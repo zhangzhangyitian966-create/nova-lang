@@ -344,3 +344,63 @@
 - 全量测试: **655 passed** (1.52s)
 - Evaluator 示例: hello/math/pattern_match/pipe/loops 全部正常输出
 - VM 示例: hello/math/pattern_match 全部正常输出
+
+---
+
+## 2026-07-15 自动改进（第六轮）— 阶段一检查
+
+基于 AUTO_REVIEW_LOG.md 第三轮审查日志的最高优先级问题进行检查。
+
+### 每日发现的问题
+
+#### vm.py
+- **第917行 FOR_ITER 闭区间**：`current <= end` 确认为闭区间。但 evaluator.py:898 同样使用 `range(start, end + 1, step)`，当前 Evaluator 和 VM 实际一致（均闭区间）。非紧急差异。
+- **`&&` false 路径触发 VM stack underflow**：compiler.py:493-500 的 `&&` 编译缺少 DUP 保护，VM 运行 `false && true` 报 `VM stack underflow: need 1, have 0`。**严重 bug，需修复**。
+
+#### compiler.py
+- **第493-500行 `&&` false 路径栈值丢失**：`POP_JUMP_IF_FALSE` 弹出 left 后跳转到 end_pos，栈为空。应参照 `||` 已修复模式采用 `DUP + POP_JUMP_IF_FALSE + POP`。**基于审查日志 Issue #3（Top 20）**。
+
+#### evaluator.py
+- **`?` 操作符解包**：第五轮修复已生效，`Some(42)?` 正确返回 `42`。
+- **`&&`/`||` 返回 Python bool**：第835-845行短路时返回 `False`/`True` 而非操作数实际值。**基于审查日志 Issue #16（Top 20）**。
+
+#### backend/native_backend.py
+- **LIRCallIndirect 未实现**：第496-497行仍抛 `NotImplementedError`。
+
+#### parser.py
+- **match arm 无 guard 支持**：第530-535行 `_parse_match_arm` 只解析 `pattern -> body`，`if guard` 完全未实现。运行 `Some(x) if x > 0 -> ...` 报语法错误。**基于审查日志 Issue #19（Top 20）**。
+
+#### type_checker.py
+- **PatternConstructor 不替换类型参数**：第988-989行 `field_types` 直接取原始定义，未用 `subject_type` 实际类型参数替换。
+- **任意 TypeVar 兼容**：第1235-1236行只要任一类型为 TypeVar 即返回 `True`。
+
+### 本次计划（基于审查日志严重问题）
+
+1. **compiler.py — `&&` false 路径栈值丢失**（Agent 1）
+2. **evaluator.py — `&&`/`||` 返回实际值**（Agent 2）
+3. **parser.py — match arm guard 支持**（Agent 3）
+
+### 本次修复内容（基于审查日志 Issue）
+
+1. **compiler.py — `&&` false 路径栈值丢失（基于审查日志 compiler.py:493-500 / Issue #3）**
+   - 采用与 `||` 对称的 `DUP + POP_JUMP_IF_FALSE + POP` 模式
+   - `DUP` 复制左操作数栈顶值，短路跳转时栈上仍保留 left 值作为结果
+   - true 路径先 `POP` 清除原 left 值，再编译 right 表达式
+   - VM 运行 `false && true` 不再报 stack underflow
+
+2. **evaluator.py — `&&`/`||` 短路返回实际值（基于审查日志 evaluator.py:835-845 / Issue #16）**
+   - `&&` 短路分支 `return False` 改为 `return left`，返回操作数实际值
+   - `||` 短路分支 `return True` 改为 `return left`，返回操作数实际值
+   - 与函数式语言语义一致（OCaml/Elixir 等返回实际操作数值）
+
+3. **parser.py — match arm guard 支持（基于审查日志 parser.py:530-535 / Issue #19）**
+   - `_parse_match_arm` 在解析 pattern 后、expect ARROW 前，增加 `IF` token 检查
+   - 若存在 `if`，consume 并调用 `_parse_expression()` 解析 guard 表达式
+   - 将解析出的 guard 传入 `MatchArm(pattern=pattern, guard=guard, body=body)`
+   - Evaluator 模式下 `match Some(42) { Some(x) if x > 0 -> print(x) _ -> print(0) }` 正确输出 `42`
+
+### 测试结果
+
+- 全量测试: **655 passed** (1.30s)
+- Evaluator 示例: hello/math/pattern_match/loops/pipe 全部正常输出
+- VM 示例: hello/math/pattern_match 全部正常输出

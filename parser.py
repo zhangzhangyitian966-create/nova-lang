@@ -530,9 +530,13 @@ class Parser:
     def _parse_match_arm(self) -> MatchArm:
         """解析 match 分支"""
         pattern = self._parse_pattern()
+        guard = None
+        if self._peek_type() == TokenType.IF:
+            self._advance()  # consume 'if'
+            guard = self._parse_expression()
         self._expect(TokenType.ARROW)
         body = self._parse_expression()
-        return MatchArm(pattern=pattern, body=body)
+        return MatchArm(pattern=pattern, guard=guard, body=body)
 
     # ----------------------------------------------------------
     # 模式

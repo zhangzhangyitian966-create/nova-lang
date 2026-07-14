@@ -492,8 +492,11 @@ class BytecodeCompiler:
 
         if op == "&&":
             self._compile_expr(expr.left)
+            self.bytecode.emit_op(Op.DUP)
             jump_pos = self.bytecode.current_pos()
             self.bytecode.emit_op(Op.POP_JUMP_IF_FALSE, 0)
+            # true 路径：left 为 true，弹出 dup 的值，计算 right
+            self.bytecode.emit_op(Op.POP)
             self._compile_expr(expr.right)
             end_pos = self.bytecode.current_pos()
             self.bytecode.patch_jump(jump_pos, end_pos)

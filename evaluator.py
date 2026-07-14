@@ -835,13 +835,13 @@ class Evaluator:
         if expr.op == "&&":
             left = self.eval_expr(expr.left)
             if not left:
-                return False
+                return left
             return self.eval_expr(expr.right)
 
         if expr.op == "||":
             left = self.eval_expr(expr.left)
             if left:
-                return True
+                return left
             return self.eval_expr(expr.right)
 
         left = self.eval_expr(expr.left)
