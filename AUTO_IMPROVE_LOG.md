@@ -150,6 +150,58 @@
 
 ---
 
+## 2026-07-15 自动改进（第八轮）
+
+基于 AUTO_REVIEW_LOG.md 第五轮审查日志的最高优先级未修复严重问题驱动改进（阶段一检查 + 阶段二开发 + 阶段三测试）。
+
+### 每日发现的问题
+
+#### vm.py
+- **return_flag 跨调用边界干扰（vm.py:172）**：`_call_closure` 调用 `_execute_function` 前没有重置 `return_flag`。当前安全（因为 `_execute_function` 内部优先处理 RETURN 不经过 `_execute_instruction`），但缺乏防御性编程，未来重构可能引入 bug。→ 添加防御性重置
+- **`_pop(n)` 返回类型不一致（vm.py:500-507）**：n==1 返回裸值，n>1 返回列表。49 处调用点中 7 处需要手动 `if count == 1:` 补偿，增加维护负担。→ 统一返回列表
+
+#### evaluator.py
+- **Block env 不恢复（evaluator.py:738-748）**：Block 表达式处理和 `_eval_match` arm body/guard 中 BreakSignal/ContinueSignal/ReturnSignal 跳过 env 恢复，导致环境泄漏。→ 改为 try/finally
+- **顶层 ? ReturnSignal 未捕获（evaluator.py:470-471）**：顶层第二遍遍历不捕获 ReturnSignal，顶层 `?` 操作符导致程序崩溃。→ 添加 try/except
+
+#### compiler.py
+- **模块导入无命名空间隔离（compiler.py:300-343）**：导入模块的导出声明直接内联编译为 STORE_VAR 进入全局变量表，同名覆盖无警告。→ 添加冲突检测 warning
+
+### 本次修复内容（基于审查日志 Issue）
+
+1. **vm.py — `_call_closure` 防御性 return_flag 重置（基于审查日志 vm.py:172）**
+   - 在 `_call_closure` 的 `try:` 块之前添加 `self.return_flag = False`
+   - 防止 return_flag 跨调用边界干扰外层执行
+
+2. **vm.py — `_pop(n)` 统一返回列表（基于审查日志 vm.py:500-507）**
+   - 删除 `if n == 1: return self.stack.pop()` 特殊分支
+   - `_pop(n)` 现在始终返回列表：n==0 → []，n==1 → [value]，n>1 → [values]
+   - 11 处裸值调用点改为 `self._pop()[0]` 或 `self._pop(1)[0]`
+   - 删除 7 处 `if count == 1:` / `if arg_count == 1:` 补偿代码
+
+3. **evaluator.py — Block/match env try/finally 恢复（基于审查日志 evaluator.py:738-748）**
+   - Block 表达式处理改为 `try/finally` 确保 `self.env = old_env` 始终执行
+   - `_eval_match` 中 guard 求值和 arm body 求值同样改为 `try/finally`
+   - BreakSignal/ContinueSignal/ReturnSignal 不再导致环境泄漏
+
+4. **evaluator.py — eval_program 捕获 ReturnSignal（基于审查日志 evaluator.py:470-471）**
+   - 在 eval_program 第二遍遍历外层添加 `try/except ReturnSignal`
+   - 顶层 `?` 操作符的提前返回视为程序正常结束
+
+5. **compiler.py — 模块导入同名冲突检测（基于审查日志 compiler.py:300-343）**
+   - 新增 `_get_decl_name` 辅助方法，从声明中提取名称
+   - `_compile_import` 中编译每个导出声明前检查同名冲突
+   - 同名时输出 `warning: import 'xxx' shadows existing binding` 到 stderr
+   - 不阻止导入，仅警告，保持向后兼容
+
+### 测试结果
+
+- 全量测试: **655 passed** (1.45s)
+- Evaluator 示例: hello/loops/fibonacci/pattern_match/list_comprehension 全部正常输出
+- VM 示例: hello/fibonacci/pattern_match 全部正常输出
+
+---
+
 ## 2026-07-15 自动改进（第三轮）
 
 基于 AUTO_REVIEW_LOG.md 审查发现的严重问题驱动改进。

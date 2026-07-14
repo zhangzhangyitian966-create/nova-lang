@@ -411,6 +411,7 @@ class NovaVM:
         self.constants = func_block.constants
         self.ip = 0
 
+        self.return_flag = False
         try:
             # 执行函数
             result = self._execute_function()
@@ -502,8 +503,6 @@ class NovaVM:
             raise RuntimeError_(f"VM stack underflow: need {n}, have {len(self.stack)}")
         if n == 0:
             return []
-        if n == 1:
-            return self.stack.pop()
         return [self.stack.pop() for _ in range(n)][::-1]
 
     def _execute_instruction(self, instr: Instruction) -> bool:
@@ -562,7 +561,7 @@ class NovaVM:
             # Pop value and store into variable (local first, then global)
             name = instr.operands[0]
             mutable = instr.operands[1]
-            val = self._pop()
+            val = self._pop()[0]
             if self.call_stack:
                 frame = self.call_stack[-1]
                 if name in frame.locals:
@@ -611,7 +610,7 @@ class NovaVM:
         elif opcode == Op.NEG:
             # Stack: [a] -> [-a]
             # Pop value, negate it, push result
-            a = self._pop()
+            a = self._pop()[0]
             self.stack.append(-a)
 
         elif opcode == Op.CONCAT:
@@ -672,7 +671,7 @@ class NovaVM:
         elif opcode == Op.NOT:
             # Stack: [a] -> [not a]
             # Pop boolean value, compute logical NOT, push result
-            a = self._pop()
+            a = self._pop()[0]
             self.stack.append(not a)
 
         # === 控制流 ===
@@ -689,21 +688,21 @@ class NovaVM:
         elif opcode == Op.JUMP_IF_FALSE:
             # Stack: [cond] -> []
             # Pop condition; if false, jump to target_ip
-            cond = self._pop()
+            cond = self._pop()[0]
             if not cond:
                 self.ip = instr.operands[0]
 
         elif opcode == Op.JUMP_IF_TRUE:
             # Stack: [cond] -> []
             # Pop condition; if true, jump to target_ip
-            cond = self._pop()
+            cond = self._pop()[0]
             if cond:
                 self.ip = instr.operands[0]
 
         elif opcode == Op.POP_JUMP_IF_FALSE:
             # Stack: [cond] -> []
             # Pop condition; if false, jump to target_ip
-            cond = self._pop()
+            cond = self._pop()[0]
             if not cond:
                 # 退出 while 循环，弹出循环信息
                 if self._while_loops and self._while_loops[-1]["end_ip"] == instr.operands[0]:
@@ -793,9 +792,7 @@ class NovaVM:
             # Pop function and arguments, call function, push result
             arg_count = instr.operands[0]
             args = self._pop(arg_count)
-            if arg_count == 1:
-                args = [args]
-            fn = self._pop()
+            fn = self._pop()[0]
             result = self._call_fn(fn, args)
             self.stack.append(result)
 
@@ -812,8 +809,6 @@ class NovaVM:
             name = instr.operands[0]
             arg_count = instr.operands[1]
             args = self._pop(arg_count)
-            if arg_count == 1:
-                args = [args]
             builtin = self.globals.get(name)
             if builtin is None:
                 raise RuntimeError_(f"未找到内置函数 '{name}'")
@@ -826,8 +821,6 @@ class NovaVM:
             # Pop N elements, build list, push it
             count = instr.operands[0]
             elements = self._pop(count)
-            if count == 1:
-                elements = [elements]
             self.stack.append(elements)
 
         elif opcode == Op.BUILD_TUPLE:
@@ -835,8 +828,6 @@ class NovaVM:
             # Pop N elements, build tuple, push it
             count = instr.operands[0]
             elements = self._pop(count)
-            if count == 1:
-                elements = [elements]
             self.stack.append(tuple(elements))
 
         elif opcode == Op.BUILD_MAP:
@@ -845,8 +836,6 @@ class NovaVM:
             count = instr.operands[0]
             result = {}
             pairs = self._pop(count * 2)
-            if count == 1:
-                pairs = [pairs]
             for i in range(0, len(pairs), 2):
                 key = pairs[i]
                 val = pairs[i + 1]
@@ -863,7 +852,7 @@ class NovaVM:
             # Stack: [obj] -> [obj.field]
             # Pop object, push field value (by index or name)
             field = instr.operands[0]
-            obj = self._pop()
+            obj = self._pop()[0]
             if isinstance(obj, tuple):
                 self.stack.append(obj[int(field)])
             elif isinstance(obj, NovaADTValue):
@@ -1052,7 +1041,7 @@ class NovaVM:
             # Stack: [val] -> []
             # Pop value and bind it to variable name in current scope
             name = instr.operands[0]
-            val = self._pop()
+            val = self._pop()[0]
             if self.call_stack:
                 self.call_stack[-1].locals[name] = val
             else:
@@ -1116,11 +1105,9 @@ class NovaVM:
             # Stack: [..., pipe_value, extra_arg1, ..., extra_argN, fn] -> [..., result]
             # Pop fn, extra args, and pipe value; call fn with extra_args + [pipe_value]
             extra_arg_count = instr.operands[0]
-            fn = self._pop()
+            fn = self._pop()[0]
             extra_args = self._pop(extra_arg_count)
-            if extra_arg_count == 1:
-                extra_args = [extra_args]
-            pipe_value = self._pop()
+            pipe_value = self._pop()[0]
             args = extra_args + [pipe_value]
             result = self._call_fn(fn, args)
             self.stack.append(result)
@@ -1134,8 +1121,6 @@ class NovaVM:
             field_count = instr.operands[2]
             field_names = list(instr.operands[3]) if len(instr.operands) > 3 else []
             fields = self._pop(field_count)
-            if field_count == 1:
-                fields = [fields]
             self.stack.append(NovaADTValue(type_name, variant_name, fields, field_names))
 
         elif opcode == Op.REGISTER_CTOR:
@@ -1162,7 +1147,7 @@ class NovaVM:
         elif opcode == Op.PRINT:
             # Stack: [value] -> [()]
             # Pop value, format and print it, push Unit
-            val = self._pop()
+            val = self._pop()[0]
             formatted = self._format_value(val)
             print(formatted)
             self.output.append(formatted)

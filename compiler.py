@@ -13,6 +13,7 @@ Nova 编程语言 - 字节码编译器
 5. 跳转偏移量在编译过程中通过占位符回填
 """
 
+import sys
 from typing import Dict, List, Optional, Any, Tuple
 
 from nova.ast_nodes import (
@@ -301,6 +302,16 @@ class BytecodeCompiler:
             self._compile_expr(decl)
             self.bytecode.emit_op(Op.POP)
 
+    def _get_decl_name(self, decl):
+        """获取声明的名称，用于冲突检测。
+
+        支持从 FnDef、LetBinding、MutBinding、TypeDef、AliasDef 等声明中提取名称。
+        对于不含名称的声明（如顶层表达式），返回 None。
+        """
+        if isinstance(decl, (FnDef, LetBinding, MutBinding, TypeDef, AliasDef)):
+            return decl.name
+        return None
+
     def _compile_import(self, decl: ImportDecl):
         """编译导入声明（内联方式）
 
@@ -343,6 +354,14 @@ class BytecodeCompiler:
                 continue
             if isinstance(imp_decl, AliasDef) and imp_decl.name not in module_info.exported_names:
                 continue
+            # 检测同名冲突：如果声明名称已存在于当前编译上下文中，发出警告
+            decl_name = self._get_decl_name(imp_decl)
+            if decl_name is not None:
+                if decl_name in self.bytecode.functions or decl_name in self._builtin_names:
+                    print(
+                        f"warning: import '{decl_name}' shadows existing binding",
+                        file=sys.stderr,
+                    )
             # 内联编译
             self._compile_decl(imp_decl)
 
