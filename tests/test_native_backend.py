@@ -10,6 +10,7 @@ from nova.backend.x86_64 import (
 )
 from nova.backend.native_backend import (
     NativeCodeGen, LinearScanAllocator, LiveInterval,
+    SimpleNativeCompiler,
 )
 
 # 直接导入 IR 节点
@@ -19,6 +20,7 @@ from nova.ir.ir_nodes import (
     LIRLoadGlobal, LIRStoreGlobal, LIRLoadReg, LIRStoreReg,
     LIRCallIndirect, LIRIndex, LIRFieldAccess,
     LIRBuildList, LIRBuildTuple, LIRBuildADT, LIRBinOp, LIRUnaryOp,
+    LIRGlobal, LIRData, LIRPanic,
     IRType, NovaType,
     INT_TYPE, FLOAT_TYPE, STRING_TYPE, BOOL_TYPE, UNIT_TYPE,
 )
@@ -691,7 +693,7 @@ class TestEndToEndNative(unittest.TestCase):
 
 
 class TestNativeBackendUnimplemented(unittest.TestCase):
-    """原生后端未实现功能测试 — 应抛出 NotImplementedError"""
+    """原生后端未实现功能测试 -- 仍应抛出 NotImplementedError 的指令"""
 
     def _compile_body_with_instr(self, instr):
         """辅助方法：编译包含指定指令的函数体"""
@@ -701,26 +703,6 @@ class TestNativeBackendUnimplemented(unittest.TestCase):
         fn.body = [instr, LIRReturn()]
         lir.functions["test_fn"] = fn
         codegen._compile_function(fn)
-
-    def test_load_global_not_implemented(self):
-        """LIRLoadGlobal 应抛出 NotImplementedError"""
-        with self.assertRaises(NotImplementedError):
-            self._compile_body_with_instr(LIRLoadGlobal(global_name="x"))
-
-    def test_store_global_not_implemented(self):
-        """LIRStoreGlobal 应抛出 NotImplementedError"""
-        with self.assertRaises(NotImplementedError):
-            self._compile_body_with_instr(LIRStoreGlobal(global_name="x"))
-
-    def test_load_reg_not_implemented(self):
-        """LIRLoadReg 应抛出 NotImplementedError"""
-        with self.assertRaises(NotImplementedError):
-            self._compile_body_with_instr(LIRLoadReg())
-
-    def test_store_reg_not_implemented(self):
-        """LIRStoreReg 应抛出 NotImplementedError"""
-        with self.assertRaises(NotImplementedError):
-            self._compile_body_with_instr(LIRStoreReg())
 
     def test_call_indirect_not_implemented(self):
         """LIRCallIndirect 应抛出 NotImplementedError"""
@@ -737,27 +719,6 @@ class TestNativeBackendUnimplemented(unittest.TestCase):
         with self.assertRaises(NotImplementedError):
             self._compile_body_with_instr(LIRFieldAccess(offset=0))
 
-    def test_build_list_not_implemented(self):
-        """LIRBuildList 应抛出 NotImplementedError"""
-        with self.assertRaises(NotImplementedError):
-            self._compile_body_with_instr(LIRBuildList(count=3))
-
-    def test_build_tuple_not_implemented(self):
-        """LIRBuildTuple 应抛出 NotImplementedError"""
-        with self.assertRaises(NotImplementedError):
-            self._compile_body_with_instr(LIRBuildTuple(count=2))
-
-    def test_build_adt_not_implemented(self):
-        """LIRBuildADT 应抛出 NotImplementedError"""
-        with self.assertRaises(NotImplementedError):
-            self._compile_body_with_instr(LIRBuildADT(type_tag=0, field_count=1))
-
-    def test_unknown_binop_not_implemented(self):
-        """未知的 LIRBinOp 操作符应抛出 NotImplementedError"""
-        instr = LIRBinOp(op="&&")
-        with self.assertRaises(NotImplementedError):
-            self._compile_body_with_instr(instr)
-
     def test_unknown_unaryop_not_implemented(self):
         """未知的 LIRUnaryOp 操作符应抛出 NotImplementedError"""
         instr = LIRUnaryOp(op="~")
@@ -770,12 +731,726 @@ class TestNativeBackendUnimplemented(unittest.TestCase):
         with self.assertRaises(NotImplementedError):
             self._compile_body_with_instr(instr)
 
-    def test_simple_native_compiler_not_implemented(self):
-        """SimpleNativeCompiler 应抛出 NotImplementedError"""
-        from nova.backend.native_backend import SimpleNativeCompiler
+    def test_simple_native_compiler_source_not_implemented(self):
+        """SimpleNativeCompiler.compile_source 应抛出 NotImplementedError"""
         compiler = SimpleNativeCompiler()
         with self.assertRaises(NotImplementedError):
             compiler.compile_source("let x = 1", "/tmp/test")
+
+
+# ============================================================
+# 已实现的新特性测试
+# ============================================================
+
+class TestComparisonOps(unittest.TestCase):
+    """比较运算编译测试"""
+
+    def _compile_comparison(self, op):
+        """辅助：编译包含指定比较运算的函数"""
+        codegen = NativeCodeGen()
+        lir = LIRModule(name="test")
+        fn = LIRFunction("test_cmp", [], INT_TYPE)
+        fn.body = [
+            LIRLoadConst(value=10, const_type="int"),
+            LIRLoadConst(value=20, const_type="int"),
+            LIRBinOp(op=op),
+            LIRReturn(),
+        ]
+        lir.functions["test_cmp"] = fn
+        return codegen._compile_function(fn)
+
+    def test_eq_compilation(self):
+        """== 比较应生成 cmp + sete 指令"""
+        code = self._compile_comparison("==")
+        self.assertTrue(len(code) > 0)
+        # sete = 0F 94
+        found = False
+        for i in range(len(code) - 1):
+            if code[i] == 0x0F and code[i + 1] == 0x94:
+                found = True
+                break
+        self.assertTrue(found, "Expected sete (0F 94) for == comparison")
+
+    def test_neq_compilation(self):
+        """!= 比较应生成 cmp + setne 指令"""
+        code = self._compile_comparison("!=")
+        self.assertTrue(len(code) > 0)
+        # setne = 0F 95
+        found = False
+        for i in range(len(code) - 1):
+            if code[i] == 0x0F and code[i + 1] == 0x95:
+                found = True
+                break
+        self.assertTrue(found, "Expected setne (0F 95) for != comparison")
+
+    def test_lt_compilation(self):
+        """< 比较应生成 cmp + setl 指令"""
+        code = self._compile_comparison("<")
+        self.assertTrue(len(code) > 0)
+        # setl = 0F 9C
+        found = False
+        for i in range(len(code) - 1):
+            if code[i] == 0x0F and code[i + 1] == 0x9C:
+                found = True
+                break
+        self.assertTrue(found, "Expected setl (0F 9C) for < comparison")
+
+    def test_gt_compilation(self):
+        """> 比较应生成 cmp + setg 指令"""
+        code = self._compile_comparison(">")
+        self.assertTrue(len(code) > 0)
+        # setg = 0F 9F
+        found = False
+        for i in range(len(code) - 1):
+            if code[i] == 0x0F and code[i + 1] == 0x9F:
+                found = True
+                break
+        self.assertTrue(found, "Expected setg (0F 9F) for > comparison")
+
+    def test_le_compilation(self):
+        """<= 比较应生成 cmp + setle 指令"""
+        code = self._compile_comparison("<=")
+        self.assertTrue(len(code) > 0)
+        # setle = 0F 9E
+        found = False
+        for i in range(len(code) - 1):
+            if code[i] == 0x0F and code[i + 1] == 0x9E:
+                found = True
+                break
+        self.assertTrue(found, "Expected setle (0F 9E) for <= comparison")
+
+    def test_ge_compilation(self):
+        """>= 比较应生成 cmp + setge 指令"""
+        code = self._compile_comparison(">=")
+        self.assertTrue(len(code) > 0)
+        # setge = 0F 9D
+        found = False
+        for i in range(len(code) - 1):
+            if code[i] == 0x0F and code[i + 1] == 0x9D:
+                found = True
+                break
+        self.assertTrue(found, "Expected setge (0F 9D) for >= comparison")
+
+
+class TestUnaryOps(unittest.TestCase):
+    """一元运算编译测试"""
+
+    def test_neg_compilation(self):
+        """NEG 应生成 neg 指令"""
+        codegen = NativeCodeGen()
+        lir = LIRModule(name="test")
+        fn = LIRFunction("test_neg", [], INT_TYPE)
+        fn.body = [
+            LIRLoadConst(value=42, const_type="int"),
+            LIRUnaryOp(op="-"),
+            LIRReturn(),
+        ]
+        lir.functions["test_neg"] = fn
+        code = codegen._compile_function(fn)
+        self.assertTrue(len(code) > 0)
+        # neg 指令: REX.W + F7 + ModR/M(/3)
+        found = False
+        for i in range(len(code) - 2):
+            if code[i] == 0x48 and code[i + 1] == 0xF7:
+                found = True
+                break
+        self.assertTrue(found, "Expected neg instruction (48 F7) for NEG unary op")
+
+    def test_not_compilation(self):
+        """! (逻辑非) 应生成 cmp + sete"""
+        codegen = NativeCodeGen()
+        lir = LIRModule(name="test")
+        fn = LIRFunction("test_not", [], INT_TYPE)
+        fn.body = [
+            LIRLoadConst(value=0, const_type="int"),
+            LIRUnaryOp(op="!"),
+            LIRReturn(),
+        ]
+        lir.functions["test_not"] = fn
+        code = codegen._compile_function(fn)
+        self.assertTrue(len(code) > 0)
+        # 应包含 cmp 指令 (48 83 F8 for cmp reg, 0)
+        found_cmp = False
+        for i in range(len(code) - 2):
+            if code[i] == 0x48 and code[i + 1] == 0x83:
+                found_cmp = True
+                break
+        self.assertTrue(found_cmp, "Expected cmp instruction for ! unary op")
+
+    def test_bitwise_not_compilation(self):
+        """NOT (按位取反) 应生成 not 指令"""
+        codegen = NativeCodeGen()
+        lir = LIRModule(name="test")
+        fn = LIRFunction("test_bnot", [], INT_TYPE)
+        fn.body = [
+            LIRLoadConst(value=42, const_type="int"),
+            LIRUnaryOp(op="NOT"),
+            LIRReturn(),
+        ]
+        lir.functions["test_bnot"] = fn
+        code = codegen._compile_function(fn)
+        self.assertTrue(len(code) > 0)
+        # not 指令: REX.W + F7 + ModR/M(/2)
+        found = False
+        for i in range(len(code) - 2):
+            if code[i] == 0x48 and code[i + 1] == 0xF7:
+                modrm = code[i + 2]
+                # /2 = ModR/M reg field is 2
+                if (modrm >> 3) & 7 == 2:
+                    found = True
+                    break
+        self.assertTrue(found, "Expected not instruction (48 F7 /2) for NOT unary op")
+
+
+class TestLoopSupport(unittest.TestCase):
+    """循环支持测试：验证 Label + Branch + Jump 形成循环结构"""
+
+    def test_counted_loop_compilation(self):
+        """计数循环：LIRLabel + LIRBinOp + LIRBranch + LIRJump"""
+        codegen = NativeCodeGen()
+        lir = LIRModule(name="test")
+        fn = LIRFunction("test_loop", [], INT_TYPE)
+        fn.body = [
+            # loop_start:
+            LIRLabel(name="loop_start"),
+            # counter = 0
+            LIRLoadConst(value=0, const_type="int"),
+            # limit = 5
+            LIRLoadConst(value=5, const_type="int"),
+            # counter < limit
+            LIRBinOp(op="<"),
+            # if true -> loop_body, else -> loop_end
+            LIRBranch(cond_reg="", true_label="loop_body", false_label="loop_end"),
+            # loop_body:
+            LIRLabel(name="loop_body"),
+            # (循环体内容)
+            LIRLoadConst(value=1, const_type="int"),
+            # jmp loop_start
+            LIRJump(target="loop_start"),
+            # loop_end:
+            LIRLabel(name="loop_end"),
+            LIRReturn(),
+        ]
+        lir.functions["test_loop"] = fn
+        code = codegen._compile_function(fn)
+        self.assertTrue(len(code) > 0)
+        # 应包含 jmp rel32 (0xE9) 用于回跳
+        self.assertIn(0xE9, code)
+
+    def test_while_loop_pattern(self):
+        """while 循环模式：先判断后执行"""
+        codegen = NativeCodeGen()
+        lir = LIRModule(name="test")
+        fn = LIRFunction("test_while", [], INT_TYPE)
+        fn.body = [
+            LIRLoadConst(value=1, const_type="bool"),
+            # while_start:
+            LIRLabel(name="while_start"),
+            # condition test
+            LIRBranch(cond_reg="", true_label="while_body", false_label="while_end"),
+            # while_body:
+            LIRLabel(name="while_body"),
+            LIRLoadConst(value=42, const_type="int"),
+            LIRJump(target="while_start"),
+            # while_end:
+            LIRLabel(name="while_end"),
+            LIRReturn(),
+        ]
+        lir.functions["test_while"] = fn
+        code = codegen._compile_function(fn)
+        self.assertTrue(len(code) > 0)
+        # 应同时包含 jne 和 jmp
+        has_jne = False
+        has_jmp = False
+        for i in range(len(code)):
+            if code[i] == 0xE9:
+                has_jmp = True
+            if i < len(code) - 1 and code[i] == 0x0F and code[i + 1] == 0x85:
+                has_jne = True
+        self.assertTrue(has_jmp, "Expected jmp for loop back-edge")
+        self.assertTrue(has_jne, "Expected jne for while condition")
+
+    def test_nested_labels(self):
+        """嵌套标签的正确回填"""
+        codegen = NativeCodeGen()
+        lir = LIRModule(name="test")
+        fn = LIRFunction("test_nested", [], INT_TYPE)
+        fn.body = [
+            LIRLabel(name="outer_start"),
+            LIRBranch(cond_reg="", true_label="outer_body", false_label="outer_end"),
+            LIRLabel(name="outer_body"),
+            LIRLabel(name="inner_start"),
+            LIRBranch(cond_reg="", true_label="inner_body", false_label="inner_end"),
+            LIRLabel(name="inner_body"),
+            LIRLoadConst(value=1, const_type="int"),
+            LIRJump(target="inner_start"),
+            LIRLabel(name="inner_end"),
+            LIRJump(target="outer_start"),
+            LIRLabel(name="outer_end"),
+            LIRReturn(),
+        ]
+        lir.functions["test_nested"] = fn
+        code = codegen._compile_function(fn)
+        self.assertTrue(len(code) > 0)
+
+
+class TestADTConstruction(unittest.TestCase):
+    """ADT 构建测试"""
+
+    def test_adt_construction_compilation(self):
+        """ADT 构建应分配栈空间并写入 tag 和字段"""
+        codegen = NativeCodeGen()
+        lir = LIRModule(name="test")
+        fn = LIRFunction("test_adt", [], INT_TYPE)
+        build = LIRBuildADT(type_tag=1, field_count=2)
+        build.src_locs = [
+            ("const_10", INT_TYPE),
+            ("const_20", INT_TYPE),
+        ]
+        fn.body = [
+            LIRLoadConst(value=10, const_type="int"),
+            LIRLoadConst(value=20, const_type="int"),
+            build,
+            LIRReturn(),
+        ]
+        lir.functions["test_adt"] = fn
+        code = codegen._compile_function(fn)
+        self.assertTrue(len(code) > 0)
+        # 应包含 sub rsp (栈分配) 和 mov_mem_reg (写入字段)
+        # sub rsp 编码: 48 83 EC 或 48 81 EC
+        found_sub = False
+        for i in range(len(code) - 2):
+            if code[i] == 0x48 and code[i + 1] == 0x83 and code[i + 2] == 0xEC:
+                found_sub = True
+                break
+        self.assertTrue(found_sub, "Expected sub rsp for ADT stack allocation")
+
+    def test_adt_zero_fields(self):
+        """无字段的 ADT (仅 tag)"""
+        codegen = NativeCodeGen()
+        lir = LIRModule(name="test")
+        fn = LIRFunction("test_adt_empty", [], INT_TYPE)
+        fn.body = [
+            LIRBuildADT(type_tag=0, field_count=0),
+            LIRReturn(),
+        ]
+        lir.functions["test_adt_empty"] = fn
+        code = codegen._compile_function(fn)
+        self.assertTrue(len(code) > 0)
+
+    def test_adt_multiple_fields(self):
+        """多字段 ADT"""
+        codegen = NativeCodeGen()
+        lir = LIRModule(name="test")
+        fn = LIRFunction("test_adt_multi", [], INT_TYPE)
+        build = LIRBuildADT(type_tag=3, field_count=4)
+        build.src_locs = [
+            ("const_1", INT_TYPE),
+            ("const_2", INT_TYPE),
+            ("const_3", INT_TYPE),
+            ("const_4", INT_TYPE),
+        ]
+        fn.body = [
+            LIRLoadConst(value=1, const_type="int"),
+            LIRLoadConst(value=2, const_type="int"),
+            LIRLoadConst(value=3, const_type="int"),
+            LIRLoadConst(value=4, const_type="int"),
+            build,
+            LIRReturn(),
+        ]
+        lir.functions["test_adt_multi"] = fn
+        code = codegen._compile_function(fn)
+        self.assertTrue(len(code) > 0)
+
+
+class TestListConstruction(unittest.TestCase):
+    """List 构建测试"""
+
+    def test_list_construction_compilation(self):
+        """List 构建应分配栈空间并写入 count 和元素"""
+        codegen = NativeCodeGen()
+        lir = LIRModule(name="test")
+        fn = LIRFunction("test_list", [], INT_TYPE)
+        build = LIRBuildList(count=3)
+        build.src_locs = [
+            ("const_1", INT_TYPE),
+            ("const_2", INT_TYPE),
+            ("const_3", INT_TYPE),
+        ]
+        fn.body = [
+            LIRLoadConst(value=100, const_type="int"),
+            LIRLoadConst(value=200, const_type="int"),
+            LIRLoadConst(value=300, const_type="int"),
+            build,
+            LIRReturn(),
+        ]
+        lir.functions["test_list"] = fn
+        code = codegen._compile_function(fn)
+        self.assertTrue(len(code) > 0)
+        # 应包含 sub rsp (分配 count + elements 的空间)
+        found_sub = False
+        for i in range(len(code) - 2):
+            if code[i] == 0x48 and code[i + 1] == 0x83 and code[i + 2] == 0xEC:
+                found_sub = True
+                break
+        self.assertTrue(found_sub, "Expected sub rsp for List stack allocation")
+
+    def test_empty_list(self):
+        """空 List"""
+        codegen = NativeCodeGen()
+        lir = LIRModule(name="test")
+        fn = LIRFunction("test_empty_list", [], INT_TYPE)
+        fn.body = [
+            LIRBuildList(count=0),
+            LIRReturn(),
+        ]
+        lir.functions["test_empty_list"] = fn
+        code = codegen._compile_function(fn)
+        self.assertTrue(len(code) > 0)
+
+
+class TestTupleConstruction(unittest.TestCase):
+    """Tuple 构建测试"""
+
+    def test_tuple_construction_compilation(self):
+        """Tuple 构建应分配栈空间并写入字段"""
+        codegen = NativeCodeGen()
+        lir = LIRModule(name="test")
+        fn = LIRFunction("test_tuple", [], INT_TYPE)
+        build = LIRBuildTuple(count=2)
+        build.src_locs = [
+            ("const_10", INT_TYPE),
+            ("const_20", INT_TYPE),
+        ]
+        fn.body = [
+            LIRLoadConst(value=10, const_type="int"),
+            LIRLoadConst(value=20, const_type="int"),
+            build,
+            LIRReturn(),
+        ]
+        lir.functions["test_tuple"] = fn
+        code = codegen._compile_function(fn)
+        self.assertTrue(len(code) > 0)
+
+    def test_empty_tuple(self):
+        """空 Tuple"""
+        codegen = NativeCodeGen()
+        lir = LIRModule(name="test")
+        fn = LIRFunction("test_empty_tuple", [], INT_TYPE)
+        fn.body = [
+            LIRBuildTuple(count=0),
+            LIRReturn(),
+        ]
+        lir.functions["test_empty_tuple"] = fn
+        code = codegen._compile_function(fn)
+        self.assertTrue(len(code) > 0)
+
+
+class TestGlobalVariables(unittest.TestCase):
+    """全局变量测试"""
+
+    def test_load_global_compilation(self):
+        """加载全局变量应生成 lea + mov 指令"""
+        codegen = NativeCodeGen()
+        lir = LIRModule(name="test")
+        global_var = LIRGlobal(name="x", ir_type=INT_TYPE, data=LIRData(name="x", value=b'\x05\x00\x00\x00\x00\x00\x00\x00'))
+        lir.globals.append(global_var)
+        fn = LIRFunction("test_load_global", [], INT_TYPE)
+        fn.body = [
+            LIRLoadGlobal(global_name="x"),
+            LIRReturn(),
+        ]
+        lir.functions["test_load_global"] = fn
+        codegen._collect_constants(lir)
+        code = codegen._compile_function(fn)
+        self.assertTrue(len(code) > 0)
+        # 应包含 lea 指令 (8D)
+        self.assertIn(0x8D, code)
+
+    def test_store_global_compilation(self):
+        """存储全局变量应生成 lea + mov [mem], reg"""
+        codegen = NativeCodeGen()
+        lir = LIRModule(name="test")
+        global_var = LIRGlobal(name="x", ir_type=INT_TYPE, data=LIRData(name="x", value=b'\x00' * 8))
+        lir.globals.append(global_var)
+        fn = LIRFunction("test_store_global", [], INT_TYPE)
+        fn.body = [
+            LIRLoadConst(value=42, const_type="int"),
+            LIRStoreGlobal(global_name="x"),
+            LIRReturn(),
+        ]
+        lir.functions["test_store_global"] = fn
+        codegen._collect_constants(lir)
+        code = codegen._compile_function(fn)
+        self.assertTrue(len(code) > 0)
+
+    def test_load_global_auto_register(self):
+        """未注册的全局变量应自动在数据段分配"""
+        codegen = NativeCodeGen()
+        lir = LIRModule(name="test")
+        fn = LIRFunction("test_auto_global", [], INT_TYPE)
+        fn.body = [
+            LIRLoadGlobal(global_name="unregistered_var"),
+            LIRReturn(),
+        ]
+        lir.functions["test_auto_global"] = fn
+        code = codegen._compile_function(fn)
+        self.assertTrue(len(code) > 0)
+
+    def test_global_data_in_elf(self):
+        """全局变量应出现在 ELF 数据段中"""
+        codegen = NativeCodeGen()
+        lir = LIRModule(name="test")
+        global_var = LIRGlobal(name="g", ir_type=INT_TYPE, data=LIRData(name="g", value=b'\x2A\x00\x00\x00\x00\x00\x00\x00'))
+        lir.globals.append(global_var)
+        fn = LIRFunction("main", [], INT_TYPE)
+        fn.body = [
+            LIRLoadConst(value=0, const_type="int"),
+            LIRReturn(),
+        ]
+        lir.functions["main"] = fn
+        codegen._collect_constants(lir)
+        # 验证全局变量数据被收集
+        self.assertIn("g", codegen.global_symbols)
+        self.assertEqual(len(codegen.global_data), 1)
+        self.assertEqual(codegen.global_data[0][1][0], 0x2A)
+
+
+class TestReturnValue(unittest.TestCase):
+    """返回值测试"""
+
+    def test_return_after_int_computation(self):
+        """整型计算后返回（值在 RAX）"""
+        codegen = NativeCodeGen()
+        lir = LIRModule(name="test")
+        fn = LIRFunction("test_ret_int", [], INT_TYPE)
+        fn.body = [
+            LIRLoadConst(value=42, const_type="int"),
+            LIRLoadConst(value=8, const_type="int"),
+            LIRBinOp(op="+"),
+            LIRReturn(),
+        ]
+        lir.functions["test_ret_int"] = fn
+        code = codegen._compile_function(fn)
+        self.assertTrue(len(code) > 0)
+        # 最后一个 ret (0xC3)
+        self.assertEqual(code[-1], 0xC3)
+
+    def test_return_after_comparison(self):
+        """比较后返回（0 或 1 在 RAX）"""
+        codegen = NativeCodeGen()
+        lir = LIRModule(name="test")
+        fn = LIRFunction("test_ret_cmp", [], INT_TYPE)
+        fn.body = [
+            LIRLoadConst(value=10, const_type="int"),
+            LIRLoadConst(value=10, const_type="int"),
+            LIRBinOp(op="=="),
+            LIRReturn(),
+        ]
+        lir.functions["test_ret_cmp"] = fn
+        code = codegen._compile_function(fn)
+        self.assertTrue(len(code) > 0)
+        self.assertEqual(code[-1], 0xC3)
+
+    def test_return_after_unary(self):
+        """一元运算后返回"""
+        codegen = NativeCodeGen()
+        lir = LIRModule(name="test")
+        fn = LIRFunction("test_ret_neg", [], INT_TYPE)
+        fn.body = [
+            LIRLoadConst(value=42, const_type="int"),
+            LIRUnaryOp(op="-"),
+            LIRReturn(),
+        ]
+        lir.functions["test_ret_neg"] = fn
+        code = codegen._compile_function(fn)
+        self.assertTrue(len(code) > 0)
+        self.assertEqual(code[-1], 0xC3)
+
+
+class TestRegisterTransfer(unittest.TestCase):
+    """寄存器传送测试"""
+
+    def test_load_reg_with_types(self):
+        """LIRLoadReg 带类型信息"""
+        codegen = NativeCodeGen()
+        lir = LIRModule(name="test")
+        fn = LIRFunction("test_loadreg", [], INT_TYPE)
+        load = LIRLoadReg()
+        load.src_locs = [("const_42", INT_TYPE)]
+        load.dst_loc = ("dest_var", INT_TYPE)
+        fn.body = [
+            LIRLoadConst(value=42, const_type="int"),
+            load,
+            LIRReturn(),
+        ]
+        lir.functions["test_loadreg"] = fn
+        code = codegen._compile_function(fn)
+        self.assertTrue(len(code) > 0)
+
+    def test_store_reg(self):
+        """LIRStoreReg"""
+        codegen = NativeCodeGen()
+        lir = LIRModule(name="test")
+        fn = LIRFunction("test_storereg", [], INT_TYPE)
+        store = LIRStoreReg()
+        store.src_locs = [("const_42", INT_TYPE)]
+        store.dst_loc = ("saved_var", INT_TYPE)
+        fn.body = [
+            LIRLoadConst(value=42, const_type="int"),
+            store,
+            LIRReturn(),
+        ]
+        lir.functions["test_storereg"] = fn
+        code = codegen._compile_function(fn)
+        self.assertTrue(len(code) > 0)
+
+
+class TestSimpleNativeCompiler(unittest.TestCase):
+    """SimpleNativeCompiler 测试"""
+
+    def test_compile_produces_elf(self):
+        """compile() 应生成 ELF 文件"""
+        import tempfile
+        compiler = SimpleNativeCompiler()
+        with tempfile.NamedTemporaryFile(suffix=".elf", delete=False) as f:
+            output_path = f.name
+        try:
+            result = compiler.compile(output_path)
+            self.assertEqual(result, output_path)
+            with open(output_path, 'rb') as f:
+                elf = f.read()
+            self.assertEqual(elf[0:4], b'\x7fELF')
+            self.assertTrue(len(elf) > 128)
+        finally:
+            os.unlink(output_path)
+
+    def test_compile_source_not_implemented(self):
+        """compile_source 仍然抛出 NotImplementedError"""
+        compiler = SimpleNativeCompiler()
+        with self.assertRaises(NotImplementedError):
+            compiler.compile_source("let x = 1", "/tmp/test")
+
+
+class TestLogicalOps(unittest.TestCase):
+    """逻辑运算测试"""
+
+    def test_and_op(self):
+        """&& 逻辑与"""
+        codegen = NativeCodeGen()
+        lir = LIRModule(name="test")
+        fn = LIRFunction("test_and", [], INT_TYPE)
+        fn.body = [
+            LIRLoadConst(value=1, const_type="int"),
+            LIRLoadConst(value=1, const_type="int"),
+            LIRBinOp(op="&&"),
+            LIRReturn(),
+        ]
+        lir.functions["test_and"] = fn
+        code = codegen._compile_function(fn)
+        self.assertTrue(len(code) > 0)
+        # and 指令: 48 21
+        found = False
+        for i in range(len(code) - 1):
+            if code[i] == 0x48 and code[i + 1] == 0x21:
+                found = True
+                break
+        self.assertTrue(found, "Expected and instruction for &&")
+
+    def test_or_op(self):
+        """|| 逻辑或"""
+        codegen = NativeCodeGen()
+        lir = LIRModule(name="test")
+        fn = LIRFunction("test_or", [], INT_TYPE)
+        fn.body = [
+            LIRLoadConst(value=0, const_type="int"),
+            LIRLoadConst(value=1, const_type="int"),
+            LIRBinOp(op="||"),
+            LIRReturn(),
+        ]
+        lir.functions["test_or"] = fn
+        code = codegen._compile_function(fn)
+        self.assertTrue(len(code) > 0)
+        # or 指令: 48 09
+        found = False
+        for i in range(len(code) - 1):
+            if code[i] == 0x48 and code[i + 1] == 0x09:
+                found = True
+                break
+        self.assertTrue(found, "Expected or instruction for ||")
+
+
+class TestADTLayout(unittest.TestCase):
+    """ADT 内存布局测试"""
+
+    def test_adt_layout_constants(self):
+        """验证 ADT 布局常量"""
+        codegen = NativeCodeGen()
+        self.assertEqual(codegen.ADT_TAG_SIZE, 8)
+        self.assertEqual(codegen.ADT_FIELD_SIZE, 8)
+
+    def test_list_layout_constants(self):
+        """验证 List 布局常量"""
+        codegen = NativeCodeGen()
+        self.assertEqual(codegen.LIST_HEADER_SIZE, 8)
+        self.assertEqual(codegen.LIST_ELEM_SIZE, 8)
+
+
+class TestELFWithNewFeatures(unittest.TestCase):
+    """包含新特性的端到端 ELF 生成测试"""
+
+    def test_elf_with_comprehensive_features(self):
+        """包含所有新特性的 ELF 生成"""
+        codegen = NativeCodeGen()
+        lir = LIRModule(name="full_test")
+
+        # 全局变量
+        g = LIRGlobal(name="g", ir_type=INT_TYPE, data=LIRData(name="g", value=b'\x00' * 8))
+        lir.globals.append(g)
+
+        # 辅助函数
+        helper = LIRFunction("helper", [], INT_TYPE)
+        helper.body = [LIRReturn()]
+        lir.functions["helper"] = helper
+
+        # 主函数
+        main = LIRFunction("main", [], INT_TYPE)
+        main.body = [
+            # 比较
+            LIRLoadConst(value=1, const_type="int"),
+            LIRLoadConst(value=2, const_type="int"),
+            LIRBinOp(op="<"),
+            LIRBranch(cond_reg="", true_label="yes", false_label="no"),
+            LIRLabel(name="yes"),
+            # 一元
+            LIRUnaryOp(op="-"),
+            LIRJump(target="end"),
+            LIRLabel(name="no"),
+            LIRLoadConst(value=0, const_type="int"),
+            LIRLabel(name="end"),
+            # 循环
+            LIRLabel(name="lp"),
+            LIRLoadConst(value=0, const_type="int"),
+            LIRLoadConst(value=1, const_type="int"),
+            LIRBinOp(op="=="),
+            LIRBranch(cond_reg="", true_label="lp_end", false_label="lp_body"),
+            LIRLabel(name="lp_body"),
+            LIRJump(target="lp"),
+            LIRLabel(name="lp_end"),
+            # ADT
+            LIRBuildADT(type_tag=0, field_count=1),
+            # List
+            LIRBuildList(count=1),
+            # 全局
+            LIRLoadGlobal(global_name="g"),
+            # 返回
+            LIRReturn(),
+        ]
+        lir.functions["main"] = main
+
+        elf = codegen.compile(lir)
+        self.assertEqual(elf[0:4], b'\x7fELF')
+        self.assertTrue(len(elf) > 128)
 
 
 if __name__ == '__main__':

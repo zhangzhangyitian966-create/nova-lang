@@ -25,6 +25,7 @@ from nova.ast_nodes import (
     ForExpr, WhileExpr, BreakExpr, ContinueExpr,
     ListExpr, ListComprehension, TupleExpr, MapExpr, FieldAccess,
     TypeDef, VariantDef, AliasDef,
+    ImportDecl, ExportDecl,
     PatternWildcard, PatternInt, PatternFloat, PatternString,
     PatternBool, PatternChar, PatternIdentifier, PatternConstructor,
     PatternTuple, PatternList,
@@ -205,7 +206,7 @@ class Bytecode:
 class BytecodeCompiler:
     """AST 到字节码的编译器"""
 
-    def __init__(self):
+    def __init__(self, module_manager=None, current_file: str = None):
         self.bytecode = Bytecode()
         self._builtin_names: set = set()
         self._init_builtin_names()
@@ -213,6 +214,8 @@ class BytecodeCompiler:
         # 用于在模式匹配中区分零字段构造器与变量绑定
         self._adt_constructors: Dict[str, Tuple[str, int]] = {}
         self._init_builtin_adt_constructors()
+        self._module_manager = module_manager  # ModuleManager 实例
+        self._current_file = current_file      # 当前文件路径
 
     def _init_builtin_adt_constructors(self):
         """初始化内置 ADT 构造器"""
@@ -248,6 +251,15 @@ class BytecodeCompiler:
 
     def _compile_decl(self, decl):
         """编译顶层声明"""
+        if isinstance(decl, ImportDecl):
+            # 内联导入的模块声明
+            self._compile_import(decl)
+            return
+
+        if isinstance(decl, ExportDecl):
+            # 导出声明：编译器不需要做额外工作（内联时名称已在作用域中）
+            return
+
         if isinstance(decl, TypeDef):
             for variant in decl.variants:
                 field_count = len(variant.fields)
@@ -284,6 +296,51 @@ class BytecodeCompiler:
             # 顶层表达式
             self._compile_expr(decl)
             self.bytecode.emit_op(Op.POP)
+
+    def _compile_import(self, decl: ImportDecl):
+        """编译导入声明（内联方式）
+
+        加载导入的模块，将其导出的声明内联到当前字节码中。
+        """
+        if self._module_manager is None:
+            return
+
+        module_path = decl.module_name
+
+        from nova.modules import ModuleResolver
+        resolver = ModuleResolver(self._module_manager.search_paths, self._current_file)
+        file_path = resolver.resolve(module_path)
+
+        if not file_path:
+            raise RuntimeError(f"编译器错误: 找不到模块 '{module_path}'")
+
+        # 加载模块
+        if file_path in self._module_manager.modules:
+            module_info = self._module_manager.modules[file_path]
+        else:
+            module_info = self._module_manager.load_module(
+                module_path, self._current_file, check_types=False
+            )
+
+        if module_info is None:
+            raise RuntimeError(f"编译器错误: 无法加载模块 '{module_path}'")
+
+        # 内联导出的声明到当前字节码
+        for imp_decl in module_info.program.declarations:
+            # 跳过导入模块中的导入和导出声明
+            if isinstance(imp_decl, (ImportDecl, ExportDecl)):
+                continue
+            # 跳过未导出的声明
+            if isinstance(imp_decl, FnDef) and imp_decl.name not in module_info.exported_names:
+                continue
+            if isinstance(imp_decl, (LetBinding, MutBinding)) and imp_decl.name not in module_info.exported_names:
+                continue
+            if isinstance(imp_decl, TypeDef) and imp_decl.name not in module_info.exported_names:
+                continue
+            if isinstance(imp_decl, AliasDef) and imp_decl.name not in module_info.exported_names:
+                continue
+            # 内联编译
+            self._compile_decl(imp_decl)
 
     def _compile_fn_def(self, decl: FnDef):
         """编译函数定义"""

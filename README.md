@@ -13,6 +13,8 @@ Nova 是一门表达式导向、强静态类型、函数式核心的通用编程
 - **多后端编译** — Python 解释器、字节码 VM、C 原生编译、x86_64 原生、WasmGC
 - **现代化错误报告** — Rust 风格多行高亮、ANSI 颜色、批量错误收集
 - **完善的类型系统** — 泛型 ADT、类型参数检查、类型别名递归展开
+- **模块系统** — import/export、相对路径、循环导入检测、标准库模块
+- **IR 优化器** — 常量折叠、死代码消除、公共子表达式消除、循环不变量外提
 
 ## 安装
 
@@ -37,7 +39,7 @@ nova
 ```
 
 ```
-Nova 编程语言 v0.4.0
+Nova 编程语言 v0.5.0
 输入表达式或声明，按 Enter 求值
 :help 查看帮助，:quit 退出
 
@@ -222,8 +224,8 @@ fn safe_divide(a: Int, b: Int) -> Result[Int, String] {
 
 | 指标 | 数值 |
 |------|------|
-| 测试用例 | **471 个**，全部通过 |
-| 代码行数 | 20,000+ |
+| 测试用例 | **632 个**，全部通过 |
+| 代码行数 | 25,000+ |
 | 支持后端 | 5 个（解释器 / VM / C / x86_64 / WasmGC）|
 | CI 覆盖 | Python 3.10-3.13 |
 
@@ -244,15 +246,16 @@ nova/
 ├── c_codegen.py      # C 代码生成器
 ├── environment.py    # 环境管理
 ├── errors.py         # 错误类型（多行高亮、ANSI颜色、批量收集）
-├── ir/               # 三层中间表示（HIR/MIR/LIR）
+├── modules.py        # 模块系统（解析、加载、缓存、循环检测）
+├── ir/               # 三层中间表示（HIR/MIR/LIR）+ 优化 Pass
 │   ├── ir_nodes.py
 │   ├── hir_lowering.py
 │   ├── mir_lowering.py
 │   ├── lir_lowering.py
-│   └── pass_manager.py
+│   ├── pass_manager.py  # 常量折叠/死代码消除/CSE/LICM
 ├── backend/          # 后端代码生成
-│   ├── x86_64.py     # x86_64 指令编码器
-│   ├── native_backend.py  # 自研原生后端（SSE2/System V ABI）
+│   ├── x86_64.py     # x86_64 指令编码器（SSE2/SSE逻辑/内存操作）
+│   ├── native_backend.py  # 自研原生后端（比较/一元/循环/ADT/List/全局变量）
 │   ├── cranelift_backend.py
 │   ├── wasm_backend.py
 │   └── compiler_pipeline.py
@@ -261,31 +264,26 @@ nova/
 │   ├── nova_runtime.c
 │   └── std_impl/     # 标准库模块
 ├── tree-sitter-nova/ # Tree-sitter 语法
-├── examples/         # 示例程序
-└── tests/            # 测试（471 个）
+├── examples/         # 示例程序 + 标准库模块
+└── tests/            # 测试（632 个）
 ```
 
 ## 发展路线图
 
-### v0.4.0（当前）— 已完成
-- [x] 原生后端：浮点常量、字符串常量、参数传递（System V ABI）、分支指令
-- [x] 类型系统：泛型 ADT、类型参数数量检查、类型别名递归展开
-- [x] 错误处理：SourceSpan 多行高亮、ANSI 颜色、ErrorCollector 批量收集
-- [x] 471 个测试覆盖核心功能
+### v0.5.0（当前）— 已完成
+- [x] 原生后端完善：比较运算、一元运算、ADT/List/Tuple 构建、全局变量、循环
+- [x] 优化器 Pass：常量折叠、死代码消除、公共子表达式消除、循环不变量外提
+- [x] 模块系统：import/export、相对路径导入、循环导入检测、标准库模块
+- [x] 修复 12 个诊断报告 Bug（5 个 P0 + 3 个 P1 + 4 个 P2）
+- [x] 632 个测试覆盖全部功能
 
-### v0.5.0（短期）
-- [ ] 完善原生后端：循环、闭包捕获、模式匹配代码生成
-- [ ] 优化器：常量折叠、死代码消除、内联等 LIR Pass
-- [ ] 标准库扩展：并发原语、网络 I/O
-- [ ] 模块系统：import/export 支持
-
-### v0.6.0（中期）
+### v0.6.0（短期）
 - [ ] JIT 编译：基于 Cranelift 的运行时编译
 - [ ] 垃圾回收：增量标记-清除或引用计数
 - [ ] 调试支持：栈回溯、断点、单步执行
 - [ ] 包管理器：依赖解析、版本管理
 
-### v1.0.0（长期）
+### v0.7.0（中期）
 - [ ] 生产级性能：与主流语言竞争
 - [ ] IDE 支持：LSP 语言服务器、自动补全、跳转定义
 - [ ] 完整文档：语言规范、标准库 API、教程

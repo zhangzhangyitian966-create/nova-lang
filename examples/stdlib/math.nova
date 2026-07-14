@@ -1,0 +1,20 @@
+// Nova 标准库 - 数学模块
+// 提供常用数学函数的导出
+
+export clamp
+export lerp
+export range
+
+fn clamp(x: Float, min: Float, max: Float) -> Float {
+  if x < min then min
+  else if x > max then max
+  else x
+}
+
+fn lerp(a: Float, b: Float, t: Float) -> Float {
+  a + (b - a) * t
+}
+
+fn range(start: Int, end: Int) -> List[Int] {
+  for i <- start..end { i }
+}

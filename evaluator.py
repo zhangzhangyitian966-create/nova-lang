@@ -101,10 +101,14 @@ UNIT_VALUE = object()
 class Evaluator:
     """Nova 解释器求值器"""
 
-    def __init__(self, check_types: bool = True):
+    def __init__(self, check_types: bool = True,
+                 module_manager=None, current_file: str = None):
         self.env = Environment()
         self.check_types = check_types
         self._output: List[str] = []  # 收集 print 输出
+        self._module_manager = module_manager  # ModuleManager 实例
+        self._current_file = current_file      # 当前文件路径
+        self._exported_names: set = set()      # 本模块导出的名称
         self._setup_builtins()
 
     def _setup_builtins(self):
@@ -506,7 +510,10 @@ class Evaluator:
             pass
 
         elif isinstance(decl, (ImportDecl, ExportDecl)):
-            pass
+            if isinstance(decl, ImportDecl):
+                self._handle_import_decl(decl)
+            elif isinstance(decl, ExportDecl):
+                self._exported_names.add(decl.name)
 
         # let/mut 绑定和顶层表达式在第二遍处理
         else:
@@ -522,8 +529,14 @@ class Evaluator:
             val = self.eval_expr(decl.value)
             self.env.define(decl.name, val, mutable=True)
 
-        elif isinstance(decl, (FnDef, TypeDef, AliasDef, ImportDecl, ExportDecl)):
+        elif isinstance(decl, (FnDef, TypeDef, AliasDef)):
             pass  # 这些在第一遍已处理
+
+        elif isinstance(decl, ImportDecl):
+            pass  # 导入在第一遍已处理
+
+        elif isinstance(decl, ExportDecl):
+            pass  # 导出在第一遍已标记
 
         else:
             # 顶层表达式
@@ -577,11 +590,53 @@ class Evaluator:
             pass
 
         elif isinstance(decl, (ImportDecl, ExportDecl)):
-            pass
+            if isinstance(decl, ImportDecl):
+                self._handle_import_decl(decl)
+            elif isinstance(decl, ExportDecl):
+                self._exported_names.add(decl.name)
 
         else:
             # 顶层表达式
             self.eval_expr(decl)
+
+    def _handle_import_decl(self, decl: ImportDecl):
+        """处理导入声明（运行时级别）"""
+        if self._module_manager is None:
+            return  # 没有模块管理器时跳过
+
+        module_path = decl.module_name
+
+        # 解析并加载模块
+        from nova.modules import ModuleResolver
+        resolver = ModuleResolver(self._module_manager.search_paths, self._current_file)
+        file_path = resolver.resolve(module_path)
+
+        if not file_path:
+            raise RuntimeError_(f"找不到模块: {module_path}")
+
+        # 检查缓存
+        if file_path in self._module_manager.modules:
+            module_info = self._module_manager.modules[file_path]
+        else:
+            module_info = self._module_manager.load_module(
+                module_path, self._current_file, check_types=self.check_types
+            )
+
+        if module_info is None:
+            raise RuntimeError_(f"无法加载模块: {module_path}")
+
+        # 将导出的绑定导入到当前环境
+        for name in module_info.exported_names:
+            try:
+                value = module_info.eval_env.lookup(name)
+                self.env.define(name, value, mutable=False)
+            except NameError:
+                pass  # 忽略找不到的绑定
+
+    @property
+    def exported_names(self) -> set:
+        """获取本模块导出的名称集合"""
+        return self._exported_names
 
     # ----------------------------------------------------------
     # 表达式求值

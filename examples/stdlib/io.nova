@@ -1,0 +1,14 @@
+// Nova 标准库 - I/O 模块
+// 提供常用 I/O 函数的导出
+
+export println
+export greet
+
+fn println(value) -> Unit {
+  print(value)
+  print("\n")
+}
+
+fn greet(name: String) -> String {
+  "Hello, " ++ name ++ "!"
+}

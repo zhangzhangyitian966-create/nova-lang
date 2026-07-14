@@ -49,21 +49,27 @@ def run_source(source: str, check_types: bool = True, capture_output: bool = Fal
 
         # 3. 类型检查
         if check_types:
-            checker = TypeChecker()
+            from nova.modules import get_global_module_manager
+            module_manager = get_global_module_manager()
+            checker = TypeChecker(source=source, module_manager=module_manager)
             checker.check_program(ast)
 
         # 4. 执行
         if use_vm:
             from nova.compiler import BytecodeCompiler
             from nova.vm import NovaVM
-            compiler = BytecodeCompiler()
+            from nova.modules import get_global_module_manager
+            module_manager = get_global_module_manager()
+            compiler = BytecodeCompiler(module_manager=module_manager)
             bytecode = compiler.compile(ast)
             vm = NovaVM(bytecode)
             vm.run()
             if capture_output:
                 return vm.get_output()
         else:
-            evaluator = Evaluator(check_types=check_types)
+            from nova.modules import get_global_module_manager
+            module_manager = get_global_module_manager()
+            evaluator = Evaluator(check_types=check_types, module_manager=module_manager)
             evaluator.eval_program(ast)
             if capture_output:
                 return evaluator.get_output()
@@ -113,6 +119,13 @@ def run_file(filepath: str, use_vm: bool = True):
     except IOError as e:
         print(f"错误: 无法读取文件 '{filepath}': {e}", file=sys.stderr)
         sys.exit(1)
+
+    # 设置模块搜索路径为当前文件所在目录
+    from nova.modules import get_global_module_manager
+    module_manager = get_global_module_manager()
+    file_dir = os.path.dirname(os.path.abspath(filepath))
+    if file_dir not in module_manager.search_paths:
+        module_manager.search_paths.insert(0, file_dir)
 
     run_source(source, use_vm=use_vm)
 

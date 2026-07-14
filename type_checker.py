@@ -245,11 +245,15 @@ ERROR_TYPE = ErrorType()
 class TypeChecker:
     """Nova 类型检查器"""
 
-    def __init__(self, source: str = "", collect_errors: bool = False):
+    def __init__(self, source: str = "", collect_errors: bool = False,
+                 module_manager=None, current_file: str = None):
         self.env = TypeEnv()
         self._source = source
         self._collect_errors = collect_errors
         self.error_collector = ErrorCollector()
+        self._module_manager = module_manager  # ModuleManager 实例
+        self._current_file = current_file      # 当前文件路径
+        self._exported_names: set = set()      # 本模块导出的名称
         self._setup_builtins()
 
     def _report_error(self, message: str, node=None):
@@ -443,12 +447,71 @@ class TypeChecker:
                 # 没有类型标注的 let/mut，使用类型变量占位
                 self.env.define(decl.name, TypeVar(f"let_{decl.name}"))
 
-        elif isinstance(decl, (ImportDecl, ExportDecl)):
-            pass  # 跳过导入/导出
+        elif isinstance(decl, ImportDecl):
+            # 导入声明：第一遍处理导入模块的类型
+            self._handle_import_decl(decl)
+
+        elif isinstance(decl, ExportDecl):
+            # 导出声明：标记名称为已导出
+            self._exported_names.add(decl.name)
 
         # 顶层表达式在第一遍不处理（第二遍也不处理函数体检查时会处理）
         else:
             pass
+
+    def _handle_import_decl(self, decl: ImportDecl):
+        """处理导入声明（类型级别）"""
+        if self._module_manager is None:
+            return  # 没有模块管理器时跳过
+
+        module_path = decl.module_name
+
+        # 解析并加载模块
+        from nova.modules import ModuleResolver
+        resolver = ModuleResolver(self._module_manager.search_paths, self._current_file)
+        file_path = resolver.resolve(module_path)
+
+        if not file_path:
+            self._report_error(f"找不到模块: {module_path}", decl)
+            return
+
+        # 检查缓存
+        if file_path in self._module_manager.modules:
+            module_info = self._module_manager.modules[file_path]
+        else:
+            # 加载模块（仅类型检查）
+            try:
+                module_info = self._module_manager.load_module(
+                    module_path, self._current_file, check_types=True
+                )
+            except NovaError as e:
+                self._report_error(str(e), decl)
+                return
+
+        if module_info is None:
+            self._report_error(f"无法加载模块: {module_path}", decl)
+            return
+
+        # 将导出的类型导入到当前环境
+        for name in module_info.exported_names:
+            ty = module_info.type_env.lookup(name)
+            if ty is not None:
+                self.env.define(name, ty)
+                self._user_defined_names.add(name)
+
+        # 同时导入 ADT 变体信息
+        for adt_name, variants in module_info.type_env.get_all_adt_variants().items():
+            if adt_name in module_info.exported_names:
+                if adt_name not in self.env.adt_variants:
+                    self.env.adt_variants[adt_name] = variants
+                self.env.adt_type_params[adt_name] = module_info.type_env.get_all_adt_type_params().get(adt_name, [])
+
+        # 导入导出的类型别名
+        for alias_name, alias_ty in module_info.type_env.aliases.items():
+            if alias_name in module_info.exported_names:
+                self.env.aliases[alias_name] = alias_ty
+                self.env.types[alias_name] = alias_ty
+                self._user_defined_types.add(alias_name)
 
     def _check_decl_body(self, decl):
         """第二遍：检查声明的主体表达式"""
@@ -497,8 +560,14 @@ class TypeChecker:
                         decl.body
                     )
 
-        elif isinstance(decl, (TypeDef, AliasDef, ImportDecl, ExportDecl)):
+        elif isinstance(decl, (TypeDef, AliasDef)):
             pass  # 这些在第一遍已处理
+
+        elif isinstance(decl, ImportDecl):
+            pass  # 导入在第一遍已处理
+
+        elif isinstance(decl, ExportDecl):
+            pass  # 导出在第一遍已标记
 
         else:
             # 顶层表达式
@@ -584,11 +653,16 @@ class TypeChecker:
             self.env.types[decl.name] = target
 
         elif isinstance(decl, (ImportDecl, ExportDecl)):
-            pass  # 跳过导入/导出的类型检查
+            pass  # 导入/导出在两遍扫描的 check_program 中处理
 
         else:
             # 顶层表达式
             self.check_expr(decl)
+
+    @property
+    def exported_names(self) -> set:
+        """获取本模块导出的名称集合"""
+        return self._exported_names
 
     def check_expr(self, expr) -> NovaType:
         """检查表达式并返回其类型"""

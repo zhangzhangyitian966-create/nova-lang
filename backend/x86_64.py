@@ -321,6 +321,95 @@ class X86_64Emitter:
         self.emit_byte(0x57)
         self.emit_byte(self._modrm(0b11, reg & 7, reg & 7))
 
+    def xorps_reg_reg(self, dst, src):
+        """xorps xmm_dst, xmm_src（用于浮点取反：翻转符号位）"""
+        self.emit_byte(0x0F)
+        self.emit_byte(0x57)
+        self.emit_byte(self._modrm(0b11, src & 7, dst & 7))
+
+    def xorpd_reg_reg(self, dst, src):
+        """xorpd xmm_dst, xmm_src"""
+        self.emit_byte(0x66)
+        self.emit_byte(0x0F)
+        self.emit_byte(0x57)
+        self.emit_byte(self._modrm(0b11, src & 7, dst & 7))
+
+    def movsd_mem_reg(self, base, offset, xmm_reg):
+        """movsd [base + offset], xmm_reg"""
+        self.emit_byte(0xF2)
+        self._rex_rb(0, base)
+        self.emit_byte(0x0F)
+        self.emit_byte(0x11)
+        if -128 <= offset <= 127:
+            self.emit_byte(self._modrm(0b01, xmm_reg & 7, base & 7))
+            self.emit_int8(offset)
+        else:
+            self.emit_byte(self._modrm(0b10, xmm_reg & 7, base & 7))
+            self.emit_int32(offset)
+
+    def movsd_mem_rip(self, xmm_reg, offset):
+        """movsd [rip + offset], xmm_reg  (存储浮点值到 RIP-relative 地址)
+        返回需要回填的 32 位偏移位置
+        """
+        self.emit_byte(0xF2)
+        if xmm_reg >= 8:
+            self._rex(0, 0, 0, 1)
+        self.emit_byte(0x0F)
+        self.emit_byte(0x11)
+        self.emit_byte(self._modrm(0b00, xmm_reg & 7, 5))  # RIP-relative
+        self.emit_int32(0)  # 占位
+        return self.current_offset() - 4
+
+    def mov_mem_imm8(self, base, offset, imm):
+        """mov byte [base + offset], imm8"""
+        if -128 <= offset <= 127:
+            self.emit_byte(0xC6)
+            self.emit_byte(self._modrm(0b01, 0, base & 7))
+            self.emit_int8(offset)
+        else:
+            self.emit_byte(0xC6)
+            self.emit_byte(self._modrm(0b10, 0, base & 7))
+            self.emit_int32(offset)
+        self.emit_byte(imm & 0xFF)
+
+    def mov_mem_imm64(self, base, offset, imm):
+        """mov qword [base + offset], imm64"""
+        self.emit_byte(0x48)  # REX.W
+        if -128 <= offset <= 127:
+            self.emit_byte(0xC7)
+            self.emit_byte(self._modrm(0b01, 0, base & 7))
+            self.emit_int8(offset)
+        else:
+            self.emit_byte(0xC7)
+            self.emit_byte(self._modrm(0b10, 0, base & 7))
+            self.emit_int32(offset)
+        self.emit_uint32(imm)
+
+    def movq_xmm_mem(self, xmm_reg, base, offset):
+        """movq [base + offset], xmm_reg (存储 XMM 低 64 位到内存)"""
+        self.emit_byte(0x66)  # prefix for movq
+        self._rex_rb(0, base)
+        self.emit_byte(0x0F)
+        self.emit_byte(0xD6)
+        if -128 <= offset <= 127:
+            self.emit_byte(self._modrm(0b01, xmm_reg & 7, base & 7))
+            self.emit_int8(offset)
+        else:
+            self.emit_byte(self._modrm(0b10, xmm_reg & 7, base & 7))
+            self.emit_int32(offset)
+
+    def lea_reg_mem(self, reg, base, offset):
+        """lea reg, [base + offset]"""
+        self._rex_rb(reg, base)
+        if -128 <= offset <= 127:
+            self.emit_byte(0x8D)
+            self.emit_byte(self._modrm(0b01, reg & 7, base & 7))
+            self.emit_int8(offset)
+        else:
+            self.emit_byte(0x8D)
+            self.emit_byte(self._modrm(0b10, reg & 7, base & 7))
+            self.emit_int32(offset)
+
     def cvtsi2sd(self, xmm_reg, gpr_reg):
         """cvtsi2sd xmm, gpr (int64 -> double)"""
         self.emit_byte(0xF2)
