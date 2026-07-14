@@ -553,15 +553,11 @@ class MIRGlobal:
 
 # --- MIR 指令 ---
 
+@dataclass
 class MIRInstruction:
     """MIR 指令基类"""
     result_type: NovaType = field(default_factory=lambda: NovaType(IRType.UNIT))
     result_name: str = ""   # SSA 名，由 lowering 分配
-
-    def __init__(self, result_type: NovaType = None, result_name: str = ""):
-        if result_type is not None:
-            self.result_type = result_type
-        self.result_name = result_name
 
 
 @dataclass
@@ -751,6 +747,7 @@ class LIRData:
 
 # --- LIR 指令 ---
 
+@dataclass
 class LIRInstr:
     """LIR 指令基类，带寄存器/栈分配信息"""
     src_locs: List[Tuple[str, NovaType]] = field(default_factory=list)    # [(reg/stack, type), ...]
