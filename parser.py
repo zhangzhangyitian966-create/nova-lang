@@ -735,10 +735,13 @@ class Parser:
                         args.append(self._parse_expression())
                 tok = self._expect(TokenType.RPAREN)
                 expr = FnCall(callee=expr, args=args, span=self._span(tok))
-            # 字段访问 expr.field
+            # 字段访问 expr.field 或 expr.0 (索引访问)
             elif self._peek_type() == TokenType.DOT:
                 self._advance()
-                field_tok = self._expect(TokenType.IDENT)
+                if self._peek_type() == TokenType.INT:
+                    field_tok = self._advance()
+                else:
+                    field_tok = self._expect(TokenType.IDENT)
                 expr = FieldAccess(target=expr, field=field_tok.value, span=self._span(field_tok))
             else:
                 break

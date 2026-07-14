@@ -31,7 +31,7 @@ dev = ["pytest>=8.0", "pytest-cov>=6.0", "ruff>=0.15.0"]
 all = ["nova-lang[dev]"]
 
 [project.scripts]
-nova = "nova._cli:main"
+nova = "nova.compiler_cli:main"
 
 [project.urls]
 Homepage = "https://github.com/zhangzhangyitian966-create/nova-lang"

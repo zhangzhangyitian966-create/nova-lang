@@ -1632,3 +1632,684 @@ class TestBytecodeVM(unittest.TestCase):
             let x = apply(|n| n * n, 5)
         """)
         self.assertEqual(vm.get_global("x"), 25)
+
+    def test_vm_empty_for_loop_list(self):
+        """空列表 for 循环应返回空列表"""
+        vm = self._vm_run("""
+            let result = for x in [] { x * 2 }
+        """)
+        self.assertEqual(vm.get_global("result"), [])
+
+    def test_vm_empty_for_loop_range(self):
+        """空范围 for 循环（start > end，正步长）应返回空列表"""
+        vm = self._vm_run("""
+            let result = for i <- 5..0 { i }
+        """)
+        self.assertEqual(vm.get_global("result"), [])
+
+    def test_vm_empty_for_loop_zero_step(self):
+        """空范围 for 循环（0..-1，负步长）应返回空列表"""
+        vm = self._vm_run("""
+            let result = for i <- 0..-10 step -2 { i }
+        """)
+        self.assertEqual(vm.get_global("result"), [0, -2, -4, -6, -8, -10])
+
+    def test_vm_adt_match_multi_branch(self):
+        """多分支 ADT 模式匹配：第一个分支失败时应正确匹配第二个分支"""
+        vm = self._vm_run("""
+            type Shape { Circle(r: Float) | Rect(w: Float, h: Float) | Square(s: Float) }
+            fn area(s: Shape) -> Float {
+                match s {
+                    Circle(r)   -> 3.14159 * r * r
+                    Rect(w, h)  -> w * h
+                    Square(s)   -> s * s
+                }
+            }
+            let r = Rect(3.0, 4.0)
+            let area_rect = area(r)
+            let sq = Square(5.0)
+            let area_sq = area(sq)
+        """)
+        self.assertAlmostEqual(vm.get_global("area_rect"), 12.0)
+        self.assertAlmostEqual(vm.get_global("area_sq"), 25.0)
+
+    def test_vm_option_match_none_first(self):
+        """Option 匹配：None 在前时 Some 值应正确匹配后面的分支"""
+        vm = self._vm_run("""
+            let x = match Some(42) {
+                None    -> 0
+                Some(v) -> v
+            }
+        """)
+        self.assertEqual(vm.get_global("x"), 42)
+
+    def test_vm_adt_match_falls_through_to_wildcard(self):
+        """ADT 匹配失败应正确落到通配符分支"""
+        vm = self._vm_run("""
+            type Shape { Circle(r: Float) | Rect(w: Float, h: Float) }
+            fn describe(s: Shape) -> String {
+                match s {
+                    Circle(r) -> "circle"
+                    _         -> "other"
+                }
+            }
+            let r = Rect(2.0, 3.0)
+            let d = describe(r)
+        """)
+        self.assertEqual(vm.get_global("d"), "other")
+
+    # ---- P1 Bug #7: 零字段 ADT 变体的模式匹配 ----
+
+    def test_vm_match_option_none_arm(self):
+        """匹配 Option[Int]：None 分支应正确匹配"""
+        vm = self._vm_run("""
+            let x = match None {
+                Some(v) -> v
+                None    -> 0
+            }
+        """)
+        self.assertEqual(vm.get_global("x"), 0)
+
+    def test_vm_match_option_none_first_arm(self):
+        """匹配 Option[Int]：None 是第一个分支时，Some 应正确匹配后续分支"""
+        vm = self._vm_run("""
+            let x = match Some(42) {
+                None    -> 0
+                Some(v) -> v
+            }
+        """)
+        self.assertEqual(vm.get_global("x"), 42)
+
+    def test_vm_match_zero_field_variant(self):
+        """用户自定义零字段变体应正确匹配（非第一个分支）"""
+        vm = self._vm_run("""
+            type Color { Red | Green | Blue }
+            let c = Green
+            let x = match c {
+                Red   -> 1
+                Green -> 2
+                Blue  -> 3
+            }
+        """)
+        self.assertEqual(vm.get_global("x"), 2)
+
+    def test_vm_match_zero_field_variant_last_arm(self):
+        """用户自定义零字段变体在最后一个分支应正确匹配"""
+        vm = self._vm_run("""
+            type Color { Red | Green | Blue }
+            let c = Blue
+            let x = match c {
+                Red   -> 1
+                Green -> 2
+                Blue  -> 3
+            }
+        """)
+        self.assertEqual(vm.get_global("x"), 3)
+
+    def test_vm_match_zero_field_with_wildcard(self):
+        """零字段变体不匹配时应正确落到通配符"""
+        vm = self._vm_run("""
+            type Color { Red | Green | Blue }
+            let c = Blue
+            let x = match c {
+                Red   -> "red"
+                Green -> "green"
+                _     -> "other"
+            }
+        """)
+        self.assertEqual(vm.get_global("x"), "other")
+
+    def test_vm_match_mixed_adt_variants(self):
+        """混合零字段和带字段变体的匹配"""
+        vm = self._vm_run("""
+            type Shape { Circle(r: Float) | Point | Square(s: Float) }
+            fn describe(s: Shape) -> String {
+                match s {
+                    Circle(r) -> "circle"
+                    Point     -> "point"
+                    Square(s) -> "square"
+                }
+            }
+            let p = Point
+            let d = describe(p)
+        """)
+        self.assertEqual(vm.get_global("d"), "point")
+
+    # ---- P1 Bug #8: for 循环 + break 栈布局 ----
+
+    def test_vm_for_break_returns_correct_list(self):
+        """for 循环中 break 应返回正确的累积列表"""
+        vm = self._vm_run("""
+            let result = for x in [1, 2, 3, 4, 5] {
+                if x == 3 then break
+                x
+            }
+        """)
+        self.assertEqual(vm.get_global("result"), [1, 2])
+
+    def test_vm_for_break_first_iteration(self):
+        """第一次迭代就 break 应返回空列表"""
+        vm = self._vm_run("""
+            let result = for x in [1, 2, 3] {
+                break
+                x
+            }
+        """)
+        self.assertEqual(vm.get_global("result"), [])
+
+    def test_vm_for_break_empty_result(self):
+        """break 在第一次迭代时返回空列表（range 版本）"""
+        vm = self._vm_run("""
+            let result = for i <- 1..5 {
+                break
+                i
+            }
+        """)
+        self.assertEqual(vm.get_global("result"), [])
+
+    def test_vm_for_break_with_range(self):
+        """范围 for 循环中 break 应返回正确结果"""
+        vm = self._vm_run("""
+            let result = for i <- 1..10 {
+                if i > 5 then break
+                i * i
+            }
+        """)
+        self.assertEqual(vm.get_global("result"), [1, 4, 9, 16, 25])
+
+    def test_vm_nested_for_break(self):
+        """嵌套 for 循环中 break 应只跳出内层循环"""
+        vm = self._vm_run("""
+            let result = for x in [1, 2, 3] {
+                for y in [10, 20, 30] {
+                    if y == 20 then break
+                    x + y
+                }
+            }
+        """)
+        self.assertEqual(vm.get_global("result"), [[11], [12], [13]])
+
+    def test_vm_for_continue_works(self):
+        """for 循环中 continue 应正确跳过迭代"""
+        vm = self._vm_run("""
+            let result = for x in [1, 2, 3, 4, 5] {
+                if x == 3 then continue
+                x
+            }
+        """)
+        self.assertEqual(vm.get_global("result"), [1, 2, 4, 5])
+
+    # ---- P2 Bug #13: ADT 字段访问 ----
+
+    def test_vm_adt_named_field_access(self):
+        """ADT 命名字段访问（单变体）"""
+        vm = self._vm_run("""
+            type Point { Point(x: Int, y: Int) }
+            let p = Point(3, 4)
+            let px = p.x
+            let py = p.y
+        """)
+        self.assertEqual(vm.get_global("px"), 3)
+        self.assertEqual(vm.get_global("py"), 4)
+
+    def test_vm_adt_index_field_access(self):
+        """ADT 索引字段访问"""
+        vm = self._vm_run("""
+            type Point { Point(x: Int, y: Int) }
+            let p = Point(10, 20)
+            let first = p.0
+            let second = p.1
+        """)
+        self.assertEqual(vm.get_global("first"), 10)
+        self.assertEqual(vm.get_global("second"), 20)
+
+    def test_vm_adt_shared_field_access(self):
+        """多变体共享同名字段的访问"""
+        vm = self._vm_run("""
+            type Shape { Circle(radius: Float) | Square(radius: Float) }
+            fn get_radius(s: Shape) -> Float { s.radius }
+            let c = Circle(5.0)
+            let r = get_radius(c)
+        """)
+        self.assertAlmostEqual(vm.get_global("r"), 5.0)
+
+    def test_vm_some_value_field_type_error(self):
+        """Some(x).value 在类型检查阶段应报错（None 没有 value 字段）"""
+        from nova.errors import TypeCheckError
+        with self.assertRaises(TypeCheckError):
+            self._vm_run("""
+                let s = Some(42)
+                let v = s.value
+            """)
+
+    def test_vm_adt_field_access_in_expression(self):
+        """ADT 字段访问在表达式中使用"""
+        vm = self._vm_run("""
+            type Point { Point(x: Int, y: Int) }
+            let p = Point(3, 4)
+            let sum = p.x + p.y
+        """)
+        self.assertEqual(vm.get_global("sum"), 7)
+
+    # ---- P2 Bug #14: MATCH_* 栈操作约定统一 ----
+
+    def test_vm_match_int_multi_branch(self):
+        """多分支整数匹配：前几个分支失败时应正确匹配后续分支"""
+        vm = self._vm_run("""
+            let x = match 3 {
+                1 -> "one"
+                2 -> "two"
+                3 -> "three"
+                4 -> "four"
+                _ -> "other"
+            }
+        """)
+        self.assertEqual(vm.get_global("x"), "three")
+
+    def test_vm_match_int_first_branch(self):
+        """整数匹配第一个分支成功"""
+        vm = self._vm_run("""
+            let x = match 1 {
+                1 -> "one"
+                2 -> "two"
+                _ -> "other"
+            }
+        """)
+        self.assertEqual(vm.get_global("x"), "one")
+
+    def test_vm_match_int_last_branch(self):
+        """整数匹配最后一个字面量分支"""
+        vm = self._vm_run("""
+            let x = match 5 {
+                1 -> "one"
+                2 -> "two"
+                3 -> "three"
+                5 -> "five"
+            }
+        """)
+        self.assertEqual(vm.get_global("x"), "five")
+
+    def test_vm_match_bool_multi_branch(self):
+        """多分支布尔匹配"""
+        vm = self._vm_run("""
+            let x = match false {
+                true -> "yes"
+                false -> "no"
+            }
+        """)
+        self.assertEqual(vm.get_global("x"), "no")
+
+    def test_vm_match_string_multi_branch(self):
+        """多分支字符串匹配：前几个失败后应正确匹配"""
+        vm = self._vm_run("""
+            let x = match "banana" {
+                "apple" -> 1
+                "orange" -> 2
+                "banana" -> 3
+                _ -> 0
+            }
+        """)
+        self.assertEqual(vm.get_global("x"), 3)
+
+    def test_vm_match_string_first_branch(self):
+        """字符串匹配第一个分支成功"""
+        vm = self._vm_run("""
+            let x = match "apple" {
+                "apple" -> 1
+                "banana" -> 2
+                _ -> 0
+            }
+        """)
+        self.assertEqual(vm.get_global("x"), 1)
+
+    def test_vm_match_wildcard_fallback(self):
+        """所有字面量分支失败后落到通配符"""
+        vm = self._vm_run("""
+            let x = match 99 {
+                1 -> "one"
+                2 -> "two"
+                3 -> "three"
+                _ -> "many"
+            }
+        """)
+        self.assertEqual(vm.get_global("x"), "many")
+
+    def test_vm_match_bind_fallback(self):
+        """所有字面量分支失败后落到变量绑定"""
+        vm = self._vm_run("""
+            let x = match 42 {
+                1 -> "one"
+                2 -> "two"
+                n -> int_to_str(n)
+            }
+        """)
+        self.assertEqual(vm.get_global("x"), "42")
+
+    def test_vm_match_mixed_types_fallback(self):
+        """混合类型匹配：整数失败后到变量绑定"""
+        vm = self._vm_run("""
+            let x = match "hello" {
+                "world" -> 1
+                s -> str_len(s)
+            }
+        """)
+        self.assertEqual(vm.get_global("x"), 5)
+
+    def test_vm_match_adt_constructor_multi_branch(self):
+        """多分支 ADT 构造器匹配：验证栈操作一致性"""
+        vm = self._vm_run("""
+            type Shape { Circle(r: Float) | Rect(w: Float, h: Float) | Square(s: Float) }
+            fn area(s: Shape) -> Float {
+                match s {
+                    Circle(r)   -> 3.14159 * r * r
+                    Rect(w, h)  -> w * h
+                    Square(s)   -> s * s
+                }
+            }
+            let c = Circle(2.0)
+            let a1 = area(c)
+            let r = Rect(3.0, 4.0)
+            let a2 = area(r)
+            let sq = Square(5.0)
+            let a3 = area(sq)
+        """)
+        self.assertAlmostEqual(vm.get_global("a1"), 12.56636)
+        self.assertAlmostEqual(vm.get_global("a2"), 12.0)
+        self.assertAlmostEqual(vm.get_global("a3"), 25.0)
+
+    def test_vm_match_zero_field_constructor_multi_branch(self):
+        """零字段构造器多分支匹配"""
+        vm = self._vm_run("""
+            type Color { Red | Green | Blue | Yellow }
+            fn to_int(c: Color) -> Int {
+                match c {
+                    Red    -> 1
+                    Green  -> 2
+                    Blue   -> 3
+                    Yellow -> 4
+                }
+            }
+            let r = to_int(Red)
+            let g = to_int(Green)
+            let b = to_int(Blue)
+            let y = to_int(Yellow)
+        """)
+        self.assertEqual(vm.get_global("r"), 1)
+        self.assertEqual(vm.get_global("g"), 2)
+        self.assertEqual(vm.get_global("b"), 3)
+        self.assertEqual(vm.get_global("y"), 4)
+
+
+# ============================================================
+# 前向引用测试（P1 Bug #9）
+# ============================================================
+
+class TestForwardReferences(unittest.TestCase):
+    """函数前向引用和相互递归测试"""
+
+    # ---- 求值器测试 ----
+
+    def test_evaluator_forward_reference(self):
+        """函数 a 调用函数 b，但 b 定义在 a 之后"""
+        ev = eval_source("""
+            fn a(x: Int) -> Int { b(x) + 1 }
+            fn b(x: Int) -> Int { x * 2 }
+            let result = a(5)
+        """, check_types=False)
+        self.assertEqual(ev.env.lookup("result"), 11)
+
+    def test_evaluator_mutual_recursion(self):
+        """相互递归：even/odd 函数"""
+        ev = eval_source("""
+            fn even(n: Int) -> Bool {
+              if n == 0 then true
+              else odd(n - 1)
+            }
+            fn odd(n: Int) -> Bool {
+              if n == 0 then false
+              else even(n - 1)
+            }
+            let r1 = even(4)
+            let r2 = odd(5)
+            let r3 = even(5)
+            let r4 = odd(4)
+        """, check_types=False)
+        self.assertTrue(ev.env.lookup("r1"))
+        self.assertTrue(ev.env.lookup("r2"))
+        self.assertFalse(ev.env.lookup("r3"))
+        self.assertFalse(ev.env.lookup("r4"))
+
+    def test_evaluator_three_way_forward(self):
+        """三个函数的链式前向引用：a -> b -> c"""
+        ev = eval_source("""
+            fn a(x: Int) -> Int { b(x) + 1 }
+            fn b(x: Int) -> Int { c(x) * 2 }
+            fn c(x: Int) -> Int { x - 3 }
+            let result = a(10)
+        """, check_types=False)
+        # a(10) = b(10) + 1 = (c(10) * 2) + 1 = ((10 - 3) * 2) + 1 = 7 * 2 + 1 = 15
+        self.assertEqual(ev.env.lookup("result"), 15)
+
+    # ---- 类型检查器测试 ----
+
+    def test_type_checker_forward_reference(self):
+        """类型检查器应支持函数前向引用"""
+        checker = type_check("""
+            fn a(x: Int) -> Int { b(x) + 1 }
+            fn b(x: Int) -> Int { x * 2 }
+        """)
+        ty_a = checker.env.lookup("a")
+        ty_b = checker.env.lookup("b")
+        self.assertIsNotNone(ty_a)
+        self.assertIsNotNone(ty_b)
+
+    def test_type_checker_mutual_recursion(self):
+        """类型检查器应支持相互递归"""
+        checker = type_check("""
+            fn even(n: Int) -> Bool {
+              if n == 0 then true
+              else odd(n - 1)
+            }
+            fn odd(n: Int) -> Bool {
+              if n == 0 then false
+              else even(n - 1)
+            }
+        """)
+        ty_even = checker.env.lookup("even")
+        ty_odd = checker.env.lookup("odd")
+        self.assertIsNotNone(ty_even)
+        self.assertIsNotNone(ty_odd)
+
+    def test_type_checker_forward_with_type_mismatch(self):
+        """前向引用函数但类型不匹配应报错"""
+        from nova.errors import TypeCheckError
+        with self.assertRaises(TypeCheckError):
+            type_check("""
+                fn a(x: Int) -> Int { b(x) + 1 }
+                fn b(x: String) -> String { x }
+            """)
+
+    # ---- VM 测试 ----
+
+    def _vm_run_no_check(self, source):
+        """用 VM 模式运行源码（不进行类型检查）"""
+        from nova.lexer import Lexer
+        from nova.parser import Parser
+        from nova.compiler import BytecodeCompiler
+        from nova.vm import NovaVM
+        tokens = Lexer(source).tokenize()
+        ast = Parser(tokens).parse()
+        compiler = BytecodeCompiler()
+        bytecode = compiler.compile(ast)
+        vm = NovaVM(bytecode)
+        vm.run()
+        return vm
+
+    def test_vm_forward_reference(self):
+        """VM 应支持函数前向引用"""
+        vm = self._vm_run_no_check("""
+            fn a(x: Int) -> Int { b(x) + 1 }
+            fn b(x: Int) -> Int { x * 2 }
+            let result = a(5)
+        """)
+        self.assertEqual(vm.get_global("result"), 11)
+
+    def test_vm_mutual_recursion(self):
+        """VM 应支持相互递归"""
+        vm = self._vm_run_no_check("""
+            fn even(n: Int) -> Bool {
+              if n == 0 then true
+              else odd(n - 1)
+            }
+            fn odd(n: Int) -> Bool {
+              if n == 0 then false
+              else even(n - 1)
+            }
+            fn main() -> Unit {
+              print("done")
+            }
+        """)
+        # 通过 main 触发执行，然后检查全局
+        # 直接调用 even/odd 通过全局变量
+        # 这里用 main 中的 print 确认程序能运行
+        self.assertIn("done", vm.get_output())
+
+    def test_vm_mutual_recursion_result(self):
+        """VM 中相互递归的 even/odd 返回正确结果"""
+        vm = self._vm_run_no_check("""
+            fn even(n: Int) -> Bool {
+              if n == 0 then true
+              else odd(n - 1)
+            }
+            fn odd(n: Int) -> Bool {
+              if n == 0 then false
+              else even(n - 1)
+            }
+            let r1 = even(4)
+            let r2 = odd(5)
+            let r3 = even(5)
+            let r4 = odd(4)
+        """)
+        self.assertTrue(vm.get_global("r1"))
+        self.assertTrue(vm.get_global("r2"))
+        self.assertFalse(vm.get_global("r3"))
+        self.assertFalse(vm.get_global("r4"))
+
+    # ---- 类型检查 + VM 集成测试 ----
+
+    def test_forward_ref_with_type_check(self):
+        """前向引用与类型检查一起工作"""
+        from nova.lexer import Lexer
+        from nova.parser import Parser
+        from nova.type_checker import TypeChecker
+        from nova.compiler import BytecodeCompiler
+        from nova.vm import NovaVM
+        source = """
+            fn a(x: Int) -> Int { b(x) + 1 }
+            fn b(x: Int) -> Int { x * 2 }
+            let result = a(5)
+        """
+        tokens = Lexer(source).tokenize()
+        ast = Parser(tokens).parse()
+        TypeChecker().check_program(ast)
+        compiler = BytecodeCompiler()
+        bytecode = compiler.compile(ast)
+        vm = NovaVM(bytecode)
+        vm.run()
+        self.assertEqual(vm.get_global("result"), 11)
+
+    def test_mutual_recursion_with_type_check(self):
+        """相互递归与类型检查一起工作"""
+        from nova.lexer import Lexer
+        from nova.parser import Parser
+        from nova.type_checker import TypeChecker
+        from nova.compiler import BytecodeCompiler
+        from nova.vm import NovaVM
+        source = """
+            fn even(n: Int) -> Bool {
+              if n == 0 then true
+              else odd(n - 1)
+            }
+            fn odd(n: Int) -> Bool {
+              if n == 0 then false
+              else even(n - 1)
+            }
+            let r = even(10)
+        """
+        tokens = Lexer(source).tokenize()
+        ast = Parser(tokens).parse()
+        TypeChecker().check_program(ast)
+        compiler = BytecodeCompiler()
+        bytecode = compiler.compile(ast)
+        vm = NovaVM(bytecode)
+        vm.run()
+        self.assertTrue(vm.get_global("r"))
+
+
+# ============================================================
+# 重复定义检测测试（P2 Bug #11）
+# ============================================================
+
+class TestDuplicateDefinitions(unittest.TestCase):
+    """重复函数/类型定义检测测试"""
+
+    def test_duplicate_function(self):
+        """重复定义函数应报错"""
+        from nova.errors import TypeCheckError
+        with self.assertRaises(TypeCheckError) as ctx:
+            type_check("""
+                fn foo(x: Int) -> Int { x + 1 }
+                fn foo(x: Int) -> Int { x + 2 }
+            """)
+        self.assertIn("重复定义", str(ctx.exception))
+
+    def test_duplicate_function_different_sig(self):
+        """即使签名不同，重复函数名也应报错"""
+        from nova.errors import TypeCheckError
+        with self.assertRaises(TypeCheckError) as ctx:
+            type_check("""
+                fn bar(x: Int) -> Int { x }
+                fn bar(x: Int, y: Int) -> Int { x + y }
+            """)
+        self.assertIn("重复定义", str(ctx.exception))
+
+    def test_duplicate_adt_definition(self):
+        """重复定义 ADT 类型应报错"""
+        from nova.errors import TypeCheckError
+        with self.assertRaises(TypeCheckError) as ctx:
+            type_check("""
+                type Color { Red | Green | Blue }
+                type Color { Cyan | Magenta | Yellow }
+            """)
+        self.assertIn("重复定义", str(ctx.exception))
+
+    def test_no_duplicate_error_for_builtin_shadow(self):
+        """用户定义与内置同名的类型/函数不应误报重复"""
+        # 用户可以重新定义 Option（覆盖内置版本）
+        checker = type_check("""
+            type Option[T] { Some(T) None }
+            let x: Option[Int] = Some(42)
+        """)
+        self.assertIn("Option", checker.env.types)
+
+    def test_three_duplicate_functions(self):
+        """三个同名函数也应报错"""
+        from nova.errors import TypeCheckError
+        with self.assertRaises(TypeCheckError):
+            type_check("""
+                fn f() -> Int { 1 }
+                fn f() -> Int { 2 }
+                fn f() -> Int { 3 }
+            """)
+
+    def test_valid_unique_functions(self):
+        """不同名称的函数不应触发重复定义错误"""
+        checker = type_check("""
+            fn add(x: Int, y: Int) -> Int { x + y }
+            fn sub(x: Int, y: Int) -> Int { x - y }
+            fn mul(x: Int, y: Int) -> Int { x * y }
+            let r = add(1, 2)
+        """)
+        self.assertIsNotNone(checker.env.lookup("add"))
+        self.assertIsNotNone(checker.env.lookup("sub"))
+        self.assertIsNotNone(checker.env.lookup("mul"))

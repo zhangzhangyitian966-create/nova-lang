@@ -37,6 +37,29 @@ class TestCCodeGenerator(unittest.TestCase):
         self.assertIn("int main", c_code)
         self.assertIn("nova_string_new", c_code)
 
+    def test_no_duplicate_print(self):
+        """测试函数体尾表达式不会被重复生成"""
+        c_code = compile_to_c("""
+            fn main() -> Unit {
+                print("Hello, Nova!")
+            }
+        """)
+        # print 调用应该只出现一次（不重复）
+        self.assertEqual(c_code.count("nova_print("), 1)
+
+    def test_fn_return_no_duplicate_tail(self):
+        """测试非 void 函数的尾表达式不会重复出现"""
+        c_code = compile_to_c("""
+            fn add(a: Int, b: Int) -> Int {
+                let sum = a + b
+                sum
+            }
+        """)
+        # 尾表达式 sum 在函数体中不应出现两次
+        # 检查 "return sum;" 应该只出现一次，且 sum 作为变量声明后直接 return
+        self.assertEqual(c_code.count("return sum;"), 1)
+        self.assertEqual(c_code.count("int64_t sum ="), 1)
+
     def test_arithmetic(self):
         """测试算术表达式的类型映射"""
         c_code = compile_to_c("let x = 1 + 2 * 3")

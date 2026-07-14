@@ -119,7 +119,7 @@ def run_file(filepath: str, use_vm: bool = True):
 
 def run_repl():
     """交互式 REPL（使用树遍历解释器作为 fallback）"""
-    print("Nova 编程语言 v0.2.0 (VM + Interpreter)")
+    print("Nova 编程语言 v0.4.0 (VM + Interpreter)")
     print('输入 "exit" 或按 Ctrl+D 退出')
     print()
 
@@ -248,7 +248,7 @@ def main():
             sys.exit(1)
         run_source(sys.argv[2])
     elif sys.argv[1] in ("-h", "--help"):
-        print("Nova 编程语言解释器 v0.2.0")
+        print("Nova 编程语言解释器 v0.4.0")
         print()
         print("用法:")
         print("  nova.py                        启动交互式 REPL")

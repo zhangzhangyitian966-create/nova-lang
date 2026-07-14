@@ -87,7 +87,20 @@ class LinearScanAllocator:
 # ============================================================
 
 class NativeCodeGen:
-    """Nova 自研 x86_64 代码生成器"""
+    """Nova 自研 x86_64 代码生成器
+
+    目前支持的操作：
+    - 常量加载：整数、浮点、布尔、字符串
+    - 基本算术：+ - * / %
+    - 比较运算：== != < > <= >=
+    - 一元运算：- !
+    - 函数调用（直接调用，System V AMD64 ABI）
+    - 控制流：跳转、条件分支、标签、返回
+    - 函数序言/尾声（callee-saved 寄存器保存/恢复）
+    - ELF 可执行文件生成
+
+    尚未支持的操作将抛出 NotImplementedError。
+    """
 
     def __init__(self):
         self.emitter = X86_64Emitter()
@@ -292,6 +305,10 @@ class NativeCodeGen:
                         e.mov_reg_imm64(reg, 1 if instr.value else 0)
                 elif instr.const_type == "string":
                     self._compile_const_string(e, instr, vregs, free_gprs, free_xmms, func_relocations)
+                else:
+                    raise NotImplementedError(
+                        f"LIRLoadConst const_type '{instr.const_type}' is not yet implemented in native backend"
+                    )
 
             elif isinstance(instr, LIRBinOp):
                 op = instr.op
@@ -335,6 +352,10 @@ class NativeCodeGen:
                     e.cmp_reg_reg(RCX, RAX)
                     e.setle(RAX)
                     e.movzx_reg32_reg8(RAX, RAX)
+                else:
+                    raise NotImplementedError(
+                        f"LIRBinOp operator '{op}' is not yet implemented in native backend"
+                    )
 
             elif isinstance(instr, LIRUnaryOp):
                 if instr.op == "-":
@@ -343,6 +364,10 @@ class NativeCodeGen:
                     e.cmp_reg_imm(RAX, 0)
                     e.sete(RAX)
                     e.movzx_reg32_reg8(RAX, RAX)
+                else:
+                    raise NotImplementedError(
+                        f"LIRUnaryOp operator '{instr.op}' is not yet implemented in native backend"
+                    )
 
             elif isinstance(instr, LIRCall):
                 self._compile_call(e, instr, vregs, free_gprs, free_xmms, func.name)
@@ -365,6 +390,41 @@ class NativeCodeGen:
                 e.mov_reg_imm64(RDI, 1)
                 e.mov_reg_imm64(RAX, 60)
                 e.syscall()
+
+            elif isinstance(instr, LIRLoadGlobal):
+                raise NotImplementedError("LIRLoadGlobal is not yet implemented in native backend")
+
+            elif isinstance(instr, LIRStoreGlobal):
+                raise NotImplementedError("LIRStoreGlobal is not yet implemented in native backend")
+
+            elif isinstance(instr, LIRLoadReg):
+                raise NotImplementedError("LIRLoadReg is not yet implemented in native backend")
+
+            elif isinstance(instr, LIRStoreReg):
+                raise NotImplementedError("LIRStoreReg is not yet implemented in native backend")
+
+            elif isinstance(instr, LIRCallIndirect):
+                raise NotImplementedError("LIRCallIndirect is not yet implemented in native backend")
+
+            elif isinstance(instr, LIRIndex):
+                raise NotImplementedError("LIRIndex is not yet implemented in native backend")
+
+            elif isinstance(instr, LIRFieldAccess):
+                raise NotImplementedError("LIRFieldAccess is not yet implemented in native backend")
+
+            elif isinstance(instr, LIRBuildList):
+                raise NotImplementedError("LIRBuildList is not yet implemented in native backend")
+
+            elif isinstance(instr, LIRBuildTuple):
+                raise NotImplementedError("LIRBuildTuple is not yet implemented in native backend")
+
+            elif isinstance(instr, LIRBuildADT):
+                raise NotImplementedError("LIRBuildADT is not yet implemented in native backend")
+
+            else:
+                raise NotImplementedError(
+                    f"LIR instruction {type(instr).__name__} is not yet implemented in native backend"
+                )
 
     def _generate_start(self, func_code: Dict[str, bytes], module: LIRModule):
         """生成 _start 入口函数"""
@@ -549,9 +609,12 @@ class NativeCodeGen:
 
 class SimpleNativeCompiler:
     """
-    简化版原生编译器
+    简化版原生编译器（占位实现，尚未完成）
     直接将 Nova 源码编译为 x86_64 ELF 可执行文件
     用于快速验证机器码生成是否正确
+
+    注意：当前仅为占位实现，完整的源码到 LIR 的 lowering 尚未完成。
+    使用时将抛出 NotImplementedError。
     """
 
     def __init__(self):
@@ -559,39 +622,14 @@ class SimpleNativeCompiler:
 
     def compile_source(self, source: str, output_path: str) -> str:
         """将 Nova 源码编译为 x86_64 ELF"""
-        # 1. 前端解析（复用现有）
-        from nova.lexer import Lexer
-        from nova.parser import Parser
-
-        tokens = Lexer(source).tokenize()
-        ast = Parser(tokens).parse()
-
-        # 2. 构建简单的 LIR
-        lir = self._build_simple_lir(ast)
-
-        # 3. 编译为 ELF
-        self.codegen.compile_and_write(lir, output_path)
-        return output_path
+        raise NotImplementedError(
+            "SimpleNativeCompiler.compile_source is not yet implemented: "
+            "AST to LIR lowering is not available in the native backend"
+        )
 
     def _build_simple_lir(self, ast):
-        """从 AST 构建简单的 LIR（仅支持整数运算和函数调用）"""
-        lir = LIRModule(name="nova_program")
-
-        # 构建 main 函数
-        main_fn = LIRFunction("main", [], UNIT_TYPE)
-        main_fn.body = []
-
-        # 构建用户函数
-        for decl in ast.declarations:
-            if hasattr(decl, 'name'):
-                fn = LIRFunction(decl.name, [], INT_TYPE)
-                fn.body = [LIRLoadConst(), LIRReturn()]
-                lir.functions[decl.name] = fn
-
-        # 简化的 _start
-        lir.functions["_start"] = LIRFunction("_start", [], UNIT_TYPE)
-        lir.functions["_start"].body = [
-            LIRReturn()
-        ]
-
-        return lir
+        """从 AST 构建简单的 LIR（占位实现，尚未完成）"""
+        raise NotImplementedError(
+            "SimpleNativeCompiler._build_simple_lir is not yet implemented: "
+            "AST to LIR lowering is not available in the native backend"
+        )

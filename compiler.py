@@ -104,8 +104,8 @@ class Op:
     PIPE_CALL = "PIPE_CALL"          # operands: (arg_count,)
 
     # ADT
-    MAKE_ADT = "MAKE_ADT"           # operands: (type_name, variant_name, field_count,)
-    REGISTER_CTOR = "REGISTER_CTOR"  # operands: (type_name, variant_name, field_count, name)
+    MAKE_ADT = "MAKE_ADT"           # operands: (type_name, variant_name, field_count, field_names_tuple)
+    REGISTER_CTOR = "REGISTER_CTOR"  # operands: (type_name, variant_name, field_count, name, field_names_tuple)
 
     # 其他
     POP = "POP"
@@ -209,6 +209,17 @@ class BytecodeCompiler:
         self.bytecode = Bytecode()
         self._builtin_names: set = set()
         self._init_builtin_names()
+        # ADT 构造器注册表: {variant_name: (type_name, field_count)}
+        # 用于在模式匹配中区分零字段构造器与变量绑定
+        self._adt_constructors: Dict[str, Tuple[str, int]] = {}
+        self._init_builtin_adt_constructors()
+
+    def _init_builtin_adt_constructors(self):
+        """初始化内置 ADT 构造器"""
+        self._adt_constructors["None"] = ("Option", 0)
+        self._adt_constructors["Some"] = ("Option", 1)
+        self._adt_constructors["Ok"] = ("Result", 1)
+        self._adt_constructors["Err"] = ("Result", 1)
 
     def _init_builtin_names(self):
         """初始化内置函数名称集合"""
@@ -239,16 +250,20 @@ class BytecodeCompiler:
         """编译顶层声明"""
         if isinstance(decl, TypeDef):
             for variant in decl.variants:
+                field_count = len(variant.fields)
+                field_names = tuple(f[0] for f in variant.fields)
+                # 注册构造器到编译器的 ADT 构造器表（用于模式匹配识别）
+                self._adt_constructors[variant.name] = (decl.name, field_count)
                 if variant.fields:
                     # 带字段的构造器 -> 注册构造函数
                     self.bytecode.emit_op(
                         Op.REGISTER_CTOR,
-                        decl.name, variant.name, len(variant.fields), variant.name
+                        decl.name, variant.name, field_count, variant.name, field_names
                     )
                     self.bytecode.emit_op(Op.STORE_VAR, variant.name, False)
                 else:
                     # 无字段构造器 -> 创建 ADT 值
-                    self.bytecode.emit_op(Op.MAKE_ADT, decl.name, variant.name, 0)
+                    self.bytecode.emit_op(Op.MAKE_ADT, decl.name, variant.name, 0, field_names)
                     self.bytecode.emit_op(Op.STORE_VAR, variant.name, False)
 
         elif isinstance(decl, AliasDef):
@@ -330,7 +345,7 @@ class BytecodeCompiler:
         elif isinstance(expr, Identifier):
             name = expr.name
             if name == "None":
-                self.bytecode.emit_op(Op.MAKE_ADT, "Option", "None", 0)
+                self.bytecode.emit_op(Op.MAKE_ADT, "Option", "None", 0, ())
             else:
                 self.bytecode.emit_op(Op.LOAD_VAR, name)
 
@@ -511,11 +526,11 @@ class BytecodeCompiler:
                     self._compile_expr(arg)
                 arg_count = len(expr.args)
                 if name == "Some":
-                    self.bytecode.emit_op(Op.MAKE_ADT, "Option", "Some", arg_count)
+                    self.bytecode.emit_op(Op.MAKE_ADT, "Option", "Some", arg_count, ("value",))
                 elif name == "Ok":
-                    self.bytecode.emit_op(Op.MAKE_ADT, "Result", "Ok", arg_count)
+                    self.bytecode.emit_op(Op.MAKE_ADT, "Result", "Ok", arg_count, ("value",))
                 elif name == "Err":
-                    self.bytecode.emit_op(Op.MAKE_ADT, "Result", "Err", arg_count)
+                    self.bytecode.emit_op(Op.MAKE_ADT, "Result", "Err", arg_count, ("error",))
                 return
             else:
                 self.bytecode.emit_op(Op.LOAD_VAR, name)
@@ -658,6 +673,14 @@ class BytecodeCompiler:
             return fail_pos
 
         elif isinstance(pattern, PatternIdentifier):
+            # 检查是否是已知的零字段 ADT 构造器（如 None, Red 等）
+            if pattern.name in self._adt_constructors:
+                type_name, field_count = self._adt_constructors[pattern.name]
+                if field_count == 0:
+                    # 零字段构造器：作为构造器模式编译
+                    fail_pos = self.bytecode.current_pos()
+                    self.bytecode.emit_op(Op.MATCH_CONSTRUCTOR, pattern.name, 0, 0)
+                    return fail_pos
             return None  # 变量绑定总是匹配
 
         elif isinstance(pattern, PatternConstructor):
@@ -674,12 +697,21 @@ class BytecodeCompiler:
     def _compile_pattern_extract_and_bind(self, pattern):
         """
         从 subject 中提取值并绑定到变量。
-        subject 在栈顶。对于非构造器模式，弹出 subject。
+        约定：所有 MATCH_TEST_* 操作码在匹配成功时已弹出 subject。
         对于构造器模式，subject 已被 MATCH_CONSTRUCTOR 弹出并替换为字段。
+        对于没有测试操作码的模式（通配符、元组、列表等），在此处弹出。
         """
         if isinstance(pattern, PatternIdentifier):
+            # 检查是否是已知的零字段 ADT 构造器
+            if pattern.name in self._adt_constructors:
+                _type_name, field_count = self._adt_constructors[pattern.name]
+                if field_count == 0:
+                    # 零字段构造器：MATCH_CONSTRUCTOR 已经弹出 subject 且没有字段
+                    # 不需要做任何额外操作（栈上没有剩余值）
+                    return
             self.bytecode.emit_op(Op.MATCH_BIND, pattern.name)
         elif isinstance(pattern, PatternWildcard):
+            # 注意：通配符模式没有测试操作码，所以需要在这里弹出 subject
             self.bytecode.emit_op(Op.POP)  # 弹出 subject
         elif isinstance(pattern, PatternConstructor):
             # 字段已由 MATCH_CONSTRUCTOR 压栈（subject 已被弹出）
@@ -687,7 +719,8 @@ class BytecodeCompiler:
                 self._compile_pattern_extract_and_bind(field_pattern)
         elif isinstance(pattern, (PatternInt, PatternFloat, PatternString,
                                   PatternBool, PatternChar)):
-            self.bytecode.emit_op(Op.POP)  # 弹出 subject
+            # MATCH_TEST_* 已经弹出了 subject，不需要再弹
+            pass
         elif isinstance(pattern, (PatternTuple, PatternList)):
             self.bytecode.emit_op(Op.POP)
         else:
@@ -753,6 +786,10 @@ class BytecodeCompiler:
         """编译代码块"""
         for stmt in expr.statements:
             self._compile_expr(stmt)
+            # 对于会留下值的语句（非绑定/赋值类），弹出结果
+            # LetBinding / MutBinding / Assignment 已通过 STORE_VAR 弹出值，无需额外 POP
+            if not isinstance(stmt, (LetBinding, MutBinding, Assignment)):
+                self.bytecode.emit_op(Op.POP)
         if expr.tail_expression:
             self._compile_expr(expr.tail_expression)
         else:

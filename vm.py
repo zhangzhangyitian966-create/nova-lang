@@ -49,10 +49,12 @@ UNIT = UNIT_TYPE()
 class NovaADTValue:
     """ADT 构造值：如 Some(42), Circle(5.0), None"""
 
-    def __init__(self, type_name: str, variant_name: str, fields: List[Any]):
+    def __init__(self, type_name: str, variant_name: str, fields: List[Any],
+                 field_names: List[str] = None):
         self.type_name = type_name
         self.variant_name = variant_name
         self.fields = fields
+        self.field_names = field_names or []
 
     def __repr__(self):
         if self.fields:
@@ -109,10 +111,12 @@ class NovaPartialBuiltin:
 class NovaConstructor:
     """ADT 构造函数（VM 版）"""
 
-    def __init__(self, type_name: str, variant_name: str, field_count: int):
+    def __init__(self, type_name: str, variant_name: str, field_count: int,
+                 field_names: List[str] = None):
         self.type_name = type_name
         self.variant_name = variant_name
         self.field_count = field_count
+        self.field_names = field_names or []
 
     def __repr__(self):
         return f"<ctor {self.variant_name}>"
@@ -218,9 +222,9 @@ class NovaVM:
 
     def _builtin_str_to_int(self, *args):
         try:
-            return NovaADTValue("Option", "Some", [int(args[0])])
+            return NovaADTValue("Option", "Some", [int(args[0])], ["value"])
         except ValueError:
-            return NovaADTValue("Option", "None", [])
+            return NovaADTValue("Option", "None", [], [])
 
     def _builtin_filter(self, *args):
         pred_fn, lst = args[0], args[1]
@@ -233,14 +237,14 @@ class NovaVM:
     def _builtin_head(self, *args):
         lst = args[0]
         if lst:
-            return NovaADTValue("Option", "Some", [lst[0]])
-        return NovaADTValue("Option", "None", [])
+            return NovaADTValue("Option", "Some", [lst[0]], ["value"])
+        return NovaADTValue("Option", "None", [], [])
 
     def _builtin_tail(self, *args):
         lst = args[0]
         if len(lst) > 0:
-            return NovaADTValue("Option", "Some", [lst[1:]])
-        return NovaADTValue("Option", "None", [])
+            return NovaADTValue("Option", "Some", [lst[1:]], ["value"])
+        return NovaADTValue("Option", "None", [], [])
 
     def _builtin_read_file(self, *args):
         path = args[0]
@@ -276,7 +280,7 @@ class NovaVM:
 
     def _convert_json_to_nova(self, val):
         if val is None:
-            return NovaADTValue("Option", "None", [])
+            return NovaADTValue("Option", "None", [], [])
         if isinstance(val, bool):
             return val
         if isinstance(val, (int, float)):
@@ -360,7 +364,7 @@ class NovaVM:
                 raise RuntimeError_(
                     f"构造器 '{fn.variant_name}' 期望 {fn.field_count} 个参数，但传入了 {len(args)} 个"
                 )
-            return NovaADTValue(fn.type_name, fn.variant_name, list(args))
+            return NovaADTValue(fn.type_name, fn.variant_name, list(args), fn.field_names)
 
         if isinstance(fn, NovaClosure):
             return self._call_closure(fn, args)
@@ -616,31 +620,38 @@ class NovaVM:
             body_result = self.stack.pop()
             result_list = self.stack.pop()
             iterable = self.stack.pop()
+            # 防御性检查：如果 result_list 不是 list（例如空循环从未执行过体），
+            # 则将其视为空列表
+            if not isinstance(result_list, list):
+                result_list = []
             result_list.append(body_result)
             self.stack.append(iterable)
             self.stack.append(result_list)
             self.ip = loop_start
 
         elif opcode == Op.BREAK:
-            # 跳出循环 - 需要清理栈并跳到循环结束
-            # 在 for 循环中弹出 (iter, index, result_list)
+            # 跳出循环 - 清理栈并跳到循环结束
             if self._for_iters:
-                self._for_iters.pop()
-                # 弹出 for 循环状态
-                if len(self.stack) >= 3:
-                    self.stack.pop()  # body_result
-                    result_list = self.stack.pop()  # result_list
-                    self.stack.pop()  # index (for range)
-                    self.stack.pop()  # iter (for range)
-                    self.stack.append(result_list)
+                # for 循环中的 break
+                loop_info = self._for_iters.pop()
+                end_ip = loop_info["end_ip"]
+                base_sp = loop_info["base_sp"]
+                # 清理迭代器索引（防止 ID 复用导致的问题）
+                iter_type = loop_info.get("iter_type")
+                iter_key = loop_info.get("iter_key")
+                if iter_type == "range" and hasattr(self, '_range_index'):
+                    self._range_index.pop(iter_key, None)
+                elif iter_type == "list" and hasattr(self, '_list_index'):
+                    self._list_index.pop(iter_key, None)
+                # 取出 result_list（在 base_sp + 1 的位置）
+                result_list = self.stack[base_sp + 1]
+                # 清理栈：只保留 base_sp 以下的内容
+                del self.stack[base_sp:]
+                # 将 result_list 作为最终值
+                self.stack.append(result_list)
+                self.ip = end_ip
             else:
-                # while 循环中的 break
-                pass
-            # 跳到当前 for_iter 的 end 位置
-            if self._for_iters:
-                self.ip = self._for_iters[-1].get("end_ip", self.ip)
-            else:
-                # 找到下一个 LOOP_END 的位置
+                # while 循环中的 break - 找到下一个 LOOP_END 后位置
                 while self.ip < len(self.code):
                     next_instr = self.code[self.ip]
                     if next_instr.opcode in (Op.LOOP_END, Op.CONST_UNIT):
@@ -650,7 +661,13 @@ class NovaVM:
 
         elif opcode == Op.CONTINUE:
             if self._for_iters:
-                self.ip = self._for_iters[-1]["loop_start"]
+                # for 循环中的 continue - 清理栈到 [iterable, result_list]，跳回 loop_start
+                loop_info = self._for_iters[-1]
+                base_sp = loop_info["base_sp"]
+                loop_start = loop_info["loop_start"]
+                # 清理栈中 body 产生的所有值（保留 iterable + result_list）
+                del self.stack[base_sp + 2:]
+                self.ip = loop_start
             else:
                 # while 循环中的 continue - 跳回循环开始
                 # 查找最近的 POP_JUMP_IF_FALSE 之前的 JUMP 位置
@@ -719,7 +736,20 @@ class NovaVM:
             if isinstance(obj, tuple):
                 self.stack.append(obj[int(field)])
             elif isinstance(obj, NovaADTValue):
-                self.stack.append(obj.fields[int(field)])
+                # 尝试索引访问
+                try:
+                    idx = int(field)
+                    self.stack.append(obj.fields[idx])
+                except ValueError:
+                    # 按名称访问
+                    found = False
+                    for i, fname in enumerate(obj.field_names):
+                        if fname == field:
+                            self.stack.append(obj.fields[i])
+                            found = True
+                            break
+                    if not found:
+                        raise RuntimeError_(f"ADT 值没有字段 '{field}'")
             else:
                 raise RuntimeError_(f"无法对值进行字段访问 '{field}'")
 
@@ -742,7 +772,8 @@ class NovaVM:
                     self._range_index = {}
 
                 key = id(iter_val)
-                if key not in self._range_index:
+                is_first = key not in self._range_index
+                if is_first:
                     self._range_index[key] = iter_val[1]  # start
 
                 current = self._range_index[key]
@@ -755,9 +786,22 @@ class NovaVM:
                     self.stack.append(iter_val)
                     self.stack.append(result_list)
                     self.stack.append(current)
+                    # 第一次迭代：注册循环状态
+                    if is_first:
+                        # base_sp: 循环状态之前的栈深度（iterable 和 result_list 下面）
+                        base_sp = len(self.stack) - 3
+                        self._for_iters.append({
+                            "end_ip": fail_ip,
+                            "loop_start": self.ip - 1,  # FOR_ITER 指令位置
+                            "base_sp": base_sp,
+                            "iter_type": "range",
+                            "iter_key": key,
+                        })
                 else:
                     del self._range_index[key]
                     # 迭代结束，只保留结果列表
+                    if self._for_iters:
+                        self._for_iters.pop()
                     self.stack.append(result_list)
                     self.ip = fail_ip
                     return
@@ -767,7 +811,8 @@ class NovaVM:
                     self._list_index = {}
 
                 key = id(iter_val)
-                if key not in self._list_index:
+                is_first = key not in self._list_index
+                if is_first:
                     self._list_index[key] = 0
 
                 idx = self._list_index[key]
@@ -777,9 +822,21 @@ class NovaVM:
                     self.stack.append(iter_val)
                     self.stack.append(result_list)
                     self.stack.append(iter_val[idx])
+                    # 第一次迭代：注册循环状态
+                    if is_first:
+                        base_sp = len(self.stack) - 3
+                        self._for_iters.append({
+                            "end_ip": fail_ip,
+                            "loop_start": self.ip - 1,
+                            "base_sp": base_sp,
+                            "iter_type": "list",
+                            "iter_key": key,
+                        })
                 else:
                     del self._list_index[key]
                     # 迭代结束，只保留结果列表
+                    if self._for_iters:
+                        self._for_iters.pop()
                     self.stack.append(result_list)
                     self.ip = fail_ip
                     return
@@ -795,30 +852,30 @@ class NovaVM:
             fail_ip = instr.operands[1]
             subject = self.stack[-1]  # peek
             if isinstance(subject, int) and not isinstance(subject, bool) and subject == test_val:
-                pass  # 匹配成功，subject 仍在栈上
+                self.stack.pop()  # 匹配成功，弹出 subject
             else:
-                self.ip = fail_ip  # 跳到下一个 arm（subject 仍保留）
+                self.ip = fail_ip  # 匹配失败，subject 保留在栈上供下一个 arm 使用
 
         elif opcode == Op.MATCH_TEST_BOOL:
             test_val = instr.operands[0]
             fail_ip = instr.operands[1]
-            subject = self.stack[-1]
+            subject = self.stack[-1]  # peek
             if isinstance(subject, bool) and subject == test_val:
-                pass
+                self.stack.pop()  # 匹配成功，弹出 subject
             else:
-                self.ip = fail_ip
+                self.ip = fail_ip  # 匹配失败，subject 保留
 
         elif opcode == Op.MATCH_TEST_STRING:
             test_val = instr.operands[0]
             fail_ip = instr.operands[1]
-            subject = self.stack[-1]
+            subject = self.stack[-1]  # peek
             if isinstance(subject, str) and subject == test_val:
-                pass
+                self.stack.pop()  # 匹配成功，弹出 subject
             else:
-                self.ip = fail_ip
+                self.ip = fail_ip  # 匹配失败，subject 保留
 
         elif opcode == Op.MATCH_WILDCARD:
-            pass  # subject 仍在栈上
+            self.stack.pop()  # 总是匹配，弹出 subject
 
         elif opcode == Op.MATCH_BIND:
             name = instr.operands[0]
@@ -832,14 +889,16 @@ class NovaVM:
             ctor_name = instr.operands[0]
             field_count = instr.operands[1]
             fail_ip = instr.operands[2]
-            subject = self.stack.pop()
+            subject = self.stack[-1]  # peek
             if (isinstance(subject, NovaADTValue) and
                     subject.variant_name == ctor_name and
                     len(subject.fields) == field_count):
                 # 匹配成功：弹出 subject，将字段压栈
+                self.stack.pop()  # 弹出 subject
                 for field_val in reversed(subject.fields):
                     self.stack.append(field_val)
             else:
+                # 匹配失败：subject 保留在栈上，跳转到下一个 arm
                 self.ip = fail_ip
 
         elif opcode == Op.MATCH_END:
@@ -862,15 +921,17 @@ class NovaVM:
             type_name = instr.operands[0]
             variant_name = instr.operands[1]
             field_count = instr.operands[2]
+            field_names = list(instr.operands[3]) if len(instr.operands) > 3 else []
             fields = [self.stack.pop() for _ in range(field_count)][::-1]
-            self.stack.append(NovaADTValue(type_name, variant_name, fields))
+            self.stack.append(NovaADTValue(type_name, variant_name, fields, field_names))
 
         elif opcode == Op.REGISTER_CTOR:
             type_name = instr.operands[0]
             variant_name = instr.operands[1]
             field_count = instr.operands[2]
             name = instr.operands[3]
-            self.stack.append(NovaConstructor(type_name, variant_name, field_count))
+            field_names = list(instr.operands[4]) if len(instr.operands) > 4 else []
+            self.stack.append(NovaConstructor(type_name, variant_name, field_count, field_names))
 
         # === 其他 ===
         elif opcode == Op.POP:

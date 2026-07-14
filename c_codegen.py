@@ -265,28 +265,25 @@ class CCodeGen:
         lines = [f"{ret_type} {c_name}({params_str}) {{"]
         self.indent_level = 1
 
-        # 编译函数体
-        body_code = self._compile_expr(fndef.body)
+        if isinstance(fndef.body, Block):
+            # 编译块中的语句（不包含尾表达式，尾表达式单独处理）
+            for stmt in fndef.body.statements:
+                stmt_c = self._compile_expr(stmt)
+                lines.append(self._indent_str(stmt_c))
 
-        # 如果函数返回非 void，需要 return
-        if ret_type != "void" and isinstance(fndef.body, Block):
-            # 检查 body 是否以 tail expression 结尾
-            lines.append(self._indent_str(body_code))
-            # 添加 return 尾表达式
+            # 处理尾表达式
             if fndef.body.tail_expression:
                 tail_c = self._compile_expr(fndef.body.tail_expression)
-                lines.append(self._indent_str(f"return {tail_c};"))
+                if ret_type != "void":
+                    lines.append(self._indent_str(f"return {tail_c};"))
+                else:
+                    lines.append(self._indent_str(f"{tail_c};"))
         elif ret_type != "void":
+            body_code = self._compile_expr(fndef.body)
             lines.append(self._indent_str(f"return {body_code};"))
         else:
-            # void 函数
-            if isinstance(fndef.body, Block):
-                lines.append(self._indent_str(body_code))
-                if fndef.body.tail_expression:
-                    tail_c = self._compile_expr(fndef.body.tail_expression)
-                    lines.append(self._indent_str(f"{tail_c};"))
-            else:
-                lines.append(self._indent_str(f"{body_code};"))
+            body_code = self._compile_expr(fndef.body)
+            lines.append(self._indent_str(f"{body_code};"))
 
         lines.append("}")
 
@@ -823,15 +820,22 @@ class CCodeGen:
         lines.append(f")")
 
         # 生成实际的 lambda 函数
-        body_c = self._compile_expr(expr.body)
         fn_lines = [f"{ret_type} nova_lambda_{lambda_fn_name}({params_str}) {{"]
         fn_lines.append(f"    (void)_nova_closure_env;")
         if isinstance(expr.body, Block):
-            fn_lines.append(self._indent_str(body_c))
+            # 编译块中的语句（不包含尾表达式，尾表达式单独处理）
+            old_indent = self.indent_level
+            self.indent_level = 1
+            for stmt in expr.body.statements:
+                stmt_c = self._compile_expr(stmt)
+                fn_lines.append(self._indent_str(stmt_c))
+            # 处理尾表达式
             if expr.body.tail_expression:
                 tail_c = self._compile_expr(expr.body.tail_expression)
-                fn_lines.append(f"    return {tail_c};")
+                fn_lines.append(self._indent_str(f"return {tail_c};"))
+            self.indent_level = old_indent
         else:
+            body_c = self._compile_expr(expr.body)
             fn_lines.append(f"    return {body_c};")
         fn_lines.append(f"}}")
         self.functions.append("\n".join(fn_lines))

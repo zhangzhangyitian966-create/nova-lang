@@ -195,7 +195,7 @@ class TypeEnv:
     def __init__(self, parent: Optional['TypeEnv'] = None):
         self.parent = parent
         self.types: Dict[str, NovaType] = {}
-        self.adt_variants: Dict[str, List[tuple]] = {}  # adt_name -> [(variant_name, [field_types])]
+        self.adt_variants: Dict[str, List[tuple]] = {}  # adt_name -> [(variant_name, [(field_name, field_type), ...])]
         self.adt_type_params: Dict[str, List[str]] = {}  # adt_name -> [param_names]
         self.aliases: Dict[str, NovaType] = {}
 
@@ -272,8 +272,8 @@ class TypeChecker:
     def _setup_builtins(self):
         """注册内置函数和类型的类型签名"""
         # 内置 Option 和 Result
-        self.env.adt_variants["Option"] = [("Some", [TypeVar("T")]), ("None", [])]
-        self.env.adt_variants["Result"] = [("Ok", [TypeVar("T")]), ("Err", [TypeVar("E")])]
+        self.env.adt_variants["Option"] = [("Some", [("value", TypeVar("T"))]), ("None", [])]
+        self.env.adt_variants["Result"] = [("Ok", [("value", TypeVar("T"))]), ("Err", [("error", TypeVar("E"))])]
         self.env.adt_type_params["Option"] = ["T"]
         self.env.adt_type_params["Result"] = ["T", "E"]
 
@@ -365,9 +365,144 @@ class TypeChecker:
         self.env.define("pi", FnType([], FLOAT_T))
 
     def check_program(self, program: Program):
-        """检查整个程序"""
+        """检查整个程序（两遍扫描：先收集声明，再检查函数体）
+
+        第一遍：收集所有函数、ADT、类型别名的签名到环境中
+        第二遍：检查所有函数体和 let/mut 绑定的值表达式
+        这样支持前向引用和相互递归
+        """
+        # 跟踪本程序中用户定义的名称（用于重复定义检测，不包含内置）
+        self._user_defined_names: set = set()
+        self._user_defined_types: set = set()
+
+        # 第一遍：收集所有顶层声明的签名
         for decl in program.declarations:
-            self.check_decl(decl)
+            self._collect_decl(decl)
+
+        # 第二遍：检查所有函数体和绑定的值
+        for decl in program.declarations:
+            self._check_decl_body(decl)
+
+    def _collect_decl(self, decl):
+        """第一遍：收集声明签名到环境中（不检查函数体）"""
+        if isinstance(decl, FnDef):
+            # 检查重复定义（只检查用户在本程序中定义的名称）
+            if decl.name in self._user_defined_names:
+                self._report_error(
+                    f"函数 '{decl.name}' 重复定义",
+                    decl
+                )
+            self._user_defined_names.add(decl.name)
+            fn_type = self._infer_fn_type(decl)
+            self.env.define(decl.name, fn_type)
+
+        elif isinstance(decl, TypeDef):
+            # 检查重复 ADT 定义（只检查用户在本程序中定义的类型）
+            if decl.name in self._user_defined_types:
+                self._report_error(
+                    f"类型 '{decl.name}' 重复定义",
+                    decl
+                )
+            self._user_defined_types.add(decl.name)
+            type_params = [TypeVar(tp) for tp in decl.type_params]
+            adt_ty = ADTType(decl.name, type_params)
+            self.env.types[decl.name] = adt_ty
+            self.env.adt_type_params[decl.name] = decl.type_params
+            # 为字段类型解析提供局部类型参数映射
+            local_types = {tp: TypeVar(tp) for tp in decl.type_params}
+            variants = []
+            for variant in decl.variants:
+                field_info = []
+                for fname, ftype_ast in variant.fields:
+                    field_type = self._from_ast_type(ftype_ast, local_types=local_types)
+                    field_info.append((fname, field_type))
+                variants.append((variant.name, field_info))
+            self.env.adt_variants[decl.name] = variants
+
+            # 注册每个变体为构造函数
+            for vname, field_info in variants:
+                if field_info:
+                    ftypes = [ft for _fn, ft in field_info]
+                    self.env.define(vname, FnType(ftypes, adt_ty))
+                else:
+                    self.env.define(vname, adt_ty)
+
+        elif isinstance(decl, AliasDef):
+            target = self._from_ast_type(decl.target_type)
+            self.env.aliases[decl.name] = target
+            self.env.types[decl.name] = target
+
+        elif isinstance(decl, (LetBinding, MutBinding)):
+            # 对于 let/mut 绑定，我们也需要在第一遍注册（支持前向引用绑定）
+            # 但值的类型需要在第二遍检查
+            # 这里先注册一个类型变量作为占位符
+            if decl.type_annotation:
+                annotated = self._from_ast_type(decl.type_annotation)
+                self.env.define(decl.name, annotated)
+            else:
+                # 没有类型标注的 let/mut，使用类型变量占位
+                self.env.define(decl.name, TypeVar(f"let_{decl.name}"))
+
+        elif isinstance(decl, (ImportDecl, ExportDecl)):
+            pass  # 跳过导入/导出
+
+        # 顶层表达式在第一遍不处理（第二遍也不处理函数体检查时会处理）
+        else:
+            pass
+
+    def _check_decl_body(self, decl):
+        """第二遍：检查声明的主体表达式"""
+        if isinstance(decl, LetBinding):
+            ty = self.check_expr(decl.value)
+            if decl.type_annotation:
+                annotated = self._from_ast_type(decl.type_annotation)
+                if not self._types_compatible(ty, annotated):
+                    self._report_error(
+                        f"let 绑定 '{decl.name}' 的推断类型 {ty} 与标注类型 {annotated} 不匹配",
+                        decl
+                    )
+            # 更新环境中的类型（用推断的实际类型替换占位符）
+            self.env.define(decl.name, ty)
+
+        elif isinstance(decl, MutBinding):
+            ty = self.check_expr(decl.value)
+            if decl.type_annotation:
+                annotated = self._from_ast_type(decl.type_annotation)
+                if not self._types_compatible(ty, annotated):
+                    self._report_error(
+                        f"mut 绑定 '{decl.name}' 的推断类型 {ty} 与标注类型 {annotated} 不匹配",
+                        decl
+                    )
+            self.env.define(decl.name, ty)
+
+        elif isinstance(decl, FnDef):
+            # 检查函数体（函数类型已在第一遍注册）
+            child_env = self.env.child()
+            for param in decl.params:
+                if param.type_annotation:
+                    ptype = self._from_ast_type(param.type_annotation)
+                else:
+                    ptype = TypeVar(f"param_{decl.name}_{param.name}")
+                child_env.define(param.name, ptype)
+            old_env = self.env
+            self.env = child_env
+            body_type = self.check_expr(decl.body)
+            self.env = old_env
+
+            if decl.return_type:
+                expected = self._from_ast_type(decl.return_type)
+                if not self._types_compatible(body_type, expected):
+                    self._report_error(
+                        f"函数 '{decl.name}' 返回类型 {body_type} 与声明的 {expected} 不匹配",
+                        decl.body
+                    )
+
+        elif isinstance(decl, (TypeDef, AliasDef, ImportDecl, ExportDecl)):
+            pass  # 这些在第一遍已处理
+
+        else:
+            # 顶层表达式
+            self.check_expr(decl)
 
     def check_decl(self, decl):
         """检查顶层声明"""
@@ -428,15 +563,17 @@ class TypeChecker:
             local_types = {tp: TypeVar(tp) for tp in decl.type_params}
             variants = []
             for variant in decl.variants:
-                field_types = []
+                field_info = []
                 for fname, ftype_ast in variant.fields:
-                    field_types.append(self._from_ast_type(ftype_ast, local_types=local_types))
-                variants.append((variant.name, field_types))
+                    field_type = self._from_ast_type(ftype_ast, local_types=local_types)
+                    field_info.append((fname, field_type))
+                variants.append((variant.name, field_info))
             self.env.adt_variants[decl.name] = variants
 
             # 注册每个变体为构造函数
-            for vname, ftypes in variants:
-                if ftypes:
+            for vname, field_info in variants:
+                if field_info:
+                    ftypes = [ft for _fn, ft in field_info]
                     self.env.define(vname, FnType(ftypes, adt_ty))
                 else:
                     self.env.define(vname, adt_ty)
@@ -655,6 +792,77 @@ class TypeChecker:
                     pass
                 self._report_error(f"元组索引 '{expr.field}' 越界", expr)
                 return ERROR_TYPE
+            elif isinstance(target_ty, ADTType):
+                # ADT 字段访问：检查所有变体是否有同名字段且类型相同（product-like access）
+                variants = self.env.get_all_adt_variants().get(target_ty.name, [])
+                if not variants:
+                    self._report_error(f"未知的 ADT 类型 '{target_ty.name}'", expr)
+                    return ERROR_TYPE
+
+                # 尝试按索引访问（数字字段名）
+                try:
+                    idx = int(expr.field)
+                    common_type = None
+                    all_have_idx = True
+                    type_param_map = dict(zip(
+                        [TypeVar(tp) for tp in self.env.get_all_adt_type_params().get(target_ty.name, [])],
+                        target_ty.type_params
+                    ))
+                    for _vname, field_info in variants:
+                        if idx < 0 or idx >= len(field_info):
+                            all_have_idx = False
+                            break
+                        field_type = field_info[idx][1]
+                        substituted = self._substitute_type_vars(field_type, type_param_map)
+                        if common_type is None:
+                            common_type = substituted
+                        elif not self._types_compatible(substituted, common_type):
+                            self._report_error(
+                                f"ADT 字段索引 {idx} 在不同变体中类型不一致",
+                                expr
+                            )
+                            return ERROR_TYPE
+                    if all_have_idx and common_type is not None:
+                        return common_type
+                    self._report_error(f"ADT 字段索引 {idx} 不是所有变体都有", expr)
+                    return ERROR_TYPE
+                except ValueError:
+                    pass
+
+                # 按名称访问
+                field_name = expr.field
+                common_type = None
+                all_have_field = True
+                type_param_map = dict(zip(
+                    [TypeVar(tp) for tp in self.env.get_all_adt_type_params().get(target_ty.name, [])],
+                    target_ty.type_params
+                ))
+                for _vname, field_info in variants:
+                    found = False
+                    for fname, ftype in field_info:
+                        if fname == field_name:
+                            substituted = self._substitute_type_vars(ftype, type_param_map)
+                            if common_type is None:
+                                common_type = substituted
+                            elif not self._types_compatible(substituted, common_type):
+                                self._report_error(
+                                    f"ADT 字段 '{field_name}' 在不同变体中类型不一致",
+                                    expr
+                                )
+                                return ERROR_TYPE
+                            found = True
+                            break
+                    if not found:
+                        all_have_field = False
+                        break
+
+                if all_have_field and common_type is not None:
+                    return common_type
+                self._report_error(
+                    f"ADT 类型 '{target_ty.name}' 没有所有变体共有的字段 '{field_name}'",
+                    expr
+                )
+                return ERROR_TYPE
             self._report_error(f"无法对类型 {target_ty} 进行字段访问", expr)
             return ERROR_TYPE
 
@@ -762,9 +970,9 @@ class TypeChecker:
             # 查找构造器对应的类型
             variants_info = None
             for adt_name, variants in self.env.get_all_adt_variants().items():
-                for vname, ftypes in variants:
+                for vname, finfo in variants:
                     if vname == pattern.name:
-                        variants_info = (adt_name, ftypes)
+                        variants_info = (adt_name, finfo)
                         break
                 if variants_info:
                     break
@@ -773,7 +981,8 @@ class TypeChecker:
                 self._report_error(f"未知的构造器 '{pattern.name}'", pattern)
                 return
 
-            adt_name, field_types = variants_info
+            adt_name, field_info = variants_info
+            field_types = [ft for _fn, ft in field_info]
             if len(pattern.fields) != len(field_types):
                 self._report_error(
                     f"构造器 '{pattern.name}' 期望 {len(field_types)} 个字段，得到 {len(pattern.fields)} 个",

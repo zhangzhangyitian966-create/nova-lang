@@ -305,3 +305,90 @@ class TestEdgeCases:
         """
         with pytest.raises(TypeCheckError):
             check_source(source)
+
+
+class TestADTFieldAccess:
+    """测试 ADT 字段访问（Bug #13）"""
+
+    def test_adt_named_field_access_all_variants(self):
+        """所有变体都有同名字段且类型相同时，字段访问应通过"""
+        source = """
+        type Shape { Circle(r: Float) | Square(s: Float) }
+        fn get_size(s: Shape) -> Float { s.r }
+        """
+        # s.r 应该失败，因为 Square 没有 r 字段
+        with pytest.raises(TypeCheckError):
+            check_source(source)
+
+    def test_adt_named_field_shared(self):
+        """所有变体有同名字段同类型时通过"""
+        source = """
+        type Shape { Circle(radius: Float) | Square(radius: Float) }
+        fn get_radius(s: Shape) -> Float { s.radius }
+        """
+        checker = check_source(source)
+        assert len(checker.error_collector.errors) == 0
+
+    def test_adt_field_index_access(self):
+        """按索引访问 ADT 字段（所有变体在该位置有相同类型）"""
+        source = """
+        type Pair { P1(a: Int, b: Int) | P2(x: Int, y: Int) }
+        fn first(p: Pair) -> Int { p.0 }
+        """
+        checker = check_source(source)
+        assert len(checker.error_collector.errors) == 0
+
+    def test_adt_field_index_mismatched_types(self):
+        """索引位置类型不同时报错"""
+        source = """
+        type Mixed { A(x: Int) | B(x: String) }
+        fn get_x(m: Mixed) -> Int { m.0 }
+        """
+        with pytest.raises(TypeCheckError):
+            check_source(source)
+
+    def test_adt_field_name_mismatched_types(self):
+        """字段名称相同但类型不同时报错"""
+        source = """
+        type Mixed { A(value: Int) | B(value: String) }
+        fn get_val(m: Mixed) -> Int { m.value }
+        """
+        with pytest.raises(TypeCheckError):
+            check_source(source)
+
+    def test_adt_field_not_in_all_variants(self):
+        """不是所有变体都有该字段时报错"""
+        source = """
+        type Shape { Circle(r: Float) | Rect(w: Float, h: Float) }
+        fn get_r(s: Shape) -> Float { s.r }
+        """
+        with pytest.raises(TypeCheckError):
+            check_source(source)
+
+    def test_option_value_field(self):
+        """内置 Option 的 Some.value 访问（仅 Some 有，None 没有，应报错）"""
+        source = """
+        fn get_val(o: Option[Int]) -> Int { o.value }
+        """
+        with pytest.raises(TypeCheckError):
+            check_source(source)
+
+    def test_adt_field_access_in_let(self):
+        """let 绑定中的 ADT 字段访问"""
+        source = """
+        type Point { Point(x: Int, y: Int) }
+        let p = Point(3, 4)
+        let px = p.x
+        """
+        checker = check_source(source)
+        assert len(checker.error_collector.errors) == 0
+
+    def test_adt_single_variant_field_access(self):
+        """单变体 ADT 的字段访问应通过"""
+        source = """
+        type Wrapper { Wrapper(value: Int) }
+        let w = Wrapper(42)
+        let v = w.value
+        """
+        checker = check_source(source)
+        assert len(checker.error_collector.errors) == 0

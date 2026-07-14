@@ -27,7 +27,7 @@ from nova.type_checker import TypeChecker
 from nova.c_codegen import CCodeGen
 from nova.errors import NovaError
 
-NOVA_VERSION = "0.2.0"
+NOVA_VERSION = "0.4.0"
 
 
 class NovaCompiler:

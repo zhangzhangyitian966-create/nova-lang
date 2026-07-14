@@ -59,10 +59,12 @@ class NovaClosure:
 class NovaADTValue:
     """ADT 构造值：如 Some(42), Circle(5.0), None"""
 
-    def __init__(self, type_name: str, variant_name: str, fields: List[Any]):
+    def __init__(self, type_name: str, variant_name: str, fields: List[Any],
+                 field_names: List[str] = None):
         self.type_name = type_name
         self.variant_name = variant_name
         self.fields = fields
+        self.field_names = field_names or []
 
     def __repr__(self):
         if self.fields:
@@ -148,10 +150,10 @@ class Evaluator:
         self.env.define("pi", BuiltinFn("pi", self._builtin_pi, 0))
 
         # 注册内置 Option 和 Result 的构造函数
-        self.env.define("Some", BuiltinFn("Some", lambda *args: NovaADTValue("Option", "Some", list(args)), 1))
-        self.env.define("None", NovaADTValue("Option", "None", []))
-        self.env.define("Ok", BuiltinFn("Ok", lambda *args: NovaADTValue("Result", "Ok", list(args)), 1))
-        self.env.define("Err", BuiltinFn("Err", lambda *args: NovaADTValue("Result", "Err", list(args)), 1))
+        self.env.define("Some", BuiltinFn("Some", lambda *args: NovaADTValue("Option", "Some", list(args), ["value"]), 1))
+        self.env.define("None", NovaADTValue("Option", "None", [], []))
+        self.env.define("Ok", BuiltinFn("Ok", lambda *args: NovaADTValue("Result", "Ok", list(args), ["value"]), 1))
+        self.env.define("Err", BuiltinFn("Err", lambda *args: NovaADTValue("Result", "Err", list(args), ["error"]), 1))
 
     # ----------------------------------------------------------
     # 内置函数实现
@@ -442,9 +444,19 @@ class Evaluator:
     # ----------------------------------------------------------
 
     def eval_program(self, program: Program):
-        """求值整个程序"""
+        """求值整个程序（两遍扫描：先注册所有函数/类型，再求值绑定和表达式）
+
+        第一遍：注册所有函数、ADT 构造器、类型别名
+        第二遍：求值 let/mut 绑定的值和顶层表达式
+        这样支持前向引用和相互递归
+        """
+        # 第一遍：收集所有函数和类型声明
         for decl in program.declarations:
-            self.eval_decl(decl)
+            self._collect_decl(decl)
+
+        # 第二遍：求值绑定值和顶层表达式
+        for decl in program.declarations:
+            self._eval_decl_body(decl)
 
         # 自动调用 main() 函数
         try:
@@ -453,6 +465,69 @@ class Evaluator:
                 self._call_fn(main_fn, [])
         except NameError:
             pass  # 没有 main 函数时忽略
+
+    def _collect_decl(self, decl):
+        """第一遍：注册函数和类型声明（不求值函数体）"""
+        if isinstance(decl, FnDef):
+            # 创建闭包（捕获当前环境，即顶层环境）
+            closure = NovaClosure(
+                name=decl.name,
+                params=decl.params,
+                body=decl.body,
+                env=self.env,
+            )
+            self.env.define(decl.name, closure)
+
+        elif isinstance(decl, TypeDef):
+            # 注册 ADT 构造函数
+            for variant in decl.variants:
+                if variant.fields:
+                    # 带字段的构造器 -> 函数
+                    field_names = [f[0] for f in variant.fields]
+
+                    def make_constructor(type_name, vname, fnames):
+                        def constructor(*args):
+                            return NovaADTValue(type_name, vname, list(args), fnames)
+                        return constructor
+
+                    ctor = BuiltinFn(
+                        variant.name,
+                        make_constructor(decl.name, variant.name, field_names),
+                        len(variant.fields)
+                    )
+                else:
+                    # 无字段构造器 -> 直接是值
+                    ctor = NovaADTValue(decl.name, variant.name, [], [])
+
+                self.env.define(variant.name, ctor)
+
+        elif isinstance(decl, AliasDef):
+            # 类型别名在运行时不产生值，跳过
+            pass
+
+        elif isinstance(decl, (ImportDecl, ExportDecl)):
+            pass
+
+        # let/mut 绑定和顶层表达式在第二遍处理
+        else:
+            pass
+
+    def _eval_decl_body(self, decl):
+        """第二遍：求值绑定值和顶层表达式"""
+        if isinstance(decl, LetBinding):
+            val = self.eval_expr(decl.value)
+            self.env.define(decl.name, val, mutable=False)
+
+        elif isinstance(decl, MutBinding):
+            val = self.eval_expr(decl.value)
+            self.env.define(decl.name, val, mutable=True)
+
+        elif isinstance(decl, (FnDef, TypeDef, AliasDef, ImportDecl, ExportDecl)):
+            pass  # 这些在第一遍已处理
+
+        else:
+            # 顶层表达式
+            self.eval_expr(decl)
 
     def eval_decl(self, decl):
         """求值顶层声明"""
@@ -664,6 +739,21 @@ class Evaluator:
                     return target[idx]
                 except (ValueError, IndexError):
                     raise RuntimeError_(f"元组索引 '{expr.field}' 越界")
+            elif isinstance(target, NovaADTValue):
+                # 尝试索引访问
+                try:
+                    idx = int(expr.field)
+                    if 0 <= idx < len(target.fields):
+                        return target.fields[idx]
+                    raise RuntimeError_(f"ADT 字段索引 {idx} 越界")
+                except ValueError:
+                    pass
+                # 按名称访问
+                field_name = expr.field
+                for i, fname in enumerate(target.field_names):
+                    if fname == field_name:
+                        return target.fields[i]
+                raise RuntimeError_(f"ADT 值没有字段 '{field_name}'")
             raise RuntimeError_(f"无法对值进行字段访问")
 
         else:

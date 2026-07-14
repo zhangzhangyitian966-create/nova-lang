@@ -16,6 +16,9 @@ from nova.backend.native_backend import (
 from nova.ir.ir_nodes import (
     LIRModule, LIRFunction, LIRLoadConst, LIRReturn,
     LIRCall, LIRBranch, LIRJump, LIRLabel,
+    LIRLoadGlobal, LIRStoreGlobal, LIRLoadReg, LIRStoreReg,
+    LIRCallIndirect, LIRIndex, LIRFieldAccess,
+    LIRBuildList, LIRBuildTuple, LIRBuildADT, LIRBinOp, LIRUnaryOp,
     IRType, NovaType,
     INT_TYPE, FLOAT_TYPE, STRING_TYPE, BOOL_TYPE, UNIT_TYPE,
 )
@@ -685,6 +688,94 @@ class TestEndToEndNative(unittest.TestCase):
             p_filesz=0, p_memsz=0, p_flags=0, p_align=0
         )
         self.assertEqual(len(ph), 56)
+
+
+class TestNativeBackendUnimplemented(unittest.TestCase):
+    """原生后端未实现功能测试 — 应抛出 NotImplementedError"""
+
+    def _compile_body_with_instr(self, instr):
+        """辅助方法：编译包含指定指令的函数体"""
+        codegen = NativeCodeGen()
+        lir = LIRModule(name="test")
+        fn = LIRFunction("test_fn", [], INT_TYPE)
+        fn.body = [instr, LIRReturn()]
+        lir.functions["test_fn"] = fn
+        codegen._compile_function(fn)
+
+    def test_load_global_not_implemented(self):
+        """LIRLoadGlobal 应抛出 NotImplementedError"""
+        with self.assertRaises(NotImplementedError):
+            self._compile_body_with_instr(LIRLoadGlobal(global_name="x"))
+
+    def test_store_global_not_implemented(self):
+        """LIRStoreGlobal 应抛出 NotImplementedError"""
+        with self.assertRaises(NotImplementedError):
+            self._compile_body_with_instr(LIRStoreGlobal(global_name="x"))
+
+    def test_load_reg_not_implemented(self):
+        """LIRLoadReg 应抛出 NotImplementedError"""
+        with self.assertRaises(NotImplementedError):
+            self._compile_body_with_instr(LIRLoadReg())
+
+    def test_store_reg_not_implemented(self):
+        """LIRStoreReg 应抛出 NotImplementedError"""
+        with self.assertRaises(NotImplementedError):
+            self._compile_body_with_instr(LIRStoreReg())
+
+    def test_call_indirect_not_implemented(self):
+        """LIRCallIndirect 应抛出 NotImplementedError"""
+        with self.assertRaises(NotImplementedError):
+            self._compile_body_with_instr(LIRCallIndirect())
+
+    def test_index_not_implemented(self):
+        """LIRIndex 应抛出 NotImplementedError"""
+        with self.assertRaises(NotImplementedError):
+            self._compile_body_with_instr(LIRIndex())
+
+    def test_field_access_not_implemented(self):
+        """LIRFieldAccess 应抛出 NotImplementedError"""
+        with self.assertRaises(NotImplementedError):
+            self._compile_body_with_instr(LIRFieldAccess(offset=0))
+
+    def test_build_list_not_implemented(self):
+        """LIRBuildList 应抛出 NotImplementedError"""
+        with self.assertRaises(NotImplementedError):
+            self._compile_body_with_instr(LIRBuildList(count=3))
+
+    def test_build_tuple_not_implemented(self):
+        """LIRBuildTuple 应抛出 NotImplementedError"""
+        with self.assertRaises(NotImplementedError):
+            self._compile_body_with_instr(LIRBuildTuple(count=2))
+
+    def test_build_adt_not_implemented(self):
+        """LIRBuildADT 应抛出 NotImplementedError"""
+        with self.assertRaises(NotImplementedError):
+            self._compile_body_with_instr(LIRBuildADT(type_tag=0, field_count=1))
+
+    def test_unknown_binop_not_implemented(self):
+        """未知的 LIRBinOp 操作符应抛出 NotImplementedError"""
+        instr = LIRBinOp(op="&&")
+        with self.assertRaises(NotImplementedError):
+            self._compile_body_with_instr(instr)
+
+    def test_unknown_unaryop_not_implemented(self):
+        """未知的 LIRUnaryOp 操作符应抛出 NotImplementedError"""
+        instr = LIRUnaryOp(op="~")
+        with self.assertRaises(NotImplementedError):
+            self._compile_body_with_instr(instr)
+
+    def test_unknown_const_type_not_implemented(self):
+        """未知的 LIRLoadConst 常量类型应抛出 NotImplementedError"""
+        instr = LIRLoadConst(value=(), const_type="unit")
+        with self.assertRaises(NotImplementedError):
+            self._compile_body_with_instr(instr)
+
+    def test_simple_native_compiler_not_implemented(self):
+        """SimpleNativeCompiler 应抛出 NotImplementedError"""
+        from nova.backend.native_backend import SimpleNativeCompiler
+        compiler = SimpleNativeCompiler()
+        with self.assertRaises(NotImplementedError):
+            compiler.compile_source("let x = 1", "/tmp/test")
 
 
 if __name__ == '__main__':
