@@ -522,7 +522,7 @@ class CCodeGen:
             return [], "continue"
 
         elif isinstance(expr, TryExpr):
-            return self._compile_expr_to_stmt(expr.expr)
+            return self._compile_try_expr_to_stmt(expr)
 
         elif isinstance(expr, (ImportDecl, ExportDecl, TypeDef, AliasDef)):
             return [], ""
@@ -574,6 +574,18 @@ class CCodeGen:
         elif expr.op == "!":
             return setup, f"(!{operand_c})"
         return setup, f"({expr.op}{operand_c})"
+
+    def _compile_try_expr_to_stmt(self, expr: TryExpr):
+        """编译 ? 错误传播操作符"""
+        setup, inner_c = self._compile_expr_to_stmt(expr.expr)
+        temp = self._new_temp()
+        new_setup = setup + [
+            f"NovaADT* {temp} = {inner_c};",
+            f"if ({temp}->variant_tag == NOVA_OPTION_NONE_TAG || {temp}->variant_tag == NOVA_RESULT_ERR_TAG) {{",
+            f"    return {temp};",
+            f"}}",
+        ]
+        return new_setup, f"(intptr_t)nova_adt_get_field({temp}, 0)"
 
     def _compile_if_expr_to_stmt(self, expr: IfExpr):
         """编译 if-then-else 表达式"""

@@ -237,8 +237,8 @@ class ModuleManager:
             program = parser.parse()
 
             # 创建独立的类型检查器和求值器
-            type_checker = TypeChecker(source=source)
-            evaluator = Evaluator(check_types=check_types)
+            type_checker = TypeChecker(source=source, module_manager=self)
+            evaluator = Evaluator(check_types=check_types, module_manager=self)
 
             # 收集导出的名称
             exported_names = self._collect_exports(program)

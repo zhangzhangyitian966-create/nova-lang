@@ -94,8 +94,10 @@ class Op:
     # 模式匹配
     MATCH_START = "MATCH_START"      # operands: (arm_count,)
     MATCH_TEST_INT = "MATCH_TEST_INT"    # operands: (value, fail_ip,)
+    MATCH_TEST_FLOAT = "MATCH_TEST_FLOAT"    # operands: (value, fail_ip,)
     MATCH_TEST_BOOL = "MATCH_TEST_BOOL"  # operands: (value, fail_ip,)
     MATCH_TEST_STRING = "MATCH_TEST_STRING"  # operands: (value, fail_ip,)
+    MATCH_TEST_CHAR = "MATCH_TEST_CHAR"  # operands: (value, fail_ip,)
     MATCH_BIND = "MATCH_BIND"        # operands: (name,)
     MATCH_WILDCARD = "MATCH_WILDCARD"
     MATCH_CONSTRUCTOR = "MATCH_CONSTRUCTOR"  # operands: (name, field_count, fail_ip,)
@@ -722,6 +724,11 @@ class BytecodeCompiler:
             self.bytecode.emit_op(Op.MATCH_TEST_INT, pattern.value, 0)
             return fail_pos
 
+        elif isinstance(pattern, PatternFloat):
+            fail_pos = self.bytecode.current_pos()
+            self.bytecode.emit_op(Op.MATCH_TEST_FLOAT, pattern.value, 0)
+            return fail_pos
+
         elif isinstance(pattern, PatternBool):
             fail_pos = self.bytecode.current_pos()
             self.bytecode.emit_op(Op.MATCH_TEST_BOOL, pattern.value, 0)
@@ -730,6 +737,11 @@ class BytecodeCompiler:
         elif isinstance(pattern, PatternString):
             fail_pos = self.bytecode.current_pos()
             self.bytecode.emit_op(Op.MATCH_TEST_STRING, pattern.value, 0)
+            return fail_pos
+
+        elif isinstance(pattern, PatternChar):
+            fail_pos = self.bytecode.current_pos()
+            self.bytecode.emit_op(Op.MATCH_TEST_CHAR, pattern.value, 0)
             return fail_pos
 
         elif isinstance(pattern, PatternIdentifier):
@@ -797,6 +809,11 @@ class BytecodeCompiler:
             self.bytecode.emit_op(Op.MATCH_TEST_INT, pattern.value, 0)
             return fail_pos
 
+        elif isinstance(pattern, PatternFloat):
+            fail_pos = self.bytecode.current_pos()
+            self.bytecode.emit_op(Op.MATCH_TEST_FLOAT, pattern.value, 0)
+            return fail_pos
+
         elif isinstance(pattern, PatternBool):
             fail_pos = self.bytecode.current_pos()
             self.bytecode.emit_op(Op.MATCH_TEST_BOOL, pattern.value, 0)
@@ -805,6 +822,11 @@ class BytecodeCompiler:
         elif isinstance(pattern, PatternString):
             fail_pos = self.bytecode.current_pos()
             self.bytecode.emit_op(Op.MATCH_TEST_STRING, pattern.value, 0)
+            return fail_pos
+
+        elif isinstance(pattern, PatternChar):
+            fail_pos = self.bytecode.current_pos()
+            self.bytecode.emit_op(Op.MATCH_TEST_CHAR, pattern.value, 0)
             return fail_pos
 
         elif isinstance(pattern, PatternIdentifier):

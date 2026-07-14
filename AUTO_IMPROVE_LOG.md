@@ -63,6 +63,55 @@
 
 ### 本次修复内容（基于审查日志 Issue）
 
+1. **vm.py — RETURN 语义修正（基于审查日志 vm.py:751-754）**
+   - 在 `NovaVM.__init__` 新增 `self.return_flag = False`
+   - `_execute_instruction` 中 RETURN 分支设置 `self.return_flag = True`，确保执行流正确终止
+   - `_run_code` 和 `_execute_function` 主循环检查 `return_flag`，提前退出并正确返回栈顶值
+
+2. **vm.py — `id()` 迭代键替换为唯一循环 ID（基于审查日志 vm.py:845,884）**
+   - 新增 `self._loop_id` 递增计数器
+   - `FOR_ITER` 不再使用 `id(iter_val)`，改用分配的唯一 `loop_id` 作为 `_range_index` / `_list_index` 键
+   - `LOOP_END` / `BREAK` / `CONTINUE` 的清理逻辑兼容新键机制
+
+3. **parser.py — `|>` 管道操作符优先级修正（基于审查日志 parser.py:432）**
+   - `_parse_expression` 入口改为 `self._parse_for_while_expr()`，将管道剥离出最低优先级
+   - `_parse_pipe` 左递归起点改为 `_parse_cons_expr()`，使管道优先级高于比较操作符
+   - `_parse_comparison_expr` 解析起点改为 `_parse_pipe()`，比较在更低层级调用管道
+   - 效果：`x |> f == y` 现在正确解析为 `(x |> f) == y`
+
+4. **modules.py — 模块加载传递 module_manager（基于审查日志 modules.py:240-241）**
+   - `TypeChecker(source=source)` 改为 `TypeChecker(source=source, module_manager=self)`
+   - `Evaluator(check_types=check_types)` 改为 `Evaluator(check_types=check_types, module_manager=self)`
+   - 被导入模块内的嵌套 import 现在可正确解析
+
+5. **compiler.py + vm.py — PatternFloat/PatternChar 模式测试代码生成（基于审查日志 compiler.py:748）**
+   - `Op` 类新增 `MATCH_TEST_FLOAT` 和 `MATCH_TEST_CHAR` 操作码
+   - `_compile_pattern_test_with_fail` 和 `_compile_pattern_test` 新增 PatternFloat/PatternChar 分支
+   - vm.py 实现 `MATCH_TEST_FLOAT`（检查 float 类型且值相等）和 `MATCH_TEST_CHAR`（检查 str 长度 1 且值相等）
+
+6. **c_codegen.py — TryExpr（`?` 操作符）错误传播实现（基于审查日志 c_codegen.py:524-525）**
+   - 新增 `_compile_try_expr_to_stmt` 方法
+   - 生成 C 代码：编译内部表达式到临时变量，检查 variant_tag 是否为 None/Err，是则提前返回，否则通过 `nova_adt_get_field` 提取 payload
+
+7. **ir/mir_lowering.py — break/continue 降级为正确跳转（基于审查日志 mir_lowering.py:259-265）**
+   - `MIRLowering.__init__` 新增 `loop_break_labels` 和 `loop_continue_labels` 栈
+   - `_lower_for_expr` / `_lower_while_expr` 在生成循环块后压入 break/continue 目标标签，循环体 lowering 结束后弹出
+   - `HIRBreakExpr` / `HIRContinueExpr` 改为生成 `MIRJump` 到对应标签；栈空时降级为 `MIRPanic("break outside loop")`
+
+8. **type_checker.py — 删除 check_decl 死代码（基于审查日志 type_checker.py:576-660）**
+   - 删除整个 `check_decl` 方法（约 85 行）及其内部所有逻辑
+   - 全局搜索确认无任何调用点
+
+9. **evaluator.py — field_names 修复（基于审查日志 evaluator.py:577 / evaluator.py:189）**
+   - `_builtin_str_to_int` 中 Option Some/None 构造补充 `field_names` 参数
+   - `_eval_decl_body` 内 `make_constructor` 闭包中 `NovaADTValue` 补充 `fnames` 参数
+
+### 测试结果
+
+- 全量测试: **655 passed** (1.66s)
+- Evaluator 示例: hello/math/pattern_match/pipe/loops 全部正常输出
+- VM 示例: hello/math/pattern_match 全部正常输出
+
 1. **vm.py — while 循环 CONTINUE 空实现修复（基于审查日志 Top 1）**
    - 新增 `_while_loops` 追踪列表，在 `POP_JUMP_IF_FALSE` 和 `JUMP` 指令中自动识别 while 循环结构
    - CONTINUE 在 while 循环中现在正确跳回条件检查位置并恢复栈
@@ -162,3 +211,44 @@
 - 全量测试: **655 passed** (1.06s)
 - Evaluator 示例: hello/math/pattern_match/pipe/loops 全部正常输出
 - VM 示例: hello/math/pattern_match 全部正常输出
+
+---
+
+## 2026-07-15 自动改进（第四轮）
+
+基于 AUTO_REVIEW_LOG.md 审查发现的严重问题驱动改进。
+
+### 每日发现的问题
+
+#### vm.py
+- RETURN 语义残留（789-792）：`_execute_instruction` 中 RETURN 只弹栈不终止执行，结果存入局部变量后丢弃。`_run_code` 不拦截 RETURN，顶层代码若出现 RETURN 行为错误。
+- `id()` 做迭代键（888、927）：`FOR_ITER` 以 `id(iter_val)` 作为 `_range_index`/`_list_index` 键。嵌套循环共享对象时状态互相覆盖；对象回收后 id 复用导致旧状态残留；异常退出时条目泄漏。
+- 闭包捕获值语义不一致（767-776）：`CLOSURE` 做 `dict(locals)` 浅拷贝快照，与 evaluator.py 的 Environment 引用捕获不一致。
+
+#### compiler.py
+- PatternFloat / PatternChar 模式测试完全缺失：`_compile_pattern_test_with_fail` 与 `_compile_pattern_test` 均无对应分支，落入 else 当作 MATCH_WILDCARD（总是匹配）。vm.py 中亦缺失 MATCH_TEST_FLOAT / MATCH_TEST_CHAR 操作码，属跨层功能缺失。
+- PatternTuple / PatternList 模式测试被禁用（751-752、819-825）：两个方法中均显式当作 MATCH_WILDCARD / 返回 None，导致元组/列表模式匹配完全失效。
+
+#### parser.py
+- `|>` 管道操作符优先级错误（432）：当前优先级最低（低于 `||`），导致 `x |> f == y` 被解析为 `x |> (f == y)`，而非 `(x |> f) == y`。
+
+#### modules.py
+- 模块加载时未传递 module_manager（240-241）：`TypeChecker(source=source)` 和 `Evaluator(check_types=check_types)` 均未传入 `module_manager=self`，嵌套 import 失效。
+
+#### c_codegen.py
+- TryExpr（`?` 操作符）被完全忽略（524-525）：仅递归编译内部表达式，未生成任何错误传播代码。
+
+#### ir/pass_manager.py
+- Inlining 优化 pass 为空壳（256-261）：`Inlining.run` 直接返回 `False`，不做任何实际内联操作。
+
+#### ir/mir_lowering.py
+- break/continue 被降级为 panic（259-265）：`HIRBreakExpr` / `HIRContinueExpr` 生成 `MIRPanic("break")` / `MIRPanic("continue")`，运行时直接崩溃。
+
+#### type_checker.py
+- check_decl 是 330 行死代码（576-660）：与 `_collect_decl` + `_check_decl_body` 功能完全重复，从未被调用。
+
+#### evaluator.py
+- ADT 构造器丢失 field_names（577）：`_eval_decl_body` 内 `make_constructor` 闭包中 `NovaADTValue(type_name, vname, list(args))` 缺少 `fnames`。
+- `_builtin_str_to_int` 返回 Option 缺少 field_names（189）：`NovaADTValue("Option", "Some", [int(args[0])])` 和 `NovaADTValue("Option", "None", [])` 均缺少 `field_names`。
+
+### 本次修复内容（基于审查日志 Issue）

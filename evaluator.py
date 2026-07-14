@@ -188,9 +188,9 @@ class Evaluator:
 
     def _builtin_str_to_int(self, *args):
         try:
-            return NovaADTValue("Option", "Some", [int(args[0])])
+            return NovaADTValue("Option", "Some", [int(args[0])], ["value"])
         except ValueError:
-            return NovaADTValue("Option", "None", [])
+            return NovaADTValue("Option", "None", [], [])
 
     def _builtin_str_len(self, *args):
         return len(args[0])
@@ -579,7 +579,7 @@ class Evaluator:
 
                     def make_constructor(type_name, vname, fnames):
                         def constructor(*args):
-                            return NovaADTValue(type_name, vname, list(args))
+                            return NovaADTValue(type_name, vname, list(args), fnames)
                         return constructor
 
                     ctor = BuiltinFn(

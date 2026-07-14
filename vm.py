@@ -165,6 +165,12 @@ class NovaVM:
         # 循环控制：用于 while 循环的状态
         self._while_loops: List[Dict] = []
 
+        # 循环控制：唯一循环 ID 计数器，替代 id() 作为迭代键
+        self._loop_id = 0
+
+        # RETURN 语义：标记提前返回
+        self.return_flag = False
+
         # 初始化内置函数
         self._setup_builtins()
 
@@ -422,7 +428,7 @@ class NovaVM:
 
     def _execute_function(self) -> Any:
         """执行当前代码直到 RETURN"""
-        while self.ip < len(self.code):
+        while self.ip < len(self.code) and not self.return_flag:
             instr = self.code[self.ip]
             opcode = instr.opcode
 
@@ -435,6 +441,10 @@ class NovaVM:
             if self._execute_instruction(instr):
                 # Early return triggered by TRY_UNWRAP
                 return self.stack[-1] if self.stack else UNIT
+
+        if self.return_flag:
+            self.return_flag = False
+            return self.stack.pop() if self.stack else UNIT
 
         return UNIT
 
@@ -464,7 +474,7 @@ class NovaVM:
         self.constants = constants
         self.ip = 0
 
-        while self.ip < len(self.code):
+        while self.ip < len(self.code) and not self.return_flag:
             instr = self.code[self.ip]
             opcode = instr.opcode
 
@@ -485,6 +495,7 @@ class NovaVM:
         self.code = saved_code
         self.constants = saved_constants
         self.ip = saved_ip
+        self.return_flag = False
 
     def _pop(self, n=1):
         if len(self.stack) < n:
@@ -787,9 +798,11 @@ class NovaVM:
             self.stack.append(result)
 
         elif opcode == Op.RETURN:
-            # Stack: [value] -> [] (within function execution)
-            # Pop return value; actual return is handled by _execute_function
+            # Stack: [value] -> [value]
+            # Save return value back to stack and set return_flag to signal early exit
             result = self.stack.pop() if self.stack else UNIT
+            self.stack.append(result)
+            self.return_flag = True
 
         elif opcode == Op.CALL_BUILTIN:
             # Stack: [arg1, ..., argN] -> [result]
@@ -885,9 +898,14 @@ class NovaVM:
                 if not hasattr(self, '_range_index'):
                     self._range_index = {}
 
-                key = id(iter_val)
-                is_first = key not in self._range_index
-                if is_first:
+                # 复用已有循环 ID 或分配新的
+                if self._for_iters and self._for_iters[-1].get("loop_start") == self.ip - 1:
+                    key = self._for_iters[-1]["iter_key"]
+                    is_first = False
+                else:
+                    key = self._loop_id
+                    self._loop_id += 1
+                    is_first = True
                     self._range_index[key] = iter_val[1]  # start
 
                 current = self._range_index[key]
@@ -924,9 +942,14 @@ class NovaVM:
                 if not hasattr(self, '_list_index'):
                     self._list_index = {}
 
-                key = id(iter_val)
-                is_first = key not in self._list_index
-                if is_first:
+                # 复用已有循环 ID 或分配新的
+                if self._for_iters and self._for_iters[-1].get("loop_start") == self.ip - 1:
+                    key = self._for_iters[-1]["iter_key"]
+                    is_first = False
+                else:
+                    key = self._loop_id
+                    self._loop_id += 1
+                    is_first = True
                     self._list_index[key] = 0
 
                 idx = self._list_index[key]
@@ -992,6 +1015,28 @@ class NovaVM:
             fail_ip = instr.operands[1]
             subject = self.stack[-1]
             if isinstance(subject, str) and subject == test_val:
+                self._pop()
+            else:
+                self.ip = fail_ip
+
+        elif opcode == Op.MATCH_TEST_FLOAT:
+            # Stack: [subject] -> [] (match success) or [subject] (match fail)
+            # Peek subject; if float and equals test_val, pop it; else jump to fail_ip
+            test_val = instr.operands[0]
+            fail_ip = instr.operands[1]
+            subject = self.stack[-1]
+            if isinstance(subject, float) and subject == test_val:
+                self._pop()
+            else:
+                self.ip = fail_ip
+
+        elif opcode == Op.MATCH_TEST_CHAR:
+            # Stack: [subject] -> [] (match success) or [subject] (match fail)
+            # Peek subject; if string (char) and equals test_val, pop it; else jump to fail_ip
+            test_val = instr.operands[0]
+            fail_ip = instr.operands[1]
+            subject = self.stack[-1]
+            if isinstance(subject, str) and len(subject) == 1 and subject == test_val:
                 self._pop()
             else:
                 self.ip = fail_ip

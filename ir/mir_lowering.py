@@ -51,6 +51,8 @@ class MIRLowering:
         self.env = {}
         self.functions = {}
         self.all_blocks = []
+        self.loop_break_labels = []
+        self.loop_continue_labels = []
 
     def lower(self, hir_module):
         mir_module = MIRModule(name=hir_module.name)
@@ -257,11 +259,17 @@ class MIRLowering:
             return self._lower_while_expr(hir_expr, block)
 
         if isinstance(hir_expr, HIRBreakExpr):
-            block.terminator = MIRPanic("break")
+            if self.loop_break_labels:
+                block.terminator = MIRJump(self.loop_break_labels[-1])
+            else:
+                block.terminator = MIRPanic("break outside loop")
             return None
 
         if isinstance(hir_expr, HIRContinueExpr):
-            block.terminator = MIRPanic("continue")
+            if self.loop_continue_labels:
+                block.terminator = MIRJump(self.loop_continue_labels[-1])
+            else:
+                block.terminator = MIRPanic("continue outside loop")
             return None
 
         if isinstance(hir_expr, HIRAssignExpr):
@@ -390,6 +398,9 @@ class MIRLowering:
         body_block = MIRBasicBlock(self._new_block())
         exit_block = MIRBasicBlock(self._new_block())
 
+        self.loop_break_labels.append(exit_block.label)
+        self.loop_continue_labels.append(header_block.label)
+
         block.terminator = MIRJump(header_block.label)
         iter_ssa = self._lower_expr(hir_expr.iterable, header_block)
         header_block.terminator = MIRBranch(iter_ssa or "", body_block.label, exit_block.label)
@@ -397,6 +408,9 @@ class MIRLowering:
         self._lower_expr(hir_expr.body, body_block)
         if body_block.terminator is None:
             body_block.terminator = MIRJump(header_block.label)
+
+        self.loop_break_labels.pop()
+        self.loop_continue_labels.pop()
 
         self.all_blocks.extend([header_block, body_block, exit_block])
         self.current_block = exit_block
@@ -407,6 +421,9 @@ class MIRLowering:
         body_block = MIRBasicBlock(self._new_block())
         exit_block = MIRBasicBlock(self._new_block())
 
+        self.loop_break_labels.append(exit_block.label)
+        self.loop_continue_labels.append(header_block.label)
+
         block.terminator = MIRJump(header_block.label)
         cond_ssa = self._lower_expr(hir_expr.condition, header_block)
         header_block.terminator = MIRBranch(cond_ssa or "", body_block.label, exit_block.label)
@@ -414,6 +431,9 @@ class MIRLowering:
         self._lower_expr(hir_expr.body, body_block)
         if body_block.terminator is None:
             body_block.terminator = MIRJump(header_block.label)
+
+        self.loop_break_labels.pop()
+        self.loop_continue_labels.pop()
 
         self.all_blocks.extend([header_block, body_block, exit_block])
         self.current_block = exit_block
