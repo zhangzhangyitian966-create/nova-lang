@@ -124,6 +124,9 @@ class NovaError(Exception):
     def __str__(self) -> str:
         return self._format()
 
+    def format(self) -> str:
+        return self._format()
+
     def _format(self) -> str:
         if self.source_code and self.line >= 0:
             return self._format_with_context()
@@ -404,7 +407,7 @@ class ErrorCollector:
         if self.errors:
             primary = self.errors[0]
             for note in self.errors[1:]:
-                primary.add_note(str(note))
+                primary.add_note(note.format())
             raise primary
 
     def format_all(self) -> str:

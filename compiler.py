@@ -501,10 +501,11 @@ class BytecodeCompiler:
 
         if op == "||":
             self._compile_expr(expr.left)
+            self.bytecode.emit_op(Op.DUP)
             jump_pos = self.bytecode.current_pos()
             self.bytecode.emit_op(Op.JUMP_IF_TRUE, 0)
-            # 如果 left 为 true，需要在栈上保留 true
-            # JUMP_IF_TRUE 不弹出，所以跳到 end 即可
+            # false 路径：left 为 false，弹出 dup 的值，计算 right
+            self.bytecode.emit_op(Op.POP)
             self._compile_expr(expr.right)
             end_pos = self.bytecode.current_pos()
             self.bytecode.patch_jump(jump_pos, end_pos)
@@ -870,7 +871,8 @@ class BytecodeCompiler:
             self._compile_expr(stmt)
             # 对于会留下值的语句（非绑定/赋值类），弹出结果
             # LetBinding / MutBinding / Assignment 已通过 STORE_VAR 弹出值，无需额外 POP
-            if not isinstance(stmt, (LetBinding, MutBinding, Assignment)):
+            # BreakExpr / ContinueExpr 不推值到栈上，无需 POP
+            if not isinstance(stmt, (LetBinding, MutBinding, Assignment, BreakExpr, ContinueExpr)):
                 self.bytecode.emit_op(Op.POP)
         if expr.tail_expression:
             self._compile_expr(expr.tail_expression)
@@ -910,8 +912,8 @@ class BytecodeCompiler:
         loop_start = self.bytecode.current_pos()
         self.bytecode.emit_op(Op.FOR_ITER, 0)  # fail_ip 占位
 
-        # 绑定循环变量
-        self.bytecode.emit_op(Op.STORE_VAR, expr.var_name, False)
+        # 绑定循环变量（循环变量需要可变以支持每次迭代更新）
+        self.bytecode.emit_op(Op.STORE_VAR, expr.var_name, True)
 
         # 此时栈: [iterable, result_list]
         # 编译循环体（block 保证栈顶有值）
@@ -986,8 +988,8 @@ class BytecodeCompiler:
         loop_start = self.bytecode.current_pos()
         self.bytecode.emit_op(Op.FOR_ITER, 0)  # fail_ip 占位
 
-        # 绑定循环变量
-        self.bytecode.emit_op(Op.STORE_VAR, expr.var_name, False)
+        # 绑定循环变量（循环变量需要可变以支持每次迭代更新）
+        self.bytecode.emit_op(Op.STORE_VAR, expr.var_name, True)
 
         # 编译过滤条件
         self._compile_expr(expr.filter_cond)

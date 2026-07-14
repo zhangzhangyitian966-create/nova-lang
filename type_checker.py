@@ -282,13 +282,15 @@ class TypeChecker:
         self.env.adt_type_params["Result"] = ["T", "E"]
 
         # 注册内置 ADT 构造函数类型签名
-        t_opt = TypeVar("T")
+        t_opt = TypeVar("opt_t")
         self.env.define("Some", FnType([t_opt], ADTType("Option", [t_opt])))
-        self.env.define("None", ADTType("Option", [TypeVar("T")]))
-        t_ok = TypeVar("T")
-        e_err = TypeVar("E")
-        self.env.define("Ok", FnType([t_ok], ADTType("Result", [t_ok, e_err])))
-        self.env.define("Err", FnType([e_err], ADTType("Result", [t_ok, e_err])))
+        self.env.define("None", ADTType("Option", [TypeVar("opt_t")]))
+        ok_t = TypeVar("ok_t")
+        ok_err_t = TypeVar("ok_err_t")
+        self.env.define("Ok", FnType([ok_t], ADTType("Result", [ok_t, ok_err_t])))
+        err_ok_t = TypeVar("err_ok_t")
+        err_err_t = TypeVar("err_err_t")
+        self.env.define("Err", FnType([err_err_t], ADTType("Result", [err_ok_t, err_err_t])))
 
         # print: (a) -> Unit
         a = TypeVar("a")

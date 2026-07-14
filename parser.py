@@ -468,7 +468,6 @@ class Parser:
             self._expect(TokenType.RANGE)
             end_expr = self._parse_expression()
 
-            step_expr = None
             if self._match(TokenType.STEP):
                 step_expr = self._parse_expression()
 

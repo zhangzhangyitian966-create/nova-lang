@@ -566,6 +566,8 @@ class NovaVM:
             if self.call_stack:
                 frame = self.call_stack[-1]
                 if name in frame.locals:
+                    if not mutable:
+                        raise RuntimeError_(f"Cannot assign to immutable variable '{name}'")
                     frame.locals[name] = val
                     return
             self.globals[name] = val
@@ -1136,6 +1138,7 @@ class NovaVM:
             formatted = self._format_value(val)
             print(formatted)
             self.output.append(formatted)
+            self.stack.append(UNIT)
 
         elif opcode == Op.HALT:
             # Stack: unchanged

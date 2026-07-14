@@ -37,7 +37,7 @@ class Environment:
             return self.bindings[name].value
         if self.parent is not None:
             return self.parent.lookup(name)
-        raise NameError(f"未定义的变量 '{name}'")
+        raise RuntimeError_(f"未定义的变量 '{name}'")
 
     def lookup_binding(self, name: str) -> BindingInfo:
         """查找绑定信息（包含可变性等元数据）"""
@@ -45,7 +45,7 @@ class Environment:
             return self.bindings[name]
         if self.parent is not None:
             return self.parent.lookup_binding(name)
-        raise NameError(f"未定义的变量 '{name}'")
+        raise RuntimeError_(f"未定义的变量 '{name}'")
 
     def assign(self, name: str, value: Any):
         """对变量赋值（必须找到可变绑定）"""

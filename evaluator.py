@@ -473,10 +473,11 @@ class Evaluator:
         # 自动调用 main() 函数
         try:
             main_fn = self.env.lookup("main")
+        except (NameError, RuntimeError_):
+            pass  # 没有 main 函数时忽略
+        else:
             if callable(main_fn) or isinstance(main_fn, (NovaClosure, BuiltinFn)):
                 self._call_fn(main_fn, [])
-        except NameError:
-            pass  # 没有 main 函数时忽略
 
     def _collect_decl(self, decl):
         """第一遍：注册函数和类型声明（不求值函数体）"""
@@ -638,7 +639,7 @@ class Evaluator:
             try:
                 value = module_info.eval_env.lookup(name)
                 self.env.define(name, value, mutable=False)
-            except NameError:
+            except (NameError, RuntimeError_):
                 pass  # 忽略找不到的绑定
 
     @property
@@ -676,7 +677,7 @@ class Evaluator:
         elif isinstance(expr, Identifier):
             try:
                 return self.env.lookup(expr.name)
-            except NameError:
+            except (NameError, RuntimeError_):
                 raise RuntimeError_(f"未定义的变量 '{expr.name}'")
 
         # --- 二元操作 ---
@@ -701,6 +702,8 @@ class Evaluator:
                 if val.variant_name in ("None", "Err"):
                     # 提前退出当前函数，将 Err/None 值传播上去
                     raise ReturnSignal(val)
+                if val.variant_name in ("Some", "Ok"):
+                    return val.fields[0]
             return val
 
         # --- 函数调用 ---

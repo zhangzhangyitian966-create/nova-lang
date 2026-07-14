@@ -53,7 +53,7 @@ class ModuleInfo:
             try:
                 value = self.eval_env.lookup(name)
                 result[name] = value
-            except NameError:
+            except (NameError, RuntimeError_):
                 pass
         return result
 

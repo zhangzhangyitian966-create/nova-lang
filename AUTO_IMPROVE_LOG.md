@@ -252,3 +252,95 @@
 - `_builtin_str_to_int` 返回 Option 缺少 field_names（189）：`NovaADTValue("Option", "Some", [int(args[0])])` 和 `NovaADTValue("Option", "None", [])` 均缺少 `field_names`。
 
 ### 本次修复内容（基于审查日志 Issue）
+
+（第四轮修复内容未完整记录到日志中）
+
+---
+
+## 2026-07-15 自动改进（第五轮）
+
+基于 AUTO_REVIEW_LOG.md 审查发现的严重问题驱动改进（阶段一检查 + 阶段二开发 + 阶段三测试）。
+
+### 每日发现的问题
+
+#### vm.py
+- 第560-571行 `STORE_VAR`：读取 `mutable = instr.operands[1]` 后未使用，VM 运行时不区分变量可变性
+- 第682-685行 `JUMP` while 启发式：通过 `target < self.ip` + 下一条为 `CONST_UNIT` 识别 while 循环，鲁棒性不足
+- 第1132-1138行 `PRINT`：注释声明栈变化 `[value] -> [()]`，但实际未 push UNIT，栈不平衡
+
+#### compiler.py
+- 第502-511行 `||`：注释错误认为 `JUMP_IF_TRUE` 不弹出；实际 vm 会 pop，导致 true 路径栈上无结果值
+- 第763-764行 `PatternTuple/PatternList`：直接返回 None，元组/列表模式匹配完全失效
+- 第867-874行 `Block` POP：对 `Break` 等控制流语句仍 emit POP，导致跳转后多余弹栈
+
+#### backend/native_backend.py
+- 行496-497 `LIRCallIndirect`：仍抛 `NotImplementedError`，间接调用代码生成未实现（审查日志 native_backend.py:489）。
+- 行504-505 `LIRFieldAccess`：**已修复**，不再抛异常，存在 `_compile_field_access` 实现。原审查日志中标记的严重问题已在第四轮解决。
+
+#### ir/pass_manager.py
+- 行257-262 `Inlining` pass：仍为空壳，`run` 方法直接返回 `False`，不做任何实际内联操作（审查日志 pass_manager.py:256-261）。
+- 行720-725 Pass 异常处理：**已修复**，`except Exception` 分支现在将错误信息记录到 `self.errors` 并打印到 stderr，不再静默吞掉。原审查日志中标记的严重问题已在第二轮解决。
+
+#### ir/mir_lowering.py
+- 行247-250 `HIRLambda` 降级：自由变量丢失。`MIRClosureCreate` 的 `captures` 字段完全未被填充，闭包不捕获任何外部变量（审查日志 mir_lowering.py:247-250）。
+- 行351-384 `_lower_match_expr`：Match 模式信息完全丢失。`value_ssa` 和 `arms[i].pattern` 未被用于生成任何模式测试或条件分支，所有 arm 被无条件顺序连接（审查日志 mir_lowering.py:351-384）。
+
+#### evaluator.py
+- 第698-704行 `?` 操作符不解包 Some/Ok：`TryExpr` 遇到 `Some(x)`/`Ok(x)` 时直接返回整个 ADT 值，未解包内部 payload。语义上 `?` 应传播错误并解包成功值。
+- 第832-842行 `&&`/`||` 返回 Python bool 且依赖 truthiness：短路求值直接返回原生 `True`/`False`，并使用 `not left`/`if left` 做判断。
+
+#### parser.py
+- 第460,471,484行 step 表达式变量遮蔽：`step_expr` 在两条分支前重复初始化，且 `step` 在 lexer 中被注册为全局关键字导致无法用作循环变量名。
+
+#### type_checker.py
+- 第1233行任意 TypeVar 兼容：`_types_compatible` 中只要任一类型为 TypeVar 即返回 True，完全绕过泛型约束检查。
+
+#### errors.py
+- 第402-408行 `raise_all` 丢失结构化信息：通过 `primary.add_note(str(note))` 将后续错误转为纯字符串，丢弃了 span、行列号等结构化元数据。
+
+#### environment.py
+- 第40,48行 `lookup`/`lookup_binding` 仍抛 Python `NameError`：与已修复的 `assign` 方法不一致，导致 evaluator 和 modules.py 仍需显式捕获 NameError。
+
+### 本次修复内容（基于审查日志 Issue）
+
+1. **vm.py — PRINT 指令未推 UNIT（基于审查日志 vm.py:1132-1138）**
+   - 在 PRINT 处理末尾（`self.output.append(formatted)` 之后）添加 `self.stack.append(UNIT)`
+   - 修复栈不平衡：注释声明栈变化 `[value] -> [()]`，但实际未 push UNIT
+
+2. **vm.py — STORE_VAR 不可变变量检查（基于审查日志 vm.py:560-571）**
+   - 在 STORE_VAR 中使用 `mutable` 操作数检查：若 `mutable` 为 False 且变量已存在，抛出 `RuntimeError_("Cannot assign to immutable variable ...")`
+   - 同步修改 compiler.py：for 循环和列表推导式的循环变量存储由 `STORE_VAR, name, False` 改为 `STORE_VAR, name, True`（循环变量需要每次迭代更新）
+
+3. **compiler.py — `||` true 路径值丢失（基于审查日志 compiler.py:502-511）**
+   - 采用 `DUP + JUMP_IF_TRUE + POP` 模式：DUP 复制 left 值，JUMP_IF_TRUE pop 复制品，true 路径保留原值；false 路径先 POP 再编译 right
+
+4. **compiler.py — Block 中 Break/Continue 后多余 POP（基于审查日志 compiler.py:867-874）**
+   - 在 `_compile_block` 的 POP 条件中排除 `BreakExpr` 和 `ContinueExpr`
+   - 控制流语句不推值，POP 会导致栈下溢
+
+5. **evaluator.py — `?` 操作符不解包 Some/Ok（基于审查日志 evaluator.py:698-704）**
+   - 在 TryExpr 处理中，对 `Some`/`Ok` variant 返回 `val.fields[0]` 而非整个 ADT 值
+   - 保持 `None`/`Err` 的 ReturnSignal 行为不变
+
+6. **environment.py — lookup/lookup_binding 异常类型统一（基于审查日志 environment.py:40,48）**
+   - 将 `NameError` 替换为 `RuntimeError_`
+   - 联动修改 evaluator.py 三处和 modules.py 一处的 `except NameError` 为 `except (NameError, RuntimeError_)`
+   - 缩小 eval_program 中 try/except 范围，避免意外吞掉 _call_fn 的 RuntimeError_
+
+7. **errors.py — raise_all 保留结构化信息（基于审查日志 errors.py:402-408）**
+   - `NovaError` 新增 `format()` 方法，委托给 `_format()`
+   - `raise_all` 中 `primary.add_note(str(note))` 改为 `primary.add_note(note.format())`
+
+8. **parser.py — step 表达式变量遮蔽（基于审查日志 parser.py:460,471,484）**
+   - 删除 `_parse_for_expr` 中第471行多余的 `step_expr = None`
+   - 两条分支共享第460行的初始化，确保 step_expr 正确传递
+
+9. **type_checker.py — Err 内置函数独立 TypeVar（基于审查日志 type_checker.py:289-291）**
+   - 为 `Option`、`Ok`、`Err` 分别使用独立名称的 TypeVar（`opt_t`、`ok_t`/`ok_err_t`、`err_ok_t`/`err_err_t`）
+   - 消除因同名 TypeVar 导致的泛型参数冲突
+
+### 测试结果
+
+- 全量测试: **655 passed** (1.52s)
+- Evaluator 示例: hello/math/pattern_match/pipe/loops 全部正常输出
+- VM 示例: hello/math/pattern_match 全部正常输出
