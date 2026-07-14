@@ -8,7 +8,7 @@ from nova.errors import (
     SourceSpan, ErrorCollector, Severity, ANSI, RelatedNote,
 )
 from nova.ast_nodes import Span
-from nova.lexer import Lexer
+from nova.lexer import Lexer, TokenType
 from nova.parser import Parser
 from nova.type_checker import TypeChecker
 
@@ -285,3 +285,73 @@ class TestErrorFormattingEdgeCases:
         err.source_code = ""
         text = str(err)
         assert "空源码" in text
+
+
+# ============================================================
+# 未闭合字符串/字符字面量的错误恢复
+# ============================================================
+
+class TestUnclosedLiteralRecovery:
+    """未闭合的字符串/字符字面量不应终止词法分析"""
+
+    def test_unclosed_string_continues_lexing(self):
+        """未闭合字符串不应终止词法分析"""
+        source = 'let x = "unclosed\nlet y = 42'
+        lexer = Lexer(source)
+        tokens = lexer.tokenize()
+        # 应该能继续解析出 let y = 42 的 token
+        # 且 errors 列表中应包含未闭合字符串的错误
+        assert len(lexer.errors) > 0
+        assert any("未闭合" in e for e in lexer.errors)
+        # 验证后续 token 仍被正确解析
+        token_types = [t.type for t in tokens]
+        assert TokenType.LET in token_types
+        assert TokenType.INT in token_types
+
+    def test_unclosed_string_at_eof_continues_lexing(self):
+        """源码结束处的未闭合字符串不应终止词法分析"""
+        source = 'let x = "unclosed'
+        lexer = Lexer(source)
+        tokens = lexer.tokenize()
+        assert len(lexer.errors) == 1
+        assert "未闭合" in lexer.errors[0]
+        # 最终应返回 EOF
+        assert tokens[-1].type == TokenType.EOF
+
+    def test_unclosed_char_continues_lexing(self):
+        """未闭合字符字面量不应终止词法分析"""
+        source = "let x = 'a\nlet y = 42"
+        lexer = Lexer(source)
+        tokens = lexer.tokenize()
+        assert len(lexer.errors) > 0
+        assert any("字符字面量" in e for e in lexer.errors)
+        # 验证后续 token 仍被正确解析
+        token_types = [t.type for t in tokens]
+        assert TokenType.LET in token_types
+        assert TokenType.INT in token_types
+
+    def test_unclosed_char_at_eof_continues_lexing(self):
+        """源码结束处的未闭合字符字面量不应终止词法分析"""
+        source = "let x = 'a"
+        lexer = Lexer(source)
+        tokens = lexer.tokenize()
+        assert len(lexer.errors) == 1
+        assert "字符字面量" in lexer.errors[0]
+        assert tokens[-1].type == TokenType.EOF
+
+    def test_unclosed_char_eof_after_opening_quote(self):
+        """开始引号后立即到达源码末尾不应终止词法分析"""
+        source = "let x = '"
+        lexer = Lexer(source)
+        tokens = lexer.tokenize()
+        assert len(lexer.errors) == 1
+        assert "未闭合的字符字面量" in lexer.errors[0]
+        assert tokens[-1].type == TokenType.EOF
+
+    def test_multiple_unclosed_strings_all_reported(self):
+        """多个未闭合字符串应全部被报告，而非遇到第一个就终止"""
+        source = '"first\nlet a = 1\n"second\nlet b = 2'
+        lexer = Lexer(source)
+        lexer.tokenize()
+        unclosed_errors = [e for e in lexer.errors if "未闭合" in e]
+        assert len(unclosed_errors) == 2

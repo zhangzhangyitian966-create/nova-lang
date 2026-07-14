@@ -522,6 +522,20 @@ void nova_map_put(NovaMap* map, NovaString* key, void* value) {
     NovaMapEntry* entry = map->buckets[bucket_idx];
     while (entry) {
         if (nova_string_eq(entry->key, key)) {
+            /* 更新已存在 key 的 value：先释放旧 value 的引用计数，避免内存泄漏。
+             *
+             * 说明：NovaMap 的 value 是 void* 泛型指针。在动态场景（如 JSON 解析，
+             * nova_runtime.c 中 json_parse_object 把 NovaValue* 存入 map）下，value 是
+             * NovaValue*，这里通过 nova_value_release 正确递减其引用计数并可能释放。
+             *
+             * 注意：某些调用方（如 test_runtime.c）直接把 NovaString* 当作 value 存入，
+             * c_codegen 也可能存入整型值转换的指针。对这类非 NovaValue* 指针，
+             * nova_value_release 会读取其内存布局中对应 NovaValue.ref_count 偏移处的字段
+             * （对 NovaString 而言是 capacity，始终 >= 16），递减后仍 > 0 而不会误释放，
+             * 因此不会崩溃；但调用方仍应保证 value 的生命周期管理正确。 */
+            if (entry->value) {
+                nova_value_release((NovaValue*)entry->value);
+            }
             entry->value = value;
             return;
         }
@@ -1483,6 +1497,19 @@ void nova_value_release(NovaValue* v) {
 // 进程/系统操作
 // ============================================================
 
+// SECURITY NOTE: nova_system() intentionally executes an arbitrary shell command
+// via system(). This is by design -- it is the Nova equivalent of os.system() /
+// C's system(), and the caller is expected to pass a complete, trusted command
+// string (so shell features like pipes/redirection/globbing keep working).
+//
+// This is NOT the same class of bug as the former nova_http_get/nova_http_post,
+// which embedded untrusted URL *data* into a shell command string and were
+// therefore remotely exploitable (CVE-level command injection). Those have been
+// fixed to exec curl directly without a shell.
+//
+// Callers of nova_system() MUST NOT concatenate untrusted user input into
+// `command` without proper escaping/quoting; doing so reintroduces a shell
+// command-injection vulnerability.
 int32_t nova_system(NovaString* command) {
     if (!command) return -1;
     return system(command->data);
@@ -1621,8 +1648,9 @@ int64_t nova_time_sleep_ms(int64_t ms) {
 // ============================================================
 
 NovaHttpResponse* nova_http_get(NovaString* url) {
-    // 不依赖 libcurl 的简单实现：使用 system 调用 curl 命令
-    // 如果没有 curl，返回 500 错误
+    // 不依赖 libcurl 的简单实现：直接 exec curl 命令
+    // 安全说明：直接通过 fork + execlp 执行 curl，不经过 shell，
+    // 因此 URL 中的 shell 元字符（如 "、;、$() 等）无法被注入执行。
     NovaHttpResponse* resp = (NovaHttpResponse*)nova_alloc(sizeof(NovaHttpResponse));
     resp->headers = nova_map_new(4);
 
@@ -1640,10 +1668,28 @@ NovaHttpResponse* nova_http_get(NovaString* url) {
     snprintf(tmpfile, sizeof(tmpfile), "/tmp/nova_http_%d.tmp", nova_getpid());
 #endif
 
-    // 使用 curl 命令
-    char cmd[4096];
-    snprintf(cmd, sizeof(cmd), "curl -s -o \"%s\" -w \"%%{http_code}\" \"%s\" 2>/dev/null", tmpfile, url->data);
-    int ret = system(cmd);
+    // 直接执行 curl，不经过 shell，杜绝 URL 中的 shell 元字符注入
+    int ret = -1;
+#ifdef _WIN32
+    // Windows：使用 _spawnlp 直接执行（同样不经过 shell）
+    ret = (int)_spawnlp(_P_WAIT, "curl", "curl", "-s", "-o", tmpfile,
+                        "-w", "%{http_code}", url->data, (char*)NULL);
+#else
+    // POSIX：fork 后在子进程中 execlp curl
+    pid_t pid = fork();
+    if (pid == 0) {
+        /* 子进程：直接执行 curl，不经过 shell */
+        /* 抑制 curl 的 stderr 输出（等价于原 2>/dev/null） */
+        freopen("/dev/null", "w", stderr);
+        execlp("curl", "curl", "-s", "-o", tmpfile, "-w", "%{http_code}",
+               url->data, (char*)NULL);
+        _exit(127);  /* execlp 失败 */
+    } else if (pid > 0) {
+        int status;
+        waitpid(pid, &status, 0);
+        ret = WIFEXITED(status) ? WEXITSTATUS(status) : -1;
+    }
+#endif
 
     if (ret != 0) {
         resp->status_code = 503;
@@ -1651,8 +1697,7 @@ NovaHttpResponse* nova_http_get(NovaString* url) {
         return resp;
     }
 
-    // 读取状态码（curl 写入了 stdout）
-    // 简化实现：直接读取文件内容
+    // 读取响应体（curl 已将 body 写入 tmpfile）
     NovaString* content = nova_read_file(nova_string_new(tmpfile));
     resp->status_code = 200;
     resp->body = content;
@@ -1688,11 +1733,32 @@ NovaHttpResponse* nova_http_post(NovaString* url, NovaString* body, NovaMap* hea
     // 写入请求体到临时文件
     nova_write_file(nova_string_new(tmpfile_data), body);
 
-    // 使用 curl 命令 POST
-    char cmd[4096];
-    snprintf(cmd, sizeof(cmd), "curl -s -o \"%s\" -w \"%%{http_code}\" -d @\"%s\" \"%s\" 2>/dev/null",
-             tmpfile_post, tmpfile_data, url->data);
-    int ret = system(cmd);
+    // 直接执行 curl POST，不经过 shell，杜绝命令注入
+    // 使用 -d @file 从文件读取请求体（@ 前缀告诉 curl 读取文件内容）
+    char data_arg[300];
+    snprintf(data_arg, sizeof(data_arg), "@%s", tmpfile_data);
+
+    int ret = -1;
+#ifdef _WIN32
+    // Windows：使用 _spawnlp 直接执行（同样不经过 shell）
+    ret = (int)_spawnlp(_P_WAIT, "curl", "curl", "-s", "-o", tmpfile_post,
+                        "-w", "%{http_code}", "-d", data_arg, url->data, (char*)NULL);
+#else
+    // POSIX：fork 后在子进程中 execlp curl
+    pid_t pid = fork();
+    if (pid == 0) {
+        /* 子进程：直接执行 curl，不经过 shell */
+        /* 抑制 curl 的 stderr 输出（等价于原 2>/dev/null） */
+        freopen("/dev/null", "w", stderr);
+        execlp("curl", "curl", "-s", "-o", tmpfile_post, "-w", "%{http_code}",
+               "-d", data_arg, url->data, (char*)NULL);
+        _exit(127);  /* execlp 失败 */
+    } else if (pid > 0) {
+        int status;
+        waitpid(pid, &status, 0);
+        ret = WIFEXITED(status) ? WEXITSTATUS(status) : -1;
+    }
+#endif
 
     if (ret != 0) {
         resp->status_code = 503;

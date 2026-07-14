@@ -5,6 +5,7 @@ Nova 编程语言 - 词法分析器（Lexer / Tokenizer）
 字符串、操作符、标点符号和注释的识别。
 """
 
+import sys
 from dataclasses import dataclass
 from enum import Enum, auto
 from typing import List, Optional
@@ -249,11 +250,21 @@ class Lexer:
                 else:
                     result += esc
             elif ch == '\n':
-                raise self._make_error("未闭合的字符串字面量", start_line, start_col)
+                # 未闭合字符串：记录错误并跳过，继续词法分析
+                error_msg = f"词法错误：未闭合的字符串字面量 (行:{start_line}, 列:{start_col})"
+                self.errors.append(error_msg)
+                print(error_msg, file=sys.stderr)
+                # pos 已指向换行符，跳过当前未闭合的字符串内容后继续分析
+                return self._next_token()
             else:
                 result += self._advance()
 
-        raise self._make_error("未闭合的字符串字面量", start_line, start_col)
+        # 源码结束仍未闭合：记录错误并跳过，继续词法分析
+        error_msg = f"词法错误：未闭合的字符串字面量 (行:{start_line}, 列:{start_col})"
+        self.errors.append(error_msg)
+        print(error_msg, file=sys.stderr)
+        # pos 已到源码末尾，继续分析将返回 EOF
+        return self._next_token()
 
     def _read_char(self) -> Token:
         """读取字符字面量 'x' """
@@ -262,7 +273,12 @@ class Lexer:
         self._advance()  # 跳过开始单引号 '
 
         if self.pos >= len(self.source):
-            raise self._make_error("未闭合的字符字面量", start_line, start_col)
+            # 源码结束，未闭合的字符字面量：记录错误并跳过，继续词法分析
+            error_msg = f"词法错误：未闭合的字符字面量 (行:{start_line}, 列:{start_col})"
+            self.errors.append(error_msg)
+            print(error_msg, file=sys.stderr)
+            # pos 已到源码末尾，继续分析将返回 EOF
+            return self._next_token()
 
         ch = self.source[self.pos]
         if ch == '\\':
@@ -284,7 +300,12 @@ class Lexer:
             self._advance()
 
         if self.pos >= len(self.source) or self.source[self.pos] != "'":
-            raise self._make_error("字符字面量应以 ' 结尾", start_line, start_col)
+            # 缺少结束引号：记录错误并跳过，继续词法分析
+            error_msg = f"词法错误：字符字面量应以 ' 结尾 (行:{start_line}, 列:{start_col})"
+            self.errors.append(error_msg)
+            print(error_msg, file=sys.stderr)
+            # 跳过当前未闭合的字符内容后继续分析
+            return self._next_token()
 
         self._advance()  # 跳过结束单引号 '
         return Token(TokenType.CHAR, ch, start_line, start_col,
@@ -431,7 +452,6 @@ class Lexer:
                          end_line=self.line, end_col=self.column - 1)
 
         # 非法字符：记录错误并跳过，继续词法分析
-        import sys
         error_msg = f"词法错误：非法字符 '{ch}' (行:{start_line}, 列:{start_col})"
         self.errors.append(error_msg)
         print(error_msg, file=sys.stderr)

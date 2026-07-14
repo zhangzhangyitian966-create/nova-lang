@@ -515,3 +515,75 @@
 - 全量测试: **655 passed** (0.78s)
 - Evaluator 示例: hello/fibonacci/pattern_match/loops 全部正常输出
 - VM 示例: hello/fibonacci/pattern_match 全部正常输出
+
+---
+
+## 2026-07-15 自动改进（第九轮）
+
+基于 AUTO_REVIEW_LOG.md 第五轮审查日志的最高优先级未修复严重问题驱动改进（阶段一检查 + 阶段二开发 + 阶段三测试）。
+
+### 每日发现的问题
+
+#### vm.py
+- **EQ/NEQ bool/int 交叉比较（vm.py:622-632）**：直接使用 Python `==`/`!=`，因 bool 是 int 子类导致 `true == 1` 错误返回 True。LT/GT/LTE/GTE 同样有此问题，且 bool 与 string 比较会泄漏 Python TypeError。**严重问题，已修复**。
+- **BUILD_MAP 单元素崩溃（vm.py:833-843）**：第八轮 `_pop(n)` 统一返回列表后已修复，当前无越界问题。确认已修复。
+
+#### evaluator.py
+- **无递归深度保护（evaluator.py:401-444）**：`_call_fn` 无深度计数器，无限递归触发 Python RecursionError 裸栈崩溃。VM 有 MAX_CALL_DEPTH=1000 但 Evaluator 没有。**严重问题，已修复**。
+- **EQ/NEQ bool/int 交叉比较（evaluator.py:866-869）**：与 VM 同病。**已修复**。
+
+#### runtime/nova_runtime.c
+- **HTTP 命令注入（nova_runtime.c:1644-1646, 1692-1695）**：`nova_http_get`/`nova_http_post` 使用 `system()` 执行拼接了用户 URL 的 curl 命令，URL 中的 `"` 字符可注入任意 shell 命令。**CVE 级别安全漏洞，五轮未修，已修复**。
+- **Map.put 内存泄漏（nova_runtime.c:525）**：`nova_map_put` 更新已有 key 时直接覆盖 value，未释放旧 value 引用计数。**已修复**。
+
+#### backend/native_backend.py
+- **LIRReturn 缺少 epilogue（native_backend.py:460-463）**：`LIRReturn` 直接调用 `e.ret()` 发射裸 ret 指令，跳过栈帧恢复和 callee-saved 寄存器恢复，导致使用显式 return 的函数栈损坏。**严重问题，已修复**。
+
+#### lexer.py
+- **未闭合字符串/字符终止词法分析（lexer.py:252,256,265,287）**：`_read_string`/`_read_char` 遇到未闭合字面量时直接 `raise` 终止，与第七轮已修复的非法字符"跳过+收集"策略不一致。**严重问题，五轮未修，已修复**。
+
+#### parser.py
+- **`|>` 管道操作符优先级（parser.py:432-439, 672-678）**：经检查，当前 `|>` 优先级高于比较运算符，与 Elixir 设计一致。代码注释明确标注"优先级：高于比较，低于 cons"。第二轮审查已降级为中等。**确认为有意设计，非 bug**。
+
+### 本次修复内容（基于审查日志 Issue）
+
+1. **vm.py — EQ/NEQ/LT/GT/LTE/GTE bool/int 交叉比较修复（基于审查日志 vm.py:622-632 / Top 5th #1）**
+   - EQ：当一边是 bool 另一边不是时，压入 `False`（而非让 Python `==` 把 True 当作 1）
+   - NEQ：对称压入 `True`
+   - LT/GT/LTE/GTE：bool 与非 bool 比较时抛出 `RuntimeError_("类型错误：Bool 不能与非 Bool 类型进行比较")`，避免 Python TypeError 泄漏
+   - bool 与 bool 之间的比较仍正常工作
+
+2. **evaluator.py — EQ/NEQ bool/int 交叉比较修复（基于审查日志 evaluator.py:866-869）**
+   - `_eval_binary_op` 中 EQ/NEQ 做与 VM 对称的修改
+   - 当一边是 bool 另一边不是时，EQ 返回 False，NEQ 返回 True
+
+3. **evaluator.py — 递归深度保护（基于审查日志 evaluator.py:106 / Top 5th #6）**
+   - `__init__` 新增 `self._call_depth = 0` 和 `self.MAX_CALL_DEPTH = 1000`（与 VM 一致）
+   - `_call_fn` 的 NovaClosure 分支中递增 `_call_depth`，超限时抛出 `RuntimeError_("栈溢出：调用深度超过限制")`
+   - `finally` 块确保深度计数器在正常返回、ReturnSignal 及异常路径下都被正确递减
+
+4. **runtime/nova_runtime.c — HTTP 命令注入修复（基于审查日志 nova_runtime.c:1645 / Top 5th #15）**
+   - `nova_http_get`：删除 `system(snprintf(...))` shell 拼接，改为 POSIX `fork()` + `execlp("curl", ...)` 直接执行（URL 作为独立 argv，不经 shell）；Windows 用 `_spawnlp`
+   - `nova_http_post`：同样替换为 fork+execlp，请求体通过 `@file` 参数传递
+   - `nova_system`：保留 `system()` 但添加安全注释（该函数语义即执行任意命令，非 URL 注入）
+
+5. **runtime/nova_runtime.c — Map.put 内存泄漏修复（基于审查日志 nova_runtime.c:525 / Top 5th #17）**
+   - `nova_map_put` 更新已有 key 时，覆盖前先 `nova_value_release((NovaValue*)entry->value)` 释放旧值引用计数
+
+6. **backend/native_backend.py — LIRReturn epilogue 修复（基于审查日志 native_backend.py:460-463 / Top 5th #18）**
+   - 新增 `_emit_epilogue(self, e, func)` 方法：恢复栈帧 + pop callee-saved 寄存器 + ret
+   - `LIRReturn` 处理由裸 `e.ret()` 改为 `self._emit_epilogue(e, func)`
+   - `_compile_function` 末尾 fall-through epilogue 复用同一方法，消除重复代码
+
+7. **lexer.py — 未闭合字符串/字符不再终止词法分析（基于审查日志 lexer.py:252 / Top 5th #13）**
+   - `_read_string` 和 `_read_char` 中四处 `raise self._make_error(...)` 改为与非法字符一致的"收集错误 + 跳过 + 继续"模式
+   - 错误信息格式统一为 `词法错误：<描述> (行:{line}, 列:{col})`
+   - 新增 6 个测试用例覆盖未闭合字符串/字符场景
+
+### 测试结果
+
+- 全量测试: **661 passed** (1.36s)
+- Evaluator 示例: hello/fibonacci/pattern_match/loops/pipe 全部正常输出
+- VM 示例: hello/fibonacci/pattern_match 全部正常输出
+- C 语法检查: `gcc -fsyntax-only -Wall -Wextra` 零警告零错误
+- C 运行时测试: `test_runtime.c` 编译运行通过

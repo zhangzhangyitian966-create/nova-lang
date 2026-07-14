@@ -114,6 +114,8 @@ class Evaluator:
         self._module_manager = module_manager  # ModuleManager 实例
         self._current_file = current_file      # 当前文件路径
         self._exported_names: set = set()      # 本模块导出的名称
+        self._call_depth = 0                   # 当前递归调用深度
+        self.MAX_CALL_DEPTH = 1000             # 最大递归调用深度（与 VM 一致）
         self._setup_builtins()
 
     def _setup_builtins(self):
@@ -434,10 +436,17 @@ class Evaluator:
 
             old_env = self.env
             self.env = child_env
+            self._call_depth += 1
+            if self._call_depth > self.MAX_CALL_DEPTH:
+                self._call_depth -= 1
+                self.env = old_env
+                raise RuntimeError_("栈溢出：调用深度超过限制")
             try:
                 result = self.eval_expr(fn.body)
             except ReturnSignal as ret:
                 result = ret.value
+            finally:
+                self._call_depth -= 1
             self.env = old_env
             return result
 
@@ -864,8 +873,13 @@ class Evaluator:
         elif expr.op == "++":
             return left + right  # 字符串拼接
         elif expr.op == "==":
+            # Nova 中 Bool 和 Int 是不同类型：bool 与非 bool 比较永远不相等
+            if isinstance(left, bool) != isinstance(right, bool):
+                return False
             return left == right
         elif expr.op == "!=":
+            if isinstance(left, bool) != isinstance(right, bool):
+                return True
             return left != right
         elif expr.op == "<":
             return left < right

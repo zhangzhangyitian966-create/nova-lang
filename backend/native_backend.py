@@ -272,6 +272,20 @@ class NativeCodeGen:
         if stack_gprs:
             e.add_rsp_imm(len(stack_gprs) * 8)
 
+    def _emit_epilogue(self, e: X86_64Emitter, func: LIRFunction):
+        """发射函数尾声：恢复栈帧 + 弹出 callee-saved 寄存器 + ret。
+
+        显式 return（LIRReturn）与函数末尾的 fall-through 都复用此方法，
+        确保任何退出路径都正确恢复栈帧，避免使用显式 return 时栈损坏。
+        必须与 _compile_function 中的 prologue（push callee-saved + sub rsp）配对。
+        """
+        if func.stack_size > 0:
+            aligned = (func.stack_size + 15) & ~15
+            e.add_rsp_imm(aligned)
+        for reg in reversed(CALLEE_SAVED):
+            e.pop_reg(reg)
+        e.ret()
+
     def _compile_function(self, func: LIRFunction) -> bytes:
         """编译单个函数为机器码"""
         e = X86_64Emitter()
@@ -291,15 +305,8 @@ class NativeCodeGen:
         # 编译函数体
         self._compile_body(e, func, label_positions, pending_jumps, pending_branches, func_relocations)
 
-        # 函数尾声：恢复 callee-saved，返回
-        if func.stack_size > 0:
-            aligned = (func.stack_size + 15) & ~15
-            e.add_rsp_imm(aligned)
-
-        for reg in reversed(CALLEE_SAVED):
-            e.pop_reg(reg)
-
-        e.ret()
+        # 函数尾声：恢复栈帧 + 弹出 callee-saved + ret（复用统一方法）
+        self._emit_epilogue(e, func)
 
         # 回填标签跳转
         code = bytearray(e.code)
@@ -459,8 +466,9 @@ class NativeCodeGen:
 
             elif isinstance(instr, LIRReturn):
                 # 返回值已在 RAX（整数/指针）或 XMM0（浮点）中
-                # 直接返回即可
-                e.ret()
+                # 发射完整尾声（恢复栈帧 + pop callee-saved + ret），而非裸 ret。
+                # 否则显式 return 会跳过栈帧恢复，导致栈损坏。
+                self._emit_epilogue(e, func)
 
             elif isinstance(instr, LIRJump):
                 jmp_offset = e.jmp_rel32()

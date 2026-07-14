@@ -622,37 +622,52 @@ class NovaVM:
         elif opcode == Op.EQ:
             # Stack: [a, b] -> [a==b]
             # Pop two values, compare equality, push boolean result
+            # Nova 中 Bool 和 Int 是不同类型：bool 与非 bool 比较永远不相等
             a, b = self._pop(2)
-            self.stack.append(a == b)
+            if isinstance(a, bool) != isinstance(b, bool):
+                self.stack.append(False)
+            else:
+                self.stack.append(a == b)
 
         elif opcode == Op.NEQ:
             # Stack: [a, b] -> [a!=b]
             # Pop two values, compare inequality, push boolean result
             a, b = self._pop(2)
-            self.stack.append(a != b)
+            if isinstance(a, bool) != isinstance(b, bool):
+                self.stack.append(True)
+            else:
+                self.stack.append(a != b)
 
         elif opcode == Op.LT:
             # Stack: [a, b] -> [a<b]
             # Pop two values, compare less-than, push boolean result
             a, b = self._pop(2)
+            if isinstance(a, bool) != isinstance(b, bool):
+                raise RuntimeError_("类型错误：Bool 不能与非 Bool 类型进行比较")
             self.stack.append(a < b)
 
         elif opcode == Op.GT:
             # Stack: [a, b] -> [a>b]
             # Pop two values, compare greater-than, push boolean result
             a, b = self._pop(2)
+            if isinstance(a, bool) != isinstance(b, bool):
+                raise RuntimeError_("类型错误：Bool 不能与非 Bool 类型进行比较")
             self.stack.append(a > b)
 
         elif opcode == Op.LTE:
             # Stack: [a, b] -> [a<=b]
             # Pop two values, compare less-than-or-equal, push boolean result
             a, b = self._pop(2)
+            if isinstance(a, bool) != isinstance(b, bool):
+                raise RuntimeError_("类型错误：Bool 不能与非 Bool 类型进行比较")
             self.stack.append(a <= b)
 
         elif opcode == Op.GTE:
             # Stack: [a, b] -> [a>=b]
             # Pop two values, compare greater-than-or-equal, push boolean result
             a, b = self._pop(2)
+            if isinstance(a, bool) != isinstance(b, bool):
+                raise RuntimeError_("类型错误：Bool 不能与非 Bool 类型进行比较")
             self.stack.append(a >= b)
 
         elif opcode == Op.AND:
