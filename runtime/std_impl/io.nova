@@ -1,0 +1,25 @@
+// Nova 标准库 - I/O 模块
+// 提供 print, println, read_line, format 等核心 I/O 功能
+
+fn println(value) -> Unit {
+  print(value)
+  print("\n")
+}
+
+fn format(template: String, args) -> String {
+  // 简单的格式化：{0}, {1}, ... 占位符
+  let result = template
+  let i = 0
+  let len = list_length(args)
+  while i < len {
+    let placeholder = "{" ++ int_to_str(i) ++ "}"
+    let replacement = ""
+    match list_get(args, i) {
+      Some(v) -> replacement = float_to_str(v)
+      None -> replacement = "null"
+    }
+    result = string_replace(result, placeholder, replacement)
+    i = i + 1
+  }
+  result
+}

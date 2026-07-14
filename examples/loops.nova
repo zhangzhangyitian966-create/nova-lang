@@ -1,0 +1,32 @@
+fn main() -> Unit {
+  // for 循环返回列表
+  let doubles = for x in [1, 2, 3, 4, 5] { x * 2 }
+  print(int_to_str(list_length(doubles)))
+
+  // 范围循环
+  let squares = for i <- 0..5 { i * i }
+  // [0, 1, 4, 9, 16]
+
+  // 带步长的范围循环
+  let evens = for i <- 0..10 step 2 { i }
+  print(int_to_str(list_length(evens)))
+
+  // while 循环
+  mut sum = 0
+  mut i = 1
+  while i <= 10 {
+    sum = sum + i
+    i = i + 1
+  }
+  print(int_to_str(sum))
+
+  // break 和 continue
+  let result = for x in [1, 2, 3, 4, 5] {
+    if x == 3 then break
+    x
+  }
+
+  // 列表推导式
+  let lc = [x * x for x <- 0..10 if x % 2 == 0]
+  print("Even squares done")
+}

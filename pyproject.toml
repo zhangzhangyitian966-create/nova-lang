@@ -1,0 +1,64 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "nova-lang"
+version = "0.3.0"
+description = "Nova - 表达式导向、强静态类型、函数式核心的编程语言"
+readme = "README.md"
+license = {text = "MIT"}
+requires-python = ">=3.9"
+authors = [
+    {name = "Nova Team"}
+]
+keywords = ["programming-language", "compiler", "functional", "type-system"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Software Development :: Compilers",
+    "Topic :: Software Development :: Interpreters",
+]
+
+[project.optional-dependencies]
+# C 后端依赖
+c-backend = [
+    "tomli>=2.0; python_version<'3.11'",
+]
+
+# 开发依赖
+dev = [
+    "pytest>=7.0",
+    "pytest-cov>=4.0",
+]
+
+# 全部依赖
+all = [
+    "nova-lang[c-backend]",
+    "nova-lang[dev]",
+]
+
+[project.scripts]
+nova = "nova.nova:main"
+
+[project.urls]
+Homepage = "https://github.com/nova-lang/nova"
+Documentation = "https://github.com/nova-lang/nova#readme"
+Repository = "https://github.com/nova-lang/nova"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["nova*"]
+exclude = ["tests*", "examples*", "runtime*", "tree-sitter-nova*", "templates*", "__pycache__*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]

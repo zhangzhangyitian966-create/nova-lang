@@ -1,0 +1,19 @@
+================================================================================
+Type definition
+================================================================================
+
+type Shape { Circle(r: Float) | Rect(w: Float, h: Float) }
+
+--------------------------------------------------------------------------------
+
+(source_file (type_def name: (identifier) (variant_def name: (identifier) (variant_field name: (identifier) type: (float_type))) (variant_def name: (identifier) (variant_field name: (identifier) type: (float_type)) (variant_field name: (identifier) type: (float_type)))))
+
+================================================================================
+ADT construction
+================================================================================
+
+Circle(5.0)
+
+--------------------------------------------------------------------------------
+
+(source_file (call_expr function: (identifier) arguments: (float_literal)))

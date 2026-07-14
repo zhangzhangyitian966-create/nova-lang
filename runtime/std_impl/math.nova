@@ -1,0 +1,43 @@
+// Nova 标准库 - 高级数学模块
+// 提供统计分析、随机数等
+
+fn clamp(x: Float, min: Float, max: Float) -> Float {
+  if x < min then min
+  else if x > max then max
+  else x
+}
+
+fn lerp(a: Float, b: Float, t: Float) -> Float {
+  a + (b - a) * t
+}
+
+fn mean(nums: List[Float]) -> Float {
+  let s = float_sum(nums)
+  s / int_to_float(list_length(nums))
+}
+
+fn median(nums: List[Float]) -> Float {
+  let sorted = list_sort(nums)
+  let n = list_length(sorted)
+  let mid = n / 2
+  if n % 2 == 0 then
+    (list_get(sorted, mid - 1) + list_get(sorted, mid)) / 2.0
+  else
+    list_get(sorted, mid)
+}
+
+fn max_list(nums: List[Float]) -> Float {
+  list_reduce(nums, |a, b| if a > b then a else b, 0.0)
+}
+
+fn min_list(nums: List[Float]) -> Float {
+  list_reduce(nums, |a, b| if a < b then a else b, 0.0)
+}
+
+fn range(start: Int, end: Int) -> List[Int] {
+  for i <- start..end { i }
+}
+
+fn range_step(start: Int, end: Int, step: Int) -> List[Int] {
+  for i <- start..end step step { i }
+}

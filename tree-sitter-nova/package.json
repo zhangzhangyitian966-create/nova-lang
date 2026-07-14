@@ -1,0 +1,16 @@
+{
+  "name": "tree-sitter-nova",
+  "version": "0.1.0",
+  "description": "Nova programming language grammar for Tree-sitter",
+  "main": "bindings/node",
+  "tree-sitter": {
+    "abi": "latest",
+    "cli": "tree-sitter"
+  },
+  "scripts": {
+    "generate": "tree-sitter generate",
+    "build": "tree-sitter build-wasm && node-gyp build",
+    "test": "tree-sitter test",
+    "parse": "tree-sitter parse"
+  }
+}

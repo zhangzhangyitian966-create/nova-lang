@@ -1,0 +1,29 @@
+================================================================================
+For-in loop
+================================================================================
+
+for x in [1, 2, 3] { x * 2 }
+
+--------------------------------------------------------------------------------
+
+(source_file (for_expr variable: (identifier) iterable: (list_expr (integer_literal) (integer_literal) (integer_literal)) body: (block_expr (multiplicative_expr left: (identifier) operator: "*" right: (integer_literal)))))
+
+================================================================================
+For range
+================================================================================
+
+for i <- 0..10 { i * i }
+
+--------------------------------------------------------------------------------
+
+(source_file (for_expr variable: (identifier) start: (integer_literal) end: (integer_literal) body: (block_expr (multiplicative_expr left: (identifier) operator: "*" right: (identifier)))))
+
+================================================================================
+While loop
+================================================================================
+
+while i < 5 { i = i + 1 }
+
+--------------------------------------------------------------------------------
+
+(source_file (while_expr condition: (comparison_expr left: (identifier) operator: "<" right: (integer_literal)) body: (block_expr (assignment_expr target: (identifier) value: (additive_expr left: (identifier) operator: "+" right: (integer_literal))))))

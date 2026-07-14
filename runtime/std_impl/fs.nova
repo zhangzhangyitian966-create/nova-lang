@@ -1,0 +1,34 @@
+// Nova 标准库 - 文件系统模块
+// 提供文件和目录操作
+
+fn read_text(path: String) -> String {
+  read_file(path)
+}
+
+fn write_text(path: String, content: String) -> Unit {
+  write_file(path, content)
+}
+
+fn exists(path: String) -> Bool {
+  file_exists(path)
+}
+
+fn read_lines(path: String) -> List[String] {
+  let content = read_file(path)
+  string_split(content, "\n")
+}
+
+fn write_lines(path: String, lines: List[String]) -> Unit {
+  let content = string_join(lines, "\n")
+  write_file(path, content)
+}
+
+fn copy(src: String, dst: String) -> Unit {
+  let content = read_file(src)
+  write_file(dst, content)
+}
+
+fn append(path: String, content: String) -> Unit {
+  let existing = if file_exists(path) then read_file(path) else ""
+  write_file(path, existing ++ content)
+}

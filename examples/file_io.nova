@@ -1,0 +1,7 @@
+fn main() -> Unit {
+  write_file("test.txt", "Hello from Nova!")
+  let content = read_file("test.txt")
+  print(content)
+  let exists = file_exists("test.txt")
+  if exists then print("File exists!") else print("File not found")
+}

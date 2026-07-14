@@ -1,0 +1,7 @@
+fn main() -> Unit {
+  let result = [1, 2, 3, 4, 5]
+    |> filter(|x| x > 2)
+    |> map(|x| x * x)
+    |> sum
+  print(int_to_str(result))
+}

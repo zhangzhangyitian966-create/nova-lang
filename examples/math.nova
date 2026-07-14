@@ -1,0 +1,10 @@
+fn main() -> Unit {
+  print(float_to_str(sqrt(16.0)))
+  print(float_to_str(sin(pi())))
+  print(float_to_str(pow(2.0, 10.0)))
+  print(float_to_str(floor(3.7)))
+  print(float_to_str(ceil(3.2)))
+  print(float_to_str(round(3.5)))
+  print(float_to_str(abs(-5.0)))
+  print(float_to_str(log(exp(1.0))))
+}

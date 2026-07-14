@@ -1,0 +1,26 @@
+// Nova 标准库 - JSON 模块
+// 提供 JSON 解析和序列化
+
+fn parse(text: String) -> Map[String, Any] {
+  json_parse(text)
+}
+
+fn stringify(value) -> String {
+  json_stringify(value)
+}
+
+fn get(obj: Map[String, Any], key: String) -> Option[Any] {
+  map_get(obj, key)
+}
+
+fn set(obj: Map[String, Any], key: String, value) -> Map[String, Any] {
+  map_put(obj, key, value)
+}
+
+fn has(obj: Map[String, Any], key: String) -> Bool {
+  map_has(obj, key)
+}
+
+fn from_list(items: List[Any]) -> String {
+  json_stringify(items)
+}

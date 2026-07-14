@@ -1,0 +1,52 @@
+================================================================================
+Basic let binding
+================================================================================
+
+let x = 42
+
+--------------------------------------------------------------------------------
+
+(source_file (let_binding name: (identifier) value: (integer_literal)))
+
+================================================================================
+String concatenation
+================================================================================
+
+"hello" ++ " world"
+
+--------------------------------------------------------------------------------
+
+(source_file (concat_expr left: (string_literal) right: (string_literal)))
+
+================================================================================
+If-then-else expression
+================================================================================
+
+if x > 0 then x else -x
+
+--------------------------------------------------------------------------------
+
+(source_file (if_expr condition: (comparison_expr left: (identifier) operator: ">" right: (integer_literal)) consequence: (identifier) alternative: (unary_expr operand: (identifier))))
+
+================================================================================
+Function definition
+================================================================================
+
+fn add(a: Int, b: Int) -> Int { a + b }
+
+--------------------------------------------------------------------------------
+
+(source_file (fn_def name: (identifier) parameters: (parameters (parameter name: (identifier) type: (int_type)) (parameter name: (identifier) type: (int_type))) return_type: (int_type) body: (block_expr (additive_expr left: (identifier) operator: "+" right: (identifier)))))
+
+================================================================================
+Match expression
+================================================================================
+
+match x {
+  1 -> "one"
+  n -> "other"
+}
+
+--------------------------------------------------------------------------------
+
+(source_file (match_expr value: (identifier) (match_arm pattern: (integer_pattern) body: (string_literal)) (match_arm pattern: (binding_pattern) body: (string_literal))))

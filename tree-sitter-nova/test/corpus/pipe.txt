@@ -1,0 +1,9 @@
+================================================================================
+Pipe expression
+================================================================================
+
+[1, 2, 3] |> filter(|x| x > 0) |> map(|x| x * 2)
+
+--------------------------------------------------------------------------------
+
+(source_file (pipe_expr left: (pipe_expr left: (list_expr (integer_literal) (integer_literal) (integer_literal)) right: (call_expr function: (identifier) arguments: (lambda body: (comparison_expr left: (identifier) operator: ">" right: (integer_literal))))) right: (call_expr function: (identifier) arguments: (lambda body: (multiplicative_expr left: (identifier) operator: "*" right: (integer_literal))))))

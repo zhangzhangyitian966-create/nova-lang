@@ -1,0 +1,19 @@
+================================================================================
+Basic list comprehension
+================================================================================
+
+[x * 2 for x in [1, 2, 3]]
+
+--------------------------------------------------------------------------------
+
+(source_file (list_comprehension result: (multiplicative_expr left: (identifier) operator: "*" right: (integer_literal)) variable: (identifier) iterable: (list_expr (integer_literal) (integer_literal) (integer_literal))))
+
+================================================================================
+List comprehension with range and filter
+================================================================================
+
+[x * x for x <- 0..10 if x % 2 == 0]
+
+--------------------------------------------------------------------------------
+
+(source_file (list_comprehension result: (multiplicative_expr left: (identifier) operator: "*" right: (identifier)) variable: (identifier) start: (integer_literal) end: (integer_literal) filter: (equality_expr left: (multiplicative_expr left: (identifier) operator: "%" right: (integer_literal)) operator: "==" right: (integer_literal))))

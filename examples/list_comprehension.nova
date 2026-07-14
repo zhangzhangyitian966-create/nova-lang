@@ -1,0 +1,13 @@
+fn main() -> Unit {
+  // 基本列表推导
+  let squares = [x * x for x <- 1..11]
+  print(int_to_str(list_length(squares)))
+
+  // 带过滤的列表推导
+  let evens = [x for x <- 1..21 if x % 2 == 0]
+  print(int_to_str(list_length(evens)))
+
+  // 从列表推导
+  let doubled = [x * 2 for x in [1, 2, 3]]
+  print(int_to_str(list_length(doubled)))
+}

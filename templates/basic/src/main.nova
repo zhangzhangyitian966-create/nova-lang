@@ -1,0 +1,6 @@
+// Nova 基本项目模板
+// 由 `nova init` 命令创建
+
+fn main() -> Unit {
+  println("Hello, Nova!")
+}

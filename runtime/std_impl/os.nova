@@ -1,0 +1,31 @@
+// Nova 标准库 - 操作系统模块
+// 提供系统信息、进程、环境变量等
+
+fn platform() -> String {
+  get_platform()
+}
+
+fn args() -> List[String] {
+  get_args()
+}
+
+fn env(name: String) -> Option[String] {
+  let val = get_env(name)
+  if val != "" then Some(val) else None
+}
+
+fn set_env(name: String, value: String) -> Unit {
+  set_environment(name, value)
+}
+
+fn cwd() -> String {
+  get_cwd()
+}
+
+fn sleep_ms(ms: Int) -> Unit {
+  time_sleep(ms)
+}
+
+fn exec(command: String) -> Int {
+  system_exec(command)
+}

@@ -1,0 +1,17 @@
+// Nova 标准库 - 日期时间模块
+
+fn now() -> Int {
+  time_now()
+}
+
+fn unix() -> Int {
+  time_unix()
+}
+
+fn format_time(fmt: String, timestamp: Int) -> String {
+  time_format(fmt, timestamp)
+}
+
+fn iso8601() -> String {
+  format_time("%Y-%m-%dT%H:%M:%SZ", unix())
+}

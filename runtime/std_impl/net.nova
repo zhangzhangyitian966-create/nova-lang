@@ -1,0 +1,34 @@
+// Nova 标准库 - 网络模块
+// 提供基础 HTTP 客户端功能
+
+fn http_get(url: String) -> Map[String, String] {
+  let response = http_get_raw(url)
+  let result = map_from_pairs([
+    ("status", int_to_str(response_status(response))),
+    ("body", response_body(response))
+  ])
+  result
+}
+
+fn http_post(url: String, body: String) -> Map[String, String] {
+  let response = http_post_raw(url, body, map_empty())
+  let result = map_from_pairs([
+    ("status", int_to_str(response_status(response))),
+    ("body", response_body(response))
+  ])
+  result
+}
+
+fn download(url: String, path: String) -> Unit {
+  let response = http_get_raw(url)
+  write_file(path, response_body(response))
+}
+
+fn url_encode(s: String) -> String {
+  // 简单的 URL 编码
+  s  // 完整实现需要在 C 运行时中
+}
+
+fn url_decode(s: String) -> String {
+  s
+}
