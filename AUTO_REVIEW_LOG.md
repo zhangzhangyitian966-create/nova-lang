@@ -1132,3 +1132,530 @@
 13. **错误处理: raise_all 丢失结构化信息** [errors.py:402-408] — 未修复
 14. **parser: step 变量遮蔽** [parser.py:460,471,484] — 未修复
 15. **测试: 无 Evaluator-VM 一致性测试** [tests/] — 未修复
+
+---
+
+## [2026-07-15] 第三轮全局审查报告
+
+> **审查时间**：2026-07-15（第三轮）
+> **审查版本**：main 分支最新提交
+> **审查方法**：三轮九个 Explore Agent 并行审查
+
+### 项目结构审查表（第三轮更新）
+
+| 模块 | 文件 | 审查状态 | 上次审查 | 严重 | 中等 | 轻微 | 修复率 |
+|------|------|---------|---------|------|------|------|--------|
+| VM 虚拟机 | `vm.py` | ✅ 已审查 | 2026-07-15 | 5 | 6 | 7 | 6/32 (19%) |
+| 编译器 | `compiler.py` | ✅ 已审查 | 2026-07-15 | 3 | 3 | 4 | 6/11 (55%) |
+| 求值器 | `evaluator.py` | ✅ 已审查 | 2026-07-15 | 4 | 7 | 6 | 3/9 (33%) |
+| AST 节点 | `ast_nodes.py` | ✅ 已审查 | 2026-07-15 | 0 | 0 | 0 | — |
+| 类型检查器 | `type_checker.py` | ✅ 已审查 | 2026-07-15 | 4 | 7 | 8 | 5/12 (42%) |
+| 词法分析器 | `lexer.py` | ✅ 已审查 | 2026-07-15 | 1 | 1 | 6 | 1/5 (20%) |
+| 语法分析器 | `parser.py` | ✅ 已审查 | 2026-07-15 | 3 | 2 | 4 | 3/10 (30%) |
+| 错误处理 | `errors.py` | ✅ 已审查 | 2026-07-15 | 5 | 7 | 5 | 1/11 (9%) |
+| 模块系统 | `modules.py` | ✅ 已审查 | 2026-07-15 | 0 | 3 | 2 | 1/5 (20%) |
+| 环境 | `environment.py` | ✅ 已审查 | 2026-07-15 | 0 | 0 | 0 | 已修复 |
+| C 代码生成 | `c_codegen.py` | ✅ 已审查 | 2026-07-15 | 3 | 3 | 2 | 0/6 (0%) |
+| Native 后端 | `backend/native_backend.py` | ✅ 已审查 | 2026-07-15 | 3 | 2 | 3 | 0/4 (0%) |
+| Cranelift 后端 | `backend/cranelift_backend.py` | ✅ 已审查 | 2026-07-15 | 5 | 3 | 1 | 0/4 (0%) |
+| WASM 后端 | `backend/wasm_backend.py` | ✅ 已审查 | 2026-07-15 | 5 | 4 | 1 | 0/4 (0%) |
+| x86_64 指令 | `backend/x86_64.py` | ✅ 已审查 | 2026-07-15 | 0 | 0 | 2 | — |
+| 编译管道 | `backend/compiler_pipeline.py` | ✅ 已审查 | 2026-07-15 | 1 | 0 | 0 | 0/1 (0%) |
+| IR 节点 | `ir/ir_nodes.py` | ✅ 已审查 | 2026-07-15 | 0 | 0 | 2 | — |
+| HIR Lowering | `ir/hir_lowering.py` | ✅ 已审查 | 2026-07-15 | 0 | 2 | 3 | — |
+| MIR Lowering | `ir/mir_lowering.py` | ✅ 已审查 | 2026-07-15 | 5 | 1 | 0 | 1/7 (14%) |
+| LIR Lowering | `ir/lir_lowering.py` | ✅ 已审查 | 2026-07-15 | 3 | 2 | 1 | 0/3 (0%) |
+| Pass 管理器 | `ir/pass_manager.py` | ✅ 已审查 | 2026-07-15 | 1 | 3 | 1 | 1/4 (25%) |
+| C 运行时 | `runtime/nova_runtime.c` | ✅ 已审查 | 2026-07-15 | 7 | 6 | 5 | 0/10 (0%) |
+| 测试套件 | `tests/` | ✅ 已审查 | 2026-07-15 | 3 | 0 | 0 | 0/3 (0%) |
+| Tree-sitter | `tree-sitter-nova/` | ✅ 已审查 | 2026-07-15 | 1 | 0 | 0 | 0/1 (0%) |
+
+---
+
+## [2026-07-15] VM 虚拟机 (vm.py) 第三轮审查报告
+
+### 总体评分
+| 维度 | 评分 | 说明 |
+|------|------|------|
+| 原创性 | ⭐⭐⭐ | PIPE_CALL/MATCH_START-END/TRY_UNWRAP 设计有特色 |
+| 可行性 | ⭐⭐⭐½ | 核心路径可用；循环控制基本修复但仍依赖启发式 |
+| 正确性 | ⭐⭐½ | 闭包过度捕获、CONTINUE 启发式、_pop 单值返回模式有隐患 |
+| 安全性 | ⭐⭐⭐ | _pop 有保护；DUP/INDEX 等仍有裸访问 |
+| 一致性 | ⭐⭐⭐ | PRINT/STORE_VAR 等第二轮严重问题已修复；部分与 Evaluator 不一致 |
+| 完整性 | ⭐⭐⭐⭐⭐ | Op 类 46 个操作码全部有处理路径 |
+| 工程质量 | ⭐⭐½ | _execute_instruction 约 665 行，仍未拆分 |
+| 性能 | ⭐⭐ | 闭包捕获整个帧 dict 浅拷贝未改善 |
+
+### 发现的问题
+
+#### 严重问题（5 个）
+
+- [vm.py:786-787] **闭包仍捕获整个帧 locals 而非仅自由变量** → 每次创建闭包 O(n) 浅拷贝所有局部变量，阻止 GC 回收不需要的变量，语义错误（修改不反映到原始帧）→ 编译器分析自由变量，CLOSURE 指令携带 free_var_names
+- 追问：如果 OCaml 闭包捕获整个作用域的 dict 拷贝，能被接受吗？→ **绝对不能。** 连续三轮未修复。
+
+- [vm.py:682-687,770-777] **CONTINUE while 循环依赖启发式检测** → 通过试探下一条指令是否为 CONST_UNIT 推断 loop_start，极其脆弱 → 编译器为 while 生成显式 LOOP 指令
+- 追问：如果 GHC 的 STG 机通过运行时扫描字节码确定循环边界，能被接受吗？→ **绝对不能。** 连续三轮未根本修复。
+
+- [vm.py:500-507] **`_pop(n)` 当 n==1 返回裸值，n>1 返回列表，类型不一致** → 多处调用需 `if arg_count == 1: args = [args]` 补偿，一旦遗漏后续 `for i, arg in enumerate(args)` 会遍历裸值字符 → 统一 `_pop(n)` 返回列表
+- 追问：如果 JVM 的 pop() 和 pop2() 返回类型不同但调用方不做检查，会导致类型混淆。→ **不可接受。**
+
+- [vm.py:414-426] **`_call_closure` 异常安全路径不完整** → 函数执行异常时 result 不被赋值，finally 截断栈后 re-raise，调用方栈状态可能不一致 → 在 except 块中也恢复栈到 base_sp 再 re-raise
+
+- [vm.py:917] **FOR_ITER 范围迭代使用 `<=` 包含 end（新发现严重 bug）** → Evaluator 使用半开区间 [start, end)，VM 使用闭区间 [start, end]，同一段代码在两条路径产生不同结果（如 `1..10` VM 遍历到 10，Evaluator 遍历到 9）→ 改为 `current < end`
+- 追问：同一段 Nova 代码在 Evaluator 和 VM 中产生不同结果，**绝对不可接受。**
+
+#### 中等问题（6 个）
+
+- [vm.py:180-217] 内置函数 lambda 缺少类型检查，非序列参数抛 Python TypeError
+- [vm.py:1153-1163] TRY_UNWRAP 对非 ADT 值静默通过，`42?` 不报错
+- [vm.py:751-757] BREAK 在 while 循环中仍用脆弱的前向扫描 CONST_UNIT
+- [vm.py:856-860] INDEX 无边界检查
+- [vm.py:1129-1132] DUP 无栈空检查
+- [vm.py:991-1044] MATCH_TEST_* 系列除 MATCH_CONSTRUCTOR 外无栈空检查
+
+#### 轻微问题（7 个）
+
+- [vm.py:509-1174] _execute_instruction 约 665 行，应按功能拆分
+- [vm.py:617-621] CONCAT 强制 str() 转换过于宽松
+- [vm.py:219-222] _to_float 不排除 bool
+- [vm.py:70-71] NovaADTValue `__hash__` 在 VM 有但 Evaluator 无
+- [vm.py:301-302] JSON dict 转换为 Python dict 而非 Nova Map
+- [vm.py:240] _builtin_filter 使用 `is True` 严格比较
+- [vm.py:180] read_line lambda 代码意图不清
+
+### Evaluator vs VM 对比
+| 行为 | Evaluator | VM | 是否一致 |
+|------|-----------|-----|---------|
+| Unit bool | False | False | ✅ |
+| PRINT 返回值 | UNIT_VALUE | UNIT | ✅ |
+| STORE_VAR mutable | 检查 | 检查 | ✅ |
+| ? 对 Some/Ok | 不解包返回原值 | 解包 push fields[0] | ❌ **严重** |
+| for 范围 `..` 语义 | 半开 [start, end) | **闭区间 [start, end]** | ❌ **新发现** |
+| ADT `__hash__` | 未定义 | 已定义 | ❌ |
+| 闭包捕获 | Environment 引用 | locals dict 浅拷贝 | ❌ |
+| 递归深度保护 | 无 | MAX_CALL_DEPTH = 1000 | ❌ |
+
+### 前两轮修复状态：6/32 已修复 (19%)
+
+---
+
+## [2026-07-15] 编译器 (compiler.py) 第三轮审查报告
+
+### 总体评分
+| 维度 | 评分 | 说明 |
+|------|------|------|
+| 原创性 | ⭐⭐⭐⭐ | PIPE_CALL 指令、MATCH_START/END 标记对、ADT 原生指令集 |
+| 可行性 | ⭐⭐⭐½ | 核心路径可用；PatternTuple/PatternList 仍空壳 |
+| 正确性 | ⭐⭐⭐ | || true 路径已修复；**&& false 路径栈值丢失（新发现）** |
+| 安全性 | ⭐⭐⭐ | 栈布局大部分正确 |
+| 一致性 | ⭐⭐⭐ | 跳转回填全部正确 |
+| 完整性 | ⭐⭐⭐⭐ | AST 所有节点有编译处理 |
+| 工程质量 | ⭐⭐⭐ | 死代码保留 |
+| 性能 | ⭐⭐⭐ | 闭包不做自由变量分析 |
+
+### 发现的问题
+
+#### 严重问题（3 个）
+
+- [compiler.py:493-500] **`&&` 运算符 false 路径栈值丢失（新发现严重 bug）** → POP_JUMP_IF_FALSE 弹出 left 值后跳转到 end_pos，栈上无值，后续指令栈下溢 → 使用 DUP + JUMP_IF_FALSE + POP 模式（与 || 对称）
+- 追问：如果 Java 的 && 在左侧为 false 时丢失返回值，**绝对不能接受。**
+
+- [compiler.py:764-765] **PatternTuple/PatternList 模式匹配仍为空壳** → 直接返回 None 表示"总是匹配"，所有元组/列表模式变量绑定完全丢失 → 生成逐元素测试和绑定
+- 追问：如果 GHC 对 tuple pattern 跳过测试代码生成，**绝对不能接受。** 连续三轮未修复。
+
+- [compiler.py:302-345] **模块导入内联无命名空间隔离** → 同名导出后者覆盖前者无警告 → 实现限定导入
+
+#### 中等问题（3 个）
+
+- [compiler.py:802-866] 两个遗留死代码方法 _compile_pattern_test/_compile_pattern_bindings
+- [compiler.py:932-949] while 循环返回值始终为 Unit，违反"返回最后一次迭代值"语义
+- [compiler.py:395-396] CharLiteral 编译为 CONST_STRING，运行时无法区分 char 与 string
+
+#### 轻微问题（4 个）
+
+- [compiler.py:80 vs 631,377] CLOSURE code_key 注释与实际不一致
+- [compiler.py:971-1012 vs 882-930] 列表推导式 filter 与 _compile_for 代码重复
+- [compiler.py Op 类] 多个已定义但未生成的操作码
+- [compiler.py:951-1012] 列表推导式不支持多 for 子句
+
+### 前两轮修复状态：6/11 已修复 (55%)
+
+---
+
+## [2026-07-15] 求值器 (evaluator.py) 第三轮审查报告
+
+### 总体评分
+| 维度 | 评分 | 说明 |
+|------|------|------|
+| 原创性 | ⭐⭐⭐ | 两遍扫描支持相互递归 |
+| 可行性 | ⭐⭐⭐½ | 核心特性可用；MapExpr 已修复 |
+| 正确性 | ⭐⭐ | ? 不解包 Some/Ok、&&/|| 返回 Python bool |
+| 安全性 | ⭐ | 无递归深度保护、无尾调用优化 |
+| 一致性 | ⭐⭐ | 与 VM 多处行为差异 |
+| 完整性 | ⭐⭐⭐⭐ | AST 覆盖完整 |
+| 工程质量 | ⭐⭐½ | eval_decl 重复代码 |
+| 性能 | ⭐⭐⭐ | 闭包引用语义效率可接受 |
+
+### 发现的问题
+
+#### 严重问题（4 个）
+
+- [evaluator.py:698-704] **`?` 操作符不解包 Some/Ok** → `let x = some_option?` 得到 `Some(value)` 而非 `value` → 添加解包逻辑
+- 追问：如果是 Rust 的 `?` 不解包 Some，**绝对不能接受。核心语义错误。** 连续三轮未修复。
+
+- [evaluator.py:835-845] **`&&`/`||` 返回 Python bool 而非操作数值** → `1 && 2` 应返回 `2`，实际返回 `True` → 返回 falsy/truthy 值本身
+- 追问：如果 OCaml 的 `&&` 返回非类型正确值，**不可接受。**
+
+- [evaluator.py:106,401] **无递归深度保护** → 恶意或意外的无限递归导致 Python RecursionError 崩溃而非 Nova 错误 → 添加调用深度计数器
+
+- [evaluator.py:699-707] **TryExpr `?` 在顶层表达式使用时 ReturnSignal 泄漏** → 在 eval_program 中未被 catch → 在 eval_program 中捕获 ReturnSignal
+
+#### 中等问题（7 个）
+
+- [evaluator.py:1004-1011] PatternString 与 PatternChar 匹配歧义（运行时都是 Python str）
+- [evaluator.py:574-595] eval_decl 中 TypeDef 构造器 field_names 缺失
+- [evaluator.py:203] _builtin_filter 用 `is True` 严格比较
+- [evaluator.py:213-222] _builtin_head/tail 返回 Option 缺少 field_names
+- [evaluator.py:271] JSON null 映射为 Option.None 语义问题
+- [evaluator.py:738-748] Block 中 BreakSignal/ReturnSignal 导致 env 不恢复（缺 try-finally）
+- [evaluator.py:486-491,717-722] 闭包引用语义的变量遮蔽行为未文档化
+
+#### 轻微问题（6 个）
+
+- [evaluator.py:379-399] _format_value 不处理 dict 类型
+- [evaluator.py:864-865] ++ 未做类型检查
+- [evaluator.py:331] _builtin_abs 对整数返回 float
+- [evaluator.py:367-370] _builtin_min/max 强制返回 float
+- [evaluator.py:554-609 vs 482-552] eval_decl 与 _collect_decl 重复代码
+- [evaluator.py:297-300] JSON UNIT_VALUE 与 Python None 映射歧义
+
+### 前两轮修复状态：3/9 已修复 (33%)
+
+---
+
+## [2026-07-15] 类型检查器 (type_checker.py) 第三轮审查报告
+
+### 总体评分
+| 维度 | 评分 | 说明 |
+|------|------|------|
+| HM 推断完整性 | ⭐ | 缺少 Unification、Generalization、Instantiation 三大核心 |
+| 类型安全 | ⭐⭐ | TypeVar 全兼容导致静默通过大量类型错误 |
+| Pattern 检查 | ⭐⭐⭐⭐ | 全部 Pattern 类型已实现 |
+| 错误恢复 | ⭐⭐⭐ | ErrorCollector 可用，部分路径仍 raise |
+| 泛型支持 | ⭐⭐⭐ | ADTType.__eq__ 正确比较参数；无 occurs check |
+| 递归/let 多态 | ⭐ | 完全没有 generalize/instantiate |
+| Lambda TypeVar | ⭐⭐⭐⭐ | 每个参数唯一 TypeVar |
+| 错误信息质量 | ⭐⭐⭐⭐ | 信息具体、有位置和上下文 |
+
+### 发现的问题
+
+#### 严重问题（4 个）
+
+- [type_checker.py:1105-1125] **缺少真正的 Unification 算法（HM 核心 #1）** → 不检测 occurs check、不处理绑定冲突 → 实现 Robinson/Union-Find based unification
+- 追问：如果 OCaml 的类型推断器缺少 unification，**绝对不能接受。HM 算法的核心。** 连续三轮未修复。
+
+- [type_checker.py:544-754] **缺少 Generalize 和 Instantiate（HM 核心 #2/#3）** → let 多态完全不工作，`let id = fun x -> x in id 1 + id "a"` 不报错 → 实现 generalize/instantiate
+- 追问：如果 OCaml 的 let 多态没有正确实现，**绝对不能接受。ML 系语言根基。**
+
+- [type_checker.py:1235-1236] **任意两个 TypeVar 被视为兼容** → 任何包含 TypeVar 的类型比较静默通过 → 通过 unification 处理 TypeVar
+- 追问：如果 Haskell 的 Maybe Int 和 Maybe String 被当作同一类型，**绝对不能接受。**
+
+- [type_checker.py:986-995] **PatternConstructor 不替换类型参数** → 泛型 ADT 模式匹配不正确 → 构建类型参数映射替换
+
+#### 中等问题（7 个）
+
+- [type_checker.py:1105-1125] _collect_type_bindings 不处理双向/嵌套 TypeVar 绑定冲突
+- [type_checker.py:436-439] AliasDef 解析时机——第一遍无法引用后定义的 ADT
+- [type_checker.py:869-888] ForExpr 循环变量类型未与可迭代元素类型关联
+- [type_checker.py:911] ListComprehension 同样未关联循环变量类型
+- [type_checker.py:1211-1229] _expand_alias 未实际展开别名引用
+- [type_checker.py:543-563] FnDef 返回类型检查不影响已注册的函数类型
+- [type_checker.py:859-867] TryExpr 对非 Option/Result 静默通过
+
+#### 轻微问题（8 个）
+
+- [type_checker.py:169-175] TypeVar 命名不唯一——类级别全局计数器
+- [type_checker.py:287] None 构造函数 TypeVar 与 Some 的 TypeVar 是不同实例
+- [type_checker.py:973-997] _check_pattern 不验证 subject_type 与构造器 ADT 匹配
+- [type_checker.py:720-735] PipeExpr 类型检查过于宽松
+- [type_checker.py:583-928] MapExpr 未在 check_expr 中处理
+- [type_checker.py:859-867] TryExpr 对非 Option/Result 类型静默通过
+- [type_checker.py:1167] AliasDef 循环检测走 raise 而非 _report_error
+- [type_checker.py:274] _report_error 中 raise TypeCheckError 可能被意外 catch
+
+### 前两轮修复状态：5/12 完全修复，2/12 部分修复 (42%)
+
+---
+
+## [2026-07-15] 词法分析器 (lexer.py) 第三轮审查报告
+
+### 总体评分
+| 维度 | 评分 | 说明 |
+|------|------|------|
+| Token 覆盖 | ⭐⭐⭐⭐ | 基本齐全；PIPE_VARIANT 死 Token |
+| 词法错误恢复 | ⭐⭐⭐ | 非法字符仍直接 raise，无恢复 |
+| 运算符优先级 | ⭐⭐⭐⭐ | |> 优先级已修复 |
+| 结合性 | ⭐⭐⭐⭐⭐ | 全部左结合 |
+| 歧义性 | ⭐⭐⭐ | lambda | vs ADT | 无实际冲突 |
+| 左递归安全 | ⭐⭐⭐⭐⭐ | 递归下降无问题 |
+| 错误位置 | ⭐⭐⭐⭐ | Token 精确；_make_error Span 起点有偏差 |
+| 特性完整性 | ⭐⭐⭐ | PatternChar/parser 未连接；无科学计数法/多行字符串 |
+
+### 严重问题（1 个）
+
+- [lexer.py:432] **非法字符直接 raise 终止词法分析** → 改为跳过并收集到错误列表
+- 追问：如果 GCC/Clang 遇到非法字符直接 crash，**绝对不能接受。**
+
+### 中等问题（1 个）
+
+- [lexer.py:153-158] _make_error 中 Span 起点使用了错误的 self.line/self.column 而非传入参数
+
+### 轻微问题（6 个）
+
+- PIPE_VARIANT 死 Token、BOOL 分支冗余、转义处理重复、无科学计数法、无十六进制、无多行注释
+
+### 前两轮修复状态：1/5 已修复 (20%)
+
+---
+
+## [2026-07-15] 语法分析器 (parser.py) 第三轮审查报告
+
+### 总体评分
+| 维度 | 评分 | 说明 |
+|------|------|------|
+| 语法完整性 | ⭐⭐⭐ | match guard/Map 字面量/PatternChar 缺失 |
+| 错误恢复 | ⭐⭐⭐ | 无恢复机制 |
+| 优先级 | ⭐⭐⭐⭐ | |> 优先级已修复 |
+| 结合性 | ⭐⭐⭐⭐⭐ | 正确 |
+| 歧义性 | ⭐⭐⭐⭐ | 无左递归 |
+| 错误位置 | ⭐⭐⭐⭐ | Token 精确 |
+
+### 严重问题（3 个）
+
+- [parser.py:530-535] **match arm 不支持 guard** → `_parse_match_arm()` 只解析 `pattern -> body`，AST 中 guard 字段永远为 None → 添加 `if` token 检查解析 guard
+- 追问：match guard 是函数式语言核心特性，**不可接受。**
+
+- [parser.py:821-822] **MapExpr 完全无法解析** → `{ "key" => value }` 走入 block 路径 → 在 _parse_primary_expr 中区分 block vs map
+
+- [parser.py:541-621] **PatternChar 未在 parser 中处理** → `'a'` 在 match 中报 ParseError → 添加 TokenType.CHAR 分支
+
+### 中等问题（2 个）
+
+- [parser.py:522] match arm 分隔符判断使用硬编码 token 列表，脆弱
+- [parser.py:428-431] for/while 优先级位置过低，无法使用管道
+
+### 轻微问题（4 个）
+
+- 无科学计数法/十六进制、无多行字符串、无块注释、variant 解析回溯可能丢错误
+
+### 前两轮修复状态：3/10 已修复 (30%)
+
+---
+
+## [2026-07-15] 错误处理 + 模块 + 环境 第三轮审查报告
+
+### 严重问题（5 个）
+
+- [errors.py:405-411] **raise_all() 仍丢失 severity 和 span 结构化信息** → `note.format()` 仍将结构化对象序列化为字符串 → 让 add_note 接受结构化参数
+- 追问：Rust 编译器每个 diagnostic 独立携带 span/severity，**不可接受。**
+
+- [errors.py:69-76,232-261] **RelatedNote 不携带自己的 source_code** → 跨文件错误显示错误源码 → 给 RelatedNote 添加 source_code/file_path 字段
+- 追问：Rust 编译器每个 diagnostic label 独立加载对应 file source。**不可接受。**
+
+- [errors.py:334-351] **BreakSignal/ContinueSignal/ReturnSignal 不携带 span 信息** → 控制流错误无法指向源码位置 → 添加 span 参数
+
+- [errors.py（evaluator调用处）] **evaluator RuntimeError_ 不携带 source_code 和 span** → 运行时错误退化为纯文本 → Evaluator 持有 source/current_file
+
+- [errors.py] **ErrorCollector 未被 evaluator 使用** → 运行时只能报第一个错误 → Evaluator 添加 ErrorCollector
+
+### 中等问题（7 个）
+
+- [modules.py:241] evaluator 创建时未传递 current_file
+- [modules.py:240] TypeChecker 创建时也未传 current_file
+- [evaluator.py:611-643] _handle_import_decl 与 ModuleManager.import_module 重复实现
+- [modules.py:276-299] _collect_exports 与 _collect_exported_types 完全重复
+- [evaluator.py:476,642,680] 仍捕获 NameError（与 environment.py 修复不一致）
+- [errors.py:86 vs 92] source vs source_code 命名不一致
+- [errors.py:396-398] ErrorCollector.get_all() 丢失时序信息
+
+### 前两轮修复状态：1/11 已修复 (9%)
+
+---
+
+## [2026-07-15] 后端 第三轮审查报告
+
+### 各后端可行性评估
+| 后端 | 等级 | 判断依据 |
+|------|------|----------|
+| c_codegen.py | C- | 唯一能生成可编译 C 代码；闭包不捕获、IfExpr 缺 else |
+| native_backend.py | D+ | 架构最完整但 LIRCallIndirect/浮点 BinOp 未实现 |
+| cranelift_backend.py | F | Branch 硬编码、Index 忽略参数，不可编译 |
+| wasm_backend.py | F | 字符串编码 bug、BuildADT 不写数据，wat2wasm 无法通过 |
+| compiler_pipeline.py | F | BACKEND_NATIVE 映射到 Cranelift 而非 NativeCodeGen |
+
+### 严重问题（10 个）
+
+- [compiler_pipeline.py:33-35] **BACKEND_NATIVE 映射到 CraneliftBackend** → "native" 选项实际使用 Cranelift → 添加 BACKEND_CRANELIFT 常量
+- [cranelift_backend.py:162-168] **Branch 硬编码 block_true/block_false** → 所有条件分支跳到不存在的块
+- [wasm_backend.py:161,371] **字符串 NUL 终止符编码错误** → `b"\\x00"` 是 4 字节字面值非 NUL
+- [wasm_backend.py:273-276] **BuildADT 不存储 tag 和字段值** → 运行时读到未初始化内存
+- [wasm_backend.py:260-263] **Branch 丢失 true 分支** → 只生成 br_if false，两个分支顺序执行
+- [native_backend.py:496-497] **LIRCallIndirect NotImplementedError** → 闭包调用不可用
+- [native_backend.py:363-427] **浮点 BinOp 全部走整数路径** → 浮点运算产生错误结果
+- [c_codegen.py:897] **闭包不捕获自由变量** → `nova_closure_new(fn, NULL, 0)` 环境永远为空
+- 追问：如果 OCaml 编译器生成的闭包不捕获自由变量，**绝对不能接受。**
+- [c_codegen.py:584] **TryExpr variant_tag 字段名不匹配** → 编译错误：结构体无 variant_tag 成员
+
+### 前两轮修复状态：0/10 已修复 (0%)
+
+---
+
+## [2026-07-15] IR 系统 第三轮审查报告
+
+### 总体评分
+| 维度 | 评分 | 说明 |
+|------|------|------|
+| 三层 IR 设计 | ⭐⭐⭐ | 分层思路正确；HIR/MIR/LIR 职责边界模糊 |
+| HIR 覆盖 | ⭐⭐⭐⭐ | AST 节点覆盖全面 |
+| MIR Lowering | ⭐⭐ | SSA 被破坏、match 无条件分支、闭包丢失 |
+| LIR Lowering | ⭐⭐ | Phi 只取第一个 source、LIRBranch 无 cond_reg |
+| 优化 Pass | ⭐⭐⭐ | LIR 层有实际实现；Inlining 空壳 |
+| Pass 异常处理 | ⭐⭐⭐⭐ | 已修复：不再静默吞异常 |
+| 代码可维护性 | ⭐⭐⭐ | 节点清晰但 lowering 大量重复 |
+| 测试覆盖 | ⭐⭐⭐ | 40+ 测试，核心语义无测试 |
+
+### 严重问题（7 个）
+
+- [mir_lowering.py:351-384] **Match 无条件分支** → 所有 arm 链式 MIRJump 无条件执行 → 实现 MIRMatchJump 条件分支
+- 追问：如果 Haskell 编译器的 match 总执行第一个分支，**不能接受。**
+
+- [lir_lowering.py:204-211] **MIRPhi 只取第一个 source** → if-else merge 只保留 true 分支值 → 通过并行拷贝实现 phi
+- 追问：phi 节点丢弃 false 分支导致 `if true then 1 else 2` 总返回 1，**不可接受。**
+
+- [lir_lowering.py:219-223] **LIRBranch.cond_reg 未设置** → 后端无法生成条件跳转代码 → 设置 cond_reg/true_label/false_label
+
+- [lir_lowering.py:231-241] **MIRSwitch/MIRMatchJump 退化为无条件跳转** → 丢弃所有 case 分支
+
+- [mir_lowering.py:275-283] **SSA 被赋值语句破坏** → 局部可变变量 store/load 路径不一致
+
+- [mir_lowering.py:396-417] **For 循环无迭代器变量，无 phi 节点** → 循环变量未绑定，循环只执行一次
+
+- [mir_lowering.py:247-250] **闭包捕获列表始终为空** → 闭包自由变量全部丢失
+
+### Pass 实现状态表
+| Pass | HIR | MIR | LIR |
+|------|-----|-----|-----|
+| ConstantFolding | ✅ | ✅ | ✅ |
+| Inlining | ❌ 空壳 | ❌ | ❌ |
+| DeadCodeElimination | ❌ | ❌ | ✅ |
+| CSE | ❌ | ✅ | ✅ |
+| LICM | ❌ | ✅(简化) | ✅ |
+
+### 前两轮修复状态：3/10 已修复 (30%)
+
+---
+
+## [2026-07-15] C 运行时 + 测试 + Tree-sitter 第三轮审查报告
+
+### C 运行时严重问题（7 个）
+
+- [nova_runtime.c:1645,1693] **HTTP 命令注入未修复** → URL 含 `"` 可注入任意 shell 命令 → 替换为 libcurl C API
+- 追问：**安全漏洞，可远程利用。不可接受。**
+
+- [nova_runtime.c:99-103] **GC 仍为空壳** → 无循环引用回收 → 实现标记-清除 GC
+
+- [nova_runtime.c:290] **nova_string_replace 整数溢出** → 乘法溢出导致缓冲区分配过小，memcpy 越界 → 添加溢出检查
+
+- [nova_runtime.c:523-526] **nova_map_put 不释放旧 value** → 每次覆盖泄漏旧值 → 覆盖前 release 旧值
+
+- [nova_runtime.c:748-761] **nova_closure_new 浅拷贝不 retain** → 捕获对象 release 后闭包持悬垂指针 → 添加 retain
+
+- [nova_runtime.c:1226-1241] **JSON unicode 不处理 surrogate pairs** → emoji 等字符产生无效 UTF-8 → 检测高/低代理项组合
+
+- [nova_runtime.c:1177-1273] **JSON 解析无错误报告机制** → 非法 JSON 返回 NULL 无错误信息 → 添加错误码
+
+### 测试覆盖统计（总计 655 个测试）
+
+| 测试文件 | 测试数 |
+|----------|--------|
+| test_nova.py | 286（Evaluator ~130, VM 79）|
+| test_backends.py | 43 |
+| test_c_codegen.py | 52 |
+| test_native_backend.py | 87 |
+| test_errors.py | 30 |
+| test_type_system.py | 39 |
+| test_ir.py | 90 |
+| test_modules.py | 28 |
+
+### 测试覆盖缺口
+
+| 缺失测试 | 影响 |
+|----------|------|
+| Evaluator-VM 一致性测试 | 两执行路径语义漂移无发现手段 |
+| 后端端到端运行验证 | 后端代码生成正确性无验证 |
+| Map 字面量 | 两个后端都缺 |
+| try 表达式 | 两个后端都缺 |
+| match guard | 两个后端都缺 |
+| char 类型操作 | 无任何 char 运行时测试 |
+| 泛型 ADT 求值 | 类型检查有测试但运行时无 |
+| VM 模块导入 | VM 不测试模块系统 |
+
+### Tree-sitter
+
+- [grammar.js] **TryExpr 仍未添加** → IDE 无法高亮/解析 try 表达式
+- [grammar.js] **缺少泛型类型参数** → `Option[T]` 无法被 Tree-sitter 解析
+- [grammar.js] 缺少 PatternChar 完整支持
+
+### 前两轮修复状态：0/10 已修复 (0%)
+
+---
+
+## 第三轮全局问题汇总
+
+### 按严重程度统计
+
+| 严重程度 | 第一轮 | 第二轮 | 第三轮 | 总计 |
+|---------|--------|--------|--------|------|
+| 严重 | 52 | 47 | 63 | **162** |
+| 中等 | 42 | 47 | 55 | **144** |
+| 轻微 | 36 | 49 | 62 | **147** |
+| **总计** | **130** | **143** | **180** | **453** |
+
+### 第三轮最高优先级修复项（Top 20）
+
+1. **VM: FOR_ITER 闭区间 vs Evaluator 半开区间** [vm.py:917] — **新发现**，同源代码两路径结果不同
+2. **求值器: ? 不解包 Some/Ok** [evaluator.py:698-704] — 核心语义错误，三轮未修
+3. **编译器: && false 路径栈值丢失** [compiler.py:493-500] — **新发现**，栈下溢
+4. **编译器: PatternTuple/PatternList 空壳** [compiler.py:764-765] — 三轮未修
+5. **类型检查器: HM 核心缺失** [type_checker.py] — Unification/Generalize/Instantiate 三轮未修
+6. **IR: Match 无条件分支** [mir_lowering.py:351-384] — 三轮未修
+7. **IR: Phi 只取第一个 source** [lir_lowering.py:204-211] — 三轮未修
+8. **IR: LIRBranch.cond_reg 未设置** [lir_lowering.py:219-223] — 三轮未修
+9. **VM: 闭包捕获整个帧** [vm.py:786-787] — 三轮未修
+10. **VM: CONTINUE while 启发式** [vm.py:682-687] — 三轮未修
+11. **C 运行时: HTTP 命令注入** [nova_runtime.c:1645] — 安全漏洞，三轮未修
+12. **C 运行时: GC 空壳** [nova_runtime.c:99-103] — 三轮未修
+13. **C 运行时: 整数溢出** [nova_runtime.c:290] — **新发现**
+14. **C 后端: 闭包不捕获** [c_codegen.py:897] — 三轮未修
+15. **所有后端: 10 项严重问题零修复** [backend/] — 修复率 0%
+16. **求值器: &&/|| 返回 bool** [evaluator.py:835-845] — 三轮未修
+17. **求值器: 无递归深度保护** [evaluator.py:106] — 三轮未修
+18. **错误处理: raise_all 丢失结构化信息** [errors.py:405-411] — 三轮未修
+19. **parser: match arm 无 guard** [parser.py:530-535] — 三轮未修
+20. **测试: 无 Evaluator-VM 一致性测试** [tests/] — 三轮未修
+
+### 三轮修复率趋势
+
+| 轮次 | 严重 | 中等 | 轻微 | 总发现 | 总已修复 | 修复率 |
+|------|------|------|------|--------|---------|--------|
+| 第一轮 | 52 | 42 | 36 | 130 | 0 | 0% |
+| 第二轮 | 47 | 47 | 49 | 143 | 25 | 17% |
+| 第三轮 | 63 | 55 | 62 | 180 | ~35 | ~19% |
+| **累计** | **162** | **144** | **147** | **453** | **~60** | **~13%** |
+
+### 关键趋势分析
+
+1. **新发现问题速率未下降**：第三轮新发现 180 个问题，与第二轮 143 个相比反而增加，说明深度审查持续发现新问题
+2. **核心模块修复率停滞**：VM/编译器/求值器修复率在 19%-55% 之间，类型检查器 42%，但后端/运行时修复率 0%
+3. **跨模块一致性问题加剧**：第三轮新发现 VM 与 Evaluator 的 for 范围语义不一致、编译器 && 栈值丢失等问题
+4. **安全漏洞持续存在**：HTTP 命令注入、整数溢出两个安全相关 bug 三轮未修
