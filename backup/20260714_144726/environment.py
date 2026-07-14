@@ -8,8 +8,6 @@ Nova 编程语言 - 环境管理
 
 from typing import Dict, Optional, Any, List
 
-from nova.errors import RuntimeError_
-
 
 class BindingInfo:
     """绑定信息：记录一个变量的值和可变性"""
@@ -52,13 +50,13 @@ class Environment:
         if name in self.bindings:
             binding = self.bindings[name]
             if not binding.mutable:
-                raise RuntimeError_(f"变量 '{name}' 不可变，无法赋值")
+                raise RuntimeError(f"变量 '{name}' 不可变，无法赋值")
             binding.value = value
             return
         if self.parent is not None:
             self.parent.assign(name, value)
             return
-        raise RuntimeError_(f"未定义的变量 '{name}'")
+        raise NameError(f"未定义的变量 '{name}'")
 
     def child(self) -> 'Environment':
         """创建子作用域"""

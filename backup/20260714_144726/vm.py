@@ -162,9 +162,6 @@ class NovaVM:
         # 循环控制：用于 for 循环的迭代状态
         self._for_iters: List[Dict] = []
 
-        # 循环控制：用于 while 循环的状态
-        self._while_loops: List[Dict] = []
-
         # 初始化内置函数
         self._setup_builtins()
 
@@ -653,12 +650,7 @@ class NovaVM:
         elif opcode == Op.JUMP:
             # Stack: unchanged
             # Unconditional jump to target_ip
-            target = instr.operands[0]
-            # 检测 while 循环回跳: JUMP 目标在前面，且下一条指令是 CONST_UNIT
-            if target < self.ip and self.ip < len(self.code) and self.code[self.ip].opcode == Op.CONST_UNIT:
-                if self._while_loops:
-                    self._while_loops[-1]["loop_start"] = target
-            self.ip = target
+            self.ip = instr.operands[0]
 
         elif opcode == Op.JUMP_IF_FALSE:
             # Stack: [cond] -> []
@@ -679,19 +671,7 @@ class NovaVM:
             # Pop condition; if false, jump to target_ip
             cond = self.stack.pop()
             if not cond:
-                # 退出 while 循环，弹出循环信息
-                if self._while_loops and self._while_loops[-1]["end_ip"] == instr.operands[0]:
-                    self._while_loops.pop()
                 self.ip = instr.operands[0]
-            else:
-                # 进入 while 循环体，记录循环信息（如果尚未记录）
-                end_ip = instr.operands[0]
-                if not (self._while_loops and self._while_loops[-1]["end_ip"] == end_ip):
-                    self._while_loops.append({
-                        "end_ip": end_ip,
-                        "base_sp": len(self.stack),
-                        "loop_start": None,
-                    })
 
         elif opcode == Op.LOOP_END:
             # Stack: [iterable, result_list, body_result] -> [iterable, result_list]
@@ -744,15 +724,8 @@ class NovaVM:
                 del self.stack[base_sp + 2:]
                 self.ip = loop_start
             else:
-                # while loop continue: clean stack and jump back to condition check
-                if self._while_loops:
-                    loop_info = self._while_loops[-1]
-                    loop_start = loop_info["loop_start"]
-                    base_sp = loop_info["base_sp"]
-                    # 清理栈上循环体产生的值
-                    if base_sp < len(self.stack):
-                        del self.stack[base_sp:]
-                    self.ip = loop_start
+                # while loop continue: no-op (while loops use JUMP)
+                pass
 
         # === 函数 ===
         elif opcode == Op.CLOSURE:

@@ -95,12 +95,7 @@ class BuiltinFn:
 # ============================================================
 
 # Unit 单例
-class _UnitValue:
-    """Unit 类型的运行时单例值"""
-    def __repr__(self): return "()"
-    def __bool__(self): return False
-
-UNIT_VALUE = _UnitValue()
+UNIT_VALUE = object()
 
 
 class Evaluator:

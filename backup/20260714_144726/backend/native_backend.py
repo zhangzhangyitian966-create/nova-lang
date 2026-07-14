@@ -408,15 +408,7 @@ class NativeCodeGen:
                     e.setge(left_reg)
                     e.movzx_reg32_reg8(left_reg, left_reg)
                 elif op in ("&&", "||"):
-                    # 逻辑运算：先将操作数规范化为 0/1 布尔值，再执行位运算。
-                    # 注意：LIR 层两个操作数已求值完毕，无法实现真正的短路求值，
-                    # 但通过 test+setne 规范化后，and/or 在 0/1 上等价于布尔 AND/OR。
-                    e.test_reg_reg(left_reg, left_reg)
-                    e.setne(left_reg)
-                    e.movzx_reg32_reg8(left_reg, left_reg)
-                    e.test_reg_reg(right_reg, right_reg)
-                    e.setne(right_reg)
-                    e.movzx_reg32_reg8(right_reg, right_reg)
+                    # 短路逻辑：&& → and, || → or
                     if op == "&&":
                         e.and_reg_reg(left_reg, right_reg)
                     else:

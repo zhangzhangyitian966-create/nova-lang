@@ -668,6 +668,8 @@ class BytecodeCompiler:
         self.bytecode.emit_op(Op.MATCH_START, arm_count)
 
         jump_to_end_positions = []
+        fail_patches = []  # [(patch_pos,)]
+        # fail_patches[i] 是 arm i 的 MATCH_TEST_* 的失败跳转占位位置
 
         for i, arm in enumerate(expr.arms):
             # 模式测试：匹配失败时跳到下一个 arm 的测试开始
@@ -678,12 +680,6 @@ class BytecodeCompiler:
             # 编译匹配体的绑定（从 subject 中提取值）
             self._compile_pattern_extract_and_bind(arm.pattern)
 
-            # 编译 guard 条件（如果有）
-            if arm.guard is not None:
-                self._compile_expr(arm.guard)
-                guard_fail_pos = self.bytecode.current_pos()
-                self.bytecode.emit_op(Op.JUMP_IF_FALSE, 0)
-
             # 编译匹配体
             self._compile_expr(arm.body)
 
@@ -692,12 +688,13 @@ class BytecodeCompiler:
             self.bytecode.emit_op(Op.JUMP, 0)
             jump_to_end_positions.append(jump_end)
 
-            # 回填模式测试和 guard 的失败跳转到下一个 arm 的开始
-            next_arm_start = self.bytecode.current_pos()
+            # 记录 fail 跳转位置（稍后回填）
             if fail_ip_pos is not None:
-                self.bytecode.patch_match_fail(fail_ip_pos, next_arm_start)
-            if arm.guard is not None:
-                self.bytecode.patch_jump(guard_fail_pos, next_arm_start)
+                fail_patches.append((fail_ip_pos, self.bytecode.current_pos()))
+
+        # 回填所有失败跳转
+        for patch_pos, target in fail_patches:
+            self.bytecode.patch_match_fail(patch_pos, target)
 
         # 所有 arm 都匹配失败
         self.bytecode.emit_op(Op.POP)  # 弹出 subject
@@ -934,58 +931,12 @@ class BytecodeCompiler:
         else:
             iterable = expr.iterable
 
-        if expr.filter_cond is None:
-            # 无过滤条件：直接委托给 _compile_for
-            for_expr = ForExpr(
-                var_name=expr.var_name,
-                iterable=iterable,
-                body=expr.expr,
-            )
-            self._compile_for(for_expr)
-            return
-
-        # 有过滤条件：内联编译，filter 为 false 时跳过 LOOP_END 追加
-        # 编译迭代器
-        if isinstance(iterable, tuple) and iterable[0] == "range":
-            self._compile_expr(iterable[1])  # start
-            self._compile_expr(iterable[2])  # end
-            if len(iterable) > 3 and iterable[3] is not None:
-                self._compile_expr(iterable[3])
-            else:
-                self.bytecode.emit_op(Op.CONST_INT, 1)
-            self.bytecode.emit_op(Op.BUILD_RANGE)
-        else:
-            self._compile_expr(iterable)
-
-        # 初始化结果列表
-        self.bytecode.emit_op(Op.BUILD_LIST, 0)
-
-        # loop_start: FOR_ITER
-        loop_start = self.bytecode.current_pos()
-        self.bytecode.emit_op(Op.FOR_ITER, 0)  # fail_ip 占位
-
-        # 绑定循环变量
-        self.bytecode.emit_op(Op.STORE_VAR, expr.var_name, False)
-
-        # 编译过滤条件
-        self._compile_expr(expr.filter_cond)
-        filter_fail = self.bytecode.current_pos()
-        self.bytecode.emit_op(Op.POP_JUMP_IF_FALSE, 0)  # 过滤失败则跳过追加
-
-        # 编译映射表达式
-        self._compile_expr(expr.expr)
-
-        # LOOP_END: 追加结果到列表，跳回 loop_start
-        self.bytecode.emit_op(Op.LOOP_END, loop_start)
-
-        # 过滤失败目标：跳回 loop_start（跳过追加）
-        after_filter = self.bytecode.current_pos()
-        self.bytecode.patch_jump(filter_fail, after_filter)
-        self.bytecode.emit_op(Op.JUMP, loop_start)
-
-        # 回填 FOR_ITER 的 fail_ip：空循环直接跳过
-        after_loop = self.bytecode.current_pos()
-        self.bytecode.patch_jump(loop_start, after_loop)
+        for_expr = ForExpr(
+            var_name=expr.var_name,
+            iterable=iterable,
+            body=expr.expr,
+        )
+        self._compile_for(for_expr)
 
 
 # ============================================================
