@@ -1019,7 +1019,7 @@ class TypeChecker:
         """检查模式与类型的匹配"""
         from nova.ast_nodes import (
             PatternWildcard, PatternInt, PatternFloat, PatternString,
-            PatternBool, PatternChar, PatternIdentifier, PatternConstructor, PatternTuple, PatternList,
+            PatternBool, PatternIdentifier, PatternConstructor, PatternTuple, PatternList,
         )
 
         if isinstance(pattern, PatternWildcard):
@@ -1029,10 +1029,6 @@ class TypeChecker:
             if not self._types_compatible(subject_type, INT_T):
                 self._report_error(f"整数模式与类型 {subject_type} 不匹配", pattern)
 
-        elif isinstance(pattern, PatternFloat):
-            if not self._types_compatible(subject_type, FLOAT_T):
-                self._report_error(f"浮点数模式与类型 {subject_type} 不匹配", pattern)
-
         elif isinstance(pattern, PatternBool):
             if not self._types_compatible(subject_type, BOOL_T):
                 self._report_error(f"布尔模式与类型 {subject_type} 不匹配", pattern)
@@ -1040,10 +1036,6 @@ class TypeChecker:
         elif isinstance(pattern, PatternString):
             if not self._types_compatible(subject_type, STRING_T):
                 self._report_error(f"字符串模式与类型 {subject_type} 不匹配", pattern)
-
-        elif isinstance(pattern, PatternChar):
-            if not self._types_compatible(subject_type, CHAR_T):
-                self._report_error(f"字符模式与类型 {subject_type} 不匹配", pattern)
 
         elif isinstance(pattern, PatternIdentifier):
             env.define(pattern.name, subject_type)

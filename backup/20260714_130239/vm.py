@@ -425,9 +425,7 @@ class NovaVM:
                 result = self.stack.pop() if self.stack else UNIT
                 return result
 
-            if self._execute_instruction(instr):
-                # Early return triggered by TRY_UNWRAP
-                return self.stack[-1] if self.stack else UNIT
+            self._execute_instruction(instr)
 
         return UNIT
 
@@ -471,16 +469,14 @@ class NovaVM:
                 # Marker for auto-calling main (handled in run()); stop execution
                 break
 
-            if self._execute_instruction(instr):
-                # Early return triggered by TRY_UNWRAP in top-level code
-                break
+            self._execute_instruction(instr)
 
         self.code = saved_code
         self.constants = saved_constants
         self.ip = saved_ip
 
-    def _execute_instruction(self, instr: Instruction) -> bool:
-        """执行单条指令，返回 True 表示需要提前返回"""
+    def _execute_instruction(self, instr: Instruction):
+        """执行单条指令"""
         opcode = instr.opcode
         self.ip += 1
 
@@ -1056,16 +1052,11 @@ class NovaVM:
             pass
 
         elif opcode == Op.TRY_UNWRAP:
-            # Stack: [val] -> [val] or early return
-            # If Some/Ok, unwrap (pop and push inner value)
-            # If None/Err, trigger early return with the error value
+            # Stack: [val] -> [val]
+            # Peek value; if None/Err ADT, leave as-is (error propagation)
             val = self.stack[-1]
             if isinstance(val, NovaADTValue) and val.variant_name in ("None", "Err"):
-                return True
-            elif isinstance(val, NovaADTValue) and val.variant_name in ("Some", "Ok"):
-                self.stack.pop()
-                self.stack.append(val.fields[0])
-            return False
+                pass
 
         elif opcode == Op.LOOP:
             # Stack: unchanged
@@ -1075,8 +1066,6 @@ class NovaVM:
 
         else:
             raise RuntimeError_(f"VM 错误: 未知的指令 '{opcode}'")
-
-        return False
 
     # ----------------------------------------------------------
     # 公共接口

@@ -48,9 +48,41 @@
 
 ## 每日发现的问题
 
-（记录每天发现的新 bug 和改进建议）
+### 2026-07-14（Agent 1 检查）
+1. **vm.py:724** — `while` 循环中 `continue` 被静默忽略（`pass`）。
+   - Compiler 正确生成 `Op.CONTINUE`，但 VM 的 `while` 分支为空操作。
+   - 当前测试未覆盖 `while + continue`，655 个测试全部通过无法发现此问题。
+   - **优先级：P0**
+
+2. **vm.py:1059** — `TRY_UNWRAP` 指令未实现错误传播。
+   - 仅 `peek` 栈顶值判断是否 `None`/`Err`，随后 `pass`，无任何实际动作。
+   - `try?` 表达式在 VM 路径下既不 unwrap 也不提前返回。
+   - 测试集中无 `try?` 相关用例。
+   - **优先级：P1**
+
+### 2026-07-14（Agent 2 检查）
+- **native_backend.py**
+  - `FLOAT_NEG`（行 447）为空壳 `pass`，浮点取反未实际发射机器码。
+  - `LIRCallIndirect`、`LIRIndex`、`LIRFieldAccess`（行 493/497/501）仍抛出 `NotImplementedError`。
+  - `SimpleNativeCompiler.compile_source` 与 `_build_simple_lir`（行 908/1006）未实现 AST->LIR lowering。
+- **pass_manager.py**
+  - `run_hir_passes` / `run_mir_passes` / `run_lir_passes`（行 721/735/749）使用 `except Exception: pass` 静默吞掉所有 Pass 异常，需改为日志记录或诊断收集。
+  - MIR 层 LICM（行 640）对 `false_target` 回边识别为空壳 `pass`，仅处理 `true_target`。
+- **测试**：`tests/test_native_backend.py` + `tests/test_ir.py` 共 177 项全部通过。
+
+### 2026-07-14（Agent 3 检查）
+- **type_checker.py:1020-1084** — `_check_pattern` 方法缺失 `PatternFloat` 和 `PatternChar` 处理。
+  - `PatternFloat` 已局部导入但无对应 `elif` 分支；`PatternChar` 未导入且无处理分支。
+  - 当匹配表达式使用浮点/字符字面量模式时，类型检查器会静默漏过，不进行检查也不绑定变量。
+  - evaluator.py 的 `_match_pattern` 已完整处理这两种模式，说明 AST 节点本身支持。
+  - 测试 39/39 通过，但未覆盖这两种模式匹配场景。
+  - **优先级：P0**
 
 ## 改进历史
 
-（记录每天的改进内容、修改的文件、测试结果）
-
+### 2026-07-14（自动改进批次）
+- **vm.py** — 实现 TRY_UNWRAP 指令：Some/Ok 时 unwrap 内部值，None/Err 时触发提前返回（修改 _execute_instruction 返回 bool）
+- **backend/native_backend.py** — 实现 FLOAT_NEG 浮点取反机器码发射（xorpd + subsd 方案）
+- **type_checker.py** — 补全 _check_pattern 对 PatternFloat 和 PatternChar 的类型检查
+- **单元测试**：655 passed（tests/）、177 passed（backend/ir/）、39 passed（type_system/），无失败
+- **示例测试**：Evaluator 路径 5 个示例、VM 路径 3 个示例全部正常运行
