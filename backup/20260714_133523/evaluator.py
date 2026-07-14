@@ -36,7 +36,7 @@ from nova.ast_nodes import (
     PatternTuple, PatternList,
 )
 from nova.environment import Environment
-from nova.errors import RuntimeError_, BreakSignal, ContinueSignal, ReturnSignal
+from nova.errors import RuntimeError_, BreakSignal, ContinueSignal
 
 
 # ============================================================
@@ -429,10 +429,7 @@ class Evaluator:
 
             old_env = self.env
             self.env = child_env
-            try:
-                result = self.eval_expr(fn.body)
-            except ReturnSignal as ret:
-                result = ret.value
+            result = self.eval_expr(fn.body)
             self.env = old_env
             return result
 
@@ -694,8 +691,8 @@ class Evaluator:
             val = self.eval_expr(expr.expr)
             if isinstance(val, NovaADTValue):
                 if val.variant_name in ("None", "Err"):
-                    # 提前退出当前函数，将 Err/None 值传播上去
-                    raise ReturnSignal(val)
+                    # 简化：直接返回当前值（实际应提前返回）
+                    return val
             return val
 
         # --- 函数调用 ---
@@ -974,7 +971,7 @@ class Evaluator:
             return True
 
         elif isinstance(pattern, PatternInt):
-            return isinstance(value, int) and not isinstance(value, bool) and value == pattern.value
+            return isinstance(value, int) and value == pattern.value
 
         elif isinstance(pattern, PatternFloat):
             return isinstance(value, float) and value == pattern.value

@@ -696,23 +696,32 @@ class TestNativeBackendUnimplemented(unittest.TestCase):
     """原生后端未实现功能测试 -- 仍应抛出 NotImplementedError 的指令"""
 
     def _compile_body_with_instr(self, instr):
-        """辅助方法：编译包含指定指令的函数体"""
+        """辅助方法：编译包含指定指令的函数体，返回编译后的机器码"""
         codegen = NativeCodeGen()
         lir = LIRModule(name="test")
         fn = LIRFunction("test_fn", [], INT_TYPE)
         fn.body = [instr, LIRReturn()]
         lir.functions["test_fn"] = fn
-        codegen._compile_function(fn)
+        return codegen._compile_function(fn)
 
     def test_call_indirect_not_implemented(self):
         """LIRCallIndirect 应抛出 NotImplementedError"""
         with self.assertRaises(NotImplementedError):
             self._compile_body_with_instr(LIRCallIndirect())
 
-    def test_index_not_implemented(self):
-        """LIRIndex 应抛出 NotImplementedError"""
-        with self.assertRaises(NotImplementedError):
-            self._compile_body_with_instr(LIRIndex())
+    def test_index_compilation(self):
+        """LIRIndex 应成功编译（不再抛出 NotImplementedError）"""
+        # 无 src_locs 时默认取偏移 LIST_HEADER_SIZE 处的元素
+        code = self._compile_body_with_instr(LIRIndex())
+        self.assertIsNotNone(code)
+        self.assertTrue(len(code) > 0)
+        # 应包含 mov_reg_mem 指令 (48 8B)
+        found = False
+        for i in range(len(code) - 2):
+            if code[i] == 0x48 and code[i + 1] == 0x8B:
+                found = True
+                break
+        self.assertTrue(found, "Expected mov_reg_mem (48 8B) for LIRIndex default element access")
 
     def test_field_access_not_implemented(self):
         """LIRFieldAccess 应抛出 NotImplementedError"""

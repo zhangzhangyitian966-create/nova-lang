@@ -27,7 +27,7 @@ from nova.ast_nodes import (
     TypeInt, TypeFloat, TypeString, TypeBool, TypeChar, TypeUnit,
     TypeIdentifier, TypeGeneric, TypeTuple, TypeFn, Span,
 )
-from nova.errors import TypeCheckError, NovaError, ErrorCollector
+from nova.errors import TypeCheckError, ErrorCollector
 
 
 # ============================================================
@@ -941,14 +941,8 @@ class TypeChecker:
             return ERROR_TYPE
 
         elif isinstance(expr, TryExpr):
-            # ? 操作符：解包 Result[T, E] -> T 或 Option[T] -> T
-            inner_ty = self.check_expr(expr.expr)
-            if isinstance(inner_ty, ADTType):
-                if inner_ty.name == "Result" and len(inner_ty.type_params) >= 1:
-                    return inner_ty.type_params[0]
-                elif inner_ty.name == "Option" and len(inner_ty.type_params) >= 1:
-                    return inner_ty.type_params[0]
-            return inner_ty
+            # ? 操作符的简化检查
+            return self.check_expr(expr.expr)
 
         elif isinstance(expr, ForExpr):
             # for 循环：返回 List[元素类型]

@@ -490,7 +490,7 @@ class NativeCodeGen:
 
             # === 索引操作 ===
             elif isinstance(instr, LIRIndex):
-                self._compile_index(e, instr, vregs, free_gprs, free_xmms)
+                raise NotImplementedError("LIRIndex is not yet implemented in native backend")
 
             # === 字段访问 ===
             elif isinstance(instr, LIRFieldAccess):
@@ -598,59 +598,6 @@ class NativeCodeGen:
         if instr.dst_loc:
             dst_name, dst_type = instr.dst_loc
             vregs[dst_name] = src_reg
-
-    # ============================================================
-    # 索引操作编译
-    # ============================================================
-
-    def _compile_index(self, e: X86_64Emitter, instr: LIRIndex,
-                        vregs: dict, free_gprs: list, free_xmms: list):
-        """编译索引操作：从 List/数组中加载指定位置的元素。
-
-        List 内存布局: [count: int64][elem_0: ptr][elem_1: ptr]...
-        偏移计算: LIST_HEADER_SIZE + index * LIST_ELEM_SIZE
-
-        src_locs[0]: 数组/List 基址寄存器名（可选）
-        src_locs[1]: 索引值寄存器名（可选）
-
-        生成的 x86_64 代码（有索引时）:
-          mov  rcx, index_reg          ; 索引值
-          mov  rdx, ELEM_SIZE          ; 8
-          imul rcx, rdx                ; rcx = index * 8
-          add  rcx, HEADER_SIZE        ; rcx = 8 + index * 8
-          add  base_reg, rcx           ; base_reg 指向目标元素
-          mov  rax, [base_reg]         ; 加载元素
-
-        无 src_locs 时默认取偏移 0 处的元素（即第一个元素）。
-        """
-        if not instr.src_locs:
-            # 无操作数：默认取 List 偏移 LIST_HEADER_SIZE 处的第一个元素
-            # mov rax, [rax + LIST_HEADER_SIZE]
-            e.mov_reg_mem(RAX, RAX, self.LIST_HEADER_SIZE)
-            return
-
-        # 获取数组基址寄存器
-        base_reg = vregs.get(instr.src_locs[0][0], RAX)
-
-        if len(instr.src_locs) >= 2:
-            # 有显式索引值
-            index_reg = vregs.get(instr.src_locs[1][0], RCX)
-
-            # 使用 RDX 作为临时寄存器计算 index * LIST_ELEM_SIZE
-            e.mov_reg_imm64(RDX, self.LIST_ELEM_SIZE)
-            # mov rcx, index_reg
-            e.mov_reg_reg64(RCX, index_reg)
-            # imul rcx, rdx  =>  rcx = index * ELEM_SIZE
-            e.imul_reg_reg(RCX, RDX)
-            # add rcx, LIST_HEADER_SIZE  =>  rcx = 8 + index * 8
-            e.add_reg_imm(RCX, self.LIST_HEADER_SIZE)
-            # 将偏移加到基址上：base_reg += rcx
-            e.add_reg_reg(base_reg, RCX)
-            # 加载元素: mov rax, [base_reg + 0]
-            e.mov_reg_mem(RAX, base_reg, 0)
-        else:
-            # 有基址但无索引，取第一个元素
-            e.mov_reg_mem(RAX, base_reg, self.LIST_HEADER_SIZE)
 
     # ============================================================
     # 数据结构构建

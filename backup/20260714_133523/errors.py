@@ -341,13 +341,6 @@ class ContinueSignal(Exception):
     pass
 
 
-class ReturnSignal(Exception):
-    """return 信号：用于函数提前返回（包括 ? 错误传播）"""
-
-    def __init__(self, value=None):
-        self.value = value
-
-
 # ============================================================
 # 错误收集器
 # ============================================================
