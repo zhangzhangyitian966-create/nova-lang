@@ -25,6 +25,7 @@ from nova.ast_nodes import (
     PipeExpr, Block, UnitLiteral,
 )
 from nova.environment import Environment
+from nova._cli import run_source
 
 
 # ============================================================
@@ -2038,6 +2039,327 @@ class TestBytecodeVM(unittest.TestCase):
         self.assertEqual(vm.get_global("g"), 2)
         self.assertEqual(vm.get_global("b"), 3)
         self.assertEqual(vm.get_global("y"), 4)
+
+    # ============================================================
+    # 空循环测试
+    # ============================================================
+
+    def test_vm_empty_range_for(self):
+        """for i <- 1..0 { i } returns []（空范围）"""
+        output = run_source("""
+            let result = for i <- 1..0 { i }
+            print(result)
+        """, use_vm=True, capture_output=True)
+        self.assertEqual(output, ["[]"])
+
+    def test_vm_empty_list_for(self):
+        """for x in [] { x } returns []"""
+        output = run_source("""
+            let result = for x in [] { x }
+            print(result)
+        """, use_vm=True, capture_output=True)
+        self.assertEqual(output, ["[]"])
+
+    def test_vm_empty_negative_range(self):
+        """空范围 for 循环：正步长返回 []，负步长正确迭代"""
+        output1 = run_source("""
+            let result = for i <- 5..0 { i }
+            print(result)
+        """, use_vm=True, capture_output=True)
+        self.assertEqual(output1, ["[]"])
+        output2 = run_source("""
+            let result = for i <- 5..0 step -1 { i }
+            print(result)
+        """, use_vm=True, capture_output=True)
+        self.assertEqual(output2, ["[5, 4, 3, 2, 1, 0]"])
+
+    def test_vm_empty_range_with_break(self):
+        """for i <- 0..0 { if i == 0 then break } returns []"""
+        output = run_source("""
+            let result = for i <- 0..0 { if i == 0 then break }
+            print(result)
+        """, use_vm=True, capture_output=True)
+        self.assertEqual(output, ["[]"])
+
+    def test_vm_range_zero_to_zero(self):
+        """for i <- 0..0 { i } returns [0]（inclusive range，单元素）"""
+        output = run_source("""
+            let result = for i <- 0..0 { i }
+            print(result)
+        """, use_vm=True, capture_output=True)
+        self.assertEqual(output, ["[0]"])
+
+    def test_vm_empty_list_for_identity(self):
+        """for x in [] { x } returns []"""
+        output = run_source("""
+            let result = for x in [] { x }
+            print(result)
+        """, use_vm=True, capture_output=True)
+        self.assertEqual(output, ["[]"])
+
+    # ============================================================
+    # 嵌套循环测试
+    # ============================================================
+
+    def test_vm_nested_for(self):
+        """嵌套 for 循环应正确生成嵌套列表"""
+        output = run_source("""
+            let result = for x in [1, 2] {
+                for y in [10, 20] {
+                    x + y
+                }
+            }
+            print(result)
+        """, use_vm=True, capture_output=True)
+        self.assertEqual(output, ["[[11, 21], [12, 22]]"])
+
+    def test_vm_nested_for_break_inner(self):
+        """break 在内层循环应只跳出内层"""
+        output = run_source("""
+            let result = for x in [1, 2, 3] {
+                for y in [10, 20, 30] {
+                    if y == 20 then break
+                    x + y
+                }
+            }
+            print(result)
+        """, use_vm=True, capture_output=True)
+        self.assertEqual(output, ["[[11], [12], [13]]"])
+
+    def test_vm_nested_for_break_outer(self):
+        """break 在外层循环体（不在内层中）应跳出外层"""
+        output = run_source("""
+            let result = for x in [1, 2, 3] {
+                if x == 2 then break
+                for y in [10, 20] {
+                    x + y
+                }
+            }
+            print(result)
+        """, use_vm=True, capture_output=True)
+        self.assertEqual(output, ["[[11, 21]]"])
+
+    def test_vm_nested_for_continue(self):
+        """continue 在嵌套循环中应作用于当前层"""
+        output = run_source("""
+            let result = for x in [1, 2, 3] {
+                for y in [10, 20, 30] {
+                    if y == 20 then continue
+                    x + y
+                }
+            }
+            print(result)
+        """, use_vm=True, capture_output=True)
+        self.assertEqual(output, ["[[11, 31], [12, 32], [13, 33]]"])
+
+    # ============================================================
+    # 多分支 ADT 匹配测试
+    # ============================================================
+
+    def test_vm_match_three_branches(self):
+        """三分支 ADT，每个分支都应正确匹配"""
+        output = run_source("""
+            type Color { Red | Green | Blue }
+            fn to_int(c: Color) -> Int {
+                match c {
+                    Red   -> 1
+                    Green -> 2
+                    Blue  -> 3
+                }
+            }
+            print(to_int(Red))
+            print(to_int(Green))
+            print(to_int(Blue))
+        """, use_vm=True, capture_output=True)
+        self.assertEqual(output, ["1", "2", "3"])
+
+    def test_vm_match_first_branch_fails(self):
+        """第一个分支不匹配时应正确匹配后续分支"""
+        output = run_source("""
+            type Shape { Circle(r: Float) | Rect(w: Float, h: Float) }
+            fn area(s: Shape) -> Float {
+                match s {
+                    Circle(r)  -> 3.14159 * r * r
+                    Rect(w, h) -> w * h
+                }
+            }
+            print(area(Rect(3.0, 4.0)))
+        """, use_vm=True, capture_output=True)
+        self.assertEqual(output, ["12.0"])
+
+    def test_vm_match_all_branches_fail_to_wildcard(self):
+        """所有构造器分支失败后通配符应捕获"""
+        output = run_source("""
+            type Shape { Circle(r: Float) | Rect(w: Float, h: Float) }
+            fn describe(s: Shape) -> String {
+                match s {
+                    Circle(r) -> "circle"
+                    _         -> "other"
+                }
+            }
+            print(describe(Rect(3.0, 4.0)))
+        """, use_vm=True, capture_output=True)
+        self.assertEqual(output, ["other"])
+
+    def test_vm_match_nested_adt(self):
+        """嵌套 ADT 模式匹配（通过显式嵌套 match）"""
+        output = run_source("""
+            type Inner { A(x: Int) | B(y: String) }
+            type Outer { Wrap(i: Inner) | Unwrap }
+            fn get(o: Outer) -> String {
+                match o {
+                    Wrap(inner) -> match inner {
+                        A(x) -> int_to_str(x)
+                        B(y) -> y
+                    }
+                    Unwrap -> "none"
+                }
+            }
+            print(get(Wrap(A(42))))
+            print(get(Wrap(B("hello"))))
+            print(get(Unwrap))
+        """, use_vm=True, capture_output=True)
+        self.assertEqual(output, ["42", "hello", "none"])
+
+    # ============================================================
+    # For 循环 + 复杂循环体测试
+    # ============================================================
+
+    def test_vm_for_with_if(self):
+        """for 循环体包含 if 表达式"""
+        output = run_source("""
+            let result = for x in [1, 2, 3, 4, 5] {
+                if x % 2 == 0 then x * 10 else x
+            }
+            print(result)
+        """, use_vm=True, capture_output=True)
+        self.assertEqual(output, ["[1, 20, 3, 40, 5]"])
+
+    def test_vm_for_with_match(self):
+        """for 循环体包含 match 表达式"""
+        output = run_source("""
+            let items = [Some(1), None, Some(3)]
+            let result = for opt in items {
+                match opt {
+                    Some(v) -> v * 10
+                    None    -> 0
+                }
+            }
+            print(result)
+        """, use_vm=True, capture_output=True)
+        self.assertEqual(output, ["[10, 0, 30]"])
+
+    def test_vm_for_with_closure(self):
+        """for 循环捕获外部闭包变量"""
+        output = run_source("""
+            let offset = 10
+            let result = for x in [1, 2, 3] {
+                x + offset
+            }
+            print(result)
+        """, use_vm=True, capture_output=True)
+        self.assertEqual(output, ["[11, 12, 13]"])
+
+    def test_vm_for_accumulate(self):
+        """for 循环中累加可变变量"""
+        output = run_source("""
+            mut sum = 0
+            for x in [1, 2, 3, 4, 5] {
+                sum = sum + x
+                sum
+            }
+            print(sum)
+        """, use_vm=True, capture_output=True)
+        self.assertEqual(output, ["15"])
+
+    # ============================================================
+    # 栈压力测试
+    # ============================================================
+
+    def test_vm_deeply_nested_calls(self):
+        """深层嵌套函数调用"""
+        output = run_source("""
+            fn f1(x: Int) -> Int { x + 1 }
+            fn f2(x: Int) -> Int { f1(x) + 1 }
+            fn f3(x: Int) -> Int { f2(x) + 1 }
+            fn f4(x: Int) -> Int { f3(x) + 1 }
+            fn f5(x: Int) -> Int { f4(x) + 1 }
+            fn f6(x: Int) -> Int { f5(x) + 1 }
+            fn f7(x: Int) -> Int { f6(x) + 1 }
+            fn f8(x: Int) -> Int { f7(x) + 1 }
+            fn f9(x: Int) -> Int { f8(x) + 1 }
+            fn f10(x: Int) -> Int { f9(x) + 1 }
+            print(f10(0))
+        """, use_vm=True, capture_output=True)
+        self.assertEqual(output, ["10"])
+
+    def test_vm_many_locals(self):
+        """函数包含大量局部变量"""
+        output = run_source("""
+            fn many_locals() -> Int {
+                let a1 = 1
+                let a2 = 2
+                let a3 = 3
+                let a4 = 4
+                let a5 = 5
+                let a6 = 6
+                let a7 = 7
+                let a8 = 8
+                let a9 = 9
+                let a10 = 10
+                let a11 = 11
+                let a12 = 12
+                let a13 = 13
+                let a14 = 14
+                let a15 = 15
+                let a16 = 16
+                let a17 = 17
+                let a18 = 18
+                let a19 = 19
+                let a20 = 20
+                a1 + a2 + a3 + a4 + a5 + a6 + a7 + a8 + a9 + a10 +
+                a11 + a12 + a13 + a14 + a15 + a16 + a17 + a18 + a19 + a20
+            }
+            print(many_locals())
+        """, use_vm=True, capture_output=True)
+        self.assertEqual(output, ["210"])
+
+    def test_vm_recursion_depth(self):
+        """递归函数到合理深度"""
+        output = run_source("""
+            fn count(n: Int) -> Int {
+                if n <= 0 then 0
+                else 1 + count(n - 1)
+            }
+            print(count(100))
+        """, use_vm=True, capture_output=True)
+        self.assertEqual(output, ["100"])
+
+    # ============================================================
+    # 边界情况（曾导致崩溃）
+    # ============================================================
+
+    def test_vm_loop_end_empty_stack(self):
+        """LOOP_END 在空栈时不应崩溃，应抛出可控错误"""
+        from nova.compiler import Bytecode, Op
+        from nova.vm import NovaVM
+        bytecode = Bytecode()
+        bytecode.emit_op(Op.LOOP_END, 0)
+        bytecode.emit_op(Op.HALT)
+        vm = NovaVM(bytecode)
+        with self.assertRaises(RuntimeError_):
+            vm.run()
+
+    def test_vm_match_constructor_no_subject(self):
+        """MATCH_CONSTRUCTOR 在栈空时不应崩溃，应抛出可控错误"""
+        from nova.compiler import Bytecode, Op
+        from nova.vm import NovaVM
+        bytecode = Bytecode()
+        bytecode.emit_op(Op.MATCH_CONSTRUCTOR, "Circle", 1, 2)
+        bytecode.emit_op(Op.HALT)
+        vm = NovaVM(bytecode)
+        with self.assertRaises(RuntimeError_):
+            vm.run()
 
 
 # ============================================================

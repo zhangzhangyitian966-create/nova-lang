@@ -268,22 +268,31 @@ class CCodeGen:
         if isinstance(fndef.body, Block):
             # 编译块中的语句（不包含尾表达式，尾表达式单独处理）
             for stmt in fndef.body.statements:
-                stmt_c = self._compile_expr(stmt)
-                lines.append(self._indent_str(stmt_c))
+                stmt_setup, stmt_expr = self._compile_expr_to_stmt(stmt)
+                for line in stmt_setup:
+                    lines.append(self._indent_str(line))
+                if stmt_expr:
+                    lines.append(self._indent_str(f"{stmt_expr};"))
 
             # 处理尾表达式
             if fndef.body.tail_expression:
-                tail_c = self._compile_expr(fndef.body.tail_expression)
+                tail_setup, tail_expr = self._compile_expr_to_stmt(fndef.body.tail_expression)
+                for line in tail_setup:
+                    lines.append(self._indent_str(line))
                 if ret_type != "void":
-                    lines.append(self._indent_str(f"return {tail_c};"))
+                    lines.append(self._indent_str(f"return {tail_expr};"))
                 else:
-                    lines.append(self._indent_str(f"{tail_c};"))
+                    lines.append(self._indent_str(f"{tail_expr};"))
         elif ret_type != "void":
-            body_code = self._compile_expr(fndef.body)
-            lines.append(self._indent_str(f"return {body_code};"))
+            body_setup, body_expr = self._compile_expr_to_stmt(fndef.body)
+            for line in body_setup:
+                lines.append(self._indent_str(line))
+            lines.append(self._indent_str(f"return {body_expr};"))
         else:
-            body_code = self._compile_expr(fndef.body)
-            lines.append(self._indent_str(f"{body_code};"))
+            body_setup, body_expr = self._compile_expr_to_stmt(fndef.body)
+            for line in body_setup:
+                lines.append(self._indent_str(line))
+            lines.append(self._indent_str(f"{body_expr};"))
 
         lines.append("}")
 
@@ -312,29 +321,37 @@ class CCodeGen:
         """在 main 函数中编译顶层声明"""
         if isinstance(decl, LetBinding):
             c_name = self._mangle_name(decl.name)
-            value_c = self._compile_expr(decl.value)
+            value_setup, value_c = self._compile_expr_to_stmt(decl.value)
+            for line in value_setup:
+                self._emit(line)
             self._emit(f"{c_name} = {value_c};")
         elif isinstance(decl, MutBinding):
             c_name = self._mangle_name(decl.name)
-            value_c = self._compile_expr(decl.value)
+            value_setup, value_c = self._compile_expr_to_stmt(decl.value)
+            for line in value_setup:
+                self._emit(line)
             self._emit(f"{c_name} = {value_c};")
         elif isinstance(decl, ForExpr):
             self._compile_for_expr_main(decl)
         elif isinstance(decl, WhileExpr):
-            cond_c = self._compile_expr(decl.condition)
+            cond_setup, cond_c = self._compile_expr_to_stmt(decl.condition)
+            for line in cond_setup:
+                self._emit(line)
             self._emit(f"while ({cond_c}) {{")
             self.indent_level += 1
-            body_c = self._compile_expr(decl.body)
-            if isinstance(decl.body, Block):
-                self._emit(body_c)
-            else:
-                self._emit(f"{body_c};")
+            body_setup, body_expr = self._compile_expr_to_stmt(decl.body)
+            for line in body_setup:
+                self._emit(line)
+            if body_expr:
+                self._emit(f"{body_expr};")
             self.indent_level -= 1
             self._emit("}")
         else:
-            # 顶层表达式
-            expr_c = self._compile_expr(decl)
-            self._emit(f"{expr_c};")
+            expr_setup, expr_c = self._compile_expr_to_stmt(decl)
+            for line in expr_setup:
+                self._emit(line)
+            if expr_c:
+                self._emit(f"{expr_c};")
 
     def _compile_for_expr_main(self, for_expr: ForExpr):
         """在 main 中编译顶层 for 循环"""
@@ -343,187 +360,203 @@ class CCodeGen:
 
         if isinstance(iterable, tuple) and iterable[0] == "range":
             # for i <- start..end
-            start_c = self._compile_expr(iterable[1])
-            end_c = self._compile_expr(iterable[2])
-            step_c = self._compile_expr(iterable[3]) if iterable[3] else "1"
+            start_setup, start_c = self._compile_expr_to_stmt(iterable[1])
+            end_setup, end_c = self._compile_expr_to_stmt(iterable[2])
+            for line in start_setup:
+                self._emit(line)
+            for line in end_setup:
+                self._emit(line)
+            step_c = "1"
+            if iterable[3]:
+                step_setup, step_c = self._compile_expr_to_stmt(iterable[3])
+                for line in step_setup:
+                    self._emit(line)
 
             i_var = self._new_temp()
             self._emit(f"for (int64_t {i_var} = {start_c}; {i_var} < {end_c}; {i_var} += {step_c}) {{")
             self.indent_level += 1
             self._emit(f"int64_t {var_name} = {i_var};")
-            body_c = self._compile_expr(for_expr.body)
-            if isinstance(for_expr.body, Block):
-                self._emit(body_c)
-            else:
-                self._emit(f"{body_c};")
+            body_setup, body_expr = self._compile_expr_to_stmt(for_expr.body)
+            for line in body_setup:
+                self._emit(line)
+            if body_expr:
+                self._emit(f"{body_expr};")
             self.indent_level -= 1
             self._emit("}")
         else:
             # for x in list
-            list_c = self._compile_expr(iterable)
+            list_setup, list_c = self._compile_expr_to_stmt(iterable)
+            for line in list_setup:
+                self._emit(line)
             list_var = self._new_temp()
-            self._emit(f"NovaList* {list_var} = {list_c};")
             idx_var = self._new_temp()
-            len_var = self._new_temp()
-            self._emit(f"int64_t {len_var} = nova_list_length({list_var});")
-            self._emit(f"for (int64_t {idx_var} = 0; {idx_var} < {len_var}; {idx_var}++) {{")
+            self._emit(f"NovaList* {list_var} = {list_c};")
+            self._emit(f"for (int64_t {idx_var} = 0; {idx_var} < nova_list_length({list_var}); {idx_var}++) {{")
             self.indent_level += 1
             # 默认元素类型为 int64_t
             self._emit(f"int64_t {var_name} = (int64_t)(intptr_t)nova_list_get({list_var}, {idx_var});")
-            body_c = self._compile_expr(for_expr.body)
-            if isinstance(for_expr.body, Block):
-                self._emit(body_c)
-            else:
-                self._emit(f"{body_c};")
+            body_setup, body_expr = self._compile_expr_to_stmt(for_expr.body)
+            for line in body_setup:
+                self._emit(line)
+            if body_expr:
+                self._emit(f"{body_expr};")
             self.indent_level -= 1
             self._emit("}")
-
-    # ----------------------------------------------------------
-    # 声明编译
-    # ----------------------------------------------------------
 
     def _compile_decl(self, decl) -> str:
         """编译顶层声明为 C 代码片段"""
         if isinstance(decl, LetBinding):
             c_name = self._mangle_name(decl.name)
-            value_c = self._compile_expr(decl.value)
-            return f"{c_name} = {value_c};"
+            value_setup, value_c = self._compile_expr_to_stmt(decl.value)
+            return "\n".join(value_setup + [f"{c_name} = {value_c};"])
         elif isinstance(decl, MutBinding):
             c_name = self._mangle_name(decl.name)
-            value_c = self._compile_expr(decl.value)
-            return f"{c_name} = {value_c};"
+            value_setup, value_c = self._compile_expr_to_stmt(decl.value)
+            return "\n".join(value_setup + [f"{c_name} = {value_c};"])
         elif isinstance(decl, Assignment):
             c_name = self._mangle_name(decl.name)
-            value_c = self._compile_expr(decl.value)
-            return f"{c_name} = {value_c};"
+            value_setup, value_c = self._compile_expr_to_stmt(decl.value)
+            return "\n".join(value_setup + [f"{c_name} = {value_c};"])
         else:
-            return self._compile_expr(decl)
+            setup, expr = self._compile_expr_to_stmt(decl)
+            if setup:
+                return "\n".join(setup + [f"{expr};"])
+            return f"{expr};" if expr else ""
+
 
     # ----------------------------------------------------------
     # 表达式编译
     # ----------------------------------------------------------
 
-    def _compile_expr(self, expr) -> str:
-        """编译表达式，返回 C 表达式字符串"""
+    # ----------------------------------------------------------
+    # 表达式编译（新架构：返回 setup_lines + result_expr）
+    # ----------------------------------------------------------
 
+    def _compile_expr_to_stmt(self, expr):
+        """编译表达式，返回 (setup_lines, result_expr)
+
+        setup_lines: 需要在 result_expr 使用前执行的 C 语句列表
+        result_expr: 有效的 C 表达式字符串
+        """
         if isinstance(expr, IntLiteral):
-            return f"((int64_t){expr.value})"
+            return [], f"((int64_t){expr.value})"
 
         elif isinstance(expr, FloatLiteral):
-            return f"((double){repr(expr.value)})"
+            return [], f"((double){repr(expr.value)})"
 
         elif isinstance(expr, StringLiteral):
             escaped = self._escape_c_string(expr.value)
-            return f'nova_string_new("{escaped}")'
+            return [], f'nova_string_new("{escaped}")'
 
         elif isinstance(expr, CharLiteral):
             escaped = self._escape_c_char(expr.value)
-            return f"'{escaped}'"
+            return [], f"'{escaped}'"
 
         elif isinstance(expr, BoolLiteral):
-            return "true" if expr.value else "false"
+            return [], "true" if expr.value else "false"
 
         elif isinstance(expr, UnitLiteral):
-            return "((void)0)"
+            return [], "((void)0)"
 
         elif isinstance(expr, Identifier):
-            return self._mangle_name(expr.name)
+            return [], self._mangle_name(expr.name)
 
         elif isinstance(expr, BinaryOp):
-            return self._compile_binary_op(expr)
+            return self._compile_binary_op_to_stmt(expr)
 
         elif isinstance(expr, UnaryOp):
-            return self._compile_unary_op(expr)
+            return self._compile_unary_op_to_stmt(expr)
 
         elif isinstance(expr, IfExpr):
-            return self._compile_if_expr(expr)
+            return self._compile_if_expr_to_stmt(expr)
 
         elif isinstance(expr, MatchExpr):
-            return self._compile_match_expr(expr)
+            return self._compile_match_expr_to_stmt(expr)
 
         elif isinstance(expr, FnCall):
-            return self._compile_fn_call(expr)
+            return self._compile_fn_call_to_stmt(expr)
 
         elif isinstance(expr, Lambda):
-            return self._compile_lambda(expr)
+            return self._compile_lambda_to_stmt(expr)
 
         elif isinstance(expr, PipeExpr):
-            return self._compile_pipe_expr(expr)
+            return self._compile_pipe_expr_to_stmt(expr)
 
         elif isinstance(expr, LetBinding):
-            return self._compile_let_binding_expr(expr)
+            return self._compile_let_binding_to_stmt(expr)
 
         elif isinstance(expr, MutBinding):
-            return self._compile_mut_binding_expr(expr)
+            return self._compile_mut_binding_to_stmt(expr)
 
         elif isinstance(expr, Assignment):
-            c_name = self._mangle_name(expr.name)
-            value_c = self._compile_expr(expr.value)
-            return f"({c_name} = {value_c})"
+            return self._compile_assignment_to_stmt(expr)
 
         elif isinstance(expr, Block):
-            return self._compile_block(expr)
+            return self._compile_block_to_stmt(expr)
 
         elif isinstance(expr, ListExpr):
-            return self._compile_list_expr(expr)
+            return self._compile_list_expr_to_stmt(expr)
 
         elif isinstance(expr, ListComprehension):
-            return self._compile_list_comprehension(expr)
+            return self._compile_list_comprehension_to_stmt(expr)
 
         elif isinstance(expr, TupleExpr):
-            return self._compile_tuple_expr(expr)
+            return self._compile_tuple_expr_to_stmt(expr)
 
         elif isinstance(expr, MapExpr):
-            return self._compile_map_expr(expr)
+            return self._compile_map_expr_to_stmt(expr)
 
         elif isinstance(expr, FieldAccess):
-            return self._compile_field_access(expr)
+            return self._compile_field_access_to_stmt(expr)
 
         elif isinstance(expr, ForExpr):
-            return self._compile_for_expr(expr)
+            return self._compile_for_expr_to_stmt(expr)
 
         elif isinstance(expr, WhileExpr):
-            return self._compile_while_expr(expr)
+            return self._compile_while_expr_to_stmt(expr)
 
         elif isinstance(expr, BreakExpr):
-            return "break"
+            return [], "break"
 
         elif isinstance(expr, ContinueExpr):
-            return "continue"
+            return [], "continue"
 
         elif isinstance(expr, TryExpr):
-            return self._compile_expr(expr.expr)
+            return self._compile_expr_to_stmt(expr.expr)
 
-        elif isinstance(expr, (ImportDecl, ExportDecl)):
-            return ""
-
-        elif isinstance(expr, TypeDef):
-            return ""
-
-        elif isinstance(expr, AliasDef):
-            return ""
+        elif isinstance(expr, (ImportDecl, ExportDecl, TypeDef, AliasDef)):
+            return [], ""
 
         elif isinstance(expr, FnDef):
-            # 嵌套函数定义——生成闭包
-            return self._compile_nested_fn_def(expr)
+            return self._compile_nested_fn_def_to_stmt(expr)
 
         else:
-            return f"/* unhandled: {type(expr).__name__} */"
+            return [], f"/* unhandled: {type(expr).__name__} */"
 
-    # ----------------------------------------------------------
-    # 字面量和基本表达式
-    # ----------------------------------------------------------
+    def _compile_expr(self, expr) -> str:
+        """向后兼容的包装：返回 C 表达式字符串
 
-    def _compile_binary_op(self, expr: BinaryOp) -> str:
+        对于需要语句设置的复合表达式，返回 GNU 语句表达式 ({ ... })
+        """
+        setup, result = self._compile_expr_to_stmt(expr)
+        if not setup:
+            return result
+        lines = ["({"]
+        for line in setup:
+            lines.append(f"    {line}")
+        lines.append(f"    {result};")
+        lines.append(f"}})")
+        return "\n".join(lines)
+
+    def _compile_binary_op_to_stmt(self, expr: BinaryOp):
         """编译二元操作"""
-        left_c = self._compile_expr(expr.left)
-        right_c = self._compile_expr(expr.right)
+        left_setup, left_c = self._compile_expr_to_stmt(expr.left)
+        right_setup, right_c = self._compile_expr_to_stmt(expr.right)
+        setup = left_setup + right_setup
 
         if expr.op == "++":
-            # 字符串拼接
-            return f"nova_string_concat({left_c}, {right_c})"
+            return setup, f"nova_string_concat({left_c}, {right_c})"
 
-        # 普通二元操作符
         op_map = {
             "+": "+", "-": "-", "*": "*", "/": "/",
             "%": "%", "==": "==", "!=": "!=",
@@ -531,68 +564,84 @@ class CCodeGen:
             "&&": "&&", "||": "||",
         }
         c_op = op_map.get(expr.op, expr.op)
-        return f"({left_c} {c_op} {right_c})"
+        return setup, f"({left_c} {c_op} {right_c})"
 
-    def _compile_unary_op(self, expr: UnaryOp) -> str:
+    def _compile_unary_op_to_stmt(self, expr: UnaryOp):
         """编译一元操作"""
-        operand_c = self._compile_expr(expr.operand)
+        setup, operand_c = self._compile_expr_to_stmt(expr.operand)
         if expr.op == "-":
-            return f"(-{operand_c})"
+            return setup, f"(-{operand_c})"
         elif expr.op == "!":
-            return f"(!{operand_c})"
-        return f"({expr.op}{operand_c})"
+            return setup, f"(!{operand_c})"
+        return setup, f"({expr.op}{operand_c})"
 
-    def _compile_if_expr(self, expr: IfExpr) -> str:
+    def _compile_if_expr_to_stmt(self, expr: IfExpr):
         """编译 if-then-else 表达式"""
-        cond_c = self._compile_expr(expr.condition)
+        cond_setup, cond_c = self._compile_expr_to_stmt(expr.condition)
 
         if expr.else_branch is not None:
-            then_c = self._compile_expr(expr.then_branch)
-            else_c = self._compile_expr(expr.else_branch)
-            # 使用三元运算符
-            return f"({cond_c} ? {then_c} : {else_c})"
+            then_setup, then_c = self._compile_expr_to_stmt(expr.then_branch)
+            else_setup, else_c = self._compile_expr_to_stmt(expr.else_branch)
+
+            if then_setup or else_setup:
+                tmp = self._new_temp()
+                result_type = self._infer_c_type_from_expr(expr.then_branch)
+                setup = cond_setup
+                setup.append(f"{result_type} {tmp};")
+                setup.append(f"if ({cond_c}) {{")
+                for line in then_setup:
+                    setup.append(f"    {line}")
+                setup.append(f"    {tmp} = {then_c};")
+                setup.append(f"}} else {{")
+                for line in else_setup:
+                    setup.append(f"    {line}")
+                setup.append(f"    {tmp} = {else_c};")
+                setup.append(f"}}")
+                return setup, tmp
+            else:
+                return cond_setup, f"({cond_c} ? {then_c} : {else_c})"
         else:
-            # 无 else 分支：生成 if 语句块字符串
-            then_c = self._compile_expr(expr.then_branch)
-            lines = []
-            lines.append(f"if ({cond_c}) {{")
-            lines.append(f"    {then_c};")
-            lines.append(f"}}")
-            return "\n".join(lines)
+            then_setup, then_c = self._compile_expr_to_stmt(expr.then_branch)
+            setup = cond_setup
+            setup.append(f"if ({cond_c}) {{")
+            for line in then_setup:
+                setup.append(f"    {line}")
+            setup.append(f"    {then_c};")
+            setup.append(f"}}")
+            return setup, ""
 
-    def _compile_match_expr(self, expr: MatchExpr) -> str:
+    def _compile_match_expr_to_stmt(self, expr: MatchExpr):
         """编译 match 表达式为 if-else 链"""
-        subject_c = self._compile_expr(expr.subject)
-        subject_tmp = self._new_temp()
-
-        lines = []
-        lines.append(f"{{")
-        lines.append(f"    {self._infer_c_type_from_expr(expr.subject)} {subject_tmp} = {subject_c};")
+        subject_setup, subject_c = self._compile_expr_to_stmt(expr.subject)
+        setup = subject_setup
+        tmp = self._new_temp()
+        result_type = "int64_t"
+        if expr.arms:
+            result_type = self._infer_c_type_from_expr(expr.arms[0].body)
+        setup.append(f"{result_type} {tmp};")
 
         for i, arm in enumerate(expr.arms):
-            pattern_c, bindings = self._compile_pattern(arm.pattern, subject_tmp, expr)
-
-            # 生成条件
-            lines.append(f"    {'if' if i == 0 else '} else if'} ({pattern_c}) {{")
-
-            # 绑定变量
+            pattern_c, bindings = self._compile_pattern(arm.pattern, subject_c, expr)
+            prefix = "if" if i == 0 else "} else if"
+            setup.append(f"{prefix} ({pattern_c}) {{")
             for bind_name, bind_expr in bindings:
                 c_name = self._mangle_name(bind_name)
-                lines.append(f"        {self._infer_c_type_from_expr(expr.subject)} {c_name} = {bind_expr};")
-
-            # 分支体
-            body_c = self._compile_expr(arm.body)
+                bind_type = self._infer_c_type_from_expr(expr.subject)
+                setup.append(f"    {bind_type} {c_name} = {bind_expr};")
+            body_setup, body_c = self._compile_expr_to_stmt(arm.body)
+            for line in body_setup:
+                setup.append(f"    {line}")
             if arm.guard:
-                guard_c = self._compile_expr(arm.guard)
-                lines.append(f"        if ({guard_c}) {{ {body_c}; }}")
+                guard_setup, guard_c = self._compile_expr_to_stmt(arm.guard)
+                for line in guard_setup:
+                    setup.append(f"    {line}")
+                setup.append(f"    if ({guard_c}) {{ {tmp} = {body_c}; }}")
             else:
-                lines.append(f"        {body_c};")
+                setup.append(f"    {tmp} = {body_c};")
 
-            lines.append(f"    }}")
-
-        lines.append(f"}}")
-
-        return "\n".join(lines)
+        if expr.arms:
+            setup.append(f"}}")
+        return setup, tmp
 
     def _compile_pattern(self, pattern, subject_var: str, match_expr: MatchExpr) -> Tuple[str, List[Tuple[str, str]]]:
         """编译模式，返回 (条件字符串, 绑定列表 [(name, c_expr)])"""
@@ -663,77 +712,83 @@ class CCodeGen:
                     return adt_name
         return "Unknown"
 
-    def _compile_fn_call(self, expr: FnCall) -> str:
+    def _compile_fn_call_to_stmt(self, expr: FnCall):
         """编译函数调用"""
-        # 检查是否是 ADT 构造器调用
+        all_setup = []
+        args_c = []
+        for arg in expr.args:
+            setup, arg_c = self._compile_expr_to_stmt(arg)
+            all_setup.extend(setup)
+            args_c.append(arg_c)
+
+        callee_setup, callee_c = self._compile_expr_to_stmt(expr.callee)
+        all_setup.extend(callee_setup)
+
         if isinstance(expr.callee, Identifier):
             callee_name = expr.callee.name
-            # 检查是否是 ADT 构造器
             adt_name = self._find_adt_name(callee_name)
             if adt_name != "Unknown" and callee_name in [v[0] for v in self.adt_info.get(adt_name, [])]:
-                return self._compile_adt_constructor(adt_name, callee_name, expr.args)
+                adt_setup, adt_expr = self._compile_adt_constructor_to_stmt(adt_name, callee_name, expr.args)
+                return all_setup + adt_setup, adt_expr
 
-            # 内置函数特殊处理
             if callee_name == "print":
                 if expr.args:
-                    arg_c = self._compile_expr(expr.args[0])
-                    return f"nova_print({arg_c})"
-                return "((void)0)"
+                    return all_setup, f"nova_print({args_c[0]})"
+                return all_setup, "((void)0)"
 
             if callee_name == "println":
                 if expr.args:
-                    arg_c = self._compile_expr(expr.args[0])
-                    return f"nova_println({arg_c})"
-                return 'nova_print(nova_string_new("\\n"))'
+                    return all_setup, f"nova_println({args_c[0]})"
+                return all_setup, 'nova_print(nova_string_new("\\n"))'
 
             if callee_name == "int_to_str":
-                arg_c = self._compile_expr(expr.args[0])
-                return f"nova_int_to_string({arg_c})"
+                if expr.args:
+                    return all_setup, f"nova_string_from_int({args_c[0]})"
+                return all_setup, "((void)0)"
 
             if callee_name == "float_to_str":
-                arg_c = self._compile_expr(expr.args[0])
-                return f"nova_float_to_string({arg_c})"
+                if expr.args:
+                    return all_setup, f"nova_string_from_float({args_c[0]})"
+                return all_setup, "((void)0)"
 
             if callee_name == "str_len":
-                arg_c = self._compile_expr(expr.args[0])
-                return f"nova_string_length({arg_c})"
+                if expr.args:
+                    return all_setup, f"nova_string_length({args_c[0]})"
+                return all_setup, "((int64_t)0)"
 
             if callee_name == "list_length":
-                arg_c = self._compile_expr(expr.args[0])
-                return f"nova_list_length({arg_c})"
+                if expr.args:
+                    return all_setup, f"nova_list_length({args_c[0]})"
+                return all_setup, "((int64_t)0)"
 
             if callee_name == "filter":
                 if len(expr.args) == 2:
-                    fn_arg = self._compile_expr(expr.args[0])
-                    list_arg = self._compile_expr(expr.args[1])
-                    return f"nova_list_filter({list_arg}, {fn_arg})"
+                    return all_setup, f"nova_list_filter({args_c[1]}, {args_c[0]})"
 
             if callee_name == "map":
                 if len(expr.args) == 2:
-                    fn_arg = self._compile_expr(expr.args[0])
-                    list_arg = self._compile_expr(expr.args[1])
-                    return f"nova_list_map({list_arg}, {fn_arg})"
+                    return all_setup, f"nova_list_map({args_c[1]}, {args_c[0]})"
 
             if callee_name == "sum":
-                arg_c = self._compile_expr(expr.args[0])
-                return f"nova_list_sum({arg_c})"
+                if expr.args:
+                    return all_setup, f"nova_list_sum({args_c[0]})"
 
             if callee_name == "head":
-                arg_c = self._compile_expr(expr.args[0])
-                return f"nova_list_head({arg_c})"
+                if expr.args:
+                    return all_setup, f"nova_list_head({args_c[0]})"
 
             if callee_name == "tail":
-                arg_c = self._compile_expr(expr.args[0])
-                return f"nova_list_tail({arg_c})"
+                if expr.args:
+                    return all_setup, f"nova_list_tail({args_c[0]})"
 
             if callee_name == "read_line":
-                return "nova_read_line()"
+                return all_setup, "nova_read_line()"
 
             if callee_name == "str_to_int":
-                arg_c = self._compile_expr(expr.args[0])
-                return f"nova_str_to_int({arg_c})"
+                if expr.args:
+                    return all_setup, f"nova_str_to_int({args_c[0]})"
+                return all_setup, "((int64_t)0)"
 
-            # 数学内置函数
             math_builtins = {
                 "abs": "nova_abs", "sqrt": "nova_sqrt", "pow": "nova_pow",
                 "log": "nova_log", "log10": "nova_log10", "exp": "nova_exp",
@@ -742,13 +797,11 @@ class CCodeGen:
                 "min": "nova_min", "max": "nova_max",
             }
             if callee_name in math_builtins:
-                args_c = ", ".join(self._compile_expr(a) for a in expr.args)
-                return f"{math_builtins[callee_name]}({args_c})"
+                return all_setup, f"{math_builtins[callee_name]}({', '.join(args_c)})"
 
             if callee_name == "pi":
-                return "nova_pi()"
+                return all_setup, "nova_pi()"
 
-            # I/O 内置函数
             io_builtins = {
                 "read_file": "nova_read_file",
                 "write_file": "nova_write_file",
@@ -758,24 +811,19 @@ class CCodeGen:
                 "json_stringify": "nova_json_stringify",
             }
             if callee_name in io_builtins:
-                args_c = ", ".join(self._compile_expr(a) for a in expr.args)
-                return f"{io_builtins[callee_name]}({args_c})"
+                return all_setup, f"{io_builtins[callee_name]}({', '.join(args_c)})"
 
-        # 普通函数调用
-        callee_c = self._compile_expr(expr.callee)
-        args_c = ", ".join(self._compile_expr(a) for a in expr.args)
-
-        # 如果 callee 是变量（可能是闭包），使用 nova_closure_call
-        if isinstance(expr.callee, Identifier):
-            # 使用函数名转换（nova_fn_ 前缀）
             c_name = self._mangle_fn_name(expr.callee.name)
-            return f"{c_name}({args_c})"
+            return all_setup, f"{c_name}({', '.join(args_c)})"
 
-        return f"{callee_c}({args_c})"
+        return all_setup, f"{callee_c}({', '.join(args_c)})"
 
-    def _compile_adt_constructor(self, adt_name: str, variant_name: str, args: list) -> str:
+    def _compile_adt_constructor_to_stmt(self, adt_name: str, variant_name: str, args: list):
         """编译 ADT 构造器调用"""
-        # 构造器查找对应字段信息
+        setup = []
+        lines = [f"({{"]
+        lines.append(f"    .tag = NOVA_ADT_{adt_name}_{variant_name},")
+
         variants_info = self.adt_info.get(adt_name, [])
         field_info = None
         for vname, fnames in variants_info:
@@ -783,28 +831,19 @@ class CCodeGen:
                 field_info = fnames
                 break
 
-        lines = [f"({{"]
-        lines.append(f"    .tag = NOVA_ADT_{adt_name}_{variant_name},")
-
         if field_info and args:
-            field_types = self.adt_field_types.get(adt_name, {}).get(variant_name, [])
             for i, arg in enumerate(args):
-                arg_c = self._compile_expr(arg)
+                arg_setup, arg_c = self._compile_expr_to_stmt(arg)
+                setup.extend(arg_setup)
                 field_cname = f"{variant_name}__field{i}"
                 lines.append(f"    .{field_cname} = {arg_c},")
 
         lines.append(f"}})")
-        return "\n".join(lines)
+        return setup, "\n".join(lines)
 
-    def _compile_lambda(self, expr: Lambda) -> str:
+    def _compile_lambda_to_stmt(self, expr: Lambda):
         """编译 Lambda 为闭包创建"""
-        # 生成闭包结构
-        lines = ["nova_closure_new("]
-        lines.append("    /* capture_count */ 0,")
-
-        # 生成 lambda 函数体为独立的 C 函数
         lambda_fn_name = self._new_temp()
-        self.indent_level = 0
         ret_type = "int64_t"
         if expr.return_type:
             ret_type = self._c_type_from_type_expr(expr.return_type)
@@ -815,250 +854,248 @@ class CCodeGen:
             params_str = "void* _nova_closure_env, " + ", ".join(param_parts)
 
         self.functions.append(f"/* lambda */ {ret_type} nova_lambda_{lambda_fn_name}({params_str});")
-        lines.append(f"    nova_lambda_{lambda_fn_name},")
-        lines.append(f"    NULL /* env */")
-        lines.append(f")")
 
-        # 生成实际的 lambda 函数
         fn_lines = [f"{ret_type} nova_lambda_{lambda_fn_name}({params_str}) {{"]
         fn_lines.append(f"    (void)_nova_closure_env;")
         if isinstance(expr.body, Block):
-            # 编译块中的语句（不包含尾表达式，尾表达式单独处理）
-            old_indent = self.indent_level
-            self.indent_level = 1
             for stmt in expr.body.statements:
-                stmt_c = self._compile_expr(stmt)
-                fn_lines.append(self._indent_str(stmt_c))
-            # 处理尾表达式
+                stmt_setup, stmt_expr = self._compile_expr_to_stmt(stmt)
+                for line in stmt_setup:
+                    fn_lines.append(f"    {line}")
+                if stmt_expr:
+                    fn_lines.append(f"    {stmt_expr};")
             if expr.body.tail_expression:
-                tail_c = self._compile_expr(expr.body.tail_expression)
-                fn_lines.append(self._indent_str(f"return {tail_c};"))
-            self.indent_level = old_indent
+                tail_setup, tail_expr = self._compile_expr_to_stmt(expr.body.tail_expression)
+                for line in tail_setup:
+                    fn_lines.append(f"    {line}")
+                fn_lines.append(f"    return {tail_expr};")
         else:
-            body_c = self._compile_expr(expr.body)
-            fn_lines.append(f"    return {body_c};")
+            body_setup, body_expr = self._compile_expr_to_stmt(expr.body)
+            for line in body_setup:
+                fn_lines.append(f"    {line}")
+            fn_lines.append(f"    return {body_expr};")
         fn_lines.append(f"}}")
         self.functions.append("\n".join(fn_lines))
 
-        return "\n".join(lines)
+        return [], f"nova_closure_new(nova_lambda_{lambda_fn_name}, NULL, 0)"
 
-    def _compile_nested_fn_def(self, fndef: FnDef) -> str:
+    def _compile_nested_fn_def_to_stmt(self, fndef: FnDef):
         """编译嵌套函数定义为闭包"""
-        return self._compile_lambda(Lambda(
+        return self._compile_lambda_to_stmt(Lambda(
             params=fndef.params,
             return_type=fndef.return_type,
             body=fndef.body,
         ))
 
-    def _compile_pipe_expr(self, expr: PipeExpr) -> str:
-        """编译管道表达式：left |> right → right(left)"""
-        left_c = self._compile_expr(expr.left)
+    def _compile_pipe_expr_to_stmt(self, expr: PipeExpr):
+        """编译管道表达式：left |> right -> right(left)"""
+        left_setup, left_c = self._compile_expr_to_stmt(expr.left)
 
         if isinstance(expr.right, FnCall):
-            callee = expr.right.callee
             args = [expr.left] + expr.right.args
-            new_call = FnCall(callee=callee, args=args, span=expr.right.span)
-            return self._compile_fn_call(new_call)
+            new_call = FnCall(callee=expr.right.callee, args=args, span=expr.right.span)
+            return self._compile_fn_call_to_stmt(new_call)
         elif isinstance(expr.right, Identifier):
-            # 直接函数引用
-            return f"{self._mangle_name(expr.right.name)}({left_c})"
+            return left_setup, f"{self._mangle_name(expr.right.name)}({left_c})"
         else:
-            # 右侧是 lambda 或其他表达式
-            right_c = self._compile_expr(expr.right)
-            return f"nova_closure_call({right_c}, {left_c})"
+            right_setup, right_c = self._compile_expr_to_stmt(expr.right)
+            return left_setup + right_setup, f"nova_closure_call({right_c}, {left_c})"
 
-    def _compile_let_binding_expr(self, expr: LetBinding) -> str:
+    def _compile_let_binding_to_stmt(self, expr: LetBinding):
         """编译块内的 let 绑定"""
         c_name = self._mangle_name(expr.name)
-        value_c = self._compile_expr(expr.value)
-        lines = []
-        # 推断 C 类型
+        value_setup, value_c = self._compile_expr_to_stmt(expr.value)
         c_type = self._infer_c_type_from_expr(expr.value)
-        lines.append(f"{c_type} {c_name} = {value_c};")
-        return "\n".join(lines)
+        return value_setup + [f"{c_type} {c_name} = {value_c};"], ""
 
-    def _compile_mut_binding_expr(self, expr: MutBinding) -> str:
+    def _compile_mut_binding_to_stmt(self, expr: MutBinding):
         """编译块内的 mut 绑定"""
         c_name = self._mangle_name(expr.name)
-        value_c = self._compile_expr(expr.value)
+        value_setup, value_c = self._compile_expr_to_stmt(expr.value)
         c_type = self._infer_c_type_from_expr(expr.value)
-        return f"{c_type} {c_name} = {value_c};"
+        return value_setup + [f"{c_type} {c_name} = {value_c};"], ""
 
-    def _compile_block(self, block: Block) -> str:
+    def _compile_assignment_to_stmt(self, expr: Assignment):
+        """编译赋值"""
+        c_name = self._mangle_name(expr.name)
+        value_setup, value_c = self._compile_expr_to_stmt(expr.value)
+        return value_setup + [f"{c_name} = {value_c};"], ""
+
+    def _compile_block_to_stmt(self, block: Block):
         """编译代码块"""
-        lines = ["{"]
-        old_indent = self.indent_level
-        self.indent_level = 1
-
+        setup = []
         for stmt in block.statements:
-            stmt_c = self._compile_expr(stmt)
-            lines.append(self._indent_str(stmt_c))
-
+            stmt_setup, stmt_expr = self._compile_expr_to_stmt(stmt)
+            setup.extend(stmt_setup)
+            if stmt_expr:
+                setup.append(f"{stmt_expr};")
         if block.tail_expression:
-            tail_c = self._compile_expr(block.tail_expression)
-            lines.append(self._indent_str(f"/* tail: */ {tail_c};"))
+            tail_setup, tail_expr = self._compile_expr_to_stmt(block.tail_expression)
+            setup.extend(tail_setup)
+            return setup, tail_expr
+        return setup, ""
 
-        self.indent_level = old_indent
-        lines.append("}")
-        return "\n".join(lines)
-
-    def _compile_list_expr(self, expr: ListExpr) -> str:
+    def _compile_list_expr_to_stmt(self, expr: ListExpr):
         """编译列表表达式"""
         tmp = self._new_temp()
-        lines = [f"{{"]
-        lines.append(f"    NovaList* {tmp} = nova_list_new();")
+        setup = [f"NovaList* {tmp} = nova_list_new(8);"]
         for elem in expr.elements:
-            elem_c = self._compile_expr(elem)
-            lines.append(f"    nova_list_push({tmp}, (void*)(intptr_t){elem_c});")
-        lines.append(f"    {tmp}")
-        lines.append(f"}}")
-        return "\n".join(lines)
+            elem_setup, elem_c = self._compile_expr_to_stmt(elem)
+            setup.extend(elem_setup)
+            setup.append(f"nova_list_push({tmp}, (void*)(intptr_t){elem_c});")
+        return setup, tmp
 
-    def _compile_list_comprehension(self, expr: ListComprehension) -> str:
+    def _compile_list_comprehension_to_stmt(self, expr: ListComprehension):
         """编译列表推导式"""
         result_var = self._new_temp()
         var_name = self._mangle_name(expr.var_name)
         iterable = expr.iterable
-
-        lines = [f"{{"]
-        lines.append(f"    NovaList* {result_var} = nova_list_new();")
+        setup = [f"NovaList* {result_var} = nova_list_new(8);"]
 
         if isinstance(iterable, tuple) and iterable[0] == "range":
-            # 范围推导式
-            start_c = self._compile_expr(iterable[1])
-            end_c = self._compile_expr(iterable[2])
+            start_setup, start_c = self._compile_expr_to_stmt(iterable[1])
+            end_setup, end_c = self._compile_expr_to_stmt(iterable[2])
+            setup.extend(start_setup)
+            setup.extend(end_setup)
             idx_var = self._new_temp()
-            lines.append(f"    for (int64_t {idx_var} = {start_c}; {idx_var} < {end_c}; {idx_var}++) {{")
-            lines.append(f"        int64_t {var_name} = {idx_var};")
-
-            # 可选过滤条件
-            if expr.filter_cond:
-                filter_c = self._compile_expr(expr.filter_cond)
-                lines.append(f"        if ({filter_c}) {{")
-
-            elem_c = self._compile_expr(expr.expr)
-            lines.append(f"            nova_list_push({result_var}, (void*)(intptr_t){elem_c});")
-
-            if expr.filter_cond:
-                lines.append(f"        }}")
-
-            lines.append(f"    }}")
+            step_c = "1"
+            if iterable[3]:
+                step_setup, step_c = self._compile_expr_to_stmt(iterable[3])
+                setup.extend(step_setup)
+            setup.append(f"for (int64_t {idx_var} = {start_c}; {idx_var} < {end_c}; {idx_var} += {step_c}) {{")
+            setup.append(f"    int64_t {var_name} = {idx_var};")
         else:
-            # 列表遍历推导式
-            list_c = self._compile_expr(iterable)
+            list_setup, list_c = self._compile_expr_to_stmt(iterable)
+            setup.extend(list_setup)
             list_var = self._new_temp()
             idx_var = self._new_temp()
-            lines.append(f"    NovaList* {list_var} = {list_c};")
-            lines.append(f"    int64_t {self._new_temp()} = nova_list_length({list_var});")
-            lines.append(f"    for (int64_t {idx_var} = 0; {idx_var} < nova_list_length({list_var}); {idx_var}++) {{")
-            lines.append(f"        int64_t {var_name} = (int64_t)(intptr_t)nova_list_get({list_var}, {idx_var});")
+            setup.append(f"NovaList* {list_var} = {list_c};")
+            setup.append(f"for (int64_t {idx_var} = 0; {idx_var} < nova_list_length({list_var}); {idx_var}++) {{")
+            setup.append(f"    int64_t {var_name} = (int64_t)(intptr_t)nova_list_get({list_var}, {idx_var});")
 
-            if expr.filter_cond:
-                filter_c = self._compile_expr(expr.filter_cond)
-                lines.append(f"        if ({filter_c}) {{")
+        if expr.filter_cond:
+            filter_setup, filter_c = self._compile_expr_to_stmt(expr.filter_cond)
+            setup.extend([f"    {line}" for line in filter_setup])
+            setup.append(f"    if ({filter_c}) {{")
+            elem_setup, elem_c = self._compile_expr_to_stmt(expr.expr)
+            setup.extend([f"        {line}" for line in elem_setup])
+            setup.append(f"        nova_list_push({result_var}, (void*)(intptr_t){elem_c});")
+            setup.append(f"    }}")
+        else:
+            elem_setup, elem_c = self._compile_expr_to_stmt(expr.expr)
+            setup.extend([f"    {line}" for line in elem_setup])
+            setup.append(f"    nova_list_push({result_var}, (void*)(intptr_t){elem_c});")
 
-            elem_c = self._compile_expr(expr.expr)
-            lines.append(f"            nova_list_push({result_var}, (void*)(intptr_t){elem_c});")
+        setup.append(f"}}")
+        return setup, result_var
 
-            if expr.filter_cond:
-                lines.append(f"        }}")
-
-            lines.append(f"    }}")
-
-        lines.append(f"    {result_var}")
-        lines.append(f"}}")
-        return "\n".join(lines)
-
-    def _compile_tuple_expr(self, expr: TupleExpr) -> str:
+    def _compile_tuple_expr_to_stmt(self, expr: TupleExpr):
         """编译元组表达式"""
-        # 元组在 C 中使用索引字段的结构体
         elem_count = len(expr.elements)
         tmp = self._new_temp()
-        lines = [f"{{"]
-
-        # 使用 void* 数组表示元组
-        lines.append(f"    void* {tmp}[{elem_count}];")
+        setup = [f"void* {tmp}[{elem_count}];"]
         for i, elem in enumerate(expr.elements):
-            elem_c = self._compile_expr(elem)
-            lines.append(f"    {tmp}[{i}] = (void*)(intptr_t){elem_c};")
+            elem_setup, elem_c = self._compile_expr_to_stmt(elem)
+            setup.extend(elem_setup)
+            setup.append(f"{tmp}[{i}] = (void*)(intptr_t){elem_c};")
+        return setup, f"nova_tuple_new({tmp}, {elem_count})"
 
-        # 返回一个标记为元组的指针（简化实现）
-        lines.append(f"    nova_tuple_new({tmp}, {elem_count})")
-        lines.append(f"}}")
-        return "\n".join(lines)
-
-    def _compile_map_expr(self, expr: MapExpr) -> str:
+    def _compile_map_expr_to_stmt(self, expr: MapExpr):
         """编译 Map 表达式"""
         tmp = self._new_temp()
-        lines = [f"{{"]
-        lines.append(f"    NovaMap* {tmp} = nova_map_new();")
+        setup = [f"NovaMap* {tmp} = nova_map_new(16);"]
         for key_expr, val_expr in expr.pairs:
-            key_c = self._compile_expr(key_expr)
-            val_c = self._compile_expr(val_expr)
-            lines.append(f"    nova_map_set({tmp}, (void*)(intptr_t){key_c}, (void*)(intptr_t){val_c});")
-        lines.append(f"    {tmp}")
-        lines.append(f"}}")
-        return "\n".join(lines)
+            key_setup, key_c = self._compile_expr_to_stmt(key_expr)
+            val_setup, val_c = self._compile_expr_to_stmt(val_expr)
+            setup.extend(key_setup)
+            setup.extend(val_setup)
+            setup.append(f"nova_map_put({tmp}, (void*)(intptr_t){key_c}, (void*)(intptr_t){val_c});")
+        return setup, tmp
 
-    def _compile_field_access(self, expr: FieldAccess) -> str:
+    def _compile_field_access_to_stmt(self, expr: FieldAccess):
         """编译字段访问"""
-        target_c = self._compile_expr(expr.target)
+        setup, target_c = self._compile_expr_to_stmt(expr.target)
         try:
             idx = int(expr.field)
-            return f"nova_tuple_get({target_c}, {idx})"
+            return setup, f"nova_tuple_get({target_c}, {idx})"
         except ValueError:
-            # 结构体字段访问
-            return f"{target_c}.{expr.field}"
+            return setup, f"{target_c}.{expr.field}"
 
-    def _compile_for_expr(self, expr: ForExpr) -> str:
+    def _compile_for_expr_to_stmt(self, expr: ForExpr):
         """编译 for 循环表达式（返回列表）"""
         result_var = self._new_temp()
         var_name = self._mangle_name(expr.var_name)
         iterable = expr.iterable
-
-        lines = [f"{{"]
-        lines.append(f"    NovaList* {result_var} = nova_list_new();")
+        setup = [f"NovaList* {result_var} = nova_list_new(8);"]
 
         if isinstance(iterable, tuple) and iterable[0] == "range":
-            start_c = self._compile_expr(iterable[1])
-            end_c = self._compile_expr(iterable[2])
-            step_c = self._compile_expr(iterable[3]) if iterable[3] else "1"
+            start_setup, start_c = self._compile_expr_to_stmt(iterable[1])
+            end_setup, end_c = self._compile_expr_to_stmt(iterable[2])
+            setup.extend(start_setup)
+            setup.extend(end_setup)
             idx_var = self._new_temp()
-            lines.append(f"    for (int64_t {idx_var} = {start_c}; {idx_var} < {end_c}; {idx_var} += {step_c}) {{")
-            lines.append(f"        int64_t {var_name} = {idx_var};")
+            step_c = "1"
+            if iterable[3]:
+                step_setup, step_c = self._compile_expr_to_stmt(iterable[3])
+                setup.extend(step_setup)
+            setup.append(f"for (int64_t {idx_var} = {start_c}; {idx_var} < {end_c}; {idx_var} += {step_c}) {{")
+            setup.append(f"    int64_t {var_name} = {idx_var};")
         else:
-            list_c = self._compile_expr(iterable)
+            list_setup, list_c = self._compile_expr_to_stmt(iterable)
+            setup.extend(list_setup)
             list_var = self._new_temp()
             idx_var = self._new_temp()
-            lines.append(f"    NovaList* {list_var} = {list_c};")
-            lines.append(f"    for (int64_t {idx_var} = 0; {idx_var} < nova_list_length({list_var}); {idx_var}++) {{")
-            lines.append(f"        int64_t {var_name} = (int64_t)(intptr_t)nova_list_get({list_var}, {idx_var});")
+            setup.append(f"NovaList* {list_var} = {list_c};")
+            setup.append(f"for (int64_t {idx_var} = 0; {idx_var} < nova_list_length({list_var}); {idx_var}++) {{")
+            setup.append(f"    int64_t {var_name} = (int64_t)(intptr_t)nova_list_get({list_var}, {idx_var});")
 
-        body_c = self._compile_expr(expr.body)
-        lines.append(f"        nova_list_push({result_var}, (void*)(intptr_t){body_c});")
-        lines.append(f"    }}")
-        lines.append(f"    {result_var}")
-        lines.append(f"}}")
-        return "\n".join(lines)
-
-    def _compile_while_expr(self, expr: WhileExpr) -> str:
-        """编译 while 循环"""
-        cond_c = self._compile_expr(expr.condition)
-        lines = [f"{{"]
-        lines.append(f"    while ({cond_c}) {{")
-        body_c = self._compile_expr(expr.body)
         if isinstance(expr.body, Block):
-            for body_line in body_c.split("\n"):
-                lines.append(f"    {body_line}")
+            for stmt in expr.body.statements:
+                stmt_setup, stmt_expr = self._compile_expr_to_stmt(stmt)
+                for line in stmt_setup:
+                    setup.append(f"    {line}")
+                if stmt_expr and not isinstance(stmt, (LetBinding, MutBinding, Assignment, ForExpr, WhileExpr)):
+                    setup.append(f"    {stmt_expr};")
+            if expr.body.tail_expression:
+                tail_setup, tail_expr = self._compile_expr_to_stmt(expr.body.tail_expression)
+                for line in tail_setup:
+                    setup.append(f"    {line}")
+                setup.append(f"    nova_list_push({result_var}, (void*)(intptr_t){tail_expr});")
         else:
-            lines.append(f"        {body_c};")
-        lines.append(f"    }}")
-        lines.append(f"}}")
-        return "\n".join(lines)
+            body_setup, body_expr = self._compile_expr_to_stmt(expr.body)
+            for line in body_setup:
+                setup.append(f"    {line}")
+            setup.append(f"    nova_list_push({result_var}, (void*)(intptr_t){body_expr});")
 
-    # ----------------------------------------------------------
-    # 类型转换
-    # ----------------------------------------------------------
+        setup.append(f"}}")
+        return setup, result_var
+
+    def _compile_while_expr_to_stmt(self, expr: WhileExpr):
+        """编译 while 循环"""
+        cond_setup, cond_c = self._compile_expr_to_stmt(expr.condition)
+        setup = cond_setup
+        setup.append(f"while ({cond_c}) {{")
+
+        if isinstance(expr.body, Block):
+            for stmt in expr.body.statements:
+                stmt_setup, stmt_expr = self._compile_expr_to_stmt(stmt)
+                for line in stmt_setup:
+                    setup.append(f"    {line}")
+                if stmt_expr and not isinstance(stmt, (LetBinding, MutBinding, Assignment, ForExpr, WhileExpr)):
+                    setup.append(f"    {stmt_expr};")
+            if expr.body.tail_expression:
+                tail_setup, tail_expr = self._compile_expr_to_stmt(expr.body.tail_expression)
+                for line in tail_setup:
+                    setup.append(f"    {line}")
+                setup.append(f"    {tail_expr};")
+        else:
+            body_setup, body_expr = self._compile_expr_to_stmt(expr.body)
+            for line in body_setup:
+                setup.append(f"    {line}")
+            setup.append(f"    {body_expr};")
+
+        setup.append(f"}}")
+        return setup, ""
 
     def _c_type_from_type_expr(self, type_node) -> str:
         """将 AST 类型表达式转换为 C 类型字符串"""

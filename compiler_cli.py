@@ -140,21 +140,25 @@ class NovaCompiler:
         cc = self.c_compiler
 
         # 构建 flags
-        flags = [f"-{optimize}", "-Wall"]
+        flags = [f"-{optimize}", "-Wall", "-std=c99"]
         if self.link_runtime and os.path.isdir(self.runtime_dir):
             flags.extend(["-I", self.runtime_dir])
 
-        # 链接数学库
-        flags.extend(["-lm"])
-
+        runtime_c = os.path.join(self.runtime_dir, "nova_runtime.c") if self.runtime_dir else None
         if cc == "cl":
             # MSVC 编译器使用不同参数格式
             msvc_flags = [f"/{optimize}", "/W3"]
             if self.link_runtime and os.path.isdir(self.runtime_dir):
                 msvc_flags.extend(["/I", self.runtime_dir])
-            cmd = [cc] + msvc_flags + ["/Fe:" + output_path, c_file_path]
+            sources = [c_file_path]
+            if self.link_runtime and runtime_c and os.path.isfile(runtime_c):
+                sources.append(runtime_c)
+            cmd = [cc] + msvc_flags + ["/Fe:" + output_path] + sources
         else:
-            cmd = [cc] + flags + ["-o", output_path, c_file_path]
+            sources = [c_file_path]
+            if self.link_runtime and runtime_c and os.path.isfile(runtime_c):
+                sources.append(runtime_c)
+            cmd = [cc] + flags + ["-o", output_path] + sources + ["-lm"]
 
         if self.verbose:
             print(f"[info] 执行: {' '.join(cmd)}")

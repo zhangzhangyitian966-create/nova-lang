@@ -853,7 +853,19 @@ class BytecodeCompiler:
             self.bytecode.emit_op(Op.CONST_UNIT)
 
     def _compile_for(self, expr: ForExpr):
-        """编译 for 循环"""
+        """编译 for 循环
+
+        栈布局（非空循环）：
+            FOR_ITER 前: [iterable, result_list]
+            FOR_ITER 后: [iterable, result_list, current]
+            STORE_VAR 后: [iterable, result_list]
+            body 后:      [iterable, result_list, body_result]
+            LOOP_END 后:  [iterable, result_list]
+
+        空循环处理：
+            FOR_ITER 发现无可迭代元素时，直接跳转到 loop_end 之后，
+            此时栈上仅剩 [result_list]，LOOP_END 不会执行。
+        """
         # 确定迭代器
         if isinstance(expr.iterable, tuple) and len(expr.iterable) >= 2 and expr.iterable[0] == "range":
             self._compile_expr(expr.iterable[1])  # start
@@ -877,7 +889,7 @@ class BytecodeCompiler:
         self.bytecode.emit_op(Op.STORE_VAR, expr.var_name, False)
 
         # 此时栈: [iterable, result_list]
-        # 编译循环体
+        # 编译循环体（block 保证栈顶有值）
         self._compile_expr(expr.body)
 
         # 此时栈: [iterable, result_list, body_result]
@@ -886,9 +898,9 @@ class BytecodeCompiler:
         #           压入 [iterable, result_list]; 跳回 loop_start
         self.bytecode.emit_op(Op.LOOP_END, loop_start)
 
-        # 回填 FOR_ITER 的 fail_ip
-        end_pos = self.bytecode.current_pos()
-        self.bytecode.patch_jump(loop_start, end_pos)
+        # 回填 FOR_ITER 的 fail_ip：空循环直接跳过 LOOP_END
+        after_loop = self.bytecode.current_pos()
+        self.bytecode.patch_jump(loop_start, after_loop)
 
     def _compile_while(self, expr: WhileExpr):
         """编译 while 循环"""

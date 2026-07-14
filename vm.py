@@ -420,7 +420,8 @@ class NovaVM:
             opcode = instr.opcode
 
             if opcode == Op.RETURN:
-                # 返回栈顶值
+                # Stack: [value] -> [] (within function execution)
+                # Pop return value and return from function execution
                 result = self.stack.pop() if self.stack else UNIT
                 return result
 
@@ -459,10 +460,13 @@ class NovaVM:
             opcode = instr.opcode
 
             if opcode == Op.HALT:
+                # Stack: unchanged
+                # Halt execution of current code sequence
                 break
 
             if opcode == Op.AUTO_CALL_MAIN:
-                # 自动调用 main 在 run() 中单独处理
+                # Stack: unchanged
+                # Marker for auto-calling main (handled in run()); stop execution
                 break
 
             self._execute_instruction(instr)
@@ -478,65 +482,85 @@ class NovaVM:
 
         # === 常量与加载 ===
         if opcode == Op.CONST_INT:
+            # Stack: [] -> [value]
+            # Push integer constant onto stack
             self.stack.append(instr.operands[0])
 
         elif opcode == Op.CONST_FLOAT:
+            # Stack: [] -> [value]
+            # Push float constant onto stack
             self.stack.append(instr.operands[0])
 
         elif opcode == Op.CONST_STRING:
+            # Stack: [] -> [value]
+            # Push string constant onto stack
             self.stack.append(instr.operands[0])
 
         elif opcode == Op.CONST_BOOL:
+            # Stack: [] -> [value]
+            # Push boolean constant onto stack
             self.stack.append(instr.operands[0])
 
         elif opcode == Op.CONST_UNIT:
+            # Stack: [] -> [()]
+            # Push Unit value onto stack
             self.stack.append(UNIT)
 
         elif opcode == Op.LOAD_CONST:
+            # Stack: [] -> [constant]
+            # Load constant from constants pool by index
             idx = instr.operands[0]
             self.stack.append(self.constants[idx])
 
         elif opcode == Op.LOAD_VAR:
+            # Stack: [] -> [value]
+            # Load variable value onto stack (local first, then global)
             name = instr.operands[0]
-            # 在帧局部变量中查找
             if self.call_stack:
                 frame = self.call_stack[-1]
                 if name in frame.locals:
                     self.stack.append(frame.locals[name])
                     return
-            # 在全局变量中查找
             if name in self.globals:
                 self.stack.append(self.globals[name])
             else:
                 raise RuntimeError_(f"未定义的变量 '{name}'")
 
         elif opcode == Op.STORE_VAR:
+            # Stack: [value] -> []
+            # Pop value and store into variable (local first, then global)
             name = instr.operands[0]
             mutable = instr.operands[1]
             val = self.stack.pop()
-            # 优先存储在当前帧的局部变量中
             if self.call_stack:
                 frame = self.call_stack[-1]
                 if name in frame.locals:
                     frame.locals[name] = val
                     return
-            # 存储到全局
             self.globals[name] = val
 
         # === 运算 ===
         elif opcode == Op.ADD:
+            # Stack: [a, b] -> [a+b]
+            # Pop two values, add them, push result
             b, a = self.stack.pop(), self.stack.pop()
             self.stack.append(a + b)
 
         elif opcode == Op.SUB:
+            # Stack: [a, b] -> [a-b]
+            # Pop two values, subtract them, push result
             b, a = self.stack.pop(), self.stack.pop()
             self.stack.append(a - b)
 
         elif opcode == Op.MUL:
+            # Stack: [a, b] -> [a*b]
+            # Pop two values, multiply them, push result
             b, a = self.stack.pop(), self.stack.pop()
             self.stack.append(a * b)
 
         elif opcode == Op.DIV:
+            # Stack: [a, b] -> [a/b]
+            # Pop two values, divide them, push result
             b, a = self.stack.pop(), self.stack.pop()
             if isinstance(a, int) and isinstance(b, int):
                 if b == 0:
@@ -546,112 +570,139 @@ class NovaVM:
                 self.stack.append(a / b)
 
         elif opcode == Op.MOD:
+            # Stack: [a, b] -> [a%b]
+            # Pop two values, compute modulo, push result
             b, a = self.stack.pop(), self.stack.pop()
             self.stack.append(a % b)
 
         elif opcode == Op.NEG:
+            # Stack: [a] -> [-a]
+            # Pop value, negate it, push result
             a = self.stack.pop()
             self.stack.append(-a)
 
         elif opcode == Op.CONCAT:
+            # Stack: [a, b] -> [a++b]
+            # Pop two values, concatenate as strings, push result
             b, a = self.stack.pop(), self.stack.pop()
             self.stack.append(str(a) + str(b))
 
         elif opcode == Op.EQ:
+            # Stack: [a, b] -> [a==b]
+            # Pop two values, compare equality, push boolean result
             b, a = self.stack.pop(), self.stack.pop()
             self.stack.append(a == b)
 
         elif opcode == Op.NEQ:
+            # Stack: [a, b] -> [a!=b]
+            # Pop two values, compare inequality, push boolean result
             b, a = self.stack.pop(), self.stack.pop()
             self.stack.append(a != b)
 
         elif opcode == Op.LT:
+            # Stack: [a, b] -> [a<b]
+            # Pop two values, compare less-than, push boolean result
             b, a = self.stack.pop(), self.stack.pop()
             self.stack.append(a < b)
 
         elif opcode == Op.GT:
+            # Stack: [a, b] -> [a>b]
+            # Pop two values, compare greater-than, push boolean result
             b, a = self.stack.pop(), self.stack.pop()
             self.stack.append(a > b)
 
         elif opcode == Op.LTE:
+            # Stack: [a, b] -> [a<=b]
+            # Pop two values, compare less-than-or-equal, push boolean result
             b, a = self.stack.pop(), self.stack.pop()
             self.stack.append(a <= b)
 
         elif opcode == Op.GTE:
+            # Stack: [a, b] -> [a>=b]
+            # Pop two values, compare greater-than-or-equal, push boolean result
             b, a = self.stack.pop(), self.stack.pop()
             self.stack.append(a >= b)
 
         elif opcode == Op.AND:
-            # 在 && 编译中，POP_JUMP_IF_FALSE 已经处理了短路
-            # 这里只处理两边的求值结果
+            # Stack: [a, b] -> [a and b]
+            # Pop two boolean values, compute logical AND, push result
+            # Note: short-circuit is handled by POP_JUMP_IF_FALSE in compilation
             b, a = self.stack.pop(), self.stack.pop()
             self.stack.append(a and b)
 
         elif opcode == Op.OR:
+            # Stack: [a, b] -> [a or b]
+            # Pop two boolean values, compute logical OR, push result
             b, a = self.stack.pop(), self.stack.pop()
             self.stack.append(a or b)
 
         elif opcode == Op.NOT:
+            # Stack: [a] -> [not a]
+            # Pop boolean value, compute logical NOT, push result
             a = self.stack.pop()
             self.stack.append(not a)
 
         # === 控制流 ===
         elif opcode == Op.JUMP:
+            # Stack: unchanged
+            # Unconditional jump to target_ip
             self.ip = instr.operands[0]
 
         elif opcode == Op.JUMP_IF_FALSE:
+            # Stack: [cond] -> []
+            # Pop condition; if false, jump to target_ip
             cond = self.stack.pop()
             if not cond:
                 self.ip = instr.operands[0]
 
         elif opcode == Op.JUMP_IF_TRUE:
+            # Stack: [cond] -> []
+            # Pop condition; if true, jump to target_ip
             cond = self.stack.pop()
             if cond:
                 self.ip = instr.operands[0]
 
         elif opcode == Op.POP_JUMP_IF_FALSE:
+            # Stack: [cond] -> []
+            # Pop condition; if false, jump to target_ip
             cond = self.stack.pop()
             if not cond:
                 self.ip = instr.operands[0]
 
         elif opcode == Op.LOOP_END:
+            # Stack: [iterable, result_list, body_result] -> [iterable, result_list]
+            # Pop body_result, append it to result_list, push iterable and updated result_list,
+            # then jump back to loop_start for next iteration
             loop_start = instr.operands[0]
-            # 栈: [iterable, result_list, body_result]
+            if len(self.stack) < 3:
+                raise RuntimeError_("VM 错误: LOOP_END 需要栈上至少有 3 个值")
             body_result = self.stack.pop()
             result_list = self.stack.pop()
             iterable = self.stack.pop()
-            # 防御性检查：如果 result_list 不是 list（例如空循环从未执行过体），
-            # 则将其视为空列表
-            if not isinstance(result_list, list):
-                result_list = []
             result_list.append(body_result)
             self.stack.append(iterable)
             self.stack.append(result_list)
             self.ip = loop_start
 
         elif opcode == Op.BREAK:
-            # 跳出循环 - 清理栈并跳到循环结束
+            # Stack: [*] -> [result_list]
+            # Break out of current loop, cleaning up stack and returning result_list
             if self._for_iters:
-                # for 循环中的 break
                 loop_info = self._for_iters.pop()
                 end_ip = loop_info["end_ip"]
                 base_sp = loop_info["base_sp"]
-                # 清理迭代器索引（防止 ID 复用导致的问题）
                 iter_type = loop_info.get("iter_type")
                 iter_key = loop_info.get("iter_key")
                 if iter_type == "range" and hasattr(self, '_range_index'):
                     self._range_index.pop(iter_key, None)
                 elif iter_type == "list" and hasattr(self, '_list_index'):
                     self._list_index.pop(iter_key, None)
-                # 取出 result_list（在 base_sp + 1 的位置）
                 result_list = self.stack[base_sp + 1]
-                # 清理栈：只保留 base_sp 以下的内容
                 del self.stack[base_sp:]
-                # 将 result_list 作为最终值
                 self.stack.append(result_list)
                 self.ip = end_ip
             else:
-                # while 循环中的 break - 找到下一个 LOOP_END 后位置
+                # while loop break: scan forward to after loop end
                 while self.ip < len(self.code):
                     next_instr = self.code[self.ip]
                     if next_instr.opcode in (Op.LOOP_END, Op.CONST_UNIT):
@@ -660,24 +711,24 @@ class NovaVM:
                     self.ip += 1
 
         elif opcode == Op.CONTINUE:
+            # Stack: [iterable, result_list, ...body_values] -> [iterable, result_list]
+            # Continue to next iteration: clean body values and jump back to loop start
             if self._for_iters:
-                # for 循环中的 continue - 清理栈到 [iterable, result_list]，跳回 loop_start
                 loop_info = self._for_iters[-1]
                 base_sp = loop_info["base_sp"]
                 loop_start = loop_info["loop_start"]
-                # 清理栈中 body 产生的所有值（保留 iterable + result_list）
                 del self.stack[base_sp + 2:]
                 self.ip = loop_start
             else:
-                # while 循环中的 continue - 跳回循环开始
-                # 查找最近的 POP_JUMP_IF_FALSE 之前的 JUMP 位置
+                # while loop continue: no-op (while loops use JUMP)
                 pass
 
         # === 函数 ===
         elif opcode == Op.CLOSURE:
+            # Stack: [] -> [closure]
+            # Create a closure capturing current frame locals, push it onto stack
             func_name = instr.operands[0]
             param_count = instr.operands[1]
-            # 捕获当前帧的局部变量
             captured = {}
             if self.call_stack:
                 captured = dict(self.call_stack[-1].locals)
@@ -685,6 +736,8 @@ class NovaVM:
             self.stack.append(closure)
 
         elif opcode == Op.CALL:
+            # Stack: [fn, arg1, ..., argN] -> [result]
+            # Pop function and arguments, call function, push result
             arg_count = instr.operands[0]
             args = [self.stack.pop() for _ in range(arg_count)][::-1]
             fn = self.stack.pop()
@@ -692,10 +745,13 @@ class NovaVM:
             self.stack.append(result)
 
         elif opcode == Op.RETURN:
+            # Stack: [value] -> [] (within function execution)
+            # Pop return value; actual return is handled by _execute_function
             result = self.stack.pop() if self.stack else UNIT
-            # 由 _execute_function 处理返回
 
         elif opcode == Op.CALL_BUILTIN:
+            # Stack: [arg1, ..., argN] -> [result]
+            # Pop arguments, call builtin function, push result
             name = instr.operands[0]
             arg_count = instr.operands[1]
             args = [self.stack.pop() for _ in range(arg_count)][::-1]
@@ -707,16 +763,22 @@ class NovaVM:
 
         # === 数据结构 ===
         elif opcode == Op.BUILD_LIST:
+            # Stack: [elem1, ..., elemN] -> [list]
+            # Pop N elements, build list, push it
             count = instr.operands[0]
             elements = [self.stack.pop() for _ in range(count)][::-1]
             self.stack.append(elements)
 
         elif opcode == Op.BUILD_TUPLE:
+            # Stack: [elem1, ..., elemN] -> [tuple]
+            # Pop N elements, build tuple, push it
             count = instr.operands[0]
             elements = [self.stack.pop() for _ in range(count)][::-1]
             self.stack.append(tuple(elements))
 
         elif opcode == Op.BUILD_MAP:
+            # Stack: [key1, val1, ..., keyN, valN] -> [map]
+            # Pop N key-value pairs, build map, push it
             count = instr.operands[0]
             result = {}
             for _ in range(count):
@@ -726,22 +788,24 @@ class NovaVM:
             self.stack.append(result)
 
         elif opcode == Op.INDEX:
+            # Stack: [obj, index] -> [obj[index]]
+            # Pop object and index, push indexed value
             index = self.stack.pop()
             obj = self.stack.pop()
             self.stack.append(obj[index])
 
         elif opcode == Op.FIELD_ACCESS:
+            # Stack: [obj] -> [obj.field]
+            # Pop object, push field value (by index or name)
             field = instr.operands[0]
             obj = self.stack.pop()
             if isinstance(obj, tuple):
                 self.stack.append(obj[int(field)])
             elif isinstance(obj, NovaADTValue):
-                # 尝试索引访问
                 try:
                     idx = int(field)
                     self.stack.append(obj.fields[idx])
                 except ValueError:
-                    # 按名称访问
                     found = False
                     for i, fname in enumerate(obj.field_names):
                         if fname == field:
@@ -754,15 +818,18 @@ class NovaVM:
                 raise RuntimeError_(f"无法对值进行字段访问 '{field}'")
 
         elif opcode == Op.BUILD_RANGE:
+            # Stack: [start, end, step] -> [range_tuple]
+            # Pop start, end, step, build range tuple ("range", start, end, step)
             step = self.stack.pop()
             end = self.stack.pop()
             start = self.stack.pop()
-            # 返回范围信息: (type, start, end, step)
             self.stack.append(("range", start, end, step))
 
         elif opcode == Op.FOR_ITER:
+            # Stack: [iterable, result_list] -> [iterable, result_list, current] (has next)
+            #                           -> [result_list] (exhausted)
+            # Iterate one step; if exhausted, jump to fail_ip leaving result_list on stack
             fail_ip = instr.operands[0]
-            # 栈: [iterable, result_list]
             result_list = self.stack.pop()
             iter_val = self.stack.pop()
 
@@ -845,39 +912,51 @@ class NovaVM:
 
         # === 模式匹配 ===
         elif opcode == Op.MATCH_START:
+            # Stack: unchanged
+            # Marker for match expression start
             pass
 
         elif opcode == Op.MATCH_TEST_INT:
+            # Stack: [subject] -> [] (match success) or [subject] (match fail)
+            # Peek subject; if int and equals test_val, pop it; else jump to fail_ip
             test_val = instr.operands[0]
             fail_ip = instr.operands[1]
-            subject = self.stack[-1]  # peek
+            subject = self.stack[-1]
             if isinstance(subject, int) and not isinstance(subject, bool) and subject == test_val:
-                self.stack.pop()  # 匹配成功，弹出 subject
+                self.stack.pop()
             else:
-                self.ip = fail_ip  # 匹配失败，subject 保留在栈上供下一个 arm 使用
+                self.ip = fail_ip
 
         elif opcode == Op.MATCH_TEST_BOOL:
+            # Stack: [subject] -> [] (match success) or [subject] (match fail)
+            # Peek subject; if bool and equals test_val, pop it; else jump to fail_ip
             test_val = instr.operands[0]
             fail_ip = instr.operands[1]
-            subject = self.stack[-1]  # peek
+            subject = self.stack[-1]
             if isinstance(subject, bool) and subject == test_val:
-                self.stack.pop()  # 匹配成功，弹出 subject
+                self.stack.pop()
             else:
-                self.ip = fail_ip  # 匹配失败，subject 保留
+                self.ip = fail_ip
 
         elif opcode == Op.MATCH_TEST_STRING:
+            # Stack: [subject] -> [] (match success) or [subject] (match fail)
+            # Peek subject; if string and equals test_val, pop it; else jump to fail_ip
             test_val = instr.operands[0]
             fail_ip = instr.operands[1]
-            subject = self.stack[-1]  # peek
+            subject = self.stack[-1]
             if isinstance(subject, str) and subject == test_val:
-                self.stack.pop()  # 匹配成功，弹出 subject
+                self.stack.pop()
             else:
-                self.ip = fail_ip  # 匹配失败，subject 保留
+                self.ip = fail_ip
 
         elif opcode == Op.MATCH_WILDCARD:
-            self.stack.pop()  # 总是匹配，弹出 subject
+            # Stack: [subject] -> []
+            # Always matches; pop subject from stack
+            self.stack.pop()
 
         elif opcode == Op.MATCH_BIND:
+            # Stack: [val] -> []
+            # Pop value and bind it to variable name in current scope
             name = instr.operands[0]
             val = self.stack.pop()
             if self.call_stack:
@@ -886,38 +965,46 @@ class NovaVM:
                 self.globals[name] = val
 
         elif opcode == Op.MATCH_CONSTRUCTOR:
+            # Stack: [subject] -> [field1, ..., fieldN] (match success)
+            #      or [subject] (match fail)
+            # Peek subject; if ADT with matching constructor and field count,
+            # pop subject and push fields; else jump to fail_ip
             ctor_name = instr.operands[0]
             field_count = instr.operands[1]
             fail_ip = instr.operands[2]
-            subject = self.stack[-1]  # peek
+            if not self.stack:
+                raise RuntimeError_("VM 错误: MATCH_CONSTRUCTOR 需要栈顶有匹配对象")
+            subject = self.stack[-1]
             if (isinstance(subject, NovaADTValue) and
                     subject.variant_name == ctor_name and
                     len(subject.fields) == field_count):
-                # 匹配成功：弹出 subject，将字段压栈
-                self.stack.pop()  # 弹出 subject
+                self.stack.pop()
                 for field_val in reversed(subject.fields):
                     self.stack.append(field_val)
             else:
-                # 匹配失败：subject 保留在栈上，跳转到下一个 arm
                 self.ip = fail_ip
 
         elif opcode == Op.MATCH_END:
+            # Stack: unchanged
+            # Marker for match expression end
             pass
 
         # === 管道 ===
         elif opcode == Op.PIPE_CALL:
+            # Stack: [..., pipe_value, extra_arg1, ..., extra_argN, fn] -> [..., result]
+            # Pop fn, extra args, and pipe value; call fn with extra_args + [pipe_value]
             extra_arg_count = instr.operands[0]
-            # 栈: [..., pipe_value, extra_arg1, ..., extra_argN, fn]
             fn = self.stack.pop()
             extra_args = [self.stack.pop() for _ in range(extra_arg_count)][::-1]
             pipe_value = self.stack.pop()
-            # 管道值作为最后一个参数（Nova 约定: filter(f, list)）
             args = extra_args + [pipe_value]
             result = self._call_fn(fn, args)
             self.stack.append(result)
 
         # === ADT ===
         elif opcode == Op.MAKE_ADT:
+            # Stack: [field1, ..., fieldN] -> [adt_value]
+            # Pop N field values, construct ADT value, push it
             type_name = instr.operands[0]
             variant_name = instr.operands[1]
             field_count = instr.operands[2]
@@ -926,6 +1013,8 @@ class NovaVM:
             self.stack.append(NovaADTValue(type_name, variant_name, fields, field_names))
 
         elif opcode == Op.REGISTER_CTOR:
+            # Stack: [] -> [constructor]
+            # Create and push an ADT constructor value
             type_name = instr.operands[0]
             variant_name = instr.operands[1]
             field_count = instr.operands[2]
@@ -935,30 +1024,43 @@ class NovaVM:
 
         # === 其他 ===
         elif opcode == Op.POP:
+            # Stack: [value] -> []
+            # Pop and discard top of stack
             self.stack.pop()
 
         elif opcode == Op.DUP:
+            # Stack: [value] -> [value, value]
+            # Duplicate top of stack
             self.stack.append(self.stack[-1])
 
         elif opcode == Op.PRINT:
+            # Stack: [value] -> [()]
+            # Pop value, format and print it, push Unit
             val = self.stack.pop()
             formatted = self._format_value(val)
             print(formatted)
             self.output.append(formatted)
 
         elif opcode == Op.HALT:
+            # Stack: unchanged
+            # Halt execution
             pass
 
         elif opcode == Op.AUTO_CALL_MAIN:
+            # Stack: unchanged
+            # Marker for auto-calling main (handled in run())
             pass
 
         elif opcode == Op.TRY_UNWRAP:
+            # Stack: [val] -> [val]
+            # Peek value; if None/Err ADT, leave as-is (error propagation)
             val = self.stack[-1]
             if isinstance(val, NovaADTValue) and val.variant_name in ("None", "Err"):
-                pass  # 保持当前值（错误传播）
-            # 否则保持值不变
+                pass
 
         elif opcode == Op.LOOP:
+            # Stack: unchanged
+            # Unconditional jump back to loop_start
             loop_start = instr.operands[0]
             self.ip = loop_start
 
