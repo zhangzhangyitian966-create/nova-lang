@@ -29,7 +29,7 @@ from nova.ast_nodes import (
     LetBinding, MutBinding, Assignment,
     IfExpr, MatchArm, MatchExpr,
     ForExpr, WhileExpr, BreakExpr, ContinueExpr,
-    ListExpr, ListComprehension, TupleExpr, FieldAccess,
+    ListExpr, ListComprehension, TupleExpr, FieldAccess, MapExpr,
     ImportDecl, ExportDecl, TypeDef, VariantDef, AliasDef,
     PatternWildcard, PatternInt, PatternFloat, PatternString,
     PatternBool, PatternChar, PatternIdentifier, PatternConstructor,
@@ -769,6 +769,10 @@ class Evaluator:
         elif isinstance(expr, ListExpr):
             return [self.eval_expr(e) for e in expr.elements]
 
+        # --- 字典 ---
+        elif isinstance(expr, MapExpr):
+            return {self.eval_expr(k): self.eval_expr(v) for k, v in expr.pairs}
+
         # --- 列表推导式 ---
         elif isinstance(expr, ListComprehension):
             return self._eval_list_comprehension(expr)
@@ -961,6 +965,16 @@ class Evaluator:
         for arm in expr.arms:
             bindings = {}
             if self._match_pattern(arm.pattern, subject, bindings):
+                if arm.guard is not None:
+                    child_env = self.env.child()
+                    for name, val in bindings.items():
+                        child_env.define(name, val)
+                    old_env = self.env
+                    self.env = child_env
+                    guard_val = self.eval_expr(arm.guard)
+                    self.env = old_env
+                    if not guard_val:
+                        continue
                 # 在新作用域中绑定模式变量并求值分支
                 child_env = self.env.child()
                 for name, val in bindings.items():

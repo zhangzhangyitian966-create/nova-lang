@@ -747,11 +747,11 @@ class TypeChecker:
         elif isinstance(expr, Lambda):
             param_types = []
             child_env = self.env.child()
-            for param in expr.params:
+            for i, param in enumerate(expr.params):
                 if param.type_annotation:
                     ptype = self._from_ast_type(param.type_annotation)
                 else:
-                    ptype = TypeVar(f"lambda_param")
+                    ptype = TypeVar(f"lambda_param_{i}")
                 param_types.append(ptype)
                 child_env.define(param.name, ptype)
 
@@ -1253,7 +1253,8 @@ class TypeChecker:
                 return self._expand_alias(self.env.aliases[name], _alias_stack)
             if name in self.env.types:
                 return self.env.types[name]
-            return PrimType(name)
+            self._report_error(f"未知类型名 '{name}'", type_node)
+            return ERROR_TYPE
         elif isinstance(type_node, TypeGeneric):
             base = type_node.base
             params = [self._from_ast_type(p, _alias_stack, local_types) for p in type_node.params]

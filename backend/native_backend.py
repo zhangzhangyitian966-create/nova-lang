@@ -502,7 +502,7 @@ class NativeCodeGen:
 
             # === 字段访问 ===
             elif isinstance(instr, LIRFieldAccess):
-                raise NotImplementedError("LIRFieldAccess is not yet implemented in native backend")
+                self._compile_field_access(e, instr, vregs, free_gprs, free_xmms)
 
             # === 数据结构构建 ===
             elif isinstance(instr, LIRBuildList):
@@ -659,6 +659,14 @@ class NativeCodeGen:
         else:
             # 有基址但无索引，取第一个元素
             e.mov_reg_mem(RAX, base_reg, self.LIST_HEADER_SIZE)
+
+    def _compile_field_access(self, e: X86_64Emitter, instr: LIRFieldAccess,
+                              vregs: dict, free_gprs: list, free_xmms: list):
+        """编译 ADT/结构体字段访问：从基址 + 偏移处加载字段值。"""
+        base_reg = vregs.get(instr.src_locs[0][0], RAX) if instr.src_locs else RAX
+        dest_reg = vregs.get(instr.dst_loc[0], RAX) if instr.dst_loc else RAX
+        # 加载字段: mov dest, [base + offset]
+        e.mov_reg_mem(dest_reg, base_reg, instr.offset)
 
     # ============================================================
     # 数据结构构建

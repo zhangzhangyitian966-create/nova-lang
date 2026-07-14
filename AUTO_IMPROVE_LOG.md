@@ -98,3 +98,67 @@
 - 全量测试: **655 passed** (0.67s)
 - Evaluator 示例: hello/fibonacci/loops/pattern_match/pipe/list_comprehension/math/file_io 全部正常输出
 - VM 示例: hello/fibonacci/pattern_match 全部正常输出
+
+---
+
+## 2026-07-15 自动改进（第三轮）
+
+基于 AUTO_REVIEW_LOG.md 审查发现的严重问题驱动改进。
+
+### 每日发现的问题
+
+#### vm.py
+- 所有 pop 操作无栈下溢保护（审查日志 vm.py:550-837）
+- base_sp 计算错误且从不用于栈截断（审查日志 vm.py:392）
+- RETURN 在 _execute_instruction 中弹栈但不终止执行（审查日志 vm.py:751-754）
+
+#### evaluator.py
+- MapExpr 完全缺失，eval_expr 落入 else 抛 RuntimeError（审查日志 evaluator.py:817）
+- Pattern guard 守卫条件未实现（审查日志 evaluator.py:956-967）
+
+#### c_codegen.py
+- IfExpr 缺少 else 分支时返回空字符串导致无效 C 代码（审查日志 c_codegen.py:603-611）
+- Match guard 条件位置错误，body 副作用在 guard 检查前执行（审查日志 c_codegen.py:634-640）
+
+#### backend/native_backend.py
+- LIRFieldAccess 抛 NotImplementedError（审查日志 native_backend.py:497）
+
+#### parser.py
+- step 表达式被静默丢弃，ForExpr 中硬编码 step=None（审查日志 parser.py:482-483）
+
+#### type_checker.py
+- Lambda 多参数共享同一 TypeVar（审查日志 type_checker.py:754）
+- 未知类型名静默创建 PrimType（审查日志 type_checker.py:1256）
+
+### 本次修复内容（基于审查日志 Issue）
+
+1. **vm.py — 栈下溢保护 + base_sp 修正（基于审查日志 vm.py:550-837 / vm.py:392）**
+   - 新增 `_pop(n=1)` 辅助方法，所有指令的裸 `self.stack.pop()` 替换为受保护的 `_pop()`
+   - 修正 `base_sp = len(self.stack) - len(args)` 为 `base_sp = len(self.stack)`
+   - 使用 `try/finally` 确保函数返回或异常时都用 `base_sp` 截断栈
+
+2. **evaluator.py — MapExpr 处理 + Pattern guard 实现（基于审查日志 evaluator.py:817 / evaluator.py:956-967）**
+   - 在 `eval_expr` 中添加 `MapExpr` 分支，求值键值对字典
+   - 在 `_eval_match` 中模式匹配成功后求值 guard，guard 失败时 continue 到下一个 arm
+
+3. **c_codegen.py — IfExpr 缺 else 默认值 + Match guard 位置修正（基于审查日志 c_codegen.py:603-611 / c_codegen.py:634-640）**
+   - 无 else 分支时返回 `"0"` 表示 Unit 默认值，避免生成 `x = ;` 无效 C 代码
+   - 重构 match guard 编译顺序：guard 条件判断在 body_setup 之前，guard 失败时 body 完全不执行
+
+4. **backend/native_backend.py — LIRFieldAccess 实现（基于审查日志 native_backend.py:497）**
+   - 新增 `_compile_field_access` 方法，从基址寄存器 + offset 加载字段到目标寄存器
+   - 更新测试为正向编译测试
+
+5. **parser.py — step 表达式不再丢弃（基于审查日志 parser.py:482-483）**
+   - 在 `for x in expr` 和 `for i <- start..end` 分支统一初始化 `step_expr = None`
+   - ForExpr 构造时传入 `step=step_expr`
+
+6. **type_checker.py — Lambda TypeVar 唯一化 + 未知类型报错（基于审查日志 type_checker.py:754 / type_checker.py:1256）**
+   - Lambda 参数改为 `TypeVar(f"lambda_param_{i}")`，消除多参数共享同一 TypeVar
+   - 未知类型名不再静默创建 `PrimType`，改为 `_report_error` 并返回 `ERROR_TYPE`
+
+### 测试结果
+
+- 全量测试: **655 passed** (1.06s)
+- Evaluator 示例: hello/math/pattern_match/pipe/loops 全部正常输出
+- VM 示例: hello/math/pattern_match 全部正常输出

@@ -392,7 +392,7 @@ class NovaVM:
         # 保存当前帧
         frame = Frame(
             return_ip=self.ip,
-            base_sp=len(self.stack) - len(args),  # 保存调用前的栈位置
+            base_sp=len(self.stack),  # 保存调用前的栈位置
             code=self.code,
             constants=self.constants,
             locals_=locals_,
@@ -405,14 +405,18 @@ class NovaVM:
         self.constants = func_block.constants
         self.ip = 0
 
-        # 执行函数
-        result = self._execute_function()
-
-        # 恢复帧
-        self.call_stack.pop()
-        self.code = frame.code
-        self.constants = frame.constants
-        self.ip = frame.return_ip
+        try:
+            # 执行函数
+            result = self._execute_function()
+        finally:
+            # 恢复帧
+            self.call_stack.pop()
+            self.code = frame.code
+            self.constants = frame.constants
+            self.ip = frame.return_ip
+            # 在函数返回后截断栈到调用前状态
+            if len(self.stack) > frame.base_sp:
+                del self.stack[frame.base_sp:]
 
         return result
 
@@ -482,6 +486,15 @@ class NovaVM:
         self.constants = saved_constants
         self.ip = saved_ip
 
+    def _pop(self, n=1):
+        if len(self.stack) < n:
+            raise RuntimeError_(f"VM stack underflow: need {n}, have {len(self.stack)}")
+        if n == 0:
+            return []
+        if n == 1:
+            return self.stack.pop()
+        return [self.stack.pop() for _ in range(n)][::-1]
+
     def _execute_instruction(self, instr: Instruction) -> bool:
         """执行单条指令，返回 True 表示需要提前返回"""
         opcode = instr.opcode
@@ -538,7 +551,7 @@ class NovaVM:
             # Pop value and store into variable (local first, then global)
             name = instr.operands[0]
             mutable = instr.operands[1]
-            val = self.stack.pop()
+            val = self._pop()
             if self.call_stack:
                 frame = self.call_stack[-1]
                 if name in frame.locals:
@@ -550,25 +563,25 @@ class NovaVM:
         elif opcode == Op.ADD:
             # Stack: [a, b] -> [a+b]
             # Pop two values, add them, push result
-            b, a = self.stack.pop(), self.stack.pop()
+            a, b = self._pop(2)
             self.stack.append(a + b)
 
         elif opcode == Op.SUB:
             # Stack: [a, b] -> [a-b]
             # Pop two values, subtract them, push result
-            b, a = self.stack.pop(), self.stack.pop()
+            a, b = self._pop(2)
             self.stack.append(a - b)
 
         elif opcode == Op.MUL:
             # Stack: [a, b] -> [a*b]
             # Pop two values, multiply them, push result
-            b, a = self.stack.pop(), self.stack.pop()
+            a, b = self._pop(2)
             self.stack.append(a * b)
 
         elif opcode == Op.DIV:
             # Stack: [a, b] -> [a/b]
             # Pop two values, divide them, push result
-            b, a = self.stack.pop(), self.stack.pop()
+            a, b = self._pop(2)
             if isinstance(a, int) and isinstance(b, int):
                 if b == 0:
                     raise RuntimeError_("除零错误")
@@ -579,74 +592,74 @@ class NovaVM:
         elif opcode == Op.MOD:
             # Stack: [a, b] -> [a%b]
             # Pop two values, compute modulo, push result
-            b, a = self.stack.pop(), self.stack.pop()
+            a, b = self._pop(2)
             self.stack.append(a % b)
 
         elif opcode == Op.NEG:
             # Stack: [a] -> [-a]
             # Pop value, negate it, push result
-            a = self.stack.pop()
+            a = self._pop()
             self.stack.append(-a)
 
         elif opcode == Op.CONCAT:
             # Stack: [a, b] -> [a++b]
             # Pop two values, concatenate as strings, push result
-            b, a = self.stack.pop(), self.stack.pop()
+            a, b = self._pop(2)
             self.stack.append(str(a) + str(b))
 
         elif opcode == Op.EQ:
             # Stack: [a, b] -> [a==b]
             # Pop two values, compare equality, push boolean result
-            b, a = self.stack.pop(), self.stack.pop()
+            a, b = self._pop(2)
             self.stack.append(a == b)
 
         elif opcode == Op.NEQ:
             # Stack: [a, b] -> [a!=b]
             # Pop two values, compare inequality, push boolean result
-            b, a = self.stack.pop(), self.stack.pop()
+            a, b = self._pop(2)
             self.stack.append(a != b)
 
         elif opcode == Op.LT:
             # Stack: [a, b] -> [a<b]
             # Pop two values, compare less-than, push boolean result
-            b, a = self.stack.pop(), self.stack.pop()
+            a, b = self._pop(2)
             self.stack.append(a < b)
 
         elif opcode == Op.GT:
             # Stack: [a, b] -> [a>b]
             # Pop two values, compare greater-than, push boolean result
-            b, a = self.stack.pop(), self.stack.pop()
+            a, b = self._pop(2)
             self.stack.append(a > b)
 
         elif opcode == Op.LTE:
             # Stack: [a, b] -> [a<=b]
             # Pop two values, compare less-than-or-equal, push boolean result
-            b, a = self.stack.pop(), self.stack.pop()
+            a, b = self._pop(2)
             self.stack.append(a <= b)
 
         elif opcode == Op.GTE:
             # Stack: [a, b] -> [a>=b]
             # Pop two values, compare greater-than-or-equal, push boolean result
-            b, a = self.stack.pop(), self.stack.pop()
+            a, b = self._pop(2)
             self.stack.append(a >= b)
 
         elif opcode == Op.AND:
             # Stack: [a, b] -> [a and b]
             # Pop two boolean values, compute logical AND, push result
             # Note: short-circuit is handled by POP_JUMP_IF_FALSE in compilation
-            b, a = self.stack.pop(), self.stack.pop()
+            a, b = self._pop(2)
             self.stack.append(a and b)
 
         elif opcode == Op.OR:
             # Stack: [a, b] -> [a or b]
             # Pop two boolean values, compute logical OR, push result
-            b, a = self.stack.pop(), self.stack.pop()
+            a, b = self._pop(2)
             self.stack.append(a or b)
 
         elif opcode == Op.NOT:
             # Stack: [a] -> [not a]
             # Pop boolean value, compute logical NOT, push result
-            a = self.stack.pop()
+            a = self._pop()
             self.stack.append(not a)
 
         # === 控制流 ===
@@ -663,21 +676,21 @@ class NovaVM:
         elif opcode == Op.JUMP_IF_FALSE:
             # Stack: [cond] -> []
             # Pop condition; if false, jump to target_ip
-            cond = self.stack.pop()
+            cond = self._pop()
             if not cond:
                 self.ip = instr.operands[0]
 
         elif opcode == Op.JUMP_IF_TRUE:
             # Stack: [cond] -> []
             # Pop condition; if true, jump to target_ip
-            cond = self.stack.pop()
+            cond = self._pop()
             if cond:
                 self.ip = instr.operands[0]
 
         elif opcode == Op.POP_JUMP_IF_FALSE:
             # Stack: [cond] -> []
             # Pop condition; if false, jump to target_ip
-            cond = self.stack.pop()
+            cond = self._pop()
             if not cond:
                 # 退出 while 循环，弹出循环信息
                 if self._while_loops and self._while_loops[-1]["end_ip"] == instr.operands[0]:
@@ -698,11 +711,7 @@ class NovaVM:
             # Pop body_result, append it to result_list, push iterable and updated result_list,
             # then jump back to loop_start for next iteration
             loop_start = instr.operands[0]
-            if len(self.stack) < 3:
-                raise RuntimeError_("VM 错误: LOOP_END 需要栈上至少有 3 个值")
-            body_result = self.stack.pop()
-            result_list = self.stack.pop()
-            iterable = self.stack.pop()
+            iterable, result_list, body_result = self._pop(3)
             result_list.append(body_result)
             self.stack.append(iterable)
             self.stack.append(result_list)
@@ -770,8 +779,10 @@ class NovaVM:
             # Stack: [fn, arg1, ..., argN] -> [result]
             # Pop function and arguments, call function, push result
             arg_count = instr.operands[0]
-            args = [self.stack.pop() for _ in range(arg_count)][::-1]
-            fn = self.stack.pop()
+            args = self._pop(arg_count)
+            if arg_count == 1:
+                args = [args]
+            fn = self._pop()
             result = self._call_fn(fn, args)
             self.stack.append(result)
 
@@ -785,7 +796,9 @@ class NovaVM:
             # Pop arguments, call builtin function, push result
             name = instr.operands[0]
             arg_count = instr.operands[1]
-            args = [self.stack.pop() for _ in range(arg_count)][::-1]
+            args = self._pop(arg_count)
+            if arg_count == 1:
+                args = [args]
             builtin = self.globals.get(name)
             if builtin is None:
                 raise RuntimeError_(f"未找到内置函数 '{name}'")
@@ -797,14 +810,18 @@ class NovaVM:
             # Stack: [elem1, ..., elemN] -> [list]
             # Pop N elements, build list, push it
             count = instr.operands[0]
-            elements = [self.stack.pop() for _ in range(count)][::-1]
+            elements = self._pop(count)
+            if count == 1:
+                elements = [elements]
             self.stack.append(elements)
 
         elif opcode == Op.BUILD_TUPLE:
             # Stack: [elem1, ..., elemN] -> [tuple]
             # Pop N elements, build tuple, push it
             count = instr.operands[0]
-            elements = [self.stack.pop() for _ in range(count)][::-1]
+            elements = self._pop(count)
+            if count == 1:
+                elements = [elements]
             self.stack.append(tuple(elements))
 
         elif opcode == Op.BUILD_MAP:
@@ -812,24 +829,26 @@ class NovaVM:
             # Pop N key-value pairs, build map, push it
             count = instr.operands[0]
             result = {}
-            for _ in range(count):
-                val = self.stack.pop()
-                key = self.stack.pop()
+            pairs = self._pop(count * 2)
+            if count == 1:
+                pairs = [pairs]
+            for i in range(0, len(pairs), 2):
+                key = pairs[i]
+                val = pairs[i + 1]
                 result[key] = val
             self.stack.append(result)
 
         elif opcode == Op.INDEX:
             # Stack: [obj, index] -> [obj[index]]
             # Pop object and index, push indexed value
-            index = self.stack.pop()
-            obj = self.stack.pop()
+            obj, index = self._pop(2)
             self.stack.append(obj[index])
 
         elif opcode == Op.FIELD_ACCESS:
             # Stack: [obj] -> [obj.field]
             # Pop object, push field value (by index or name)
             field = instr.operands[0]
-            obj = self.stack.pop()
+            obj = self._pop()
             if isinstance(obj, tuple):
                 self.stack.append(obj[int(field)])
             elif isinstance(obj, NovaADTValue):
@@ -851,9 +870,7 @@ class NovaVM:
         elif opcode == Op.BUILD_RANGE:
             # Stack: [start, end, step] -> [range_tuple]
             # Pop start, end, step, build range tuple ("range", start, end, step)
-            step = self.stack.pop()
-            end = self.stack.pop()
-            start = self.stack.pop()
+            start, end, step = self._pop(3)
             self.stack.append(("range", start, end, step))
 
         elif opcode == Op.FOR_ITER:
@@ -861,8 +878,7 @@ class NovaVM:
             #                           -> [result_list] (exhausted)
             # Iterate one step; if exhausted, jump to fail_ip leaving result_list on stack
             fail_ip = instr.operands[0]
-            result_list = self.stack.pop()
-            iter_val = self.stack.pop()
+            iter_val, result_list = self._pop(2)
 
             if isinstance(iter_val, tuple) and iter_val[0] == "range":
                 # 范围迭代
@@ -954,7 +970,7 @@ class NovaVM:
             fail_ip = instr.operands[1]
             subject = self.stack[-1]
             if isinstance(subject, int) and not isinstance(subject, bool) and subject == test_val:
-                self.stack.pop()
+                self._pop()
             else:
                 self.ip = fail_ip
 
@@ -965,7 +981,7 @@ class NovaVM:
             fail_ip = instr.operands[1]
             subject = self.stack[-1]
             if isinstance(subject, bool) and subject == test_val:
-                self.stack.pop()
+                self._pop()
             else:
                 self.ip = fail_ip
 
@@ -976,20 +992,20 @@ class NovaVM:
             fail_ip = instr.operands[1]
             subject = self.stack[-1]
             if isinstance(subject, str) and subject == test_val:
-                self.stack.pop()
+                self._pop()
             else:
                 self.ip = fail_ip
 
         elif opcode == Op.MATCH_WILDCARD:
             # Stack: [subject] -> []
             # Always matches; pop subject from stack
-            self.stack.pop()
+            self._pop()
 
         elif opcode == Op.MATCH_BIND:
             # Stack: [val] -> []
             # Pop value and bind it to variable name in current scope
             name = instr.operands[0]
-            val = self.stack.pop()
+            val = self._pop()
             if self.call_stack:
                 self.call_stack[-1].locals[name] = val
             else:
@@ -1009,7 +1025,7 @@ class NovaVM:
             if (isinstance(subject, NovaADTValue) and
                     subject.variant_name == ctor_name and
                     len(subject.fields) == field_count):
-                self.stack.pop()
+                self._pop()
                 for field_val in reversed(subject.fields):
                     self.stack.append(field_val)
             else:
@@ -1025,9 +1041,11 @@ class NovaVM:
             # Stack: [..., pipe_value, extra_arg1, ..., extra_argN, fn] -> [..., result]
             # Pop fn, extra args, and pipe value; call fn with extra_args + [pipe_value]
             extra_arg_count = instr.operands[0]
-            fn = self.stack.pop()
-            extra_args = [self.stack.pop() for _ in range(extra_arg_count)][::-1]
-            pipe_value = self.stack.pop()
+            fn = self._pop()
+            extra_args = self._pop(extra_arg_count)
+            if extra_arg_count == 1:
+                extra_args = [extra_args]
+            pipe_value = self._pop()
             args = extra_args + [pipe_value]
             result = self._call_fn(fn, args)
             self.stack.append(result)
@@ -1040,7 +1058,9 @@ class NovaVM:
             variant_name = instr.operands[1]
             field_count = instr.operands[2]
             field_names = list(instr.operands[3]) if len(instr.operands) > 3 else []
-            fields = [self.stack.pop() for _ in range(field_count)][::-1]
+            fields = self._pop(field_count)
+            if field_count == 1:
+                fields = [fields]
             self.stack.append(NovaADTValue(type_name, variant_name, fields, field_names))
 
         elif opcode == Op.REGISTER_CTOR:
@@ -1057,7 +1077,7 @@ class NovaVM:
         elif opcode == Op.POP:
             # Stack: [value] -> []
             # Pop and discard top of stack
-            self.stack.pop()
+            self._pop()
 
         elif opcode == Op.DUP:
             # Stack: [value] -> [value, value]
@@ -1067,7 +1087,7 @@ class NovaVM:
         elif opcode == Op.PRINT:
             # Stack: [value] -> [()]
             # Pop value, format and print it, push Unit
-            val = self.stack.pop()
+            val = self._pop()
             formatted = self._format_value(val)
             print(formatted)
             self.output.append(formatted)
@@ -1090,7 +1110,7 @@ class NovaVM:
             if isinstance(val, NovaADTValue) and val.variant_name in ("None", "Err"):
                 return True
             elif isinstance(val, NovaADTValue) and val.variant_name in ("Some", "Ok"):
-                self.stack.pop()
+                self._pop()
                 self.stack.append(val.fields[0])
             return False
 

@@ -723,10 +723,14 @@ class TestNativeBackendUnimplemented(unittest.TestCase):
                 break
         self.assertTrue(found, "Expected mov_reg_mem (48 8B) for LIRIndex default element access")
 
-    def test_field_access_not_implemented(self):
-        """LIRFieldAccess 应抛出 NotImplementedError"""
-        with self.assertRaises(NotImplementedError):
-            self._compile_body_with_instr(LIRFieldAccess(offset=0))
+    def test_field_access_compilation(self):
+        """LIRFieldAccess 应编译成功"""
+        instr = LIRFieldAccess(offset=8)
+        instr.src_locs = [("RAX", INT_TYPE)]
+        instr.dst_loc = ("RBX", INT_TYPE)
+        code = self._compile_body_with_instr(instr)
+        self.assertIsInstance(code, bytes)
+        self.assertGreater(len(code), 0)
 
     def test_unknown_unaryop_not_implemented(self):
         """未知的 LIRUnaryOp 操作符应抛出 NotImplementedError"""

@@ -608,7 +608,7 @@ class CCodeGen:
                 setup.append(f"    {line}")
             setup.append(f"    {then_c};")
             setup.append(f"}}")
-            return setup, ""
+            return setup, "0"
 
     def _compile_match_expr_to_stmt(self, expr: MatchExpr):
         """编译 match 表达式为 if-else 链"""
@@ -628,15 +628,20 @@ class CCodeGen:
                 c_name = self._mangle_name(bind_name)
                 bind_type = self._infer_c_type_from_expr(expr.subject)
                 setup.append(f"    {bind_type} {c_name} = {bind_expr};")
-            body_setup, body_c = self._compile_expr_to_stmt(arm.body)
-            for line in body_setup:
-                setup.append(f"    {line}")
             if arm.guard:
                 guard_setup, guard_c = self._compile_expr_to_stmt(arm.guard)
                 for line in guard_setup:
                     setup.append(f"    {line}")
-                setup.append(f"    if ({guard_c}) {{ {tmp} = {body_c}; }}")
+                setup.append(f"    if ({guard_c}) {{")
+                body_setup, body_c = self._compile_expr_to_stmt(arm.body)
+                for line in body_setup:
+                    setup.append(f"        {line}")
+                setup.append(f"        {tmp} = {body_c};")
+                setup.append(f"    }}")
             else:
+                body_setup, body_c = self._compile_expr_to_stmt(arm.body)
+                for line in body_setup:
+                    setup.append(f"    {line}")
                 setup.append(f"    {tmp} = {body_c};")
 
         if expr.arms:

@@ -457,6 +457,7 @@ class Parser:
         var_tok = self._expect(TokenType.IDENT)
         var_name = var_tok.value
 
+        step_expr = None
         if self._match(TokenType.IN):
             # for x in list_expr { body }
             iterable = self._parse_expression()
@@ -480,7 +481,7 @@ class Parser:
 
         body = self._parse_block_or_expr()
         return ForExpr(var_name=var_name, iterable=iterable, body=body,
-                       step=None, span=self._span(tok))
+                       step=step_expr, span=self._span(tok))
 
     def _parse_while_expr(self) -> WhileExpr:
         """解析 while 循环表达式: while condition { body }"""
