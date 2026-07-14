@@ -272,6 +272,57 @@ class NativeCodeGen:
         if stack_gprs:
             e.add_rsp_imm(len(stack_gprs) * 8)
 
+    def _compile_call_indirect(self, e, instr, vregs, free_gprs, free_xmms):
+        """编译间接调用（通过函数指针），按 System V AMD64 ABI 传递参数。
+
+        src_locs 布局:
+          [0] = 函数指针（寄存器/SSA 值）
+          [1:] = 调用参数
+        """
+        if not instr.src_locs:
+            return
+
+        # 第一个 src_loc 是函数指针
+        func_ptr_loc, func_ptr_type = instr.src_locs[0]
+        func_ptr_reg = vregs.get(func_ptr_loc)
+
+        # 将函数指针移入 R11（间接调用专用寄存器，caller-saved）
+        # R11 不会与参数寄存器冲突
+        if func_ptr_reg is not None and func_ptr_reg != R11:
+            e.mov_reg_reg64(R11, func_ptr_reg)
+        elif func_ptr_reg is None:
+            e.mov_reg_imm64(R11, 0)
+
+        # 剩余 src_locs 是调用参数，按 System V AMD64 ABI 传递
+        int_idx = 0
+        float_idx = 0
+        stack_gprs = []
+
+        for loc, typ in instr.src_locs[1:]:
+            src_reg = vregs.get(loc)
+            if typ == FLOAT_TYPE:
+                if float_idx < 8 and src_reg is not None:
+                    e.movsd_reg_reg(XMM_ARG_REGS[float_idx], src_reg)
+                float_idx += 1
+            else:
+                if int_idx < 6 and src_reg is not None:
+                    e.mov_reg_reg64(ARG_REGS[int_idx], src_reg)
+                int_idx += 1
+                if int_idx > 6:
+                    stack_gprs.append(src_reg)
+
+        # 将超出寄存器限制的整型参数压栈（按反序）
+        for src_reg in reversed(stack_gprs):
+            if src_reg is not None:
+                e.push_reg(src_reg)
+
+        # 发射间接调用指令：call *%r11
+        e.call_reg(R11)
+
+        # 恢复栈指针
+        if stack_gprs:
+            e.add_rsp_imm(len(stack_gprs) * 8)
+
     def _emit_epilogue(self, e: X86_64Emitter, func: LIRFunction):
         """发射函数尾声：恢复栈帧 + 弹出 callee-saved 寄存器 + ret。
 
@@ -502,7 +553,7 @@ class NativeCodeGen:
 
             # === 间接调用 ===
             elif isinstance(instr, LIRCallIndirect):
-                raise NotImplementedError("LIRCallIndirect is not yet implemented in native backend")
+                self._compile_call_indirect(e, instr, vregs, free_gprs, free_xmms)
 
             # === 索引操作 ===
             elif isinstance(instr, LIRIndex):

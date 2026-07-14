@@ -214,14 +214,14 @@ class Evaluator:
     def _builtin_head(self, *args):
         lst = args[0]
         if lst:
-            return NovaADTValue("Option", "Some", [lst[0]])
-        return NovaADTValue("Option", "None", [])
+            return NovaADTValue("Option", "Some", [lst[0]], field_names=["value"])
+        return NovaADTValue("Option", "None", [], field_names=["value"])
 
     def _builtin_tail(self, *args):
         lst = args[0]
         if len(lst) > 0:
-            return NovaADTValue("Option", "Some", [lst[1:]])
-        return NovaADTValue("Option", "None", [])
+            return NovaADTValue("Option", "Some", [lst[1:]], field_names=["value"])
+        return NovaADTValue("Option", "None", [], field_names=["value"])
 
     # ----------------------------------------------------------
     # 文件 I/O 内置函数
@@ -445,6 +445,10 @@ class Evaluator:
                 result = self.eval_expr(fn.body)
             except ReturnSignal as ret:
                 result = ret.value
+            except BreakSignal:
+                raise RuntimeError_("break 不能出现在函数体内")
+            except ContinueSignal:
+                raise RuntimeError_("continue 不能出现在函数体内")
             finally:
                 self._call_depth -= 1
             self.env = old_env

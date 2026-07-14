@@ -615,9 +615,10 @@ class NovaVM:
 
         elif opcode == Op.CONCAT:
             # Stack: [a, b] -> [a++b]
-            # Pop two values, concatenate as strings, push result
+            # Pop two values, concatenate, push result
+            # Python 原生 + 按类型分发：list+list→拼接, str+str→拼接, int+int→加法
             a, b = self._pop(2)
-            self.stack.append(str(a) + str(b))
+            self.stack.append(a + b)
 
         elif opcode == Op.EQ:
             # Stack: [a, b] -> [a==b]
@@ -745,9 +746,12 @@ class NovaVM:
             self.ip = loop_start
 
         elif opcode == Op.BREAK:
-            # Stack: [*] -> [result_list]
-            # Break out of current loop, cleaning up stack and returning result_list
-            if self._for_iters:
+            # Stack: [*] -> [result_list or unit]
+            # Break out of current loop
+            if instr.operands:
+                # while 循环中的 BREAK：操作数为 end_pos，直接跳转
+                self.ip = instr.operands[0]
+            elif self._for_iters:
                 loop_info = self._for_iters.pop()
                 end_ip = loop_info["end_ip"]
                 base_sp = loop_info["base_sp"]
@@ -762,7 +766,7 @@ class NovaVM:
                 self.stack.append(result_list)
                 self.ip = end_ip
             else:
-                # while loop break: scan forward to after loop end
+                # while loop break fallback (无操作数的旧代码路径)：前向扫描
                 while self.ip < len(self.code):
                     next_instr = self.code[self.ip]
                     if next_instr.opcode in (Op.LOOP_END, Op.CONST_UNIT):

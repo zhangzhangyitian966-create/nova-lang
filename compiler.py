@@ -221,6 +221,8 @@ class BytecodeCompiler:
         self._init_builtin_adt_constructors()
         self._module_manager = module_manager  # ModuleManager 实例
         self._current_file = current_file      # 当前文件路径
+        # while 循环 BREAK 跳转目标栈：编译 while 循环体时 push end_pos，BREAK 编译时消费
+        self._while_end_stack: List[int] = []
 
     def _init_builtin_adt_constructors(self):
         """初始化内置 ADT 构造器"""
@@ -484,7 +486,14 @@ class BytecodeCompiler:
             self._compile_while(expr)
 
         elif isinstance(expr, BreakExpr):
-            self.bytecode.emit_op(Op.BREAK)
+            if self._while_end_stack:
+                # while 循环中的 BREAK：附带占位操作数，稍后回填为 end_pos
+                patch_pos = self.bytecode.current_pos()
+                self.bytecode.emit_op(Op.BREAK, 0)
+                self._while_end_stack[-1].append(patch_pos)
+            else:
+                # for 循环中的 BREAK：无操作数，由 VM 通过 _for_iters 处理
+                self.bytecode.emit_op(Op.BREAK)
 
         elif isinstance(expr, ContinueExpr):
             self.bytecode.emit_op(Op.CONTINUE)
@@ -977,6 +986,10 @@ class BytecodeCompiler:
         jump_to_end = self.bytecode.current_pos()
         self.bytecode.emit_op(Op.POP_JUMP_IF_FALSE, 0)
 
+        # 记录循环体中 BREAK 指令的位置，编译完循环体后回填 end_pos
+        break_patch_positions: List[int] = []
+        self._while_end_stack.append(break_patch_positions)
+
         self._compile_expr(expr.body)
         self.bytecode.emit_op(Op.POP)  # 弹出体结果
 
@@ -986,6 +999,11 @@ class BytecodeCompiler:
         self.bytecode.patch_jump(jump_to_end, end_pos)
 
         self.bytecode.emit_op(Op.CONST_UNIT)
+
+        # 回填循环体中所有 BREAK 指令的跳转目标为 end_pos
+        self._while_end_stack.pop()
+        for bp in break_patch_positions:
+            self.bytecode.patch_jump(bp, end_pos)
 
     def _compile_list_comprehension(self, expr: ListComprehension):
         """编译列表推导式"""

@@ -587,3 +587,66 @@
 - VM 示例: hello/fibonacci/pattern_match 全部正常输出
 - C 语法检查: `gcc -fsyntax-only -Wall -Wextra` 零警告零错误
 - C 运行时测试: `test_runtime.c` 编译运行通过
+
+---
+
+## 2026-07-15 自动改进（第十轮）
+
+基于 AUTO_REVIEW_LOG.md 第六轮审查日志的最高优先级未修复严重问题驱动改进（阶段一检查 + 阶段二开发 + 阶段三测试）。
+
+### 每日发现的问题
+
+#### vm.py
+- **CONCAT (`++`) 运算符语义错误（vm.py:616-620）**：`str(a) + str(b)` 强制字符串化，`[1,2] ++ [3,4]` 产生 `"[1, 2][3, 4]"` 而非列表拼接。与 Evaluator 的 `left + right` 不一致。→ 改为 `a + b` **[已修复]**
+- **while 循环 BREAK 脆弱的前向扫描（vm.py:765-771）**：逐条扫描 LOOP_END/CONST_UNIT 定位跳转目标。→ 改为编译器附带操作数 **[已修复]**
+- **CLOSURE 捕获整个帧（vm.py:794-803）**：`dict(locals)` 浅拷贝过度捕获。→ 需编译器做自由变量分析，本轮未修
+
+#### compiler.py
+- **BREAK/CONTINUE 不带操作数（compiler.py:487,490）**：while 循环的 break 依赖运行时前向扫描。→ 新增 `_while_end_stack` 回填机制 **[已修复]**
+
+#### evaluator.py
+- **_builtin_head/tail 缺少 field_names（evaluator.py:217-218）**：返回 Option ADT 时缺少 `field_names=["value"]`，导致字段命名访问不工作。→ 添加 field_names **[已修复]**
+- **_call_fn 中 break/continue 未捕获（evaluator.py:444-451）**：BreakSignal/ContinueSignal 可逃出函数调用边界。→ 添加 except 捕获并报 RuntimeError_ **[已修复]**
+
+#### backend/native_backend.py
+- **LIRCallIndirect NotImplementedError（native_backend.py:504-505）**：间接调用代码生成未实现。→ 实现 `_compile_call_indirect` **[已修复]**
+
+### 本次修复内容（基于审查日志 Issue）
+
+1. **vm.py — CONCAT (`++`) 运算符语义修正（基于审查日志 vm.py:616-620 / Top 10 #3）**
+   - 将 `self.stack.append(str(a) + str(b))` 改为 `self.stack.append(a + b)`
+   - Python 原生 `+` 按类型分发：list+list 列表拼接、str+str 字符串拼接、int+int 数值加法
+   - 与 Evaluator 的 `left + right` 行为一致，两条路径统一
+
+2. **compiler.py — BREAK 指令附带操作数（基于审查日志 compiler.py:487 / Top 10 #2）**
+   - 新增 `_while_end_stack: List[int]` 栈，跟踪 while 循环中 BREAK 的回填位置
+   - `_compile_while` 在循环体编译前 push 回填列表，编译结束后用 end_pos 回填所有 BREAK 操作数
+   - BREAK 编译时检查 `_while_end_stack` 非空则 emit `BREAK, end_pos` 并记录位置供回填
+
+3. **vm.py — BREAK 优先使用操作数跳转（基于审查日志 vm.py:765-771 / Top 10 #2）**
+   - BREAK 处理优先检查 `instr.operands`，有操作数时直接 `self.ip = operands[0]` 跳转
+   - 无操作数时走 `_for_iters` 路径（for 循环），最后保留旧前向扫描作为 fallback
+   - while 循环的 break 不再需要运行时扫描字节码
+
+4. **evaluator.py — _builtin_head/tail 添加 field_names（基于审查日志 evaluator.py:217-218）**
+   - `_builtin_head` 的 `NovaADTValue("Option", "Some", [lst[0]])` 添加 `field_names=["value"]`
+   - `_builtin_head` 的 `NovaADTValue("Option", "None", [])` 添加 `field_names=["value"]`
+   - `_builtin_tail` 同样添加 field_names 参数
+   - 与 `_setup_builtins` 中 Option 构造方式一致
+
+5. **evaluator.py — _call_fn 捕获 break/continue（基于审查日志 evaluator.py:444-451）**
+   - NovaClosure 分支新增 `except BreakSignal: raise RuntimeError_("break 不能出现在函数体内")`
+   - 新增 `except ContinueSignal: raise RuntimeError_("continue 不能出现在函数体内")`
+   - 防止控制流信号逃出函数调用边界
+
+6. **backend/native_backend.py — LIRCallIndirect 代码生成实现（基于审查日志 native_backend.py:504-505）**
+   - 新增 `_compile_call_indirect` 方法，实现 x86_64 间接调用
+   - 函数指针移入 R11 寄存器，参数按 System V AMD64 ABI 传递（rdi/rsi/rdx/rcx/r8/r9）
+   - 浮点参数通过 XMM0-XMM7 传递，超出寄存器限制的参数压栈
+   - 发射 `call *%r11`（机器码 FF D3），调用后恢复栈指针
+
+### 测试结果
+
+- 全量测试: **662 passed** (1.10s)
+- Evaluator 示例: hello/fibonacci/loops/pattern_match/math 全部正常输出
+- VM 示例: hello/fibonacci/pattern_match 全部正常输出

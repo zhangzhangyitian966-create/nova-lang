@@ -704,10 +704,40 @@ class TestNativeBackendUnimplemented(unittest.TestCase):
         lir.functions["test_fn"] = fn
         return codegen._compile_function(fn)
 
-    def test_call_indirect_not_implemented(self):
-        """LIRCallIndirect 应抛出 NotImplementedError"""
-        with self.assertRaises(NotImplementedError):
-            self._compile_body_with_instr(LIRCallIndirect())
+    def test_call_indirect_compilation(self):
+        """LIRCallIndirect 应成功编译，生成 call *%r11 间接调用指令"""
+        # 无 src_locs 时直接返回（无函数指针）
+        code = self._compile_body_with_instr(LIRCallIndirect())
+        self.assertIsNotNone(code)
+        self.assertTrue(len(code) > 0)
+
+    def test_call_indirect_with_args(self):
+        """LIRCallIndirect 带参数时应生成参数传递 + call *%r11 指令"""
+        codegen = NativeCodeGen()
+        lir = LIRModule(name="test")
+        fn = LIRFunction("test_fn", [], INT_TYPE)
+        fn.body = [
+            LIRLoadConst(value=10, const_type="int"),
+            LIRLoadConst(value=20, const_type="int"),
+        ]
+        call = LIRCallIndirect()
+        call.src_locs = [
+            ("const_10", INT_TYPE),   # 函数指针
+            ("const_20", INT_TYPE),   # 参数1
+        ]
+        fn.body.append(call)
+        fn.body.append(LIRReturn())
+        lir.functions["test_fn"] = fn
+        code = codegen._compile_function(fn)
+        self.assertIsNotNone(code)
+        self.assertTrue(len(code) > 0)
+        # 应包含 call_reg 指令 (FF D3 = call *%r11)
+        found = False
+        for i in range(len(code) - 2):
+            if code[i] == 0xFF and code[i + 1] == 0xD3:
+                found = True
+                break
+        self.assertTrue(found, "Expected call *%r11 (FF D3) for LIRCallIndirect")
 
     def test_index_compilation(self):
         """LIRIndex 应成功编译（不再抛出 NotImplementedError）"""
