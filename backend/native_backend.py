@@ -95,9 +95,12 @@ class NativeCodeGen:
         self.data_section = bytearray()
         self.float_constants = []  # [(value_bytes, offset_in_data)]
         self.string_constants = []  # [(string_bytes, offset_in_data)]
+        self.float_constant_map = {}   # float_value -> data_offset
+        self.string_constant_map = {}  # string_value -> data_offset
         self.symbols = {}          # name -> offset in code
         self.data_symbols = {}     # name -> offset in data
-        self.relocations = []      # [(code_offset, symbol, addend)]
+        self.rip_relocations = []  # [(func_name, code_offset_in_func, data_offset)]
+        self.func_calls = {}       # {func_name: [(call_offset, target_name)]}
         self.link_calls = []       # [(code_offset, func_name)]
 
     def compile(self, lir_module: LIRModule) -> bytes:
@@ -119,36 +122,122 @@ class NativeCodeGen:
     def _collect_constants(self, module):
         """收集数据段常量"""
         offset = 0
+        self.float_constants = []
+        self.string_constants = []
+        self.float_constant_map = {}
+        self.string_constant_map = {}
         for func in module.functions.values():
             for instr in func.body:
                 if isinstance(instr, LIRLoadConst):
                     if instr.const_type == "float":
-                        value_bytes = struct.pack('<d', float(instr.value))
-                        self.float_constants.append((value_bytes, offset))
-                        offset += len(value_bytes)
-                        # 对齐到 8 字节
-                        while offset % 8 != 0:
-                            offset += 1
+                        value = float(instr.value)
+                        if value not in self.float_constant_map:
+                            value_bytes = struct.pack('<d', value)
+                            self.float_constants.append((value_bytes, offset))
+                            self.float_constant_map[value] = offset
+                            offset += len(value_bytes)
+                            # 对齐到 8 字节
+                            while offset % 8 != 0:
+                                offset += 1
                     elif instr.const_type == "string":
-                        value_bytes = instr.value.encode('utf-8') + b'\x00'
-                        self.string_constants.append((value_bytes, offset))
-                        offset += len(value_bytes)
+                        value = instr.value
+                        if value not in self.string_constant_map:
+                            value_bytes = value.encode('utf-8') + b'\x00'
+                            self.string_constants.append((value_bytes, offset))
+                            self.string_constant_map[value] = offset
+                            offset += len(value_bytes)
+
+    def _alloc_vreg(self, name, vregs, free_gprs, free_xmms, is_float=False):
+        """分配虚拟寄存器到物理寄存器"""
+        if name not in vregs:
+            if is_float and free_xmms:
+                vregs[name] = free_xmms.pop(0)
+            elif not is_float and free_gprs:
+                vregs[name] = free_gprs.pop(0)
+            else:
+                vregs[name] = None
+        return vregs[name]
+
+    def _compile_const_float(self, e, instr, vregs, free_gprs, free_xmms, func_relocations):
+        """编译浮点常量加载：通过 RIP-relative movsd 从数据段加载"""
+        reg = self._alloc_vreg(f"fconst_{instr.value}", vregs, free_gprs, free_xmms, is_float=True)
+        if reg is not None:
+            value = float(instr.value)
+            data_offset = self.float_constant_map.get(value)
+            if data_offset is not None:
+                rip_offset = e.movsd_reg_imm(reg, 0)
+                func_relocations.append((rip_offset, data_offset))
+
+    def _compile_const_string(self, e, instr, vregs, free_gprs, free_xmms, func_relocations):
+        """编译字符串常量加载：通过 RIP-relative lea 获取地址"""
+        reg = self._alloc_vreg(f"sconst_{instr.value}", vregs, free_gprs, free_xmms)
+        if reg is not None:
+            value = instr.value
+            data_offset = self.string_constant_map.get(value)
+            if data_offset is not None:
+                rip_offset = e.lea_reg_rip(reg, 0)
+                func_relocations.append((rip_offset, data_offset))
+
+    def _compile_branch(self, e, instr, vregs, free_gprs, free_xmms,
+                        label_positions, pending_branches):
+        """编译条件分支：test + jne true_label + jmp false_label"""
+        cond_reg = vregs.get(instr.cond_reg, RAX) if instr.cond_reg else RAX
+        e.test_reg_reg(cond_reg, cond_reg)
+        jne_offset = e.jne_rel32()
+        jmp_offset = e.jmp_rel32()
+        pending_branches.append((jne_offset, instr.true_label, jmp_offset, instr.false_label))
+
+    def _compile_call(self, e, instr, vregs, free_gprs, free_xmms, func_name):
+        """编译函数调用，按 System V AMD64 ABI 传递参数"""
+        int_idx = 0
+        float_idx = 0
+        stack_gprs = []
+
+        for loc, typ in instr.src_locs:
+            src_reg = vregs.get(loc)
+            if typ == FLOAT_TYPE:
+                if float_idx < 8 and src_reg is not None:
+                    e.movsd_reg_reg(XMM_ARG_REGS[float_idx], src_reg)
+                float_idx += 1
+            else:
+                if int_idx < 6 and src_reg is not None:
+                    e.mov_reg_reg64(ARG_REGS[int_idx], src_reg)
+                int_idx += 1
+                if int_idx > 6:
+                    stack_gprs.append(src_reg)
+
+        # 将超出寄存器限制的整型参数压栈（按反序）
+        for src_reg in reversed(stack_gprs):
+            if src_reg is not None:
+                e.push_reg(src_reg)
+
+        call_offset = e.call_rel32()
+        if func_name not in self.func_calls:
+            self.func_calls[func_name] = []
+        self.func_calls[func_name].append((call_offset, instr.func_name))
+
+        # 恢复栈指针
+        if stack_gprs:
+            e.add_rsp_imm(len(stack_gprs) * 8)
 
     def _compile_function(self, func: LIRFunction) -> bytes:
         """编译单个函数为机器码"""
         e = X86_64Emitter()
+        label_positions = {}
+        pending_jumps = []
+        pending_branches = []
+        func_relocations = []
 
         # 函数序言：保存 callee-saved，分配栈帧
         for reg in CALLEE_SAVED:
             e.push_reg(reg)
 
         if func.stack_size > 0:
-            # 对齐到 16 字节
             aligned = (func.stack_size + 15) & ~15
             e.sub_rsp_imm(aligned)
 
         # 编译函数体
-        self._compile_body(e, func)
+        self._compile_body(e, func, label_positions, pending_jumps, pending_branches, func_relocations)
 
         # 函数尾声：恢复 callee-saved，返回
         if func.stack_size > 0:
@@ -160,59 +249,55 @@ class NativeCodeGen:
 
         e.ret()
 
-        return bytes(e.code)
+        # 回填标签跳转
+        code = bytearray(e.code)
+        for offset_pos, target_label in pending_jumps:
+            target = label_positions.get(target_label, 0)
+            rel = target - (offset_pos + 4)
+            struct.pack_into('<i', code, offset_pos, rel)
 
-    def _compile_body(self, e: X86_64Emitter, func: LIRFunction):
+        for jcc_offset, true_label, jmp_offset, false_label in pending_branches:
+            true_target = label_positions.get(true_label, 0)
+            false_target = label_positions.get(false_label, 0)
+            rel_true = true_target - (jcc_offset + 4)
+            rel_false = false_target - (jmp_offset + 4)
+            struct.pack_into('<i', code, jcc_offset, rel_true)
+            struct.pack_into('<i', code, jmp_offset, rel_false)
+
+        # 记录 RIP-relative 重定位
+        for offset_pos, data_offset in func_relocations:
+            self.rip_relocations.append((func.name, offset_pos, data_offset))
+
+        return bytes(code)
+
+    def _compile_body(self, e: X86_64Emitter, func: LIRFunction,
+                      label_positions: dict, pending_jumps: list,
+                      pending_branches: list, func_relocations: list):
         """编译函数体指令"""
-        # 虚拟寄存器 -> 物理寄存器映射
-        vregs = {}  # vreg_name -> phys_reg
-
-        # 分配虚拟寄存器
+        vregs = {}
         free_gprs = [RAX, RCX, RDX, RBX, R8, R9, R10, R11, R12, R13, R14, R15]
         free_xmms = [XMM0, XMM1, XMM2, XMM3, XMM4, XMM5, XMM6, XMM7]
-
-        def get_reg(is_float=False):
-            if is_float:
-                if free_xmms:
-                    return free_xmms.pop(0)
-            else:
-                if free_gprs:
-                    return free_gprs.pop(0)
-            return None  # 需要溢出处理
-
-        def alloc_vreg(name, is_float=False):
-            if name not in vregs:
-                vregs[name] = get_reg(is_float)
-            return vregs[name]
 
         for instr in func.body:
             if isinstance(instr, LIRLoadConst):
                 if instr.const_type == "int":
-                    reg = alloc_vreg(f"const_{instr.value}")
+                    reg = self._alloc_vreg(f"const_{instr.value}", vregs, free_gprs, free_xmms)
                     if reg is not None:
                         e.mov_reg_imm64(reg, int(instr.value))
                 elif instr.const_type == "float":
-                    reg = alloc_vreg(f"fconst_{instr.value}", is_float=True)
-                    if reg is not None:
-                        # 加载浮点常量（通过 rip-relative 寻址）
-                        # 实际实现需要数据段引用，此处为占位
-                        pass
+                    self._compile_const_float(e, instr, vregs, free_gprs, free_xmms, func_relocations)
                 elif instr.const_type == "bool":
-                    reg = alloc_vreg(f"bconst_{instr.value}")
+                    reg = self._alloc_vreg(f"bconst_{instr.value}", vregs, free_gprs, free_xmms)
                     if reg is not None:
                         e.mov_reg_imm64(reg, 1 if instr.value else 0)
                 elif instr.const_type == "string":
-                    reg = alloc_vreg(f"sconst_{instr.value}")
-                    if reg is not None:
-                        # lea reg, [rip + string_offset]
-                        pass
+                    self._compile_const_string(e, instr, vregs, free_gprs, free_xmms, func_relocations)
 
             elif isinstance(instr, LIRBinOp):
                 op = instr.op
                 if op in ("+", "-", "*", "/", "%"):
-                    # 简化：使用固定寄存器
-                    dst = RAX  # 结果在 RAX
-                    src = RCX  # 操作数在 RCX
+                    dst = RAX
+                    src = RCX
                     if op == "+":
                         e.add_reg_reg(dst, src)
                     elif op == "-":
@@ -225,7 +310,6 @@ class NativeCodeGen:
                     elif op == "%":
                         e.cqo()
                         e.idiv_reg(src)
-                        # 余数在 RDX
                         e.mov_reg_reg64(RAX, RDX)
                 elif op == "==":
                     e.cmp_reg_reg(RAX, RCX)
@@ -261,64 +345,51 @@ class NativeCodeGen:
                     e.movzx_reg32_reg8(RAX, RAX)
 
             elif isinstance(instr, LIRCall):
-                # 设置参数
-                for i in range(min(instr.arg_count, 6)):
-                    # 将第 i 个参数放到 ARG_REGS[i]
-                    pass  # 实际需要从虚拟寄存器加载
-
-                # 调用
-                call_offset = e.call_rel32()
-                self.link_calls.append((call_offset, instr.func_name))
+                self._compile_call(e, instr, vregs, free_gprs, free_xmms, func.name)
 
             elif isinstance(instr, LIRReturn):
-                # 返回值已在 RAX
                 e.ret()
 
             elif isinstance(instr, LIRJump):
-                # jmp label
                 jmp_offset = e.jmp_rel32()
-                # 记录标签跳转，后续回填
+                pending_jumps.append((jmp_offset, instr.target))
 
             elif isinstance(instr, LIRBranch):
-                # if (RAX != 0) jmp true; else jmp false
-                e.test_reg_reg(RAX, RAX)
-                jne_offset = e.jne_rel32()
-                jmp_offset = e.jmp_rel32()
-                # 记录分支跳转
+                self._compile_branch(e, instr, vregs, free_gprs, free_xmms,
+                                     label_positions, pending_branches)
 
             elif isinstance(instr, LIRLabel):
-                pass  # 标签在回填阶段处理
+                label_positions[instr.name] = e.current_offset()
 
             elif isinstance(instr, LIRPanic):
-                # 调用 abort (exit code 1)
                 e.mov_reg_imm64(RDI, 1)
-                e.mov_reg_imm64(RAX, 60)  # syscall: exit
+                e.mov_reg_imm64(RAX, 60)
                 e.syscall()
 
     def _generate_start(self, func_code: Dict[str, bytes], module: LIRModule):
         """生成 _start 入口函数"""
         e = X86_64Emitter()
+        self.func_calls["_start"] = []
 
         # 设置参数
-        # argc 在 [RSP], argv 在 [RSP+8]
-        e.mov_reg_mem(RDI, RSP, 8)  # argv[0] = program name
+        e.mov_reg_mem(RDI, RSP, 8)
 
         # 调用 nova_init
         call_init = e.call_rel32()
-        self.link_calls.append((call_init, "nova_init"))
+        self.func_calls["_start"].append((call_init, "nova_init"))
 
         # 调用 main
         if "main" in func_code:
             call_main = e.call_rel32()
-            self.link_calls.append((call_main, "main"))
+            self.func_calls["_start"].append((call_main, "main"))
 
         # 调用 nova_cleanup
         call_cleanup = e.call_rel32()
-        self.link_calls.append((call_cleanup, "nova_cleanup"))
+        self.func_calls["_start"].append((call_cleanup, "nova_cleanup"))
 
         # exit(0)
-        e.mov_reg_imm64(RDI, 0)  # exit code
-        e.mov_reg_imm64(RAX, 60)  # syscall: exit
+        e.mov_reg_imm64(RDI, 0)
+        e.mov_reg_imm64(RAX, 60)
         e.syscall()
 
         return bytes(e.code)
@@ -327,6 +398,27 @@ class NativeCodeGen:
     # ELF 文件生成器
     # ============================================================
 
+    def _patch_code(self, code: bytearray, func_offsets: Dict[str, int]):
+        """回填函数调用和 RIP-relative 数据引用"""
+        page_size = 0x1000
+        data_dist = ((len(code) + page_size - 1) // page_size) * page_size
+
+        # Patch 函数调用
+        for func_name, calls in self.func_calls.items():
+            func_base = 0 if func_name == "_start" else func_offsets.get(func_name, 0)
+            for call_offset, target_name in calls:
+                target_base = func_offsets.get(target_name, 0)
+                abs_call_offset = func_base + call_offset
+                rel = target_base - (abs_call_offset + 4)
+                struct.pack_into('<i', code, abs_call_offset, rel)
+
+        # Patch RIP-relative 数据引用
+        for func_name, offset_in_func, data_offset in self.rip_relocations:
+            func_base = 0 if func_name == "_start" else func_offsets.get(func_name, 0)
+            abs_offset = func_base + offset_in_func
+            rel = data_dist + data_offset - (abs_offset + 4)
+            struct.pack_into('<i', code, abs_offset, rel)
+
     def _generate_elf(self, func_code: Dict[str, bytes], start_code: bytes,
                      module: LIRModule) -> bytes:
         """生成 Linux ELF 可执行文件"""
@@ -334,15 +426,11 @@ class NativeCodeGen:
         # 1. 构建代码段
         code = bytearray()
 
-        # 记录所有函数位置
         code_offset = 0
-
-        # _start 入口
         code.extend(start_code)
         start_offset = 0
         code_offset = len(code)
 
-        # 各函数
         func_offsets = {}
         for name, fc in func_code.items():
             func_offsets[name] = code_offset
@@ -358,31 +446,32 @@ class NativeCodeGen:
         for value_bytes, _ in self.string_constants:
             data.extend(value_bytes)
 
-        # 3. ELF 头 (64 bytes)
+        # 回填跳转和数据引用
+        self._patch_code(code, func_offsets)
+
+        # 3. ELF 头
         ehdr = self._make_elf_header(
             entry=start_offset,
-            phoff=64,           # program headers 紧跟 ELF header
-            phnum=3,            # LOAD(code) + LOAD(data) + LOAD(rodata)
-            shoff=0,            # 无 section headers（简化）
+            phoff=64,
+            phnum=2,
+            shoff=0,
         )
 
         # 4. Program headers
         page_size = 0x1000
         base_addr = 0x400000
 
-        # LOAD: 代码段 (RWX)
         code_ph = self._make_program_header(
-            p_type=1,  # PT_LOAD
+            p_type=1,
             p_offset=0,
             p_vaddr=base_addr,
             p_paddr=base_addr,
             p_filesz=len(code),
             p_memsz=len(code),
-            p_flags=5,  # PF_R | PF_X
+            p_flags=5,
             p_align=page_size,
         )
 
-        # LOAD: 数据段 (RW)
         data_offset = len(code)
         data_ph = self._make_program_header(
             p_type=1,
@@ -391,7 +480,7 @@ class NativeCodeGen:
             p_paddr=base_addr + ((data_offset + page_size - 1) // page_size) * page_size,
             p_filesz=len(data),
             p_memsz=len(data),
-            p_flags=6,  # PF_R | PF_W
+            p_flags=6,
             p_align=page_size,
         )
 

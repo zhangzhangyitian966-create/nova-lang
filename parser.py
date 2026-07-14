@@ -66,7 +66,10 @@ class Parser:
         tok = self._cur()
         if tok.type != tt:
             detail = msg or f"期望 {tt.name}，但得到 {tok.type.name} ('{tok.value}')"
-            raise ParseError(detail, tok.line, tok.column, source=self._source)
+            span = None
+            if tok.end_line is not None and tok.end_col is not None:
+                span = Span(tok.line, tok.column, tok.end_line, tok.end_col)
+            raise ParseError(detail, tok.line, tok.column, source=self._source, span=span)
         return self._advance()
 
     def _match(self, tt: TokenType) -> Optional[Token]:
@@ -77,6 +80,8 @@ class Parser:
 
     def _span(self, tok: Token) -> Span:
         """从 token 创建 Span"""
+        if tok.end_line is not None and tok.end_col is not None:
+            return Span(tok.line, tok.column, tok.end_line, tok.end_col)
         return Span(tok.line, tok.column)
 
     # ----------------------------------------------------------
@@ -211,6 +216,17 @@ class Parser:
         tok = self._expect(TokenType.TYPE)
         name_tok = self._expect(TokenType.IDENT)
         name = name_tok.value
+
+        # 解析可选的泛型参数列表：type Option[T] { ... }
+        type_params = []
+        if self._match(TokenType.LBRACKET):
+            param_tok = self._expect(TokenType.IDENT)
+            type_params.append(param_tok.value)
+            while self._match(TokenType.COMMA):
+                param_tok = self._expect(TokenType.IDENT)
+                type_params.append(param_tok.value)
+            self._expect(TokenType.RBRACKET)
+
         self._expect(TokenType.LBRACE)
 
         variants = []
@@ -223,7 +239,7 @@ class Parser:
                 variants.append(self._parse_variant_def())
 
         self._expect(TokenType.RBRACE)
-        return TypeDef(name=name, variants=variants, span=self._span(tok))
+        return TypeDef(name=name, variants=variants, type_params=type_params, span=self._span(tok))
 
     def _parse_variant_def(self) -> VariantDef:
         tok = self._cur()
@@ -232,17 +248,29 @@ class Parser:
 
         if self._match(TokenType.LPAREN):
             if self._peek_type() != TokenType.RPAREN:
-                # 第一个字段
-                field_name = self._expect(TokenType.IDENT)
-                self._expect(TokenType.COLON)
-                field_type = self._parse_type_expr()
-                fields.append((field_name.value, field_type))
-
-                while self._match(TokenType.COMMA):
-                    field_name = self._expect(TokenType.IDENT)
-                    self._expect(TokenType.COLON)
+                # 判断是命名字段 (name: Type) 还是匿名字段 (Type)
+                saved_pos = self.pos
+                first_ident = self._expect(TokenType.IDENT)
+                if self._peek_type() == TokenType.COLON:
+                    # 命名字段
+                    self._advance()  # skip :
                     field_type = self._parse_type_expr()
-                    fields.append((field_name.value, field_type))
+                    fields.append((first_ident.value, field_type))
+
+                    while self._match(TokenType.COMMA):
+                        field_name = self._expect(TokenType.IDENT)
+                        self._expect(TokenType.COLON)
+                        field_type = self._parse_type_expr()
+                        fields.append((field_name.value, field_type))
+                else:
+                    # 匿名字段，回退并解析为类型表达式
+                    self.pos = saved_pos
+                    field_type = self._parse_type_expr()
+                    fields.append((None, field_type))
+
+                    while self._match(TokenType.COMMA):
+                        field_type = self._parse_type_expr()
+                        fields.append((None, field_type))
 
             self._expect(TokenType.RPAREN)
 
@@ -329,7 +357,8 @@ class Parser:
                 return TypeGeneric(base=name, params=params, span=self._span(tok))
             return TypeIdentifier(name=name, span=self._span(tok))
 
-        raise ParseError(f"期望类型表达式，但得到 '{tok.value}'", tok.line, tok.column, source=self._source)
+        span = Span(tok.line, tok.column, tok.end_line, tok.end_col) if tok.end_line is not None else Span(tok.line, tok.column)
+        raise ParseError(f"期望类型表达式，但得到 '{tok.value}'", tok.line, tok.column, source=self._source, span=span)
 
     # ----------------------------------------------------------
     # 语句
@@ -444,8 +473,10 @@ class Parser:
 
             iterable = ("range", start_expr, end_expr, step_expr)
         else:
-            raise ParseError(f"for 循环期望 'in' 或 '<-'，但得到 '{self._cur().value}'",
-                           self._cur().line, self._cur().column, source=self._source)
+            tok = self._cur()
+            span = Span(tok.line, tok.column, tok.end_line, tok.end_col) if tok.end_line is not None else Span(tok.line, tok.column)
+            raise ParseError(f"for 循环期望 'in' 或 '<-'，但得到 '{tok.value}'",
+                           tok.line, tok.column, source=self._source, span=span)
 
         body = self._parse_block_or_expr()
         return ForExpr(var_name=var_name, iterable=iterable, body=body,
@@ -586,7 +617,8 @@ class Parser:
                 return PatternConstructor(name=name, fields=fields, span=self._span(tok))
             return PatternIdentifier(name=name, span=self._span(tok))
 
-        raise ParseError(f"无效的模式 '{tok.value}'", tok.line, tok.column, source=self._source)
+        span = Span(tok.line, tok.column, tok.end_line, tok.end_col) if tok.end_line is not None else Span(tok.line, tok.column)
+        raise ParseError(f"无效的模式 '{tok.value}'", tok.line, tok.column, source=self._source, span=span)
 
     # ----------------------------------------------------------
     # 逻辑或 (||)
@@ -786,7 +818,8 @@ class Parser:
         if tok.type == TokenType.LBRACE:
             return self._parse_block()
 
-        raise ParseError(f"意外的 token '{tok.value}'", tok.line, tok.column, source=self._source)
+        span = Span(tok.line, tok.column, tok.end_line, tok.end_col) if tok.end_line is not None else Span(tok.line, tok.column)
+        raise ParseError(f"意外的 token '{tok.value}'", tok.line, tok.column, source=self._source, span=span)
 
     def _parse_lambda(self) -> Lambda:
         """解析 Lambda 表达式 |params| -> Type { body } 或 |params| expr"""
@@ -852,8 +885,10 @@ class Parser:
             end_expr = self._parse_expression()
             iterable = ("range", start_expr, end_expr, None)
         else:
+            tok = self._cur()
+            span = Span(tok.line, tok.column, tok.end_line, tok.end_col) if tok.end_line is not None else Span(tok.line, tok.column)
             raise ParseError(f"列表推导式期望 'in' 或 '<-'",
-                           self._cur().line, self._cur().column, source=self._source)
+                           tok.line, tok.column, source=self._source, span=span)
 
         # 可选过滤条件: if cond
         filter_cond = None

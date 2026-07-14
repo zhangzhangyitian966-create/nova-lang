@@ -15,9 +15,11 @@ from typing import List, Optional, Any, Union
 
 @dataclass
 class Span:
-    """源代码位置信息（行号、列号）"""
+    """源代码位置信息（行号、列号），支持多行跨度"""
     line: int
     column: int
+    end_line: Optional[int] = None
+    end_column: Optional[int] = None
 
 
 # ============================================================
@@ -400,6 +402,7 @@ class TypeDef:
     """类型定义（ADT）：type Shape { Circle(r: Float) | Rect(w: Float, h: Float) }"""
     name: str
     variants: List[Any]  # List[VariantDef]
+    type_params: List[str] = field(default_factory=list)
     span: Optional[Span] = None
 
 

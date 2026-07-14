@@ -375,6 +375,14 @@ class X86_64Emitter:
         self.emit_int32(0)
         return pos
 
+    def je_rel32(self):
+        """je rel32"""
+        self.emit_byte(0x0F)
+        self.emit_byte(0x84)
+        pos = self.current_offset()
+        self.emit_int32(0)
+        return pos
+
     def jl_rel32(self):
         """jl rel32"""
         self.emit_byte(0x0F)

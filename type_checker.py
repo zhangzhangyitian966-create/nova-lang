@@ -27,7 +27,7 @@ from nova.ast_nodes import (
     TypeInt, TypeFloat, TypeString, TypeBool, TypeChar, TypeUnit,
     TypeIdentifier, TypeGeneric, TypeTuple, TypeFn, Span,
 )
-from nova.errors import TypeCheckError
+from nova.errors import TypeCheckError, ErrorCollector
 
 
 # ============================================================
@@ -37,6 +37,25 @@ from nova.errors import TypeCheckError
 class NovaType:
     """Nova 类型基类"""
     pass
+
+
+class ErrorType(NovaType):
+    """错误类型，用于错误收集模式下避免级联错误"""
+    _instance = None
+
+    def __new__(cls):
+        if cls._instance is None:
+            cls._instance = super().__new__(cls)
+        return cls._instance
+
+    def __eq__(self, other):
+        return isinstance(other, ErrorType)
+
+    def __hash__(self):
+        return hash("<error>")
+
+    def __repr__(self):
+        return "<error>"
 
 
 class PrimType(NovaType):
@@ -131,10 +150,13 @@ class ADTType(NovaType):
         self.type_params = type_params or []
 
     def __eq__(self, other):
-        return isinstance(other, ADTType) and self.name == other.name
+        return (isinstance(other, ADTType)
+                and self.name == other.name
+                and len(self.type_params) == len(other.type_params)
+                and all(a == b for a, b in zip(self.type_params, other.type_params)))
 
     def __hash__(self):
-        return hash(("ADT", self.name))
+        return hash(("ADT", self.name, tuple(hash(p) for p in self.type_params)))
 
     def __repr__(self):
         if self.type_params:
@@ -154,10 +176,10 @@ class TypeVar(NovaType):
             self.name = name
 
     def __eq__(self, other):
-        return self is other
+        return isinstance(other, TypeVar) and self.name == other.name
 
     def __hash__(self):
-        return hash(id(self))
+        return hash(("TypeVar", self.name))
 
     def __repr__(self):
         return self.name
@@ -174,6 +196,7 @@ class TypeEnv:
         self.parent = parent
         self.types: Dict[str, NovaType] = {}
         self.adt_variants: Dict[str, List[tuple]] = {}  # adt_name -> [(variant_name, [field_types])]
+        self.adt_type_params: Dict[str, List[str]] = {}  # adt_name -> [param_names]
         self.aliases: Dict[str, NovaType] = {}
 
     def define(self, name: str, ty: NovaType):
@@ -194,6 +217,14 @@ class TypeEnv:
         result.update(self.adt_variants)
         return result
 
+    def get_all_adt_type_params(self) -> Dict[str, List[str]]:
+        """获取当前环境及所有父环境的 ADT 泛型参数信息"""
+        result = {}
+        if self.parent:
+            result.update(self.parent.get_all_adt_type_params())
+        result.update(self.adt_type_params)
+        return result
+
     def child(self) -> 'TypeEnv':
         return TypeEnv(parent=self)
 
@@ -208,21 +239,52 @@ STRING_T = PrimType("String")
 BOOL_T = PrimType("Bool")
 CHAR_T = PrimType("Char")
 UNIT_T = PrimType("Unit")
+ERROR_TYPE = ErrorType()
 
 
 class TypeChecker:
     """Nova 类型检查器"""
 
-    def __init__(self, source: str = ""):
+    def __init__(self, source: str = "", collect_errors: bool = False):
         self.env = TypeEnv()
         self._source = source
+        self._collect_errors = collect_errors
+        self.error_collector = ErrorCollector()
         self._setup_builtins()
+
+    def _report_error(self, message: str, node=None):
+        """报告类型错误：收集模式或立即抛出"""
+        line, col, span = -1, -1, None
+        if node is not None and hasattr(node, 'span') and node.span:
+            line = node.span.line
+            col = node.span.column
+            if node.span.end_line is not None and node.span.end_column is not None:
+                span = Span(node.span.line, node.span.column,
+                            node.span.end_line, node.span.end_column)
+            else:
+                span = Span(node.span.line, node.span.column)
+        err = TypeCheckError(message, line, col, source=self._source, span=span)
+        if self._collect_errors:
+            self.error_collector.add(err)
+        else:
+            raise err
 
     def _setup_builtins(self):
         """注册内置函数和类型的类型签名"""
         # 内置 Option 和 Result
         self.env.adt_variants["Option"] = [("Some", [TypeVar("T")]), ("None", [])]
         self.env.adt_variants["Result"] = [("Ok", [TypeVar("T")]), ("Err", [TypeVar("E")])]
+        self.env.adt_type_params["Option"] = ["T"]
+        self.env.adt_type_params["Result"] = ["T", "E"]
+
+        # 注册内置 ADT 构造函数类型签名
+        t_opt = TypeVar("T")
+        self.env.define("Some", FnType([t_opt], ADTType("Option", [t_opt])))
+        self.env.define("None", ADTType("Option", [TypeVar("T")]))
+        t_ok = TypeVar("T")
+        e_err = TypeVar("E")
+        self.env.define("Ok", FnType([t_ok], ADTType("Result", [t_ok, e_err])))
+        self.env.define("Err", FnType([e_err], ADTType("Result", [t_ok, e_err])))
 
         # print: (a) -> Unit
         a = TypeVar("a")
@@ -314,11 +376,9 @@ class TypeChecker:
             if decl.type_annotation:
                 annotated = self._from_ast_type(decl.type_annotation)
                 if not self._types_compatible(ty, annotated):
-                    line = decl.span.line if decl.span else -1
-                    col = decl.span.column if decl.span else -1
-                    raise TypeCheckError(
+                    self._report_error(
                         f"let 绑定 '{decl.name}' 的推断类型 {ty} 与标注类型 {annotated} 不匹配",
-                        line, col
+                        decl
                     )
             self.env.define(decl.name, ty)
 
@@ -327,8 +387,9 @@ class TypeChecker:
             if decl.type_annotation:
                 annotated = self._from_ast_type(decl.type_annotation)
                 if not self._types_compatible(ty, annotated):
-                    raise TypeCheckError(
-                        f"mut 绑定 '{decl.name}' 的推断类型 {ty} 与标注类型 {annotated} 不匹配"
+                    self._report_error(
+                        f"mut 绑定 '{decl.name}' 的推断类型 {ty} 与标注类型 {annotated} 不匹配",
+                        decl
                     )
             self.env.define(decl.name, ty)
 
@@ -352,19 +413,24 @@ class TypeChecker:
             if decl.return_type:
                 expected = self._from_ast_type(decl.return_type)
                 if not self._types_compatible(body_type, expected):
-                    raise TypeCheckError(
-                        f"函数 '{decl.name}' 返回类型 {body_type} 与声明的 {expected} 不匹配"
+                    self._report_error(
+                        f"函数 '{decl.name}' 返回类型 {body_type} 与声明的 {expected} 不匹配",
+                        decl.body
                     )
 
         elif isinstance(decl, TypeDef):
-            # 注册 ADT 类型
-            adt_ty = ADTType(decl.name)
+            # 注册 ADT 类型（支持泛型参数）
+            type_params = [TypeVar(tp) for tp in decl.type_params]
+            adt_ty = ADTType(decl.name, type_params)
             self.env.types[decl.name] = adt_ty
+            self.env.adt_type_params[decl.name] = decl.type_params
+            # 为字段类型解析提供局部类型参数映射
+            local_types = {tp: TypeVar(tp) for tp in decl.type_params}
             variants = []
             for variant in decl.variants:
                 field_types = []
                 for fname, ftype_ast in variant.fields:
-                    field_types.append(self._from_ast_type(ftype_ast))
+                    field_types.append(self._from_ast_type(ftype_ast, local_types=local_types))
                 variants.append((variant.name, field_types))
             self.env.adt_variants[decl.name] = variants
 
@@ -411,7 +477,8 @@ class TypeChecker:
         elif isinstance(expr, Identifier):
             ty = self.env.lookup(expr.name)
             if ty is None:
-                raise TypeCheckError(f"未定义的标识符 '{expr.name}'")
+                self._report_error(f"未定义的标识符 '{expr.name}'", expr)
+                return ERROR_TYPE
             return ty
 
         elif isinstance(expr, ListExpr):
@@ -421,8 +488,9 @@ class TypeChecker:
             first = elem_types[0]
             for i, et in enumerate(elem_types[1:], 1):
                 if not self._types_compatible(et, first):
-                    raise TypeCheckError(
-                        f"列表元素类型不一致：元素 0 为 {first}，元素 {i} 为 {et}"
+                    self._report_error(
+                        f"列表元素类型不一致：元素 0 为 {first}，元素 {i} 为 {et}",
+                        expr.elements[i]
                     )
             return ListType(first)
 
@@ -439,13 +507,14 @@ class TypeChecker:
         elif isinstance(expr, IfExpr):
             cond_ty = self.check_expr(expr.condition)
             if not self._types_compatible(cond_ty, BOOL_T):
-                raise TypeCheckError(f"if 条件必须是 Bool 类型，得到 {cond_ty}")
+                self._report_error(f"if 条件必须是 Bool 类型，得到 {cond_ty}", expr.condition)
             then_ty = self.check_expr(expr.then_branch)
             if expr.else_branch:
                 else_ty = self.check_expr(expr.else_branch)
                 if not self._types_compatible(then_ty, else_ty):
-                    raise TypeCheckError(
-                        f"if 分支类型不一致：then 为 {then_ty}，else 为 {else_ty}"
+                    self._report_error(
+                        f"if 分支类型不一致：then 为 {then_ty}，else 为 {else_ty}",
+                        expr
                     )
                 return then_ty
             return UNIT_T
@@ -458,8 +527,9 @@ class TypeChecker:
                 if result_type is None:
                     result_type = arm_ty
                 elif not self._types_compatible(arm_ty, result_type):
-                    raise TypeCheckError(
-                        f"match 分支 {i} 类型 {arm_ty} 与第一个分支 {result_type} 不一致"
+                    self._report_error(
+                        f"match 分支 {i} 类型 {arm_ty} 与第一个分支 {result_type} 不一致",
+                        arm.body
                     )
             return result_type or UNIT_T
 
@@ -488,25 +558,37 @@ class TypeChecker:
             if isinstance(callee_ty, FnType):
                 # 支持部分应用（参数数量少于声明的参数数量）
                 if len(arg_types) > len(callee_ty.param_types):
-                    raise TypeCheckError(
-                        f"函数期望至多 {len(callee_ty.param_types)} 个参数，但传入了 {len(arg_types)} 个"
+                    self._report_error(
+                        f"函数期望至多 {len(callee_ty.param_types)} 个参数，但传入了 {len(arg_types)} 个",
+                        expr
                     )
+                    return ERROR_TYPE
+                # 收集类型变量绑定
+                bindings: Dict[TypeVar, NovaType] = {}
+                for arg_t, param_t in zip(arg_types, callee_ty.param_types):
+                    self._collect_type_bindings(arg_t, param_t, bindings)
+
                 for i, (arg_t, param_t) in enumerate(zip(arg_types, callee_ty.param_types)):
-                    if not self._types_compatible(arg_t, param_t):
-                        raise TypeCheckError(
-                            f"参数 {i} 类型不匹配：期望 {param_t}，得到 {arg_t}"
+                    substituted = self._substitute_type_vars(param_t, bindings)
+                    if not self._types_compatible(arg_t, substituted):
+                        self._report_error(
+                            f"参数 {i} 类型不匹配：期望 {substituted}，得到 {arg_t}",
+                            expr.args[i]
                         )
                 if len(arg_types) == len(callee_ty.param_types):
-                    return callee_ty.return_type
+                    return self._substitute_type_vars(callee_ty.return_type, bindings)
                 else:
                     # 部分应用：返回剩余参数 -> 返回值 的函数类型
-                    return FnType(callee_ty.param_types[len(arg_types):], callee_ty.return_type)
+                    remaining = [self._substitute_type_vars(p, bindings) for p in callee_ty.param_types[len(arg_types):]]
+                    ret = self._substitute_type_vars(callee_ty.return_type, bindings)
+                    return FnType(remaining, ret)
             elif isinstance(callee_ty, TypeVar):
                 # 未类型化的参数（duck typing）：允许任意调用
                 # 返回一个 TypeVar 表示结果类型
                 return TypeVar(f"ret_{callee_ty.name}")
             else:
-                raise TypeCheckError(f"无法对非函数类型 {callee_ty} 进行调用")
+                self._report_error(f"无法对非函数类型 {callee_ty} 进行调用", expr)
+                return ERROR_TYPE
 
         elif isinstance(expr, PipeExpr):
             # expr |> f  等价于 f(expr)
@@ -537,8 +619,9 @@ class TypeChecker:
             if expr.type_annotation:
                 annotated = self._from_ast_type(expr.type_annotation)
                 if not self._types_compatible(val_ty, annotated):
-                    raise TypeCheckError(
-                        f"let 绑定类型不匹配：推断为 {val_ty}，标注为 {annotated}"
+                    self._report_error(
+                        f"let 绑定类型不匹配：推断为 {val_ty}，标注为 {annotated}",
+                        expr
                     )
             self.env.define(expr.name, val_ty)
             return UNIT_T
@@ -552,10 +635,12 @@ class TypeChecker:
             val_ty = self.check_expr(expr.value)
             existing = self.env.lookup(expr.name)
             if existing is None:
-                raise TypeCheckError(f"赋值目标 '{expr.name}' 未定义")
+                self._report_error(f"赋值目标 '{expr.name}' 未定义", expr)
+                return UNIT_T
             if not self._types_compatible(val_ty, existing):
-                raise TypeCheckError(
-                    f"赋值类型不匹配：'{expr.name}' 为 {existing}，值为 {val_ty}"
+                self._report_error(
+                    f"赋值类型不匹配：'{expr.name}' 为 {existing}，值为 {val_ty}",
+                    expr
                 )
             return UNIT_T
 
@@ -568,8 +653,10 @@ class TypeChecker:
                         return target_ty.elements[idx]
                 except ValueError:
                     pass
-                raise TypeCheckError(f"元组索引 '{expr.field}' 越界")
-            raise TypeCheckError(f"无法对类型 {target_ty} 进行字段访问")
+                self._report_error(f"元组索引 '{expr.field}' 越界", expr)
+                return ERROR_TYPE
+            self._report_error(f"无法对类型 {target_ty} 进行字段访问", expr)
+            return ERROR_TYPE
 
         elif isinstance(expr, TryExpr):
             # ? 操作符的简化检查
@@ -599,7 +686,7 @@ class TypeChecker:
         elif isinstance(expr, WhileExpr):
             cond_ty = self.check_expr(expr.condition)
             if not self._types_compatible(cond_ty, BOOL_T):
-                raise TypeCheckError(f"while 条件必须是 Bool 类型，得到 {cond_ty}")
+                self._report_error(f"while 条件必须是 Bool 类型，得到 {cond_ty}", expr.condition)
             return self.check_expr(expr.body)
 
         elif isinstance(expr, BreakExpr):
@@ -623,7 +710,7 @@ class TypeChecker:
                 self.env = child_env
                 cond_ty = self.check_expr(expr.filter_cond)
                 if not self._types_compatible(cond_ty, BOOL_T):
-                    raise TypeCheckError(f"列表推导式过滤条件必须是 Bool 类型")
+                    self._report_error(f"列表推导式过滤条件必须是 Bool 类型", expr.filter_cond)
                 self.env = old_env
 
             old_env = self.env
@@ -633,7 +720,8 @@ class TypeChecker:
             return ListType(expr_ty)
 
         else:
-            raise TypeCheckError(f"未知的表达式类型: {type(expr).__name__}")
+            self._report_error(f"未知的表达式类型: {type(expr).__name__}", expr)
+            return ERROR_TYPE
 
     def check_match_arm(self, arm, subject_type: NovaType, match_expr: MatchExpr) -> NovaType:
         """检查 match 分支"""
@@ -657,15 +745,15 @@ class TypeChecker:
 
         elif isinstance(pattern, PatternInt):
             if not self._types_compatible(subject_type, INT_T):
-                raise TypeCheckError(f"整数模式与类型 {subject_type} 不匹配")
+                self._report_error(f"整数模式与类型 {subject_type} 不匹配", pattern)
 
         elif isinstance(pattern, PatternBool):
             if not self._types_compatible(subject_type, BOOL_T):
-                raise TypeCheckError(f"布尔模式与类型 {subject_type} 不匹配")
+                self._report_error(f"布尔模式与类型 {subject_type} 不匹配", pattern)
 
         elif isinstance(pattern, PatternString):
             if not self._types_compatible(subject_type, STRING_T):
-                raise TypeCheckError(f"字符串模式与类型 {subject_type} 不匹配")
+                self._report_error(f"字符串模式与类型 {subject_type} 不匹配", pattern)
 
         elif isinstance(pattern, PatternIdentifier):
             env.define(pattern.name, subject_type)
@@ -682,27 +770,33 @@ class TypeChecker:
                     break
 
             if variants_info is None:
-                raise TypeCheckError(f"未知的构造器 '{pattern.name}'")
+                self._report_error(f"未知的构造器 '{pattern.name}'", pattern)
+                return
 
             adt_name, field_types = variants_info
             if len(pattern.fields) != len(field_types):
-                raise TypeCheckError(
-                    f"构造器 '{pattern.name}' 期望 {len(field_types)} 个字段，得到 {len(pattern.fields)} 个"
+                self._report_error(
+                    f"构造器 '{pattern.name}' 期望 {len(field_types)} 个字段，得到 {len(pattern.fields)} 个",
+                    pattern
                 )
+                return
             for p, ft in zip(pattern.fields, field_types):
                 self._check_pattern(p, ft, env, match_expr)
 
         elif isinstance(pattern, PatternTuple):
             if not isinstance(subject_type, TupleType):
-                raise TypeCheckError(f"元组模式与类型 {subject_type} 不匹配")
+                self._report_error(f"元组模式与类型 {subject_type} 不匹配", pattern)
+                return
             if len(pattern.elements) != len(subject_type.elements):
-                raise TypeCheckError("元组模式长度不匹配")
+                self._report_error("元组模式长度不匹配", pattern)
+                return
             for p, t in zip(pattern.elements, subject_type.elements):
                 self._check_pattern(p, t, env, match_expr)
 
         elif isinstance(pattern, PatternList):
             if not isinstance(subject_type, ListType):
-                raise TypeCheckError(f"列表模式与类型 {subject_type} 不匹配")
+                self._report_error(f"列表模式与类型 {subject_type} 不匹配", pattern)
+                return
             for p in pattern.elements:
                 self._check_pattern(p, subject_type.elem_type, env, match_expr)
 
@@ -717,38 +811,43 @@ class TypeChecker:
                 return INT_T
             if self._types_compatible(left_ty, FLOAT_T) and self._types_compatible(right_ty, FLOAT_T):
                 return FLOAT_T
-            raise TypeCheckError(
-                f"操作符 '{expr.op}' 的操作数类型不兼容：{left_ty} 和 {right_ty}"
+            self._report_error(
+                f"操作符 '{expr.op}' 的操作数类型不兼容：{left_ty} 和 {right_ty}",
+                expr
             )
+            return INT_T
 
         if expr.op == "%":
             if self._types_compatible(left_ty, INT_T) and self._types_compatible(right_ty, INT_T):
                 return INT_T
-            raise TypeCheckError(f"操作符 '%' 需要 Int 类型操作数")
+            self._report_error(f"操作符 '%' 需要 Int 类型操作数", expr)
+            return INT_T
 
         # 字符串拼接
         if expr.op == "++":
             if self._types_compatible(left_ty, STRING_T) and self._types_compatible(right_ty, STRING_T):
                 return STRING_T
-            raise TypeCheckError(f"操作符 '++' 需要 String 类型操作数")
+            self._report_error(f"操作符 '++' 需要 String 类型操作数", expr)
+            return STRING_T
 
         # 比较操作
         if expr.op in ("==", "!=", "<", ">", "<=", ">="):
             if expr.op in ("<", ">", "<=", ">="):
                 if not (self._types_compatible(left_ty, INT_T) and self._types_compatible(right_ty, INT_T)
                         or self._types_compatible(left_ty, FLOAT_T) and self._types_compatible(right_ty, FLOAT_T)):
-                    raise TypeCheckError(f"操作符 '{expr.op}' 需要数值类型操作数")
+                    self._report_error(f"操作符 '{expr.op}' 需要数值类型操作数", expr)
             return BOOL_T
 
         # 逻辑操作
         if expr.op in ("&&", "||"):
             if not self._types_compatible(left_ty, BOOL_T):
-                raise TypeCheckError(f"'&&' 左侧必须是 Bool，得到 {left_ty}")
+                self._report_error(f"'&&' 左侧必须是 Bool，得到 {left_ty}", expr.left)
             if not self._types_compatible(right_ty, BOOL_T):
-                raise TypeCheckError(f"'&&' 右侧必须是 Bool，得到 {right_ty}")
+                self._report_error(f"'&&' 右侧必须是 Bool，得到 {right_ty}", expr.right)
             return BOOL_T
 
-        raise TypeCheckError(f"未知的操作符 '{expr.op}'")
+        self._report_error(f"未知的操作符 '{expr.op}'", expr)
+        return ERROR_TYPE
 
     def _check_unary_op(self, expr: UnaryOp) -> NovaType:
         """检查一元操作"""
@@ -758,12 +857,59 @@ class TypeChecker:
                 return INT_T
             if self._types_compatible(operand_ty, FLOAT_T):
                 return FLOAT_T
-            raise TypeCheckError(f"一元 '-' 需要 Int 或 Float，得到 {operand_ty}")
+            self._report_error(f"一元 '-' 需要 Int 或 Float，得到 {operand_ty}", expr)
+            return INT_T
         if expr.op == "!":
             if self._types_compatible(operand_ty, BOOL_T):
                 return BOOL_T
-            raise TypeCheckError(f"一元 '!' 需要 Bool，得到 {operand_ty}")
-        raise TypeCheckError(f"未知的一元操作符 '{expr.op}'")
+            self._report_error(f"一元 '!' 需要 Bool，得到 {operand_ty}", expr)
+            return BOOL_T
+        self._report_error(f"未知的一元操作符 '{expr.op}'", expr)
+        return ERROR_TYPE
+
+    def _substitute_type_vars(self, ty: NovaType, bindings: Dict[TypeVar, NovaType]) -> NovaType:
+        """替换类型中的类型变量"""
+        if isinstance(ty, TypeVar):
+            return bindings.get(ty, ty)
+        if isinstance(ty, ListType):
+            return ListType(self._substitute_type_vars(ty.elem_type, bindings))
+        if isinstance(ty, MapType):
+            return MapType(
+                self._substitute_type_vars(ty.key_type, bindings),
+                self._substitute_type_vars(ty.value_type, bindings)
+            )
+        if isinstance(ty, TupleType):
+            return TupleType([self._substitute_type_vars(e, bindings) for e in ty.elements])
+        if isinstance(ty, FnType):
+            return FnType(
+                [self._substitute_type_vars(p, bindings) for p in ty.param_types],
+                self._substitute_type_vars(ty.return_type, bindings)
+            )
+        if isinstance(ty, ADTType):
+            return ADTType(ty.name, [self._substitute_type_vars(p, bindings) for p in ty.type_params])
+        return ty
+
+    def _collect_type_bindings(self, actual: NovaType, expected: NovaType, bindings: Dict[TypeVar, NovaType]):
+        """从实际类型和期望类型中收集类型变量绑定"""
+        if isinstance(expected, TypeVar):
+            if expected not in bindings:
+                bindings[expected] = actual
+        elif isinstance(expected, ListType) and isinstance(actual, ListType):
+            self._collect_type_bindings(actual.elem_type, expected.elem_type, bindings)
+        elif isinstance(expected, MapType) and isinstance(actual, MapType):
+            self._collect_type_bindings(actual.key_type, expected.key_type, bindings)
+            self._collect_type_bindings(actual.value_type, expected.value_type, bindings)
+        elif isinstance(expected, TupleType) and isinstance(actual, TupleType):
+            for ae, ee in zip(actual.elements, expected.elements):
+                self._collect_type_bindings(ae, ee, bindings)
+        elif isinstance(expected, FnType) and isinstance(actual, FnType):
+            for ae, ee in zip(actual.param_types, expected.param_types):
+                self._collect_type_bindings(ae, ee, bindings)
+            self._collect_type_bindings(actual.return_type, expected.return_type, bindings)
+        elif isinstance(expected, ADTType) and isinstance(actual, ADTType):
+            if expected.name == actual.name:
+                for ap, ep in zip(actual.type_params, expected.type_params):
+                    self._collect_type_bindings(ap, ep, bindings)
 
     def _infer_fn_type(self, fn: FnDef) -> FnType:
         """推断函数类型"""
@@ -780,8 +926,13 @@ class TypeChecker:
             ret_type = TypeVar(f"ret_{fn.name}")
         return FnType(param_types, ret_type)
 
-    def _from_ast_type(self, type_node) -> NovaType:
+    def _from_ast_type(self, type_node, _alias_stack: set = None, local_types: Dict[str, NovaType] = None) -> NovaType:
         """将 AST 中的类型注解转换为 NovaType"""
+        if _alias_stack is None:
+            _alias_stack = set()
+        if local_types is None:
+            local_types = {}
+
         if isinstance(type_node, TypeInt):
             return INT_T
         elif isinstance(type_node, TypeFloat):
@@ -796,35 +947,77 @@ class TypeChecker:
             return UNIT_T
         elif isinstance(type_node, TypeIdentifier):
             name = type_node.name
+            if name in local_types:
+                return local_types[name]
             if name in self.env.aliases:
-                return self.env.aliases[name]
+                if name in _alias_stack:
+                    raise TypeCheckError(f"类型别名 '{name}' 存在循环定义")
+                _alias_stack = _alias_stack | {name}
+                return self._expand_alias(self.env.aliases[name], _alias_stack)
             if name in self.env.types:
                 return self.env.types[name]
             return PrimType(name)
         elif isinstance(type_node, TypeGeneric):
             base = type_node.base
-            params = [self._from_ast_type(p) for p in type_node.params]
+            params = [self._from_ast_type(p, _alias_stack, local_types) for p in type_node.params]
             if base == "List":
+                if len(params) != 1:
+                    self._report_error(f"List 期望 1 个类型参数，得到 {len(params)} 个", type_node)
                 return ListType(params[0]) if params else ListType(TypeVar("T"))
-            elif base == "Map" and len(params) >= 2:
-                return MapType(params[0], params[1])
+            elif base == "Map":
+                if len(params) != 2:
+                    self._report_error(f"Map 期望 2 个类型参数，得到 {len(params)} 个", type_node)
+                return MapType(params[0], params[1]) if len(params) >= 2 else MapType(TypeVar("K"), TypeVar("V"))
             elif base == "Option":
+                if len(params) != 1:
+                    self._report_error(f"Option 期望 1 个类型参数，得到 {len(params)} 个", type_node)
                 return ADTType("Option", params)
             elif base == "Result":
+                if len(params) != 2:
+                    self._report_error(f"Result 期望 2 个类型参数，得到 {len(params)} 个", type_node)
                 return ADTType("Result", params)
             else:
+                adt_params = self.env.get_all_adt_type_params().get(base)
+                if adt_params is not None and len(params) != len(adt_params):
+                    self._report_error(
+                        f"类型 '{base}' 期望 {len(adt_params)} 个类型参数，得到 {len(params)} 个",
+                        type_node
+                    )
                 return ADTType(base, params)
         elif isinstance(type_node, TypeTuple):
-            return TupleType([self._from_ast_type(e) for e in type_node.elements])
+            return TupleType([self._from_ast_type(e, _alias_stack, local_types) for e in type_node.elements])
         elif isinstance(type_node, TypeFn):
             return FnType(
-                [self._from_ast_type(p) for p in type_node.param_types],
-                self._from_ast_type(type_node.return_type)
+                [self._from_ast_type(p, _alias_stack, local_types) for p in type_node.param_types],
+                self._from_ast_type(type_node.return_type, _alias_stack, local_types)
             )
-        raise TypeCheckError(f"未知的类型注解: {type(type_node).__name__}")
+        self._report_error(f"未知的类型注解: {type(type_node).__name__}", type_node)
+        return ERROR_TYPE
+
+    def _expand_alias(self, ty: NovaType, _alias_stack: set) -> NovaType:
+        """递归展开类型中的别名引用"""
+        if isinstance(ty, ListType):
+            return ListType(self._expand_alias(ty.elem_type, _alias_stack))
+        if isinstance(ty, MapType):
+            return MapType(
+                self._expand_alias(ty.key_type, _alias_stack),
+                self._expand_alias(ty.value_type, _alias_stack)
+            )
+        if isinstance(ty, TupleType):
+            return TupleType([self._expand_alias(e, _alias_stack) for e in ty.elements])
+        if isinstance(ty, FnType):
+            return FnType(
+                [self._expand_alias(p, _alias_stack) for p in ty.param_types],
+                self._expand_alias(ty.return_type, _alias_stack)
+            )
+        if isinstance(ty, ADTType):
+            return ADTType(ty.name, [self._expand_alias(p, _alias_stack) for p in ty.type_params])
+        return ty
 
     def _types_compatible(self, a: NovaType, b: NovaType) -> bool:
         """检查两个类型是否兼容"""
+        if isinstance(a, ErrorType) or isinstance(b, ErrorType):
+            return True
         if isinstance(a, TypeVar) or isinstance(b, TypeVar):
             return True
         if a == b:
@@ -838,4 +1031,15 @@ class TypeChecker:
         # 递归检查 ListType
         if isinstance(a, ListType) and isinstance(b, ListType):
             return self._types_compatible(a.elem_type, b.elem_type)
+        # 递归检查 MapType
+        if isinstance(a, MapType) and isinstance(b, MapType):
+            return (self._types_compatible(a.key_type, b.key_type)
+                    and self._types_compatible(a.value_type, b.value_type))
+        # 递归检查 ADTType
+        if isinstance(a, ADTType) and isinstance(b, ADTType):
+            if a.name != b.name:
+                return False
+            if len(a.type_params) != len(b.type_params):
+                return False
+            return all(self._types_compatible(pa, pb) for pa, pb in zip(a.type_params, b.type_params))
         return False

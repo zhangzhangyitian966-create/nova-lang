@@ -1,5 +1,7 @@
 # Nova 编程语言
 
+[![CI](https://github.com/zhangzhangyitian966-create/nova-lang/actions/workflows/ci.yml/badge.svg)](https://github.com/zhangzhangyitian966-create/nova-lang/actions)
+
 Nova 是一门表达式导向、强静态类型、函数式核心的通用编程语言。
 
 ## 特性
@@ -9,6 +11,8 @@ Nova 是一门表达式导向、强静态类型、函数式核心的通用编程
 - **函数式核心** — 闭包、高阶函数、模式匹配、管道操作符
 - **安全** — 无空值（Option/Result 替代 null）、不可变优先
 - **多后端编译** — Python 解释器、字节码 VM、C 原生编译、x86_64 原生、WasmGC
+- **现代化错误报告** — Rust 风格多行高亮、ANSI 颜色、批量错误收集
+- **完善的类型系统** — 泛型 ADT、类型参数检查、类型别名递归展开
 
 ## 安装
 
@@ -19,8 +23,8 @@ pip install nova-lang
 或从源码安装：
 
 ```bash
-git clone https://github.com/nova-lang/nova.git
-cd nova
+git clone https://github.com/zhangzhangyitian966-create/nova-lang.git
+cd nova-lang
 pip install -e ".[all]"
 ```
 
@@ -33,7 +37,7 @@ nova
 ```
 
 ```
-Nova 编程语言 v0.3.0
+Nova 编程语言 v0.4.0
 输入表达式或声明，按 Enter 求值
 :help 查看帮助，:quit 退出
 
@@ -214,24 +218,33 @@ fn safe_divide(a: Int, b: Int) -> Result[Int, String] {
 | `:clear` | 清除当前环境 |
 | `:quit` / `:q` | 退出 |
 
+## 项目统计
+
+| 指标 | 数值 |
+|------|------|
+| 测试用例 | **471 个**，全部通过 |
+| 代码行数 | 20,000+ |
+| 支持后端 | 5 个（解释器 / VM / C / x86_64 / WasmGC）|
+| CI 覆盖 | Python 3.10-3.13 |
+
 ## 项目结构
 
 ```
 nova/
-├── nova.py           # 主入口
+├── _cli.py           # 主入口
 ├── __main__.py       # python -m nova 入口
 ├── pyproject.toml    # 包配置
 ├── lexer.py          # 词法分析器
 ├── parser.py         # 语法分析器
 ├── ast_nodes.py      # AST 节点
-├── type_checker.py   # 类型检查器
+├── type_checker.py   # 类型检查器（泛型 ADT、类型推断）
 ├── evaluator.py      # Python 解释器
 ├── compiler.py       # 字节码编译器
 ├── vm.py             # 栈式虚拟机
 ├── c_codegen.py      # C 代码生成器
 ├── environment.py    # 环境管理
-├── errors.py         # 错误类型
-├── ir/               # 三层中间表示
+├── errors.py         # 错误类型（多行高亮、ANSI颜色、批量收集）
+├── ir/               # 三层中间表示（HIR/MIR/LIR）
 │   ├── ir_nodes.py
 │   ├── hir_lowering.py
 │   ├── mir_lowering.py
@@ -239,7 +252,7 @@ nova/
 │   └── pass_manager.py
 ├── backend/          # 后端代码生成
 │   ├── x86_64.py     # x86_64 指令编码器
-│   ├── native_backend.py  # 自研原生后端
+│   ├── native_backend.py  # 自研原生后端（SSE2/System V ABI）
 │   ├── cranelift_backend.py
 │   ├── wasm_backend.py
 │   └── compiler_pipeline.py
@@ -249,8 +262,34 @@ nova/
 │   └── std_impl/     # 标准库模块
 ├── tree-sitter-nova/ # Tree-sitter 语法
 ├── examples/         # 示例程序
-└── tests/            # 测试
+└── tests/            # 测试（471 个）
 ```
+
+## 发展路线图
+
+### v0.4.0（当前）— 已完成
+- [x] 原生后端：浮点常量、字符串常量、参数传递（System V ABI）、分支指令
+- [x] 类型系统：泛型 ADT、类型参数数量检查、类型别名递归展开
+- [x] 错误处理：SourceSpan 多行高亮、ANSI 颜色、ErrorCollector 批量收集
+- [x] 471 个测试覆盖核心功能
+
+### v0.5.0（短期）
+- [ ] 完善原生后端：循环、闭包捕获、模式匹配代码生成
+- [ ] 优化器：常量折叠、死代码消除、内联等 LIR Pass
+- [ ] 标准库扩展：并发原语、网络 I/O
+- [ ] 模块系统：import/export 支持
+
+### v0.6.0（中期）
+- [ ] JIT 编译：基于 Cranelift 的运行时编译
+- [ ] 垃圾回收：增量标记-清除或引用计数
+- [ ] 调试支持：栈回溯、断点、单步执行
+- [ ] 包管理器：依赖解析、版本管理
+
+### v1.0.0（长期）
+- [ ] 生产级性能：与主流语言竞争
+- [ ] IDE 支持：LSP 语言服务器、自动补全、跳转定义
+- [ ] 完整文档：语言规范、标准库 API、教程
+- [ ] 生态系统：包仓库、CI/CD 集成
 
 ## 许可证
 

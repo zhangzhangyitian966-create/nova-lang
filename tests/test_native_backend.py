@@ -15,6 +15,7 @@ from nova.backend.native_backend import (
 # 直接导入 IR 节点
 from nova.ir.ir_nodes import (
     LIRModule, LIRFunction, LIRLoadConst, LIRReturn,
+    LIRCall, LIRBranch, LIRJump, LIRLabel,
     IRType, NovaType,
     INT_TYPE, FLOAT_TYPE, STRING_TYPE, BOOL_TYPE, UNIT_TYPE,
 )
@@ -274,6 +275,14 @@ class TestX86_64Emitter(unittest.TestCase):
         self.assertEqual(code[1], 0x85)  # TEST r/m64, r64
         self.assertEqual(code[2], 0xC0)  # ModR/M: mod=11, reg=RAX, rm=RAX
 
+    def test_je_rel32(self):
+        """je rel32"""
+        e = X86_64Emitter()
+        e.je_rel32()
+        code = e.get_code()
+        self.assertEqual(code[0], 0x0F)
+        self.assertEqual(code[1], 0x84)
+
 
 class TestLinearScanAllocator(unittest.TestCase):
     """线性扫描寄存器分配器测试"""
@@ -404,6 +413,213 @@ class TestNativeCodeGen(unittest.TestCase):
                          struct.pack('<d', 3.14))
         self.assertEqual(codegen.string_constants[0][0],
                          b'hello\x00')
+
+    def test_float_constant_compilation(self):
+        """浮点常量加载编译：应生成 movsd (RIP-relative)"""
+        codegen = NativeCodeGen()
+        lir = LIRModule(name="test")
+        fn = LIRFunction("main", [], FLOAT_TYPE)
+        fn.body = [
+            LIRLoadConst(value=2.718, const_type="float"),
+            LIRReturn(),
+        ]
+        lir.functions["main"] = fn
+
+        codegen._collect_constants(lir)
+        code = codegen._compile_function(fn)
+        self.assertTrue(len(code) > 0)
+        # movsd 指令以 F2 前缀开头
+        self.assertIn(0xF2, code)
+
+    def test_string_constant_compilation(self):
+        """字符串常量加载编译：应生成 lea (RIP-relative)"""
+        codegen = NativeCodeGen()
+        lir = LIRModule(name="test")
+        fn = LIRFunction("main", [], STRING_TYPE)
+        fn.body = [
+            LIRLoadConst(value="nova", const_type="string"),
+            LIRReturn(),
+        ]
+        lir.functions["main"] = fn
+
+        codegen._collect_constants(lir)
+        code = codegen._compile_function(fn)
+        self.assertTrue(len(code) > 0)
+        # lea 指令 opcode 为 8D
+        self.assertIn(0x8D, code)
+
+    def test_branch_compilation(self):
+        """条件分支编译：应生成 test + jne + jmp"""
+        codegen = NativeCodeGen()
+        lir = LIRModule(name="test")
+        fn = LIRFunction("main", [], INT_TYPE)
+        fn.body = [
+            LIRLoadConst(value=1, const_type="int"),
+            LIRBranch(cond_reg="", true_label="then", false_label="else"),
+            LIRLabel(name="then"),
+            LIRLoadConst(value=42, const_type="int"),
+            LIRJump(target="end"),
+            LIRLabel(name="else"),
+            LIRLoadConst(value=0, const_type="int"),
+            LIRLabel(name="end"),
+            LIRReturn(),
+        ]
+        lir.functions["main"] = fn
+
+        code = codegen._compile_function(fn)
+        self.assertTrue(len(code) > 0)
+        # test 指令 (REX.W + 85)
+        self.assertIn(0x85, code)
+        # jne rel32 (0F 85)
+        found_jne = False
+        for i in range(len(code) - 1):
+            if code[i] == 0x0F and code[i + 1] == 0x85:
+                found_jne = True
+                break
+        self.assertTrue(found_jne, "Expected jne_rel32 (0F 85) in compiled code")
+
+    def test_call_integer_args(self):
+        """函数调用整型参数传递：应移动到 RDI, RSI, ..."""
+        codegen = NativeCodeGen()
+        lir = LIRModule(name="test")
+
+        callee = LIRFunction("callee", [], INT_TYPE)
+        callee.body = [LIRReturn()]
+        lir.functions["callee"] = callee
+
+        caller = LIRFunction("caller", [], INT_TYPE)
+        caller.body = [
+            LIRLoadConst(value=10, const_type="int"),
+            LIRLoadConst(value=20, const_type="int"),
+            LIRLoadConst(value=30, const_type="int"),
+        ]
+        call = LIRCall(func_name="callee", arg_count=3)
+        call.src_locs = [
+            ("const_10", INT_TYPE),
+            ("const_20", INT_TYPE),
+            ("const_30", INT_TYPE),
+        ]
+        caller.body.append(call)
+        caller.body.append(LIRReturn())
+        lir.functions["caller"] = caller
+
+        code = codegen._compile_function(caller)
+        self.assertTrue(len(code) > 0)
+        # 应包含 mov 指令（参数移动到 ARG_REGS）
+        # mov_reg_reg64 编码为 REX.W + 89 + ModR/M
+        found_mov = False
+        for i in range(len(code) - 2):
+            if code[i] == 0x48 and code[i + 1] == 0x89:
+                found_mov = True
+                break
+        self.assertTrue(found_mov, "Expected mov_reg_reg64 (48 89) for argument passing")
+
+    def test_call_float_args(self):
+        """函数调用浮点参数传递：应移动到 XMM0-XMM7"""
+        codegen = NativeCodeGen()
+        lir = LIRModule(name="test")
+
+        callee = LIRFunction("callee", [], FLOAT_TYPE)
+        callee.body = [LIRReturn()]
+        lir.functions["callee"] = callee
+
+        caller = LIRFunction("caller", [], FLOAT_TYPE)
+        caller.body = [
+            LIRLoadConst(value=1.5, const_type="float"),
+            LIRLoadConst(value=2.5, const_type="float"),
+        ]
+        call = LIRCall(func_name="callee", arg_count=2)
+        call.src_locs = [
+            ("fconst_1.5", FLOAT_TYPE),
+            ("fconst_2.5", FLOAT_TYPE),
+        ]
+        caller.body.append(call)
+        caller.body.append(LIRReturn())
+        lir.functions["caller"] = caller
+
+        codegen._collect_constants(lir)
+        code = codegen._compile_function(caller)
+        self.assertTrue(len(code) > 0)
+        # 应包含 movsd_reg_reg (F2 0F 10)
+        found_movsd = False
+        for i in range(len(code) - 2):
+            if code[i] == 0xF2 and code[i + 1] == 0x0F and code[i + 2] == 0x10:
+                found_movsd = True
+                break
+        self.assertTrue(found_movsd, "Expected movsd_reg_reg (F2 0F 10) for float argument passing")
+
+    def test_call_mixed_args(self):
+        """函数调用混合参数：整型和浮点参数分别计数"""
+        codegen = NativeCodeGen()
+        lir = LIRModule(name="test")
+
+        callee = LIRFunction("callee", [], INT_TYPE)
+        callee.body = [LIRReturn()]
+        lir.functions["callee"] = callee
+
+        caller = LIRFunction("caller", [], INT_TYPE)
+        caller.body = [
+            LIRLoadConst(value=1, const_type="int"),
+            LIRLoadConst(value=1.5, const_type="float"),
+            LIRLoadConst(value=2, const_type="int"),
+        ]
+        call = LIRCall(func_name="callee", arg_count=3)
+        call.src_locs = [
+            ("const_1", INT_TYPE),
+            ("fconst_1.5", FLOAT_TYPE),
+            ("const_2", INT_TYPE),
+        ]
+        caller.body.append(call)
+        caller.body.append(LIRReturn())
+        lir.functions["caller"] = caller
+
+        codegen._collect_constants(lir)
+        code = codegen._compile_function(caller)
+        self.assertTrue(len(code) > 0)
+        # 应同时包含整型 mov 和浮点 movsd
+        found_mov = False
+        found_movsd = False
+        for i in range(len(code) - 2):
+            if code[i] == 0x48 and code[i + 1] == 0x89:
+                found_mov = True
+            if code[i] == 0xF2 and code[i + 1] == 0x0F and code[i + 2] == 0x10:
+                found_movsd = True
+        self.assertTrue(found_mov, "Expected integer mov for mixed args")
+        self.assertTrue(found_movsd, "Expected movsd for mixed args")
+
+    def test_call_stack_args(self):
+        """函数调用栈参数：超出 6 个整型寄存器限制的参数应压栈"""
+        codegen = NativeCodeGen()
+        lir = LIRModule(name="test")
+
+        callee = LIRFunction("callee", [], INT_TYPE)
+        callee.body = [LIRReturn()]
+        lir.functions["callee"] = callee
+
+        caller = LIRFunction("caller", [], INT_TYPE)
+        caller.body = []
+        arg_locs = []
+        for i in range(8):
+            caller.body.append(LIRLoadConst(value=i + 1, const_type="int"))
+            arg_locs.append((f"const_{i + 1}", INT_TYPE))
+
+        call = LIRCall(func_name="callee", arg_count=8)
+        call.src_locs = arg_locs
+        caller.body.append(call)
+        caller.body.append(LIRReturn())
+        lir.functions["caller"] = caller
+
+        code = codegen._compile_function(caller)
+        self.assertTrue(len(code) > 0)
+        # 超出 6 个的参数应通过 push 指令压栈
+        # push_reg 编码：50 + reg 或 41 50 + reg
+        found_push = False
+        for b in code:
+            if 0x50 <= b <= 0x57 or b == 0x41:
+                # 简化检查：push 指令范围
+                found_push = True
+                break
+        self.assertTrue(found_push, "Expected push instruction for stack arguments")
 
 
 class TestEndToEndNative(unittest.TestCase):

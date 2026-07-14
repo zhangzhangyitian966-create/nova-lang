@@ -102,6 +102,8 @@ class Token:
     value: str
     line: int
     column: int
+    end_line: Optional[int] = None
+    end_col: Optional[int] = None
 
     def __repr__(self):
         return f"Token({self.type.name}, {self.value!r}, 行:{self.line}, 列:{self.column})"
@@ -149,8 +151,11 @@ class Lexer:
         self.tokens: List[Token] = []
 
     def _make_error(self, message: str, line: int, column: int) -> LexerError:
-        """创建 LexerError，自动附带源代码上下文"""
-        return LexerError(message, line, column, source=self.source)
+        """创建 LexerError，自动附带源代码上下文和位置跨度"""
+        from nova.ast_nodes import Span
+        end_col = self.column - 1
+        span = Span(line, column, self.line, max(column, end_col))
+        return LexerError(message, line, column, source=self.source, span=span)
 
     def _peek(self) -> Optional[str]:
         """查看当前字符（不推进）"""
@@ -207,9 +212,11 @@ class Lexer:
             num_str += self._advance()  # 小数点
             while self.pos < len(self.source) and self.source[self.pos].isdigit():
                 num_str += self._advance()
-            return Token(TokenType.FLOAT, num_str, start_line, start_col)
+            return Token(TokenType.FLOAT, num_str, start_line, start_col,
+                         end_line=self.line, end_col=self.column - 1)
 
-        return Token(TokenType.INT, num_str, start_line, start_col)
+        return Token(TokenType.INT, num_str, start_line, start_col,
+                     end_line=self.line, end_col=self.column - 1)
 
     def _read_string(self) -> Token:
         """读取字符串字面量 "..." """
@@ -222,7 +229,8 @@ class Lexer:
             ch = self.source[self.pos]
             if ch == '"':
                 self._advance()  # 跳过结束引号
-                return Token(TokenType.STRING, result, start_line, start_col)
+                return Token(TokenType.STRING, result, start_line, start_col,
+                             end_line=self.line, end_col=self.column - 1)
             elif ch == '\\':
                 self._advance()  # 跳过反斜杠
                 esc = self._advance()
@@ -278,7 +286,8 @@ class Lexer:
             raise self._make_error("字符字面量应以 ' 结尾", start_line, start_col)
 
         self._advance()  # 跳过结束单引号 '
-        return Token(TokenType.CHAR, ch, start_line, start_col)
+        return Token(TokenType.CHAR, ch, start_line, start_col,
+                     end_line=self.line, end_col=self.column - 1)
 
     def _read_identifier(self) -> Token:
         """读取标识符或关键字"""
@@ -289,26 +298,30 @@ class Lexer:
         while self.pos < len(self.source) and (self.source[self.pos].isalnum() or self.source[self.pos] == '_'):
             name += self._advance()
 
+        end_line = self.line
+        end_col = self.column - 1
+
         # 检查是否是关键字
         if name in KEYWORDS:
             tt = KEYWORDS[name]
             if tt == TokenType.BOOL:
-                return Token(tt, name, start_line, start_col)
-            return Token(tt, name, start_line, start_col)
+                return Token(tt, name, start_line, start_col, end_line=end_line, end_col=end_col)
+            return Token(tt, name, start_line, start_col, end_line=end_line, end_col=end_col)
 
         # 单独下划线是通配符
         if name == '_':
-            return Token(TokenType.UNDERSCORE, '_', start_line, start_col)
+            return Token(TokenType.UNDERSCORE, '_', start_line, start_col, end_line=end_line, end_col=end_col)
 
         # _x 或 x_ 等含下划线的名称是普通标识符
-        return Token(TokenType.IDENT, name, start_line, start_col)
+        return Token(TokenType.IDENT, name, start_line, start_col, end_line=end_line, end_col=end_col)
 
     def _next_token(self) -> Token:
         """获取下一个 token"""
         self._skip_whitespace_and_comments()
 
         if self.pos >= len(self.source):
-            return Token(TokenType.EOF, "", self.line, self.column)
+            return Token(TokenType.EOF, "", self.line, self.column,
+                         end_line=self.line, end_col=self.column)
 
         start_line = self.line
         start_col = self.column
@@ -333,7 +346,8 @@ class Lexer:
         # ( 始终为 LPAREN（UNIT 由 parser 处理）
         if ch == '(':
             self._advance()
-            return Token(TokenType.LPAREN, "(", start_line, start_col)
+            return Token(TokenType.LPAREN, "(", start_line, start_col,
+                         end_line=self.line, end_col=self.column - 1)
 
         # 操作符和标点
         self._advance()
@@ -343,37 +357,48 @@ class Lexer:
         if next_ch:
             if ch == '.' and next_ch == '.':
                 self._advance()
-                return Token(TokenType.RANGE, "..", start_line, start_col)
+                return Token(TokenType.RANGE, "..", start_line, start_col,
+                             end_line=self.line, end_col=self.column - 1)
             if ch == '+' and next_ch == '+':
                 self._advance()
-                return Token(TokenType.PLUSPLUS, "++", start_line, start_col)
+                return Token(TokenType.PLUSPLUS, "++", start_line, start_col,
+                             end_line=self.line, end_col=self.column - 1)
             if ch == '-' and next_ch == '>':
                 self._advance()
-                return Token(TokenType.ARROW, "->", start_line, start_col)
+                return Token(TokenType.ARROW, "->", start_line, start_col,
+                             end_line=self.line, end_col=self.column - 1)
             if ch == '=' and next_ch == '=':
                 self._advance()
-                return Token(TokenType.EQ, "==", start_line, start_col)
+                return Token(TokenType.EQ, "==", start_line, start_col,
+                             end_line=self.line, end_col=self.column - 1)
             if ch == '!' and next_ch == '=':
                 self._advance()
-                return Token(TokenType.NEQ, "!=", start_line, start_col)
+                return Token(TokenType.NEQ, "!=", start_line, start_col,
+                             end_line=self.line, end_col=self.column - 1)
             if ch == '<' and next_ch == '=':
                 self._advance()
-                return Token(TokenType.LTE, "<=", start_line, start_col)
+                return Token(TokenType.LTE, "<=", start_line, start_col,
+                             end_line=self.line, end_col=self.column - 1)
             if ch == '>' and next_ch == '=':
                 self._advance()
-                return Token(TokenType.GTE, ">=", start_line, start_col)
+                return Token(TokenType.GTE, ">=", start_line, start_col,
+                             end_line=self.line, end_col=self.column - 1)
             if ch == '&' and next_ch == '&':
                 self._advance()
-                return Token(TokenType.AND, "&&", start_line, start_col)
+                return Token(TokenType.AND, "&&", start_line, start_col,
+                             end_line=self.line, end_col=self.column - 1)
             if ch == '|' and next_ch == '|':
                 self._advance()
-                return Token(TokenType.OR, "||", start_line, start_col)
+                return Token(TokenType.OR, "||", start_line, start_col,
+                             end_line=self.line, end_col=self.column - 1)
             if ch == '|' and next_ch == '>':
                 self._advance()
-                return Token(TokenType.PIPE_GT, "|>", start_line, start_col)
+                return Token(TokenType.PIPE_GT, "|>", start_line, start_col,
+                             end_line=self.line, end_col=self.column - 1)
             if ch == '=' and next_ch == '>':
                 self._advance()
-                return Token(TokenType.FAT_ARROW, "=>", start_line, start_col)
+                return Token(TokenType.FAT_ARROW, "=>", start_line, start_col,
+                             end_line=self.line, end_col=self.column - 1)
 
         # 单字符 token
         single_char_tokens = {
@@ -401,7 +426,8 @@ class Lexer:
         }
 
         if ch in single_char_tokens:
-            return Token(single_char_tokens[ch], ch, start_line, start_col)
+            return Token(single_char_tokens[ch], ch, start_line, start_col,
+                         end_line=self.line, end_col=self.column - 1)
 
         raise self._make_error(f"非法字符 '{ch}'", start_line, start_col)
 

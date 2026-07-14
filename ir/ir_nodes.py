@@ -820,7 +820,9 @@ class LIRJump(LIRInstr):
 @dataclass
 class LIRBranch(LIRInstr):
     """LIR 条件跳转"""
-    pass
+    cond_reg: str = ""       # 条件虚拟寄存器名，空表示使用 RAX
+    true_label: str = ""     # 条件为真时跳转的标签
+    false_label: str = ""    # 条件为假时跳转的标签
 
 
 @dataclass
