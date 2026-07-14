@@ -404,3 +404,62 @@
 - 全量测试: **655 passed** (1.30s)
 - Evaluator 示例: hello/math/pattern_match/loops/pipe 全部正常输出
 - VM 示例: hello/math/pattern_match 全部正常输出
+
+---
+
+## 2026-07-15 自动改进（第七轮）
+
+基于 AUTO_REVIEW_LOG.md 第三轮审查日志的最高优先级未修复严重问题驱动改进。
+
+### 每日发现的问题
+
+#### compiler.py
+- **第767-768行 PatternTuple/PatternList**：仍直接返回 `None`（当作 always-match），未生成逐元素结构测试。绑定逻辑已实现但测试缺失。**严重问题，已修复**。
+- **第493-502行 `&&` 编译**：已修复，正确使用 `DUP + POP_JUMP_IF_FALSE + POP` 模式。
+- **第505-514行 `||` 编译**：已修复，正确使用 `DUP + JUMP_IF_TRUE + POP` 模式。
+
+#### type_checker.py
+- **第986-995行 PatternConstructor**：`field_types` 直接取原始定义，未用 `subject_type` 实际类型参数替换 TypeVar。泛型 ADT 模式匹配类型推断不正确。**严重问题，已修复**。
+- **第1235-1236行任意 TypeVar 兼容**：仍存在，需后续实现 unification 算法解决。
+
+#### parser.py
+- **PatternChar 未解析**：`_parse_pattern` 中无 `TokenType.CHAR` 分支，`'a'` 在 match 中报 ParseError。**严重问题，已修复**。
+- **match arm guard**：已在第六轮修复。
+
+#### lexer.py
+- **第432行非法字符直接 raise**：终止整个词法分析，只看到第一个非法字符。**严重问题，已修复**。
+
+#### vm.py
+- **FOR_ITER 闭区间**：Evaluator 和 VM 均为闭区间 `[start, end]`，实际一致。非差异 bug。
+- **`_pop(n)` 返回类型不一致**：`n==1` 返回裸值、`n>1` 返回列表。代码异味，低优先级。
+- **CLOSURE 捕获整个帧**：已知设计 debt，低优先级。
+
+### 本次修复内容（基于审查日志 Issue）
+
+1. **compiler.py — PatternTuple/PatternList 模式测试实现（基于审查日志 compiler.py:763-764）**
+   - Op 类新增 `MATCH_TEST_TUPLE` 和 `MATCH_TEST_LIST` 操作码
+   - `_compile_pattern_test_with_fail` 中 PatternTuple/PatternList 分支不再返回 None，改为生成 `MATCH_TEST_TUPLE(element_count, fail_ip)` / `MATCH_TEST_LIST(element_count, fail_ip)`
+   - `_compile_pattern_extract_and_bind` 替换简单 POP 为递归处理每个元素子模式的 extract_and_bind
+   - vm.py 实现 `MATCH_TEST_TUPLE`（检查 tuple + 长度 + 弹出 subject 压入各元素）和 `MATCH_TEST_LIST`（检查 list + 长度 + 同上）
+
+2. **type_checker.py — PatternConstructor 类型参数替换（基于审查日志 type_checker.py:986-995）**
+   - 在 PatternConstructor 分支中，`field_types` 获取后增加类型参数替换逻辑
+   - 构建 `type_param_map`：从 ADT 定义的类型参数名映射到 `subject_type` 的实际类型参数
+   - 用已有的 `_substitute_type_vars` 方法递归替换 `field_types` 中的 TypeVar
+   - 与文件中 ADT 字段访问（第 797-800 行）已有的替换逻辑一致
+
+3. **parser.py — PatternChar 模式解析（基于审查日志 parser.py:541-621）**
+   - `_parse_pattern` 中添加 `TokenType.CHAR` 分支
+   - 解析 `'a'` 等字符字面量为 `PatternChar(value=tok.value, span=self._span(tok))`
+   - 端到端验证 `match 'a' { 'a' -> print("matched a") _ -> print("other") }` 正确输出 `matched a`
+
+4. **lexer.py — 非法字符跳过+记录（基于审查日志 lexer.py:432）**
+   - `__init__` 中新增 `self.errors: List[str] = []` 错误收集列表
+   - 非法字符处理从 `raise self._make_error(...)` 改为记录错误到 `self.errors`、打印到 stderr、递归调用 `_next_token()` 跳过继续分析
+   - 更新 3 个相关测试用例（test_lexer_error、test_illegal_char、test_lexer_error_has_span）
+
+### 测试结果
+
+- 全量测试: **655 passed** (0.78s)
+- Evaluator 示例: hello/fibonacci/pattern_match/loops 全部正常输出
+- VM 示例: hello/fibonacci/pattern_match 全部正常输出

@@ -247,11 +247,11 @@ let z = undefined_var
 
 class TestEnhancedLexerParserErrors:
     def test_lexer_error_has_span(self):
-        with pytest.raises(LexerError) as exc_info:
-            Lexer("let x = @").tokenize()
-        err = exc_info.value
-        assert err.span is not None
-        assert err.line == 1
+        """非法字符不再抛出 LexerError，而是记录到 self.errors 并跳过"""
+        lexer = Lexer("let x = @")
+        lexer.tokenize()
+        assert len(lexer.errors) == 1
+        assert "非法字符 '@'" in lexer.errors[0]
 
     def test_parser_error_has_span(self):
         with pytest.raises(ParseError) as exc_info:

@@ -149,6 +149,7 @@ class Lexer:
         self.line = 1
         self.column = 1
         self.tokens: List[Token] = []
+        self.errors: List[str] = []
 
     def _make_error(self, message: str, line: int, column: int) -> LexerError:
         """创建 LexerError，自动附带源代码上下文和位置跨度"""
@@ -429,7 +430,12 @@ class Lexer:
             return Token(single_char_tokens[ch], ch, start_line, start_col,
                          end_line=self.line, end_col=self.column - 1)
 
-        raise self._make_error(f"非法字符 '{ch}'", start_line, start_col)
+        # 非法字符：记录错误并跳过，继续词法分析
+        import sys
+        error_msg = f"词法错误：非法字符 '{ch}' (行:{start_line}, 列:{start_col})"
+        self.errors.append(error_msg)
+        print(error_msg, file=sys.stderr)
+        return self._next_token()  # 跳过非法字符，继续分析
 
     def tokenize(self) -> List[Token]:
         """将整个源代码转换为 token 列表"""

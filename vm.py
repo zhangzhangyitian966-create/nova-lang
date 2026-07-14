@@ -1078,6 +1078,34 @@ class NovaVM:
             else:
                 self.ip = fail_ip
 
+        elif opcode == Op.MATCH_TEST_TUPLE:
+            # Stack: [subject] -> [elem1, ..., elemN] (match success)
+            #      or [subject] (match fail)
+            # Peek subject; if tuple with matching length, pop subject and push elements; else jump to fail_ip
+            elem_count = instr.operands[0]
+            fail_ip = instr.operands[1]
+            subject = self.stack[-1]
+            if isinstance(subject, tuple) and len(subject) == elem_count:
+                self._pop()
+                for elem in reversed(subject):
+                    self.stack.append(elem)
+            else:
+                self.ip = fail_ip
+
+        elif opcode == Op.MATCH_TEST_LIST:
+            # Stack: [subject] -> [elem1, ..., elemN] (match success)
+            #      or [subject] (match fail)
+            # Peek subject; if list with matching length, pop subject and push elements; else jump to fail_ip
+            elem_count = instr.operands[0]
+            fail_ip = instr.operands[1]
+            subject = self.stack[-1]
+            if isinstance(subject, list) and len(subject) == elem_count:
+                self._pop()
+                for elem in reversed(subject):
+                    self.stack.append(elem)
+            else:
+                self.ip = fail_ip
+
         elif opcode == Op.MATCH_END:
             # Stack: unchanged
             # Marker for match expression end

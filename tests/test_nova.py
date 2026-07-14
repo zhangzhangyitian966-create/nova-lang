@@ -183,8 +183,11 @@ class TestLexer(unittest.TestCase):
         self.assertEqual(tokens[0].value, "hello\nworld")
 
     def test_illegal_char(self):
-        with self.assertRaises(LexerError):
-            tokenize("@")
+        """非法字符不再抛出 LexerError，而是记录到 self.errors 并跳过"""
+        lexer = Lexer("@")
+        lexer.tokenize()
+        self.assertEqual(len(lexer.errors), 1)
+        self.assertIn("非法字符 '@'", lexer.errors[0])
 
 
 # ============================================================
@@ -963,8 +966,11 @@ class TestErrors(unittest.TestCase):
     """错误处理测试"""
 
     def test_lexer_error(self):
-        with self.assertRaises(LexerError):
-            tokenize("@")
+        """非法字符不再抛出 LexerError，而是记录到 self.errors 并跳过"""
+        lexer = Lexer("@")
+        lexer.tokenize()
+        self.assertEqual(len(lexer.errors), 1)
+        self.assertIn("非法字符 '@'", lexer.errors[0])
 
     def test_parse_error(self):
         with self.assertRaises(ParseError):

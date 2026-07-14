@@ -571,6 +571,11 @@ class Parser:
             self._advance()
             return PatternString(value=tok.value, span=self._span(tok))
 
+        # 字符
+        if tok.type == TokenType.CHAR:
+            self._advance()
+            return PatternChar(value=tok.value, span=self._span(tok))
+
         # 负数模式
         if tok.type == TokenType.MINUS:
             self._advance()

@@ -987,6 +987,15 @@ class TypeChecker:
 
             adt_name, field_info = variants_info
             field_types = [ft for _fn, ft in field_info]
+
+            # 如果 subject_type 是带类型参数的 ADTType，替换 field_types 中的类型变量
+            if isinstance(subject_type, ADTType) and subject_type.type_params:
+                type_param_map = dict(zip(
+                    [TypeVar(tp) for tp in self.env.get_all_adt_type_params().get(adt_name, [])],
+                    subject_type.type_params
+                ))
+                field_types = [self._substitute_type_vars(ft, type_param_map) for ft in field_types]
+
             if len(pattern.fields) != len(field_types):
                 self._report_error(
                     f"构造器 '{pattern.name}' 期望 {len(field_types)} 个字段，得到 {len(pattern.fields)} 个",

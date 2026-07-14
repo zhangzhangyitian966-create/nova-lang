@@ -101,6 +101,8 @@ class Op:
     MATCH_BIND = "MATCH_BIND"        # operands: (name,)
     MATCH_WILDCARD = "MATCH_WILDCARD"
     MATCH_CONSTRUCTOR = "MATCH_CONSTRUCTOR"  # operands: (name, field_count, fail_ip,)
+    MATCH_TEST_TUPLE = "MATCH_TEST_TUPLE"  # operands: (element_count, fail_ip,)
+    MATCH_TEST_LIST = "MATCH_TEST_LIST"    # operands: (element_count, fail_ip,)
     MATCH_END = "MATCH_END"
 
     # 管道
@@ -764,8 +766,15 @@ class BytecodeCompiler:
             self.bytecode.emit_op(Op.MATCH_CONSTRUCTOR, pattern.name, len(pattern.fields), 0)
             return fail_pos
 
-        elif isinstance(pattern, (PatternTuple, PatternList)):
-            return None  # 简化处理
+        elif isinstance(pattern, PatternTuple):
+            fail_pos = self.bytecode.current_pos()
+            self.bytecode.emit_op(Op.MATCH_TEST_TUPLE, len(pattern.elements), 0)
+            return fail_pos
+
+        elif isinstance(pattern, PatternList):
+            fail_pos = self.bytecode.current_pos()
+            self.bytecode.emit_op(Op.MATCH_TEST_LIST, len(pattern.elements), 0)
+            return fail_pos
 
         else:
             return None
@@ -797,8 +806,16 @@ class BytecodeCompiler:
                                   PatternBool, PatternChar)):
             # MATCH_TEST_* 已经弹出了 subject，不需要再弹
             pass
-        elif isinstance(pattern, (PatternTuple, PatternList)):
-            self.bytecode.emit_op(Op.POP)
+        elif isinstance(pattern, PatternTuple):
+            # MATCH_TEST_TUPLE 已弹出 subject 并将各元素压栈（reversed）
+            # 递归处理每个元素子模式
+            for elem_pattern in pattern.elements:
+                self._compile_pattern_extract_and_bind(elem_pattern)
+        elif isinstance(pattern, PatternList):
+            # MATCH_TEST_LIST 已弹出 subject 并将各元素压栈（reversed）
+            # 递归处理每个元素子模式
+            for elem_pattern in pattern.elements:
+                self._compile_pattern_extract_and_bind(elem_pattern)
         else:
             self.bytecode.emit_op(Op.POP)
 
