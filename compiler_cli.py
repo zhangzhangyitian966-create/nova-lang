@@ -180,18 +180,40 @@ class NovaCompiler:
             print(f"错误: 找不到 C 编译器 '{cc}'", file=sys.stderr)
             sys.exit(1)
 
-    def run(self, source_path: str, args: list = None):
-        """编译并运行 Nova 程序"""
-        output = self.build(source_path)
-        run_args = [output]
-        if args:
-            run_args.extend(args)
+    def run(self, source_path: str, args: list = None, use_native: bool = False):
+        """运行 Nova 程序
 
-        try:
-            subprocess.run(run_args, check=True)
-        except subprocess.CalledProcessError as e:
-            print(f"运行错误: 程序退出码 {e.returncode}", file=sys.stderr)
-            sys.exit(e.returncode)
+        Args:
+            source_path: Nova 源文件路径
+            args: 运行时参数
+            use_native: 是否使用 C 后端编译为原生二进制（默认 False，使用 VM）
+        """
+        if not os.path.isfile(source_path):
+            print(f"错误: 文件 '{source_path}' 不存在", file=sys.stderr)
+            sys.exit(1)
+
+        with open(source_path, 'r', encoding='utf-8') as f:
+            source = f.read()
+
+        if use_native:
+            # C 后端编译并运行
+            output = self.build(source_path)
+            run_args = [output]
+            if args:
+                run_args.extend(args)
+            try:
+                subprocess.run(run_args, check=True)
+            except subprocess.CalledProcessError as e:
+                print(f"运行错误: 程序退出码 {e.returncode}", file=sys.stderr)
+                sys.exit(e.returncode)
+        else:
+            # VM 字节码执行（默认，更可靠）
+            from nova._cli import run_source
+            try:
+                run_source(source, use_vm=True)
+            except Exception as e:
+                print(f"运行时错误: {e}", file=sys.stderr)
+                sys.exit(1)
 
     def check(self, source_path: str):
         """仅进行类型检查"""
@@ -442,13 +464,17 @@ def main():
                               help="详细输出")
 
     # run 命令
-    run_parser = subparsers.add_parser("run", help="编译并运行")
+    run_parser = subparsers.add_parser("run", help="运行 Nova 程序（默认 VM 字节码）")
     run_parser.add_argument("file", help="Nova 源文件路径")
     run_parser.add_argument("run_args", nargs="*", help="运行时参数")
+    run_parser.add_argument("--native", action="store_true",
+                            help="使用 C 后端编译为原生二进制后运行（需要 gcc/clang）")
+    run_parser.add_argument("--vm", action="store_true",
+                            help="使用字节码 VM 运行（默认）")
     run_parser.add_argument("-o", "--output", help="输出文件名")
     run_parser.add_argument("-O", "--optimize", default="O2",
                             choices=["O0", "O1", "O2", "O3", "Os"],
-                            help="优化级别")
+                            help="优化级别（仅 --native 有效）")
     run_parser.add_argument("-v", "--verbose", action="store_true",
                             help="详细输出")
 
@@ -508,7 +534,7 @@ def main():
 
     elif args.command == "run":
         compiler.verbose = args.verbose
-        compiler.run(args.file, args=args.run_args)
+        compiler.run(args.file, args=args.run_args, use_native=args.native)
 
     elif args.command == "check":
         compiler.check(args.file)

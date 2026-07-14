@@ -57,18 +57,22 @@ nova> :quit
 ### 运行程序
 
 ```bash
-# 使用字节码 VM（默认）
+# 使用字节码 VM 运行（默认，推荐）
 nova run examples/hello.nova
 
 # 使用 C 后端编译为原生二进制
 nova build examples/hello.nova
 
-# 编译并运行
+# 使用 C 后端编译并运行（需要 gcc/clang）
 nova run --native examples/fibonacci.nova
 
 # 仅类型检查
 nova check examples/loops.nova
 ```
+
+> **注意**：Nova 有两条执行路径。字节码 VM（`nova run`，默认）经过全面测试，
+> 稳定性高；C 后端（`nova build` / `nova run --native`）是实验性功能，
+> 某些复杂语法可能生成错误的 C 代码。
 
 ### 语法示例
 
