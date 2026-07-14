@@ -6,7 +6,7 @@ HIR -> MIR 降级器
 """
 
 from typing import Optional, List, Tuple
-from ir_nodes import (
+from nova.ir.ir_nodes import (
     IRType, NovaType,
     INT_TYPE, FLOAT_TYPE, STRING_TYPE, BOOL_TYPE, UNIT_TYPE, NEVER_TYPE,
     HIRModule, HIRFunction, HIRTypeDef,

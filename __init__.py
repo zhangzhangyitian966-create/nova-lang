@@ -1,2 +1,1 @@
-# Nova Programming Language Interpreter
-# An expression-oriented, statically typed, functional-core language.
+"""Nova Programming Language - Expression-oriented, strongly statically typed, functional-core language."""

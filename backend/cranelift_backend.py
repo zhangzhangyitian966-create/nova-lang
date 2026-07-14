@@ -14,9 +14,7 @@ import tempfile
 import platform
 from typing import List, Dict, Optional, Tuple
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-
-from ir.ir_nodes import (
+from nova.ir.ir_nodes import (
     LIRModule, LIRFunction, LIRGlobal, LIRData,
     LIRInstr, LIRLoadConst, LIRLoadGlobal, LIRStoreGlobal,
     LIRLoadReg, LIRStoreReg, LIRBinOp, LIRUnaryOp,

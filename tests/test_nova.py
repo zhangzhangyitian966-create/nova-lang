@@ -14,20 +14,17 @@ import sys
 import os
 import unittest
 
-# 确保导入路径正确
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
-
-from lexer import Lexer, TokenType
-from parser import Parser
-from type_checker import TypeChecker
-from evaluator import Evaluator
-from errors import LexerError, ParseError, TypeCheckError, RuntimeError_
-from ast_nodes import (
+from nova.lexer import Lexer, TokenType
+from nova.parser import Parser
+from nova.type_checker import TypeChecker
+from nova.evaluator import Evaluator
+from nova.errors import LexerError, ParseError, TypeCheckError, RuntimeError_
+from nova.ast_nodes import (
     IntLiteral, FloatLiteral, StringLiteral, BoolLiteral, Identifier,
     BinaryOp, LetBinding, FnDef, IfExpr, MatchExpr, ListExpr, Lambda, FnCall,
     PipeExpr, Block, UnitLiteral,
 )
-from environment import Environment
+from nova.environment import Environment
 
 
 # ============================================================
@@ -232,7 +229,7 @@ class TestParser(unittest.TestCase):
     def test_mut_binding(self):
         ast = parse("mut counter = 0")
         decl = ast.declarations[0]
-        from ast_nodes import MutBinding
+        from nova.ast_nodes import MutBinding
         self.assertIsInstance(decl, MutBinding)
         self.assertEqual(decl.name, "counter")
 
@@ -286,14 +283,14 @@ class TestParser(unittest.TestCase):
 
     def test_unary_minus(self):
         ast = parse("-42")
-        from ast_nodes import UnaryOp
+        from nova.ast_nodes import UnaryOp
         decl = ast.declarations[0]
         self.assertIsInstance(decl, UnaryOp)
         self.assertEqual(decl.op, "-")
 
     def test_unary_not(self):
         ast = parse("!true")
-        from ast_nodes import UnaryOp
+        from nova.ast_nodes import UnaryOp
         decl = ast.declarations[0]
         self.assertIsInstance(decl, UnaryOp)
         self.assertEqual(decl.op, "!")
@@ -324,7 +321,7 @@ class TestParser(unittest.TestCase):
 
     def test_type_def(self):
         ast = parse("type Color { Red | Green | Blue }")
-        from ast_nodes import TypeDef
+        from nova.ast_nodes import TypeDef
         decl = ast.declarations[0]
         self.assertIsInstance(decl, TypeDef)
         self.assertEqual(decl.name, "Color")
@@ -332,7 +329,7 @@ class TestParser(unittest.TestCase):
 
     def test_type_def_with_fields(self):
         ast = parse("type Shape { Circle(r: Float) }")
-        from ast_nodes import TypeDef
+        from nova.ast_nodes import TypeDef
         decl = ast.declarations[0]
         self.assertIsInstance(decl, TypeDef)
         self.assertEqual(decl.variants[0].name, "Circle")
@@ -340,7 +337,7 @@ class TestParser(unittest.TestCase):
 
     def test_alias_def(self):
         ast = parse("alias Point = (Float, Float)")
-        from ast_nodes import AliasDef
+        from nova.ast_nodes import AliasDef
         decl = ast.declarations[0]
         self.assertIsInstance(decl, AliasDef)
         self.assertEqual(decl.name, "Point")
@@ -367,12 +364,12 @@ class TestParser(unittest.TestCase):
 
     def test_import(self):
         ast = parse('import "math.nova"')
-        from ast_nodes import ImportDecl
+        from nova.ast_nodes import ImportDecl
         self.assertIsInstance(ast.declarations[0], ImportDecl)
 
     def test_export(self):
         ast = parse('export myFunc')
-        from ast_nodes import ExportDecl
+        from nova.ast_nodes import ExportDecl
         self.assertIsInstance(ast.declarations[0], ExportDecl)
 
     def test_string_concat(self):
@@ -486,7 +483,7 @@ class TestEvaluator(unittest.TestCase):
 
     def test_unit_literal(self):
         ev = eval_source("let x = ()", check_types=False)
-        from evaluator import UNIT_VALUE
+        from nova.evaluator import UNIT_VALUE
         self.assertEqual(ev.env.lookup("x"), UNIT_VALUE)
 
     def test_arithmetic_add(self):
@@ -600,7 +597,7 @@ class TestEvaluator(unittest.TestCase):
     def test_lambda(self):
         ev = eval_source("let add = |a, b| a + b", check_types=False)
         fn_val = ev.env.lookup("add")
-        from evaluator import NovaClosure
+        from nova.evaluator import NovaClosure
         self.assertIsInstance(fn_val, NovaClosure)
 
     def test_lambda_call(self):
@@ -684,7 +681,7 @@ class TestADT(unittest.TestCase):
             type Color { Red | Green | Blue }
             let c = Red
         """, check_types=False)
-        from evaluator import NovaADTValue
+        from nova.evaluator import NovaADTValue
         self.assertIsInstance(ev.env.lookup("c"), NovaADTValue)
         self.assertEqual(ev.env.lookup("c").variant_name, "Red")
 
@@ -693,7 +690,7 @@ class TestADT(unittest.TestCase):
             type Shape { Circle(r: Float) | Rect(w: Float, h: Float) }
             let c = Circle(5.0)
         """, check_types=False)
-        from evaluator import NovaADTValue
+        from nova.evaluator import NovaADTValue
         c = ev.env.lookup("c")
         self.assertEqual(c.variant_name, "Circle")
         self.assertEqual(len(c.fields), 1)
@@ -718,7 +715,7 @@ class TestADT(unittest.TestCase):
         ev = eval_source("""
             let x = Some(42)
         """, check_types=False)
-        from evaluator import NovaADTValue
+        from nova.evaluator import NovaADTValue
         x = ev.env.lookup("x")
         self.assertEqual(x.variant_name, "Some")
         self.assertEqual(x.fields[0], 42)
@@ -814,40 +811,40 @@ class TestBuiltins(unittest.TestCase):
 
     def test_head_some(self):
         ev = eval_source('let x = head([1, 2, 3])', check_types=False)
-        from evaluator import NovaADTValue
+        from nova.evaluator import NovaADTValue
         x = ev.env.lookup("x")
         self.assertEqual(x.variant_name, "Some")
         self.assertEqual(x.fields[0], 1)
 
     def test_head_none(self):
         ev = eval_source('let x = head([])', check_types=False)
-        from evaluator import NovaADTValue
+        from nova.evaluator import NovaADTValue
         x = ev.env.lookup("x")
         self.assertEqual(x.variant_name, "None")
 
     def test_tail_some(self):
         ev = eval_source('let x = tail([1, 2, 3])', check_types=False)
-        from evaluator import NovaADTValue
+        from nova.evaluator import NovaADTValue
         x = ev.env.lookup("x")
         self.assertEqual(x.variant_name, "Some")
         self.assertEqual(x.fields[0], [2, 3])
 
     def test_tail_none(self):
         ev = eval_source('let x = tail([])', check_types=False)
-        from evaluator import NovaADTValue
+        from nova.evaluator import NovaADTValue
         x = ev.env.lookup("x")
         self.assertEqual(x.variant_name, "None")
 
     def test_str_to_int_success(self):
         ev = eval_source('let x = str_to_int("42")', check_types=False)
-        from evaluator import NovaADTValue
+        from nova.evaluator import NovaADTValue
         x = ev.env.lookup("x")
         self.assertEqual(x.variant_name, "Some")
         self.assertEqual(x.fields[0], 42)
 
     def test_str_to_int_fail(self):
         ev = eval_source('let x = str_to_int("abc")', check_types=False)
-        from evaluator import NovaADTValue
+        from nova.evaluator import NovaADTValue
         x = ev.env.lookup("x")
         self.assertEqual(x.variant_name, "None")
 
@@ -1284,7 +1281,7 @@ class TestErrorFormatting(unittest.TestCase):
 
     def test_error_with_source_context(self):
         """错误信息包含源码上下文"""
-        from errors import NovaError
+        from nova.errors import NovaError
         err = NovaError("测试错误", line=2, column=5)
         err.source_code = "line1\nline2 error here\nline3"
         formatted = str(err)
@@ -1294,7 +1291,7 @@ class TestErrorFormatting(unittest.TestCase):
 
     def test_error_with_source_context_first_line(self):
         """错误在第一行时也能正确显示"""
-        from errors import NovaError
+        from nova.errors import NovaError
         err = NovaError("第一行错误", line=1, column=3)
         err.source_code = "first line\nsecond line"
         formatted = str(err)
@@ -1303,7 +1300,7 @@ class TestErrorFormatting(unittest.TestCase):
 
     def test_error_with_source_context_last_line(self):
         """错误在最后一行时也能正确显示"""
-        from errors import NovaError
+        from nova.errors import NovaError
         err = NovaError("最后一行错误", line=3, column=1)
         err.source_code = "line1\nline2\nline3 error"
         formatted = str(err)
@@ -1312,7 +1309,7 @@ class TestErrorFormatting(unittest.TestCase):
 
     def test_error_without_source_fallback(self):
         """没有源码时使用传统格式"""
-        from errors import NovaError
+        from nova.errors import NovaError
         err = NovaError("简单错误", line=5, column=10)
         formatted = str(err)
         self.assertIn("[行 5, 列 10]", formatted)
@@ -1320,14 +1317,14 @@ class TestErrorFormatting(unittest.TestCase):
 
     def test_error_no_line_info(self):
         """没有行列号时只显示消息"""
-        from errors import NovaError
+        from nova.errors import NovaError
         err = NovaError("无位置错误")
         formatted = str(err)
         self.assertEqual(formatted, "无位置错误")
 
     def test_error_highlight_span(self):
         """使用 highlight_span 标记范围"""
-        from errors import NovaError
+        from nova.errors import NovaError
         err = NovaError("范围错误", line=2, column=5)
         err.source_code = "line1\nabcDEFGhij\nline3"
         err.highlight_span = (5, 10)
@@ -1337,7 +1334,7 @@ class TestErrorFormatting(unittest.TestCase):
 
     def test_lexer_error_with_source(self):
         """词法分析错误自动附带源码"""
-        from errors import LexerError
+        from nova.errors import LexerError
         err = LexerError("非法字符", 1, 1, source="let x = @")
         formatted = str(err)
         self.assertIn("let x = @", formatted)
@@ -1345,28 +1342,28 @@ class TestErrorFormatting(unittest.TestCase):
 
     def test_parse_error_with_source(self):
         """语法分析错误附带源码"""
-        from errors import ParseError
+        from nova.errors import ParseError
         err = ParseError("意外 token", 1, 5, source="let = 42")
         formatted = str(err)
         self.assertIn("let = 42", formatted)
 
     def test_type_check_error_with_source(self):
         """类型检查错误附带源码"""
-        from errors import TypeCheckError
+        from nova.errors import TypeCheckError
         err = TypeCheckError("类型不匹配", 1, 3, source="let x: Int = true")
         formatted = str(err)
         self.assertIn("let x: Int = true", formatted)
 
     def test_runtime_error_with_source(self):
         """运行时错误附带源码"""
-        from errors import RuntimeError_
+        from nova.errors import RuntimeError_
         err = RuntimeError_("除零错误", 1, 10, source="let x = 10 / 0")
         formatted = str(err)
         self.assertIn("10 / 0", formatted)
 
     def test_error_context_shows_previous_line(self):
         """上下文显示前一行"""
-        from errors import NovaError
+        from nova.errors import NovaError
         err = NovaError("错误", line=2, column=1)
         err.source_code = "prev\nerror\nnext"
         formatted = str(err)
@@ -1374,7 +1371,7 @@ class TestErrorFormatting(unittest.TestCase):
 
     def test_error_context_shows_next_line(self):
         """上下文显示后一行"""
-        from errors import NovaError
+        from nova.errors import NovaError
         err = NovaError("错误", line=2, column=1)
         err.source_code = "prev\nerror\nnext"
         formatted = str(err)
@@ -1390,7 +1387,7 @@ class TestREPLFeatures(unittest.TestCase):
 
     def test_multiline_detection(self):
         """多行检测"""
-        from nova import _is_incomplete
+        from nova._cli import _is_incomplete
         self.assertTrue(_is_incomplete("fn add(a) {"))
         self.assertFalse(_is_incomplete("42"))
         self.assertTrue(_is_incomplete("if true then {"))
@@ -1401,7 +1398,7 @@ class TestREPLFeatures(unittest.TestCase):
 
     def test_multiline_with_braces(self):
         """花括号闭合后完成"""
-        from nova import _is_incomplete
+        from nova._cli import _is_incomplete
         self.assertTrue(_is_incomplete("{"))
         self.assertFalse(_is_incomplete("{}"))
         self.assertTrue(_is_incomplete("{{"))
@@ -1409,7 +1406,7 @@ class TestREPLFeatures(unittest.TestCase):
 
     def test_multiline_with_parens(self):
         """括号闭合后完成"""
-        from nova import _is_incomplete
+        from nova._cli import _is_incomplete
         self.assertTrue(_is_incomplete("("))
         self.assertFalse(_is_incomplete("()"))
         self.assertTrue(_is_incomplete("(1 + "))
@@ -1417,7 +1414,7 @@ class TestREPLFeatures(unittest.TestCase):
 
     def test_multiline_with_brackets(self):
         """方括号闭合后完成"""
-        from nova import _is_incomplete
+        from nova._cli import _is_incomplete
         self.assertTrue(_is_incomplete("["))
         self.assertFalse(_is_incomplete("[]"))
         self.assertTrue(_is_incomplete("[1, 2, "))
@@ -1425,7 +1422,7 @@ class TestREPLFeatures(unittest.TestCase):
 
     def test_multiline_string_ignored(self):
         """字符串内的括号不影响检测"""
-        from nova import _is_incomplete
+        from nova._cli import _is_incomplete
         self.assertFalse(_is_incomplete('"{"'))
         self.assertFalse(_is_incomplete('"(()"'))
         self.assertFalse(_is_incomplete('let x = "("'))
@@ -1434,7 +1431,7 @@ class TestREPLFeatures(unittest.TestCase):
 
     def test_count_indent(self):
         """缩进级别计算"""
-        from nova import _count_indent
+        from nova._cli import _count_indent
         self.assertEqual(_count_indent("fn add() {"), 1)
         self.assertEqual(_count_indent("fn add() { x + "), 1)
         self.assertEqual(_count_indent("fn add() { x + }"), 0)
@@ -1443,8 +1440,8 @@ class TestREPLFeatures(unittest.TestCase):
 
     def test_attach_source(self):
         """_attach_source 为错误附加源码"""
-        from nova import _attach_source
-        from errors import NovaError
+        from nova._cli import _attach_source
+        from nova.errors import NovaError
         err = NovaError("test", line=1, column=1)
         self.assertIsNone(err.source_code)
         _attach_source(err, "let x = 42")
@@ -1452,8 +1449,8 @@ class TestREPLFeatures(unittest.TestCase):
 
     def test_attach_source_idempotent(self):
         """_attach_source 不覆盖已有源码"""
-        from nova import _attach_source
-        from errors import NovaError
+        from nova._cli import _attach_source
+        from nova.errors import NovaError
         err = NovaError("test", line=1, column=1)
         err.source_code = "original"
         _attach_source(err, "new")
@@ -1461,7 +1458,7 @@ class TestREPLFeatures(unittest.TestCase):
 
     def test_error_backwards_compatibility(self):
         """NovaError 的 source_code 和 highlight_span 是可选的"""
-        from errors import NovaError, LexerError, ParseError, TypeCheckError, RuntimeError_
+        from nova.errors import NovaError, LexerError, ParseError, TypeCheckError, RuntimeError_
 
         # 旧式创建（无 source）仍然工作
         err1 = NovaError("msg", 1, 1)
@@ -1493,8 +1490,8 @@ class TestBytecodeVM(unittest.TestCase):
         tokens = Lexer(source).tokenize()
         ast = Parser(tokens).parse()
         TypeChecker().check_program(ast)
-        from compiler import BytecodeCompiler
-        from vm import NovaVM
+        from nova.compiler import BytecodeCompiler
+        from nova.vm import NovaVM
         compiler = BytecodeCompiler()
         bytecode = compiler.compile(ast)
         vm = NovaVM(bytecode)

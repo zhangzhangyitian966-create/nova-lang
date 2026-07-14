@@ -8,15 +8,11 @@ import unittest
 import sys
 import os
 
-# 确保能正确导入 nova 包和 ir 包
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'ir'))
+from nova.lexer import Lexer
+from nova.parser import Parser
+from nova.ast_nodes import Program
 
-from lexer import Lexer
-from parser import Parser
-from ast_nodes import Program
-
-from ir_nodes import (
+from nova.ir.ir_nodes import (
     IRType, NovaType,
     INT_TYPE, FLOAT_TYPE, STRING_TYPE, BOOL_TYPE, CHAR_TYPE, UNIT_TYPE, NEVER_TYPE,
     ListType, MapType, TupleType, FnType, ADTType, OptionType, ResultType,
@@ -40,10 +36,10 @@ from ir_nodes import (
     MIRConst, MIRBinOp, MIRReturn, MIRPhi, MIRBranch,
     LIRModule, LIRFunction, LIRLabel, LIRReturn, LIRLoadConst,
 )
-from hir_lowering import HIRLowering
-from mir_lowering import MIRLowering
-from lir_lowering import LIRLowering
-from pass_manager import (
+from nova.ir.hir_lowering import HIRLowering
+from nova.ir.mir_lowering import MIRLowering
+from nova.ir.lir_lowering import LIRLowering
+from nova.ir.pass_manager import (
     PassManager, ConstantFolding, DeadCodeElimination, Inlining,
     CommonSubexprElimination, LoopInvariantCodeMotion,
     default_optimization_pipeline,

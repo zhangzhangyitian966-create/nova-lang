@@ -27,35 +27,25 @@ classifiers = [
 ]
 
 [project.optional-dependencies]
-# C 后端依赖
-c-backend = [
-    "tomli>=2.0; python_version<'3.11'",
-]
-
-# 开发依赖
-dev = [
-    "pytest>=7.0",
-    "pytest-cov>=4.0",
-]
-
-# 全部依赖
-all = [
-    "nova-lang[c-backend]",
-    "nova-lang[dev]",
-]
+c-backend = ["tomli>=2.0; python_version<'3.11'"]
+dev = ["pytest>=7.0", "pytest-cov>=4.0"]
+all = ["nova-lang[c-backend]", "nova-lang[dev]"]
 
 [project.scripts]
-nova = "nova.nova:main"
+nova = "nova._cli:main"
 
 [project.urls]
 Homepage = "https://github.com/nova-lang/nova"
 Documentation = "https://github.com/nova-lang/nova#readme"
 Repository = "https://github.com/nova-lang/nova"
 
-[tool.setuptools.packages.find]
-where = ["."]
-include = ["nova*"]
-exclude = ["tests*", "examples*", "runtime*", "tree-sitter-nova*", "templates*", "__pycache__*"]
+[tool.setuptools]
+packages = [
+    "nova",
+    "nova.backend",
+    "nova.ir",
+]
+package-dir = {"nova" = "."}
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

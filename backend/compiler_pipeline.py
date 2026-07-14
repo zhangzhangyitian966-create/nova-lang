@@ -6,17 +6,13 @@ Nova 源码 -> Tree-sitter 解析 -> HIR -> MIR -> LIR -> 目标代码
 import sys
 import os
 
-# 确保 ir/ 目录在路径上（ir 内的模块直接 import ir_nodes）
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "ir"))
-
 from typing import Optional
 
-from ir.ir_nodes import HIRModule, MIRModule, LIRModule
-from ir.hir_lowering import HIRLowering
-from ir.mir_lowering import MIRLowering
-from ir.lir_lowering import LIRLowering
-from ir.pass_manager import default_optimization_pipeline
+from nova.ir.ir_nodes import HIRModule, MIRModule, LIRModule
+from nova.ir.hir_lowering import HIRLowering
+from nova.ir.mir_lowering import MIRLowering
+from nova.ir.lir_lowering import LIRLowering
+from nova.ir.pass_manager import default_optimization_pipeline
 
 
 # 编译目标常量
@@ -35,21 +31,21 @@ class NovaCompilerPipeline:
 
         # 选择后端
         if target == BACKEND_NATIVE:
-            from backend.cranelift_backend import CraneliftBackend
+            from nova.backend.cranelift_backend import CraneliftBackend
             self.backend = CraneliftBackend()
         elif target == BACKEND_WASM:
-            from backend.wasm_backend import WasmGCBackend
+            from nova.backend.wasm_backend import WasmGCBackend
             self.backend = WasmGCBackend()
         else:
-            from c_codegen import CCodeGen
+            from nova.c_codegen import CCodeGen
             self.backend = CCodeGen()
 
     def compile_source(self, source: str, output_path: str) -> bool:
         """完整的编译管道：源码 -> 目标代码"""
         # 1. 前端解析（复用现有 Parser）
-        from lexer import Lexer
-        from parser import Parser
-        from type_checker import TypeChecker
+        from nova.lexer import Lexer
+        from nova.parser import Parser
+        from nova.type_checker import TypeChecker
 
         tokens = Lexer(source).tokenize()
         ast = Parser(tokens).parse()
@@ -91,8 +87,8 @@ class NovaCompilerPipeline:
 
     def compile_to_ir_text(self, source: str, level: str = "lir") -> str:
         """编译到指定 IR 层的文本输出（调试用）"""
-        from lexer import Lexer
-        from parser import Parser
+        from nova.lexer import Lexer
+        from nova.parser import Parser
 
         tokens = Lexer(source).tokenize()
         ast = Parser(tokens).parse()

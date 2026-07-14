@@ -15,7 +15,7 @@ Nova 编程语言 - 字节码编译器
 
 from typing import Dict, List, Optional, Any, Tuple
 
-from ast_nodes import (
+from nova.ast_nodes import (
     Program, Block,
     IntLiteral, FloatLiteral, StringLiteral, CharLiteral, BoolLiteral, UnitLiteral,
     Identifier, BinaryOp, UnaryOp, PipeExpr, TryExpr,

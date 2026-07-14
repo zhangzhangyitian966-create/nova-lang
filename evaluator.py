@@ -21,7 +21,7 @@ import json
 import os
 from typing import Dict, List, Optional, Any, Callable
 
-from ast_nodes import (
+from nova.ast_nodes import (
     Program, Block, Span,
     IntLiteral, FloatLiteral, StringLiteral, CharLiteral, BoolLiteral, UnitLiteral,
     Identifier, BinaryOp, UnaryOp, PipeExpr, TryExpr,
@@ -35,8 +35,8 @@ from ast_nodes import (
     PatternBool, PatternChar, PatternIdentifier, PatternConstructor,
     PatternTuple, PatternList,
 )
-from environment import Environment
-from errors import RuntimeError_, BreakSignal, ContinueSignal
+from nova.environment import Environment
+from nova.errors import RuntimeError_, BreakSignal, ContinueSignal
 
 
 # ============================================================

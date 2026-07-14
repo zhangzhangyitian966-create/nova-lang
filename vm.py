@@ -19,8 +19,8 @@ import json
 import os
 from typing import Dict, List, Optional, Any, Callable
 
-from compiler import Bytecode, FunctionBlock, Instruction, Op
-from errors import RuntimeError_
+from nova.compiler import Bytecode, FunctionBlock, Instruction, Op
+from nova.errors import RuntimeError_
 
 
 # ============================================================

@@ -13,7 +13,7 @@ Nova 编程语言 - 类型检查器
 
 from typing import Dict, Optional, List, Any
 
-from ast_nodes import (
+from nova.ast_nodes import (
     Program, Block,
     IntLiteral, FloatLiteral, StringLiteral, CharLiteral, BoolLiteral, UnitLiteral,
     Identifier, BinaryOp, UnaryOp, PipeExpr, TryExpr,
@@ -27,7 +27,7 @@ from ast_nodes import (
     TypeInt, TypeFloat, TypeString, TypeBool, TypeChar, TypeUnit,
     TypeIdentifier, TypeGeneric, TypeTuple, TypeFn, Span,
 )
-from errors import TypeCheckError
+from nova.errors import TypeCheckError
 
 
 # ============================================================
@@ -647,7 +647,7 @@ class TypeChecker:
 
     def _check_pattern(self, pattern, subject_type: NovaType, env: TypeEnv, match_expr):
         """检查模式与类型的匹配"""
-        from ast_nodes import (
+        from nova.ast_nodes import (
             PatternWildcard, PatternInt, PatternFloat, PatternString,
             PatternBool, PatternIdentifier, PatternConstructor, PatternTuple, PatternList,
         )

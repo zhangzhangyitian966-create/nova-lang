@@ -10,7 +10,7 @@ Nova 编程语言 - 语法分析器（Parser）
 
 from typing import List, Optional, Any
 
-from ast_nodes import (
+from nova.ast_nodes import (
     Span, Program, Block,
     IntLiteral, FloatLiteral, StringLiteral, CharLiteral, BoolLiteral, UnitLiteral,
     Identifier, BinaryOp, UnaryOp, PipeExpr, TryExpr,
@@ -26,8 +26,8 @@ from ast_nodes import (
     TypeInt, TypeFloat, TypeString, TypeBool, TypeChar, TypeUnit,
     TypeIdentifier, TypeGeneric, TypeTuple, TypeFn,
 )
-from lexer import Token, TokenType
-from errors import ParseError
+from nova.lexer import Token, TokenType
+from nova.errors import ParseError
 
 
 class Parser:

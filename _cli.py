@@ -18,14 +18,11 @@ Nova 编程语言 - 主入口
 import sys
 import os
 
-# 确保导入路径正确
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-
-from lexer import Lexer
-from parser import Parser
-from type_checker import TypeChecker
-from evaluator import Evaluator
-from errors import NovaError
+from nova.lexer import Lexer
+from nova.parser import Parser
+from nova.type_checker import TypeChecker
+from nova.evaluator import Evaluator
+from nova.errors import NovaError
 
 
 def run_source(source: str, check_types: bool = True, capture_output: bool = False, use_vm: bool = True):
@@ -57,8 +54,8 @@ def run_source(source: str, check_types: bool = True, capture_output: bool = Fal
 
         # 4. 执行
         if use_vm:
-            from compiler import BytecodeCompiler
-            from vm import NovaVM
+            from nova.compiler import BytecodeCompiler
+            from nova.vm import NovaVM
             compiler = BytecodeCompiler()
             bytecode = compiler.compile(ast)
             vm = NovaVM(bytecode)
@@ -94,9 +91,9 @@ def dump_bytecode_file(filepath: str):
         print(f"错误: 文件 '{filepath}' 不存在", file=sys.stderr)
         sys.exit(1)
 
-    from compiler import BytecodeCompiler, dump_bytecode
-    from lexer import Lexer
-    from parser import Parser
+    from nova.compiler import BytecodeCompiler, dump_bytecode
+    from nova.lexer import Lexer
+    from nova.parser import Parser
 
     tokens = Lexer(source).tokenize()
     ast = Parser(tokens).parse()
@@ -126,7 +123,7 @@ def run_repl():
     print('输入 "exit" 或按 Ctrl+D 退出')
     print()
 
-    from environment import Environment
+    from nova.environment import Environment
     evaluator = Evaluator(check_types=False)
     buffer = ""
 

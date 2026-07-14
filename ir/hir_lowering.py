@@ -5,13 +5,7 @@ AST -> HIR 降级器
 这是编译管道的第一步，接收 AST 产出 HIR Module。
 """
 
-import sys
-import os
-
-# 确保能正确导入 ast_nodes
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
-
-from ast_nodes import (
+from nova.ast_nodes import (
     Program, Block,
     IntLiteral, FloatLiteral, StringLiteral, CharLiteral, BoolLiteral, UnitLiteral,
     Identifier, BinaryOp, UnaryOp, PipeExpr, TryExpr,
@@ -25,7 +19,7 @@ from ast_nodes import (
     ListExpr, ListComprehension, TupleExpr, MapExpr, FieldAccess,
     ImportDecl, ExportDecl, TypeDef, VariantDef, AliasDef,
 )
-from ir_nodes import (
+from nova.ir.ir_nodes import (
     IRType, NovaType,
     INT_TYPE, FLOAT_TYPE, STRING_TYPE, BOOL_TYPE, CHAR_TYPE, UNIT_TYPE, NEVER_TYPE,
     HIRModule, HIRFunction, HIRTypeDef, HIRVariant,

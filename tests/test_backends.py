@@ -7,9 +7,7 @@ import sys
 import os
 import tempfile
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
-
-from ir.ir_nodes import (
+from nova.ir.ir_nodes import (
     IRType, NovaType,
     INT_TYPE, FLOAT_TYPE, STRING_TYPE, BOOL_TYPE, UNIT_TYPE,
     LIRModule, LIRFunction, LIRGlobal, LIRData,
@@ -19,9 +17,9 @@ from ir.ir_nodes import (
     HIRModule, MIRModule,
     LIRInstr,
 )
-from backend.cranelift_backend import CraneliftBackend
-from backend.wasm_backend import WasmGCBackend
-from backend.compiler_pipeline import NovaCompilerPipeline, BACKEND_NATIVE, BACKEND_WASM, BACKEND_C
+from nova.backend.cranelift_backend import CraneliftBackend
+from nova.backend.wasm_backend import WasmGCBackend
+from nova.backend.compiler_pipeline import NovaCompilerPipeline, BACKEND_NATIVE, BACKEND_WASM, BACKEND_C
 
 
 # ============================================================
@@ -30,12 +28,12 @@ from backend.compiler_pipeline import NovaCompilerPipeline, BACKEND_NATIVE, BACK
 
 def source_to_lir(source: str) -> LIRModule:
     """完整的 Nova 源码 -> LIR 管道"""
-    from lexer import Lexer
-    from parser import Parser
-    from type_checker import TypeChecker
-    from ir.hir_lowering import HIRLowering
-    from ir.mir_lowering import MIRLowering
-    from ir.lir_lowering import LIRLowering
+    from nova.lexer import Lexer
+    from nova.parser import Parser
+    from nova.type_checker import TypeChecker
+    from nova.ir.hir_lowering import HIRLowering
+    from nova.ir.mir_lowering import MIRLowering
+    from nova.ir.lir_lowering import LIRLowering
 
     tokens = Lexer(source).tokenize()
     ast = Parser(tokens).parse()
@@ -144,7 +142,7 @@ class TestCraneliftBackend(unittest.TestCase):
 
     def test_type_map(self):
         """测试 Cranelift 类型映射完整性"""
-        from backend.cranelift_backend import CRANELIFT_TYPE_MAP
+        from nova.backend.cranelift_backend import CRANELIFT_TYPE_MAP
         self.assertIn(IRType.INT, CRANELIFT_TYPE_MAP)
         self.assertIn(IRType.FLOAT, CRANELIFT_TYPE_MAP)
         self.assertIn(IRType.BOOL, CRANELIFT_TYPE_MAP)
@@ -210,7 +208,7 @@ class TestWasmGCBackend(unittest.TestCase):
 
     def test_wasm_type_map(self):
         """测试 Wasm 类型映射"""
-        from backend.wasm_backend import WASM_TYPE_MAP
+        from nova.backend.wasm_backend import WASM_TYPE_MAP
         self.assertEqual(WASM_TYPE_MAP[IRType.INT], "i64")
         self.assertEqual(WASM_TYPE_MAP[IRType.FLOAT], "f64")
         self.assertEqual(WASM_TYPE_MAP[IRType.BOOL], "i32")
@@ -416,14 +414,14 @@ class TestPassManager(unittest.TestCase):
 
     def test_default_pipeline(self):
         """测试默认优化管道"""
-        from ir.pass_manager import default_optimization_pipeline
+        from nova.ir.pass_manager import default_optimization_pipeline
         pm = default_optimization_pipeline()
         self.assertTrue(len(pm.hir_passes) > 0)
         self.assertTrue(len(pm.mir_passes) > 0)
 
     def test_pass_manager_run_hir(self):
         """测试 PassManager 运行 HIR passes"""
-        from ir.pass_manager import PassManager, ConstantFolding
+        from nova.ir.pass_manager import PassManager, ConstantFolding
         pm = PassManager()
         pm.add_hir_pass(ConstantFolding())
         module = HIRModule(name="test")
@@ -431,7 +429,7 @@ class TestPassManager(unittest.TestCase):
 
     def test_pass_manager_run_mir(self):
         """测试 PassManager 运行 MIR passes"""
-        from ir.pass_manager import PassManager, CommonSubexprElimination
+        from nova.ir.pass_manager import PassManager, CommonSubexprElimination
         pm = PassManager()
         pm.add_mir_pass(CommonSubexprElimination())
         module = MIRModule(name="test")
@@ -439,7 +437,7 @@ class TestPassManager(unittest.TestCase):
 
     def test_pass_manager_run_lir(self):
         """测试 PassManager 运行 LIR passes"""
-        from ir.pass_manager import PassManager
+        from nova.ir.pass_manager import PassManager
         pm = PassManager()
         module = LIRModule(name="test")
         pm.run_lir_passes(module)  # 不应抛出异常
@@ -453,9 +451,9 @@ class TestLowering(unittest.TestCase):
 
     def test_hir_lowering_basic(self):
         """测试基本 HIR 降级"""
-        from ir.hir_lowering import HIRLowering
-        from lexer import Lexer
-        from parser import Parser
+        from nova.ir.hir_lowering import HIRLowering
+        from nova.lexer import Lexer
+        from nova.parser import Parser
 
         source = "fn add(a: Int, b: Int) -> Int { a + b }"
         tokens = Lexer(source).tokenize()
@@ -466,10 +464,10 @@ class TestLowering(unittest.TestCase):
 
     def test_mir_lowering_basic(self):
         """测试基本 MIR 降级"""
-        from ir.hir_lowering import HIRLowering
-        from ir.mir_lowering import MIRLowering
-        from lexer import Lexer
-        from parser import Parser
+        from nova.ir.hir_lowering import HIRLowering
+        from nova.ir.mir_lowering import MIRLowering
+        from nova.lexer import Lexer
+        from nova.parser import Parser
 
         source = "fn add(a: Int, b: Int) -> Int { a + b }"
         tokens = Lexer(source).tokenize()
@@ -481,11 +479,11 @@ class TestLowering(unittest.TestCase):
 
     def test_lir_lowering_basic(self):
         """测试基本 LIR 降级"""
-        from ir.hir_lowering import HIRLowering
-        from ir.mir_lowering import MIRLowering
-        from ir.lir_lowering import LIRLowering
-        from lexer import Lexer
-        from parser import Parser
+        from nova.ir.hir_lowering import HIRLowering
+        from nova.ir.mir_lowering import MIRLowering
+        from nova.ir.lir_lowering import LIRLowering
+        from nova.lexer import Lexer
+        from nova.parser import Parser
 
         source = "fn add(a: Int, b: Int) -> Int { a + b }"
         tokens = Lexer(source).tokenize()
@@ -499,11 +497,11 @@ class TestLowering(unittest.TestCase):
 
     def test_lowering_with_main(self):
         """测试含 main 的完整降级"""
-        from ir.hir_lowering import HIRLowering
-        from ir.mir_lowering import MIRLowering
-        from ir.lir_lowering import LIRLowering
-        from lexer import Lexer
-        from parser import Parser
+        from nova.ir.hir_lowering import HIRLowering
+        from nova.ir.mir_lowering import MIRLowering
+        from nova.ir.lir_lowering import LIRLowering
+        from nova.lexer import Lexer
+        from nova.parser import Parser
 
         source = 'fn main() -> Unit { print("Hello") }'
         tokens = Lexer(source).tokenize()

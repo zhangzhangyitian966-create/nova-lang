@@ -9,9 +9,7 @@ import os
 import sys
 from typing import Dict, List, Tuple, Optional, Any
 
-# 确保 ir 节点可以被导入
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'ir'))
-from ir_nodes import (
+from nova.ir.ir_nodes import (
     LIRModule, LIRFunction, LIRGlobal, LIRData,
     LIRInstr, LIRLoadConst, LIRLoadGlobal, LIRStoreGlobal,
     LIRLoadReg, LIRStoreReg, LIRBinOp, LIRUnaryOp,
@@ -473,9 +471,8 @@ class SimpleNativeCompiler:
     def compile_source(self, source: str, output_path: str) -> str:
         """将 Nova 源码编译为 x86_64 ELF"""
         # 1. 前端解析（复用现有）
-        sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
-        from lexer import Lexer
-        from parser import Parser
+        from nova.lexer import Lexer
+        from nova.parser import Parser
 
         tokens = Lexer(source).tokenize()
         ast = Parser(tokens).parse()

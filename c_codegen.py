@@ -10,7 +10,7 @@ Nova 编程语言 - C 代码生成器
 
 from typing import List, Optional, Any, Dict, Set, Tuple
 
-from ast_nodes import (
+from nova.ast_nodes import (
     Program, Block,
     IntLiteral, FloatLiteral, StringLiteral, CharLiteral, BoolLiteral, UnitLiteral,
     Identifier, BinaryOp, UnaryOp, PipeExpr, TryExpr,
