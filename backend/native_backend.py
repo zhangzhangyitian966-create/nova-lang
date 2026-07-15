@@ -132,6 +132,7 @@ class NativeCodeGen:
         self.rip_relocations = []  # [(func_name, code_offset_in_func, data_offset)]
         self.func_calls = {}       # {func_name: [(call_offset, target_name)]}
         self.link_calls = []       # [(code_offset, func_name)]
+        self.closure_relocations = []  # [(func_name, code_offset_in_func, target_func_name)]
         self.global_symbols = {}   # global_name -> offset in data section
         self.global_data = []      # [(name, bytes_value, offset)]
 
@@ -248,6 +249,8 @@ class NativeCodeGen:
                 name = f"sconst_{instr.value}"
             elif instr.const_type == "bool":
                 name = f"bconst_{instr.value}"
+            elif instr.const_type == "closure":
+                name = f"closure_{instr.value}"
             else:
                 name = f"const_{instr.value}"
             defined.append((name, is_float))
@@ -473,6 +476,27 @@ class NativeCodeGen:
                 rip_offset = e.lea_reg_rip(reg, 0)
                 func_relocations.append((rip_offset, data_offset))
 
+    def _compile_const_closure(self, e, instr, vregs, free_gprs, free_xmms,
+                               func_name, preallocated=None):
+        """编译闭包常量加载：通过 RIP-relative lea 获取函数地址作为函数指针。
+
+        instr.value 格式为 "<closure:fn_name>"，解析出目标函数名，
+        使用 RIP-relative LEA 加载函数符号地址到目标寄存器。
+        记录重定位条目，类型为函数符号引用（代码段内相对寻址）。
+        """
+        # 解析函数名："<closure:fn_name>" -> "fn_name"
+        value = instr.value
+        if value.startswith("<closure:") and value.endswith(">"):
+            target_func = value[len("<closure:"):-1]
+        else:
+            target_func = value  # fallback，直接用 value 作为函数名
+
+        reg = self._alloc_vreg(f"closure_{instr.value}", vregs, free_gprs, free_xmms,
+                               preallocated=preallocated)
+        if reg is not None:
+            rip_offset = e.lea_reg_rip(reg, 0)
+            self.closure_relocations.append((func_name, rip_offset, target_func))
+
     def _compile_branch(self, e, instr, vregs, free_gprs, free_xmms,
                         label_positions, pending_branches):
         """编译条件分支：test + jne true_label + jmp false_label"""
@@ -661,6 +685,9 @@ class NativeCodeGen:
                 elif instr.const_type == "string":
                     self._compile_const_string(e, instr, vregs, free_gprs, free_xmms,
                                                func_relocations, preallocated=preallocated)
+                elif instr.const_type == "closure":
+                    self._compile_const_closure(e, instr, vregs, free_gprs, free_xmms,
+                                                func.name, preallocated=preallocated)
                 else:
                     raise NotImplementedError(
                         f"LIRLoadConst const_type '{instr.const_type}' is not yet implemented in native backend"
@@ -1240,6 +1267,14 @@ class NativeCodeGen:
             func_base = 0 if func_name == "_start" else func_offsets.get(func_name, 0)
             abs_offset = func_base + offset_in_func
             rel = data_dist + data_offset - (abs_offset + 4)
+            struct.pack_into('<i', code, abs_offset, rel)
+
+        # Patch closure (函数指针) RIP-relative 引用
+        for func_name, offset_in_func, target_name in self.closure_relocations:
+            func_base = 0 if func_name == "_start" else func_offsets.get(func_name, 0)
+            abs_offset = func_base + offset_in_func
+            target_base = func_offsets.get(target_name, 0)
+            rel = target_base - (abs_offset + 4)
             struct.pack_into('<i', code, abs_offset, rel)
 
     def _generate_elf(self, func_code: Dict[str, bytes], start_code: bytes,

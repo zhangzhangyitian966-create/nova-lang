@@ -1045,6 +1045,10 @@ class TypeChecker:
         self._check_pattern(arm.pattern, subject_type, child_env, match_expr)
         old_env = self.env
         self.env = child_env
+        if arm.guard is not None:
+            guard_ty = self.check_expr(arm.guard)
+            if not self._types_compatible(guard_ty, BOOL_T):
+                self._report_error(f"match 守卫条件必须是 Bool 类型，得到 {guard_ty}", arm.guard)
         body_ty = self.check_expr(arm.body)
         self.env = old_env
         return body_ty

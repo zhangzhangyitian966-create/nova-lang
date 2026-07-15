@@ -160,7 +160,6 @@ class NovaVM:
         self.stack: List[Any] = []
         self.call_stack: List[Frame] = []
         self.globals: Dict[str, Any] = {}
-        self.global_mutable: set = set()  # 跟踪哪些全局变量是可变的
         self.constants: List[Any] = bytecode.constants
         self.code: List[Instruction] = bytecode.code
         self.functions: Dict[str, FunctionBlock] = dict(bytecode.functions)
@@ -634,13 +633,9 @@ class NovaVM:
 
         elif opcode == Op.STORE_VAR:
             # Stack: [value] -> []
-            # Pop value and store into variable
-            # operands: (name, mutable, [is_assignment])
-            #   - is_assignment=False (default): let/mut binding, creates new var in current scope
-            #   - is_assignment=True: assignment, modifies existing mutable var (local -> global)
+            # Pop value and store into variable (local first, then global)
             name = instr.operands[0]
             mutable = instr.operands[1]
-            is_assignment = instr.operands[2] if len(instr.operands) > 2 else False
             val = self._pop()[0]
             if self.call_stack:
                 frame = self.call_stack[-1]
@@ -649,38 +644,12 @@ class NovaVM:
                         raise RuntimeError_(f"Cannot assign to immutable variable '{name}'")
                     frame.locals[name] = val
                 else:
-                    if is_assignment:
-                        # 赋值操作：变量不在局部时，检查全局变量
-                        if name in self.globals:
-                            # 全局变量存在
-                            if name in self.global_mutable:
-                                # 全局可变变量 -> 修改全局
-                                self.globals[name] = val
-                            else:
-                                # 全局不可变变量 -> 报错
-                                raise RuntimeError_(f"Cannot assign to immutable variable '{name}'")
-                        else:
-                            # 全局不存在 -> 报错（赋值必须有已存在的变量）
-                            raise RuntimeError_(f"未定义的变量 '{name}'")
-                    else:
-                        # 绑定操作：总是在局部创建新变量（shadow 全局）
-                        frame.locals[name] = val
+                    # 函数作用域中：总是写入局部变量，禁止隐式创建/修改全局变量
+                    # 这确保 let/mut 绑定在函数中创建局部变量，
+                    # 同时防止意外修改全局变量（违背静态作用域原则）
+                    frame.locals[name] = val
                 return
-            # 顶层代码
-            if is_assignment:
-                # 顶层赋值：必须是已存在的可变全局变量
-                if name in self.globals:
-                    if name in self.global_mutable:
-                        self.globals[name] = val
-                    else:
-                        raise RuntimeError_(f"Cannot assign to immutable variable '{name}'")
-                else:
-                    raise RuntimeError_(f"未定义的变量 '{name}'")
-            else:
-                # 顶层绑定：创建全局变量
-                self.globals[name] = val
-                if mutable:
-                    self.global_mutable.add(name)
+            self.globals[name] = val
 
         # === 运算 ===
         elif opcode == Op.ADD:

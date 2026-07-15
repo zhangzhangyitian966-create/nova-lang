@@ -471,7 +471,7 @@ class BytecodeCompiler:
 
         elif isinstance(expr, Assignment):
             self._compile_expr(expr.value)
-            self.bytecode.emit_op(Op.STORE_VAR, expr.name, True)
+            self.bytecode.emit_op(Op.STORE_VAR, expr.name, True, True)
 
         elif isinstance(expr, ListExpr):
             for elem in expr.elements:

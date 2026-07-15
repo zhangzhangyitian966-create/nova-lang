@@ -812,6 +812,54 @@ class TestNativeCodeGen(unittest.TestCase):
         # lea 指令 opcode 为 8D
         self.assertIn(0x8D, code)
 
+    def test_closure_constant_compilation(self):
+        """闭包常量加载编译：应生成 lea (RIP-relative)，加载函数符号地址"""
+        codegen = NativeCodeGen()
+        lir = LIRModule(name="test")
+
+        # 被引用的目标函数
+        callee = LIRFunction("my_func", [], INT_TYPE)
+        callee.body = [
+            LIRLoadConst(value=42, const_type="int"),
+            LIRReturn(),
+        ]
+        lir.functions["my_func"] = callee
+
+        # 主函数：加载闭包常量（函数指针）
+        fn = LIRFunction("main", [], INT_TYPE)
+        fn.body = [
+            LIRLoadConst(value="<closure:my_func>", const_type="closure"),
+            LIRReturn(),
+        ]
+        lir.functions["main"] = fn
+
+        # 完整编译（确保 closure 重定位被正确处理）
+        elf = codegen.compile(lir)
+        self.assertTrue(len(elf) > 0)
+
+        # 验证 closure_relocations 被正确记录
+        self.assertTrue(len(codegen.closure_relocations) > 0)
+        func_name, offset, target = codegen.closure_relocations[0]
+        self.assertEqual(func_name, "main")
+        self.assertEqual(target, "my_func")
+
+    def test_closure_constant_compilation_no_not_implemented(self):
+        """closure 类型常量加载不应抛出 NotImplementedError"""
+        codegen = NativeCodeGen()
+        lir = LIRModule(name="test")
+        fn = LIRFunction("main", [], INT_TYPE)
+        fn.body = [
+            LIRLoadConst(value="<closure:foo>", const_type="closure"),
+            LIRReturn(),
+        ]
+        lir.functions["main"] = fn
+
+        # 不应抛出 NotImplementedError
+        code = codegen._compile_function(fn)
+        self.assertTrue(len(code) > 0)
+        # lea 指令 opcode 为 8D
+        self.assertIn(0x8D, code)
+
     def test_branch_compilation(self):
         """条件分支编译：应生成 test + jne + jmp"""
         codegen = NativeCodeGen()

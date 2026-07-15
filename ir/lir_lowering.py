@@ -139,11 +139,28 @@ class LIRLowering:
             result.append(lir)
 
         elif isinstance(instr, MIRCall):
-            lir = LIRCall()
-            lir.func_name = instr.callee
-            lir.arg_count = len(instr.args)
-            if instr.result_name:
-                lir.dst_loc = (self.ssa_to_loc.get(instr.result_name, ""), instr.result_type)
+            # 判断是直接调用还是间接调用（闭包调用）
+            if instr.callee in self.ssa_to_loc:
+                # callee 是 SSA 变量（函数指针/闭包），生成间接调用
+                lir = LIRCallIndirect()
+                # src_locs[0] = 函数指针位置，src_locs[1:] = 参数位置
+                lir.src_locs = [(self.ssa_to_loc[instr.callee], instr.result_type)]
+                for arg in instr.args:
+                    lir.src_locs.append((self.ssa_to_loc.get(arg, ""), instr.result_type))
+                if instr.result_name:
+                    lir.dst_loc = (self.ssa_to_loc.get(instr.result_name, ""), instr.result_type)
+            else:
+                # callee 是已知函数名，生成直接调用
+                lir = LIRCall()
+                lir.func_name = instr.callee
+                lir.arg_count = len(instr.args)
+                if instr.result_name:
+                    lir.dst_loc = (self.ssa_to_loc.get(instr.result_name, ""), instr.result_type)
+                # 填充 src_locs（参数位置），供后端使用
+                if instr.args:
+                    lir.src_locs = []
+                    for arg in instr.args:
+                        lir.src_locs.append((self.ssa_to_loc.get(arg, ""), instr.result_type))
             result.append(lir)
 
         elif isinstance(instr, MIRClosureCreate):

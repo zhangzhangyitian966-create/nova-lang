@@ -1,5 +1,61 @@
 # Nova 自动改进日志
 
+## 2026-07-16 自动改进（第二十二轮）
+
+基于 AUTO_REVIEW_LOG.md 第二十轮审查日志的 P1/P2 级严重问题驱动改进（阶段一检查 + 阶段二开发 + 阶段三测试）。
+
+### 每日发现的问题
+
+#### vm.py / compiler.py
+- **STORE_VAR 函数内无法修改全局 mut 变量（vm.py:634-652）**：函数作用域中 STORE_VAR 对未定义变量直接在局部创建，不沿作用域链查找全局可变变量；与 evaluator 的 Environment.assign 语义不一致 → 添加 global_mutable 集合跟踪全局可变性，赋值模式下沿作用域链查找
+  - 审查日志追问结论：绝对不能接受，两条执行路径语义不一致是致命缺陷
+  - 复现：`mut x = 0; fn f() { x = x + 1 }; f(); print(x)` VM 输出 0，evaluator 输出 1
+
+#### type_checker.py
+- **match 守卫条件完全缺少类型检查（type_checker.py:1042-1050）**：`check_match_arm` 方法只检查模式和分支体，完全跳过 `arm.guard`，非 Bool 类型守卫只能在运行时才报错 → 在子环境中对守卫条件执行 Bool 类型检查
+  - 审查日志追问结论：绝对不能，强类型语言的守卫条件必须是 Bool
+  - 复现：`match 42 { n when 123 => "bad" }` 类型检查通过，运行时才抛 RuntimeError_
+
+#### backend/native_backend.py
+- **LIRLoadConst 不支持 closure 类型常量（native_backend.py:664-667）**：MIRClosureCreate 被降级为 LIRLoadConst(const_type="closure")，但 native_backend 只处理 int/float/bool/string，闭包场景直接抛 NotImplementedError → 添加 closure 类型处理，用 RIP-relative LEA 加载函数符号地址
+  - 配套修复：lir_lowering.py 中 MIRCall 区分直接调用（函数名）和间接调用（闭包 SSA 变量），后者生成 LIRCallIndirect
+
+### 本次修复内容（基于审查日志 Issue）
+
+1. **vm.py + compiler.py — STORE_VAR 支持函数内修改全局 mut 变量（基于审查日志 vm.py:634-652 / 第二十轮严重问题 "函数修改全局 mut 变量不一致"）**
+   - NovaVM 新增 `global_mutable: set` 集合跟踪全局可变变量名
+   - STORE_VAR 新增第三个操作数 `is_assignment`，区分绑定模式（let/mut 声明）和赋值模式（`x = val`）
+   - 赋值模式下：局部不存在时，先检查全局是否存在且可变 → 是则修改全局，否则报错
+   - 绑定模式下：保持原有行为（顶层创建全局并维护 global_mutable，函数内创建局部）
+   - compiler.py 中 Assignment 编译时传入第三个操作数 True
+   - 新增 10 个测试用例覆盖各种场景
+
+2. **type_checker.py — match 守卫条件 Bool 类型检查（基于审查日志 type_checker.py / 第二十轮 P1 级 #22 守卫条件类型检查缺失）**
+   - `check_match_arm` 方法中增加守卫条件类型检查
+   - 守卫在模式绑定的子环境中求值（可引用模式变量）
+   - 使用 `_types_compatible` 检查 BOOL_T 兼容性
+   - 错误信息："match 守卫条件必须是 Bool 类型，得到 {类型}"
+   - 新增 8 个测试用例：比较运算守卫、逻辑运算守卫、模式变量引用、Int/String/Unit 错误守卫、多 arm 场景
+
+3. **backend/native_backend.py + ir/lir_lowering.py — 闭包常量加载 + MIRCall 区分直接/间接调用（基于审查日志 native_backend.py:489 / 第二十轮严重问题 "LIRCallIndirect 抛 NotImplementedError" 延伸修复）**
+   - native_backend 新增 `closure_relocations` 列表记录函数符号重定位
+   - 新增 `_compile_const_closure` 方法：解析 `<closure:fn_name>`，用 LEA RIP-relative 加载函数地址
+   - `_patch_code` 中添加 closure 重定位回填
+   - `_collect_vreg_info` 支持 closure 类型虚拟寄存器命名
+   - lir_lowering.py 中 MIRCall 判断 callee 是否为 SSA 变量：是则生成 LIRCallIndirect（src_locs[0]=函数指针），否则生成 LIRCall
+   - 新增 2 个测试用例验证闭包常量编译
+
+### 测试结果
+
+- 全量测试: **793 passed** (1.88s)
+- Evaluator 示例: hello/fibonacci/pattern_match/loops/math 全部正常输出
+- VM 示例: hello/fibonacci/pattern_match 全部正常输出
+- VM 全局 mut 变量修改: 函数内两次调用后 count=2 ✅
+- 类型检查器守卫条件: 8 个新增测试全部通过 ✅
+- Native 后端闭包常量: 2 个新增测试全部通过 ✅
+
+---
+
 ## 2026-07-15 自动改进（第二十轮）
 
 基于 AUTO_REVIEW_LOG.md 第十八轮审查日志的 P0 级严重问题驱动改进（阶段一检查 + 阶段二开发 + 阶段三测试）。

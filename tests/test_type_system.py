@@ -794,3 +794,104 @@ class TestAssignmentMutability:
         with pytest.raises(TypeCheckError) as exc_info:
             check_source(source)
         assert "不可变绑定" in str(exc_info.value)
+
+
+class TestMatchGuardTypeCheck:
+    """测试 match 守卫条件的类型检查（Bug 修复）"""
+
+    def test_guard_bool_comparison_ok(self):
+        """守卫条件为比较运算（Bool）应通过"""
+        source = """
+        match 42 {
+            x if x > 0 -> x,
+            _ -> 0
+        }
+        """
+        checker = check_source(source)
+        assert len(checker.error_collector.errors) == 0
+
+    def test_guard_bool_logic_ok(self):
+        """守卫条件为逻辑运算（Bool）应通过"""
+        source = """
+        match 42 {
+            x if x > 0 && x < 100 -> x,
+            _ -> 0
+        }
+        """
+        checker = check_source(source)
+        assert len(checker.error_collector.errors) == 0
+
+    def test_guard_uses_pattern_variable_ok(self):
+        """守卫条件中引用模式变量应通过类型检查"""
+        source = """
+        type Option[T] { Some(T) None }
+        match Some(42) {
+            Some(x) if x > 10 -> x,
+            _ -> 0
+        }
+        """
+        checker = check_source(source)
+        assert len(checker.error_collector.errors) == 0
+
+    def test_guard_int_error(self):
+        """守卫条件为 Int 类型应报错"""
+        source = """
+        match 42 {
+            x if 42 -> x,
+            _ -> 0
+        }
+        """
+        with pytest.raises(TypeCheckError) as exc_info:
+            check_source(source)
+        assert "守卫条件必须是 Bool 类型" in str(exc_info.value)
+        assert "Int" in str(exc_info.value)
+
+    def test_guard_string_error(self):
+        """守卫条件为 String 类型应报错"""
+        source = """
+        match 42 {
+            x if "hello" -> x,
+            _ -> 0
+        }
+        """
+        with pytest.raises(TypeCheckError) as exc_info:
+            check_source(source)
+        assert "守卫条件必须是 Bool 类型" in str(exc_info.value)
+        assert "String" in str(exc_info.value)
+
+    def test_guard_unit_error(self):
+        """守卫条件为 Unit 类型应报错"""
+        source = """
+        match 42 {
+            x if {} -> x,
+            _ -> 0
+        }
+        """
+        with pytest.raises(TypeCheckError) as exc_info:
+            check_source(source)
+        assert "守卫条件必须是 Bool 类型" in str(exc_info.value)
+
+    def test_multiple_arms_guard_type_check(self):
+        """多个 arm 中守卫条件类型检查正确"""
+        source = """
+        match 42 {
+            x if x > 100 -> "big",
+            x if x > 10 -> "medium",
+            _ -> "small"
+        }
+        """
+        checker = check_source(source)
+        assert len(checker.error_collector.errors) == 0
+
+    def test_multiple_arms_guard_type_error_in_second_arm(self):
+        """多个 arm 中第二个 arm 守卫条件类型错误应报错"""
+        source = """
+        match 42 {
+            x if x > 100 -> "big",
+            x if 42 -> "medium",
+            _ -> "small"
+        }
+        """
+        with pytest.raises(TypeCheckError) as exc_info:
+            check_source(source)
+        assert "守卫条件必须是 Bool 类型" in str(exc_info.value)
