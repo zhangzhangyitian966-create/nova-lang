@@ -235,6 +235,12 @@ class Lexer:
                              end_line=self.line, end_col=self.column - 1)
             elif ch == '\\':
                 self._advance()  # 跳过反斜杠
+                if self.pos >= len(self.source):
+                    # 反斜杠后到达 EOF：未闭合字符串
+                    error_msg = f"词法错误：未闭合的字符串字面量 (行:{start_line}, 列:{start_col})"
+                    self.errors.append(error_msg)
+                    print(error_msg, file=sys.stderr)
+                    return self._next_token()
                 esc = self._advance()
                 # 处理转义字符
                 if esc == 'n':
@@ -283,6 +289,12 @@ class Lexer:
         ch = self.source[self.pos]
         if ch == '\\':
             self._advance()  # 跳过反斜杠
+            if self.pos >= len(self.source):
+                # 反斜杠后到达 EOF：未闭合字符字面量
+                error_msg = f"词法错误：未闭合的字符字面量 (行:{start_line}, 列:{start_col})"
+                self.errors.append(error_msg)
+                print(error_msg, file=sys.stderr)
+                return self._next_token()
             esc = self._advance()
             if esc == 'n':
                 ch = '\n'

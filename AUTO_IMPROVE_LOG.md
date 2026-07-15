@@ -1,5 +1,131 @@
 # Nova 自动改进日志
 
+## 2026-07-16 自动改进（第二十四轮）
+
+基于 AUTO_REVIEW_LOG.md 第二十二轮审查日志的 P0/P1 级严重问题驱动改进（阶段一检查 + 阶段二开发 + 阶段三测试）。
+
+### 每日发现的问题
+
+#### vm.py
+- **TRY_UNWRAP 提前返回不清理迭代器状态（vm.py:1399-1418 / 425-479）**：`_call_closure` 的 finally 块只恢复栈和帧，完全不清理 `_for_iters`、`_while_loops`、`_range_index`、`_list_index` 四个循环状态结构
+  - 审查日志追问结论：绝对不能，典型的资源泄漏+状态错乱 bug
+  - 复现：单层 for 循环内 `?` 提前返回 → `_for_iters` 残留 1 条、`_list_index` 残留 1 键
+  - 影响：内存泄漏 + 同一 VM 实例后续循环行为错乱
+
+- **顶层 TRY_UNWRAP 失败后仍执行 main()（vm.py:507-511）**：`_run_code` 遇到 TRY_UNWRAP early return 只是 break 退出循环，不返回状态；`run()` 无条件调用 `_auto_call_main()`
+  - 审查日志追问结论：绝对不能，静默忽略错误是严重的语义错误
+  - 复现：`fn main() { print("called") }; let x = None?` → VM 输出 "called"，Evaluator 抛出 ReturnSignal 终止程序
+  - 与 Evaluator 语义不一致
+
+- **CONTINUE/BREAK 在无对应循环时静默失败（vm.py:926-947 / 888-924）**：CONTINUE 无循环上下文时完全静默 fall through；BREAK 无循环时走脆弱前向扫描
+  - 审查日志追问结论：不能，break/continue 不在循环中是静态错误
+  - 与 Evaluator 不一致：Evaluator 中 BreakSignal/ContinueSignal 会向上传播
+
+#### lexer.py
+- **字符串末尾反斜杠 + EOF 导致词法分析器崩溃（lexer.py:236-238）**：`"hello\` 这种输入触发 IndexError，恶意输入可导致进程级崩溃
+  - 审查日志追问结论：绝对不能，P0 级崩溃性 bug
+  - 根因：`_read_string` 跳过反斜杠后直接 `_advance()` 读转义字符，未检查 EOF
+
+- **字符字面量末尾反斜杠 + EOF 同样崩溃（lexer.py:284-286）**：`'\` 触发 IndexError，与字符串问题同理
+  - 审查日志追问结论：绝对不能，P0 级崩溃性 bug
+
+#### parser.py
+- **Fn[...] 函数类型返回类型恒为 Unit（parser.py:335-346）**：`Fn[Int, Bool]` 被解析为 `(Int, Bool) -> Unit` 而非 `(Int) -> Bool`
+  - 审查日志追问结论：绝对不能，类型系统层面的基本正确性问题
+  - 根因：所有类型参数全部放入 params，return_type 硬编码为 TypeUnit
+
+- **? 操作符只能应用一次，无法链式调用（parser.py:764-768）**：`expr??`、`foo?()`、`foo?.bar` 全部语法错误
+  - 审查日志追问结论：不能，? 是后缀运算符，应与其他后缀操作同优先级
+  - 根因：`?` 在后缀 while 循环外面，函数调用/字段访问/索引访问在循环内
+
+#### evaluator.py
+- **表达式求值无递归深度保护（evaluator.py:676-885）**：eval_expr 是纯递归实现，深度嵌套表达式会触发 Python RecursionError
+  - 审查日志追问结论：不能，DoS 攻击向量
+  - 复现：100 层嵌套算术表达式就触发 RecursionError
+  - `_call_depth` 只保护函数调用递归，不保护表达式嵌套递归
+
+- **Block 求值缺少 try-finally，异常路径环境泄漏（evaluator.py:766-776）**：BreakSignal/ContinueSignal/ReturnSignal/RuntimeError_ 等异常导致 `self.env = old_env` 不执行
+  - 审查日志追问结论：绝对不能，P0 级严重缺陷
+  - 复现：while 循环体内 break 后，循环体 Block 中定义的变量泄漏到外部
+  - 对比：`_call_fn` 和 `_eval_for_expr` 都正确使用了 try-finally
+
+- **while 循环体没有独立作用域，与 for 循环不一致（evaluator.py:1015-1030）**：for 循环每次迭代创建 child_env，while 直接在当前环境执行
+  - 审查日志追问结论：不能，违反最少意外原则
+  - 与问题 2 有叠加效应：while 无 try-finally 兜底，Block 泄漏后环境永久污染
+
+### 本次修复内容（基于审查日志 Issue）
+
+1. **vm.py — TRY_UNWRAP 提前返回清理迭代器状态（基于审查日志 vm.py:1399-1418 / 第二十二轮 P0 级 #4）**
+   - `_call_closure` 入口保存四个循环状态的深度/键集合
+   - `_for_iters`（list）：保存 len，finally 中截断多余元素
+   - `_while_loops`（list）：保存 len，finally 中截断多余元素
+   - `_range_index`（dict）：保存调用前 keys 集合，finally 中删除新增 key
+   - `_list_index`（dict）：同理
+   - 函数提前返回时内部循环状态正确清理，不泄漏到外层
+
+2. **vm.py — 顶层 TRY_UNWRAP 失败后不执行 main()（基于审查日志 vm.py:507-511 / 第二十二轮 P1 级 #17）**
+   - `_run_code` 改为返回 bool：True=正常结束，False=TRY_UNWRAP 提前返回
+   - `run()` 根据返回值决定是否调用 `_auto_call_main()`
+   - 顶层 `?` 失败时程序正确终止，与 Evaluator 语义一致
+
+3. **vm.py — CONTINUE/BREAK 无循环时报错（基于审查日志 vm.py:926-947 / 第二十二轮 P1 级 #29）**
+   - BREAK 无循环上下文时抛出 RuntimeError_："'break' 不在循环中"
+   - CONTINUE 无循环上下文时抛出 RuntimeError_："'continue' 不在循环中"
+   - 移除 BREAK 的脆弱前向扫描 fallback
+   - 与 Evaluator 行为一致
+
+4. **lexer.py — 字符串/字符反斜杠+EOF 崩溃修复（基于审查日志 lexer.py:236-238 / 第二十二轮 P0 级 #14）**
+   - `_read_string()` 跳过反斜杠后增加 EOF 检查
+   - `_read_char()` 同理添加 EOF 检查
+   - 到达 EOF 时按未闭合字符串/字符处理，避免 IndexError 崩溃
+   - 两处修复模式一致，防御恶意输入导致的 DoS
+
+5. **parser.py — Fn[...] 返回类型解析修复（基于审查日志 parser.py:335-346 / 第二十二轮 P1 级 #22）**
+   - 读取所有类型参数到 params 列表
+   - 非空时：取最后一个作为 return_type，其余作为 param_types
+   - 空列表时（`Fn[]`）：param_types 为空，return_type = TypeUnit
+   - `Fn[Int, Bool]` 现在正确解析为 `(Int) -> Bool`
+
+6. **parser.py — ? 操作符链式调用支持（基于审查日志 parser.py:764-768 / 第二十二轮 P1 级 #21）**
+   - 将 `?` 解析从后缀 while 循环外部移入循环内部
+   - 与函数调用、字段访问、索引访问同级
+   - 支持 `expr??`、`foo?()`、`foo?.bar` 等链式用法
+
+7. **evaluator.py — 表达式递归深度保护（基于审查日志 evaluator.py:676-885 / 第二十二轮 P0 级 #15）**
+   - 新增 `_eval_depth` 计数器和 `MAX_EVAL_DEPTH = 1000`
+   - `eval_expr` 入口递增并检查阈值，超过抛 RuntimeError_("表达式嵌套过深")
+   - try-finally 确保退出时递减计数器
+   - 与 `_call_depth` / `MAX_CALL_DEPTH` 模式一致
+
+8. **evaluator.py — Block try-finally 环境恢复（基于审查日志 evaluator.py:766-776 / 第二十二轮 P1 级 #16）**
+   - 用 try-finally 包裹 Block 体求值
+   - finally 中执行 `self.env = old_env`
+   - BreakSignal/ContinueSignal/ReturnSignal/RuntimeError_ 等异常路径环境正确恢复
+   - 与 `_call_fn` / `_eval_for_expr` 模式一致
+
+9. **evaluator.py — while 循环独立作用域（基于审查日志 evaluator.py:1015-1030 / 第二十二轮 P2 级 #35）**
+   - 参考 `_eval_for_expr` 结构重写 `_eval_while_expr`
+   - 每次迭代创建 child_env，与 for 循环统一
+   - 外层 try-finally 确保环境恢复
+   - ContinueSignal 从 continue 改为 pass（finally 先执行环境恢复，再由循环自然进入下一轮）
+
+### 测试结果
+
+- 全量测试: **802 passed** (1.1s)
+- Evaluator 示例: hello/fibonacci/pattern_match/loops/pipe/math/list_comprehension 全部正常输出
+- VM 示例: hello/fibonacci/pattern_match 全部正常输出
+- TRY_UNWRAP 循环状态清理: 函数提前返回后 `_for_iters`/`_while_loops` 正确截断 ✅
+- 顶层 ? 失败终止: main() 不再被调用 ✅
+- break/continue 无循环报错: 正确抛出 RuntimeError_ ✅
+- 字符串/字符 EOF 崩溃: 不再触发 IndexError ✅
+- Fn[] 返回类型: `Fn[Int, Bool]` 正确解析为 `(Int) -> Bool` ✅
+- ? 链式调用: `expr??`/`foo?()`/`foo?.bar` 正确解析 ✅
+- 表达式深度保护: 超深嵌套抛友好错误而非 RecursionError ✅
+- Block 环境恢复: break/continue/异常后环境不泄漏 ✅
+- while 作用域: 与 for 循环一致，每次迭代独立作用域 ✅
+
+---
+
 ## 2026-07-16 自动改进（第二十三轮）
 
 基于 AUTO_REVIEW_LOG.md 第二十轮审查日志的 P1 级严重问题驱动改进（阶段一检查 + 阶段二开发 + 阶段三测试）。

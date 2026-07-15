@@ -341,7 +341,13 @@ class Parser:
                     while self._match(TokenType.COMMA):
                         params.append(self._parse_type_expr())
                 self._expect(TokenType.RBRACKET)
-                return TypeFn(param_types=params, return_type=TypeUnit(span=self._span(tok)),
+                if params:
+                    param_types = params[:-1]
+                    return_type = params[-1]
+                else:
+                    param_types = []
+                    return_type = TypeUnit(span=self._span(tok))
+                return TypeFn(param_types=param_types, return_type=return_type,
                              span=self._span(tok))
             return TypeIdentifier(name="Fn", span=self._span(tok))
 
@@ -758,13 +764,13 @@ class Parser:
                 idx = self._parse_expression()
                 tok = self._expect(TokenType.RBRACKET)
                 expr = IndexExpr(target=expr, index=idx, span=self._span(tok))
+            # ? 错误传播 expr?
+            elif self._peek_type() == TokenType.QUESTION:
+                self._advance()
+                tok = self.tokens[self.pos - 1]
+                expr = TryExpr(expr=expr, span=self._span(tok))
             else:
                 break
-
-        # ? 错误传播
-        if self._match(TokenType.QUESTION):
-            tok = self.tokens[self.pos - 1]
-            expr = TryExpr(expr=expr, span=self._span(tok))
 
         return expr
 

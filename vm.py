@@ -457,6 +457,12 @@ class NovaVM:
         )
         self.call_stack.append(frame)
 
+        # 保存循环状态深度，用于提前返回时清理
+        saved_for_iters_len = len(self._for_iters)
+        saved_while_loops_len = len(self._while_loops)
+        saved_range_keys = set(getattr(self, '_range_index', {}).keys())
+        saved_list_keys = set(getattr(self, '_list_index', {}).keys())
+
         # 切换到函数代码
         self.code = func_block.code
         self.constants = func_block.constants
@@ -475,6 +481,20 @@ class NovaVM:
             # 在函数返回后截断栈到调用前状态
             if len(self.stack) > frame.base_sp:
                 del self.stack[frame.base_sp:]
+
+            # 清理函数内新增的循环状态（处理 TRY_UNWRAP 提前返回的情况）
+            if len(self._for_iters) > saved_for_iters_len:
+                del self._for_iters[saved_for_iters_len:]
+            if len(self._while_loops) > saved_while_loops_len:
+                del self._while_loops[saved_while_loops_len:]
+            if hasattr(self, '_range_index'):
+                new_keys = set(self._range_index.keys()) - saved_range_keys
+                for k in new_keys:
+                    del self._range_index[k]
+            if hasattr(self, '_list_index'):
+                new_keys = set(self._list_index.keys()) - saved_list_keys
+                for k in new_keys:
+                    del self._list_index[k]
 
         return result
 
@@ -506,9 +526,10 @@ class NovaVM:
 
     def run(self):
         """执行主代码"""
-        self._run_code(self.code, self.constants)
-        # 自动调用 main
-        self._auto_call_main()
+        normal_exit = self._run_code(self.code, self.constants)
+        # 只有正常结束时才自动调用 main
+        if normal_exit:
+            self._auto_call_main()
 
     def _auto_call_main(self):
         """自动调用 main() 函数"""
@@ -516,8 +537,8 @@ class NovaVM:
         if main_fn is not None and isinstance(main_fn, (NovaClosure, NovaBuiltinFn)):
             self._call_fn(main_fn, [])
 
-    def _run_code(self, code: List[Instruction], constants: List[Any]):
-        """执行给定的代码序列"""
+    def _run_code(self, code: List[Instruction], constants: List[Any]) -> bool:
+        """执行给定的代码序列，返回 True 表示正常结束，False 表示 TRY_UNWRAP 提前返回"""
         saved_code = self.code
         saved_constants = self.constants
         saved_ip = self.ip
@@ -526,6 +547,7 @@ class NovaVM:
         self.constants = constants
         self.ip = 0
         self.return_flag = False
+        early_return = False
 
         try:
             while self.ip < len(self.code) and not self.return_flag:
@@ -544,12 +566,15 @@ class NovaVM:
 
                 if self._execute_instruction(instr):
                     # Early return triggered by TRY_UNWRAP in top-level code
+                    early_return = True
                     break
         finally:
             self.code = saved_code
             self.constants = saved_constants
             self.ip = saved_ip
             self.return_flag = False
+
+        return not early_return
 
     def _pop(self, n=1):
         if len(self.stack) < n:
@@ -890,15 +915,12 @@ class NovaVM:
             # Break out of current loop
             if instr.operands:
                 # while 循环中的 BREAK：操作数为 end_pos
-                # 保留结果槽（base_sp 处的值），清理 body 产生的中间值，并弹出 _while_loops 条目
-                # 新栈布局：[..., result_slot, ...body_values...]
-                #   base_sp 指向结果槽的位置（结果槽本身需要保留）
-                #   清理 base_sp+1 及以上的 body 中间值
-                if self._while_loops:
-                    loop_info = self._while_loops.pop()
-                    base_sp = loop_info["base_sp"]
-                    if base_sp + 1 < len(self.stack):
-                        del self.stack[base_sp + 1:]
+                if not self._while_loops:
+                    raise RuntimeError_("'break' 不在循环中")
+                loop_info = self._while_loops.pop()
+                base_sp = loop_info["base_sp"]
+                if base_sp + 1 < len(self.stack):
+                    del self.stack[base_sp + 1:]
                 self.ip = instr.operands[0]
             elif self._for_iters:
                 loop_info = self._for_iters.pop()
@@ -915,29 +937,22 @@ class NovaVM:
                 self.stack.append(result_list)
                 self.ip = end_ip
             else:
-                # while loop break fallback (无操作数的旧代码路径)：前向扫描
-                while self.ip < len(self.code):
-                    next_instr = self.code[self.ip]
-                    if next_instr.opcode in (Op.LOOP_END, Op.CONST_UNIT):
-                        self.ip += 1
-                        break
-                    self.ip += 1
+                raise RuntimeError_("'break' 不在循环中")
 
         elif opcode == Op.CONTINUE:
             # Stack: [iterable, result_list, ...body_values] -> [iterable, result_list]
             # Continue to next iteration: clean body values and jump back to loop start
             if instr.operands:
                 # while loop continue: 操作数为 loop_start，直接使用
-                # 新栈布局：[..., result_slot, ...body_values...]
-                #   保留结果槽，清理 body 中间值，跳回循环开始
-                if self._while_loops:
-                    loop_info = self._while_loops[-1]
-                    base_sp = loop_info["base_sp"]
-                    loop_start = instr.operands[0]
-                    # 保留结果槽（base_sp 处），清理 body 产生的值
-                    if base_sp + 1 < len(self.stack):
-                        del self.stack[base_sp + 1:]
-                    self.ip = loop_start
+                if not self._while_loops:
+                    raise RuntimeError_("'continue' 不在循环中")
+                loop_info = self._while_loops[-1]
+                base_sp = loop_info["base_sp"]
+                loop_start = instr.operands[0]
+                # 保留结果槽（base_sp 处），清理 body 产生的值
+                if base_sp + 1 < len(self.stack):
+                    del self.stack[base_sp + 1:]
+                self.ip = loop_start
             elif self._for_iters:
                 # for loop continue: 清理 body 值并跳回 FOR_ITER
                 loop_info = self._for_iters[-1]
@@ -945,6 +960,8 @@ class NovaVM:
                 loop_start = loop_info["loop_start"]
                 del self.stack[base_sp + 2:]
                 self.ip = loop_start
+            else:
+                raise RuntimeError_("'continue' 不在循环中")
 
         # === 函数 ===
         elif opcode == Op.CLOSURE:

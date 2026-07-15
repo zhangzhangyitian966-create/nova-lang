@@ -119,6 +119,8 @@ class Evaluator:
         self._exported_names: set = set()      # 本模块导出的名称
         self._call_depth = 0                   # 当前递归调用深度
         self.MAX_CALL_DEPTH = 1000             # 最大递归调用深度（与 VM 一致）
+        self._eval_depth = 0                   # 当前表达式求值递归深度
+        self.MAX_EVAL_DEPTH = 1000             # 最大表达式求值递归深度
         self._setup_builtins()
 
     def _setup_builtins(self):
@@ -675,6 +677,17 @@ class Evaluator:
 
     def eval_expr(self, expr) -> Any:
         """求值表达式并返回运行时值"""
+        self._eval_depth += 1
+        if self._eval_depth > self.MAX_EVAL_DEPTH:
+            self._eval_depth -= 1
+            raise RuntimeError_("表达式嵌套过深")
+        try:
+            return self._eval_expr_inner(expr)
+        finally:
+            self._eval_depth -= 1
+
+    def _eval_expr_inner(self, expr) -> Any:
+        """eval_expr 的内部实现，包含所有表达式类型的求值逻辑"""
 
         # --- 字面量 ---
         if isinstance(expr, IntLiteral):
@@ -767,13 +780,15 @@ class Evaluator:
             child_env = self.env.child()
             old_env = self.env
             self.env = child_env
-            for stmt in expr.statements:
-                self.eval_expr(stmt)
-            result = UNIT_VALUE
-            if expr.tail_expression:
-                result = self.eval_expr(expr.tail_expression)
-            self.env = old_env
-            return result
+            try:
+                for stmt in expr.statements:
+                    self.eval_expr(stmt)
+                result = UNIT_VALUE
+                if expr.tail_expression:
+                    result = self.eval_expr(expr.tail_expression)
+                return result
+            finally:
+                self.env = old_env
 
         # --- let 绑定（在代码块内） ---
         elif isinstance(expr, LetBinding):
@@ -1021,12 +1036,17 @@ class Evaluator:
                 raise RuntimeError_(f"while 条件必须是 Bool 类型，得到 {type(cond).__name__}")
             if not cond:
                 break
+            child_env = self.env.child()
+            old_env = self.env
+            self.env = child_env
             try:
                 result = self.eval_expr(expr.body)
             except BreakSignal:
                 break
             except ContinueSignal:
-                continue
+                pass
+            finally:
+                self.env = old_env
         return result
 
     def _eval_list_comprehension(self, expr: ListComprehension) -> Any:
