@@ -223,6 +223,8 @@ class BytecodeCompiler:
         self._current_file = current_file      # 当前文件路径
         # while 循环 BREAK 跳转目标栈：编译 while 循环体时 push end_pos，BREAK 编译时消费
         self._while_end_stack: List[int] = []
+        # while 循环 CONTINUE 跳转目标栈：编译 while 循环体时 push loop_start，CONTINUE 编译时消费
+        self._while_start_stack: List[int] = []
 
     def _init_builtin_adt_constructors(self):
         """初始化内置 ADT 构造器"""
@@ -496,7 +498,12 @@ class BytecodeCompiler:
                 self.bytecode.emit_op(Op.BREAK)
 
         elif isinstance(expr, ContinueExpr):
-            self.bytecode.emit_op(Op.CONTINUE)
+            if self._while_start_stack:
+                # while 循环中的 CONTINUE：附带 loop_start 操作数，VM 直接跳转
+                self.bytecode.emit_op(Op.CONTINUE, self._while_start_stack[-1])
+            else:
+                # for 循环中的 CONTINUE：无操作数，由 VM 通过 _for_iters 处理
+                self.bytecode.emit_op(Op.CONTINUE)
 
         elif isinstance(expr, TupleExpr):
             for elem in expr.elements:
@@ -989,6 +996,8 @@ class BytecodeCompiler:
         # 记录循环体中 BREAK 指令的位置，编译完循环体后回填 end_pos
         break_patch_positions: List[int] = []
         self._while_end_stack.append(break_patch_positions)
+        # 记录 while 循环的 loop_start，供 CONTINUE 使用
+        self._while_start_stack.append(loop_start)
 
         self._compile_expr(expr.body)
         self.bytecode.emit_op(Op.POP)  # 弹出体结果
@@ -1002,6 +1011,7 @@ class BytecodeCompiler:
 
         # 回填循环体中所有 BREAK 指令的跳转目标为 end_pos
         self._while_end_stack.pop()
+        self._while_start_stack.pop()
         for bp in break_patch_positions:
             self.bytecode.patch_jump(bp, end_pos)
 

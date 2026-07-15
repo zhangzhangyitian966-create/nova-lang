@@ -1599,6 +1599,34 @@ class TestBytecodeVM(unittest.TestCase):
         """)
         self.assertEqual(vm.get_global("sum"), 15)
 
+    def test_vm_while_continue(self):
+        """while 循环中的 continue 应跳过当前迭代"""
+        vm = self._vm_run("""
+            mut sum = 0
+            mut i = 0
+            while i < 5 {
+                i = i + 1
+                if i == 2 then continue
+                sum = sum + i
+            }
+        """)
+        self.assertEqual(vm.get_global("i"), 5)
+        self.assertEqual(vm.get_global("sum"), 13)
+
+    def test_vm_while_continue_first_iteration(self):
+        """首次迭代即触发 continue 不应崩溃（VM-7-1 修复验证）"""
+        vm = self._vm_run("""
+            mut sum = 0
+            mut i = 0
+            while i < 5 {
+                i = i + 1
+                if i == 1 then continue
+                sum = sum + i
+            }
+        """)
+        self.assertEqual(vm.get_global("i"), 5)
+        self.assertEqual(vm.get_global("sum"), 14)
+
     def test_vm_adt(self):
         vm = self._vm_run("""
             type Shape { Circle(r: Float) | Rect(w: Float, h: Float) }
