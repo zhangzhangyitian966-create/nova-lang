@@ -150,6 +150,66 @@
 
 ---
 
+## 2026-07-15 自动改进（第十二轮）
+
+基于 AUTO_REVIEW_LOG.md 第八轮审查日志的最高优先级未修复严重问题驱动改进（阶段一检查 + 阶段二开发 + 阶段三测试）。
+
+### 每日发现的问题
+
+#### vm.py
+- **TRY_UNWRAP 对非ADT值静默通过（vm.py:1189-1199）**：非 Option/Result 值不解包也不报错，原值留在栈上。违反 `?` 操作符语义。→ 增加 else 分支抛 RuntimeError_
+
+#### evaluator.py
+- **_call_fn env 恢复不在 finally 中（evaluator.py:452-454）**：`self.env = old_env` 在 finally 块外，非预期异常导致环境泄漏。→ 移入 finally
+- **NovaADTValue.__eq__ 未比较 type_name（evaluator.py:75-78）**：同名 variant 跨 ADT 类型错误相等。→ 增加 type_name 比较
+
+#### compiler.py
+- **match guard 失败时销毁 subject（compiler.py:717-748）**：模式测试成功后 subject 被弹出，guard 失败跳到下一个 arm 时栈上已无 subject，后续 arm 的 MATCH_TEST_* 会栈下溢。→ 每个 arm 开始前 DUP subject
+
+#### type_checker.py
+- **二元操作错误后返回具体类型（type_checker.py:1068,1074,1081,1089,1097,1111,1116）**：多处错误分支返回 INT_T/STRING_T/BOOL_T 而非 ERROR_TYPE，导致级联错误。→ 统一返回 ERROR_TYPE
+- **TryExpr 对非 Result/Option 静默通过（type_checker.py:887-895）**：非 Result/Option 类型直接返回 inner_ty 不报错。→ 增加 else 分支报错
+- **FnCall TypeVar callee duck typing 放行（type_checker.py:740-743）**：TypeVar callee 不约束为函数类型，高阶函数类型错误完全静默。→ 报告错误
+
+### 本次修复内容（基于审查日志 Issue）
+
+1. **vm.py — TRY_UNWRAP 非 ADT 值报错（基于审查日志 VM-8-3）**
+   - TRY_UNWRAP 指令处理末尾增加 else 分支
+   - 非 Option/Result 类型值抛出 `RuntimeError_("TRY_UNWRAP: 期望 Option 或 Result 类型，得到 {type(val).__name__}")`
+
+2. **evaluator.py — _call_fn env 恢复移入 finally（基于审查日志 EVAL-8-3）**
+   - `self.env = old_env` 从 finally 块外移入 finally 块内
+   - 确保非预期异常时环境变量也能正确恢复
+
+3. **evaluator.py + vm.py — NovaADTValue.__eq__ 增加 type_name 比较（基于审查日志 EVAL-8-5）**
+   - 两处 __eq__ 方法均增加 `self.type_name == other.type_name` 条件
+   - 防止不同 ADT 类型拥有同名 variant 时错误相等
+   - vm.py 中 __hash__ 同步加入 type_name 保持一致性
+
+4. **compiler.py — match guard 失败时 DUP subject 保护（基于审查日志 CMP-8-2）**
+   - 每个 arm 开头 emit DUP 复制 subject
+   - 模式测试失败时先 POP DUP 副本再跳到下一个 arm
+   - guard 失败直接跳到下一个 arm（extract_and_bind 已消费 DUP 副本）
+   - 成功路径在 body 前 POP 原始 subject
+
+5. **type_checker.py — 二元/一元操作错误返回 ERROR_TYPE（基于审查日志 TC-8-中等问题集）**
+   - 7 处错误分支统一返回 ERROR_TYPE（算术/取模/拼接/比较/逻辑/一元负/一元非）
+
+6. **type_checker.py — TryExpr 非 Result/Option 报错（基于审查日志 TC-8-中等问题集）**
+   - 非 Result/Option 类型增加 else 分支报告 `"? 操作符只能在 Option 或 Result 类型上使用"`
+
+7. **type_checker.py — FnCall TypeVar callee 错误报告（基于审查日志 TC-8-中等问题集）**
+   - TypeVar callee 通过 error_collector.add() 记录"无法对未确定类型的值进行函数调用"
+   - 不抛异常不阻止编译，保持向后兼容
+
+### 测试结果
+
+- 全量测试: **664 passed** (0.93s)
+- Evaluator 示例: hello/math/pattern_match/list_comprehension/loops 全部正常输出
+- VM 示例: hello/math/pattern_match 全部正常输出
+
+---
+
 ## 2026-07-15 自动改进（第八轮）
 
 基于 AUTO_REVIEW_LOG.md 第五轮审查日志的最高优先级未修复严重问题驱动改进（阶段一检查 + 阶段二开发 + 阶段三测试）。

@@ -74,9 +74,9 @@ class NovaADTValue:
 
     def __eq__(self, other):
         return (isinstance(other, NovaADTValue)
+                and self.type_name == other.type_name
                 and self.variant_name == other.variant_name
                 and self.fields == other.fields)
-
 
 class BuiltinFn:
     """内置函数包装"""
@@ -451,7 +451,7 @@ class Evaluator:
                 raise RuntimeError_("continue 不能出现在函数体内")
             finally:
                 self._call_depth -= 1
-            self.env = old_env
+                self.env = old_env
             return result
 
         raise RuntimeError_(f"无法调用非函数值: {fn}")

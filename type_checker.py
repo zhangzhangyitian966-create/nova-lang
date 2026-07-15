@@ -740,6 +740,13 @@ class TypeChecker:
             elif isinstance(callee_ty, TypeVar):
                 # 未类型化的参数（duck typing）：允许任意调用
                 # 返回一个 TypeVar 表示结果类型
+                # 报告类型推断不完整，但不阻止编译
+                self.error_collector.add(TypeCheckError(
+                    f"无法对未确定类型的值进行函数调用",
+                    expr.span.line if expr.span else -1,
+                    expr.span.column if expr.span else -1,
+                    source=self._source,
+                ))
                 return TypeVar(f"ret_{callee_ty.name}")
             else:
                 self._report_error(f"无法对非函数类型 {callee_ty} 进行调用", expr)
@@ -892,7 +899,11 @@ class TypeChecker:
                     return inner_ty.type_params[0]
                 elif inner_ty.name == "Option" and len(inner_ty.type_params) >= 1:
                     return inner_ty.type_params[0]
-            return inner_ty
+            self._report_error(
+                f"? 操作符只能在 Option 或 Result 类型上使用，得到 {inner_ty}",
+                expr
+            )
+            return ERROR_TYPE
 
         elif isinstance(expr, ForExpr):
             # for 循环：返回 List[元素类型]
@@ -1065,20 +1076,20 @@ class TypeChecker:
                 f"操作符 '{expr.op}' 的操作数类型不兼容：{left_ty} 和 {right_ty}",
                 expr
             )
-            return INT_T
+            return ERROR_TYPE
 
         if expr.op == "%":
             if self._types_compatible(left_ty, INT_T) and self._types_compatible(right_ty, INT_T):
                 return INT_T
             self._report_error(f"操作符 '%' 需要 Int 类型操作数", expr)
-            return INT_T
+            return ERROR_TYPE
 
         # 字符串拼接
         if expr.op == "++":
             if self._types_compatible(left_ty, STRING_T) and self._types_compatible(right_ty, STRING_T):
                 return STRING_T
             self._report_error(f"操作符 '++' 需要 String 类型操作数", expr)
-            return STRING_T
+            return ERROR_TYPE
 
         # 比较操作
         if expr.op in ("==", "!=", "<", ">", "<=", ">="):
@@ -1086,15 +1097,19 @@ class TypeChecker:
                 if not (self._types_compatible(left_ty, INT_T) and self._types_compatible(right_ty, INT_T)
                         or self._types_compatible(left_ty, FLOAT_T) and self._types_compatible(right_ty, FLOAT_T)):
                     self._report_error(f"操作符 '{expr.op}' 需要数值类型操作数", expr)
+                    return ERROR_TYPE
             return BOOL_T
 
         # 逻辑操作
         if expr.op in ("&&", "||"):
+            has_error = False
             if not self._types_compatible(left_ty, BOOL_T):
                 self._report_error(f"'&&' 左侧必须是 Bool，得到 {left_ty}", expr.left)
+                has_error = True
             if not self._types_compatible(right_ty, BOOL_T):
                 self._report_error(f"'&&' 右侧必须是 Bool，得到 {right_ty}", expr.right)
-            return BOOL_T
+                has_error = True
+            return ERROR_TYPE if has_error else BOOL_T
 
         self._report_error(f"未知的操作符 '{expr.op}'", expr)
         return ERROR_TYPE
@@ -1108,12 +1123,12 @@ class TypeChecker:
             if self._types_compatible(operand_ty, FLOAT_T):
                 return FLOAT_T
             self._report_error(f"一元 '-' 需要 Int 或 Float，得到 {operand_ty}", expr)
-            return INT_T
+            return ERROR_TYPE
         if expr.op == "!":
             if self._types_compatible(operand_ty, BOOL_T):
                 return BOOL_T
             self._report_error(f"一元 '!' 需要 Bool，得到 {operand_ty}", expr)
-            return BOOL_T
+            return ERROR_TYPE
         self._report_error(f"未知的一元操作符 '{expr.op}'", expr)
         return ERROR_TYPE
 

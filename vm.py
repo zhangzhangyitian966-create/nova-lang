@@ -64,11 +64,12 @@ class NovaADTValue:
 
     def __eq__(self, other):
         return (isinstance(other, NovaADTValue)
+                and self.type_name == other.type_name
                 and self.variant_name == other.variant_name
                 and self.fields == other.fields)
 
     def __hash__(self):
-        return hash((self.variant_name, tuple(self.fields)))
+        return hash((self.type_name, self.variant_name, tuple(self.fields)))
 
 
 class NovaClosure:
@@ -1196,6 +1197,8 @@ class NovaVM:
             elif isinstance(val, NovaADTValue) and val.variant_name in ("Some", "Ok"):
                 self._pop()
                 self.stack.append(val.fields[0])
+            else:
+                raise RuntimeError_(f"TRY_UNWRAP: 期望 Option 或 Result 类型，得到 {type(val).__name__}")
             return False
 
         elif opcode == Op.LOOP:
