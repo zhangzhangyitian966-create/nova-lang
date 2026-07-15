@@ -250,8 +250,8 @@ class BytecodeCompiler:
         for decl in program.declarations:
             self._compile_decl(decl)
 
-        self.bytecode.emit_op(Op.HALT)
         self.bytecode.emit_op(Op.AUTO_CALL_MAIN)
+        self.bytecode.emit_op(Op.HALT)
         return self.bytecode
 
     # ----------------------------------------------------------

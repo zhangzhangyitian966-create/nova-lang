@@ -78,6 +78,9 @@ class NovaADTValue:
                 and self.variant_name == other.variant_name
                 and self.fields == other.fields)
 
+    def __hash__(self):
+        return hash((self.type_name, self.variant_name, tuple(self.fields)))
+
 class BuiltinFn:
     """内置函数包装"""
 
@@ -777,7 +780,7 @@ class Evaluator:
             val = self.eval_expr(expr.value)
             try:
                 self.env.assign(expr.name, val)
-            except RuntimeError as e:
+            except RuntimeError_ as e:
                 raise RuntimeError_(str(e))
             return UNIT_VALUE
 

@@ -1008,6 +1008,8 @@ class NovaVM:
             # Peek subject; if int and equals test_val, pop it; else jump to fail_ip
             test_val = instr.operands[0]
             fail_ip = instr.operands[1]
+            if not self.stack:
+                raise RuntimeError_("VM stack underflow: MATCH_TEST_INT")
             subject = self.stack[-1]
             if isinstance(subject, int) and not isinstance(subject, bool) and subject == test_val:
                 self._pop()
@@ -1019,6 +1021,8 @@ class NovaVM:
             # Peek subject; if bool and equals test_val, pop it; else jump to fail_ip
             test_val = instr.operands[0]
             fail_ip = instr.operands[1]
+            if not self.stack:
+                raise RuntimeError_("VM stack underflow: MATCH_TEST_BOOL")
             subject = self.stack[-1]
             if isinstance(subject, bool) and subject == test_val:
                 self._pop()
@@ -1030,6 +1034,8 @@ class NovaVM:
             # Peek subject; if string and equals test_val, pop it; else jump to fail_ip
             test_val = instr.operands[0]
             fail_ip = instr.operands[1]
+            if not self.stack:
+                raise RuntimeError_("VM stack underflow: MATCH_TEST_STRING")
             subject = self.stack[-1]
             if isinstance(subject, str) and subject == test_val:
                 self._pop()
@@ -1041,6 +1047,8 @@ class NovaVM:
             # Peek subject; if float and equals test_val, pop it; else jump to fail_ip
             test_val = instr.operands[0]
             fail_ip = instr.operands[1]
+            if not self.stack:
+                raise RuntimeError_("VM stack underflow: MATCH_TEST_FLOAT")
             subject = self.stack[-1]
             if isinstance(subject, float) and subject == test_val:
                 self._pop()
@@ -1052,6 +1060,8 @@ class NovaVM:
             # Peek subject; if string (char) and equals test_val, pop it; else jump to fail_ip
             test_val = instr.operands[0]
             fail_ip = instr.operands[1]
+            if not self.stack:
+                raise RuntimeError_("VM stack underflow: MATCH_TEST_CHAR")
             subject = self.stack[-1]
             if isinstance(subject, str) and len(subject) == 1 and subject == test_val:
                 self._pop()
@@ -1168,6 +1178,8 @@ class NovaVM:
         elif opcode == Op.DUP:
             # Stack: [value] -> [value, value]
             # Duplicate top of stack
+            if not self.stack:
+                raise RuntimeError_("VM stack underflow: DUP")
             self.stack.append(self.stack[-1])
 
         elif opcode == Op.PRINT:

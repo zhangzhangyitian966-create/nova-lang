@@ -1,5 +1,49 @@
 # Nova 自动改进日志
 
+## 2026-07-15 自动改进（第十三轮）
+
+基于 AUTO_REVIEW_LOG.md 第九轮/第十轮审查日志的 P0 级严重问题驱动改进（阶段一检查 + 阶段二开发 + 阶段三测试）。
+
+### 每日发现的问题
+
+#### vm.py
+- **DUP 指令无栈空检查（vm.py:1168-1171）**：直接 `self.stack[-1]`，空栈时抛 Python IndexError → 添加空栈检查 **[已修复]**
+- **MATCH_TEST_* 系列指令无栈空检查（vm.py:1006-1059）**：5 个模式匹配指令均直接访问栈顶，空栈时抛 IndexError → 添加空栈检查 **[已修复]**
+- **STORE_VAR 静默创建全局变量（vm.py:560-573）**：编译器架构中所有顶层绑定首次定义均依赖 STORE_VAR 写入 globals，直接禁止会破坏 let/fn/type 声明 → 需先引入全局变量预定义机制，本轮未修
+
+#### compiler.py
+- **HALT 在 AUTO_CALL_MAIN 之前（compiler.py:253-254）**：VM 碰到 HALT 先停止，AUTO_CALL_MAIN 永远不执行 → 交换顺序 **[已修复]**
+
+#### evaluator.py
+- **NovaADTValue 缺少 __hash__（evaluator.py:59-78）**：与 VM 行为不一致，不可哈希 → 添加与 vm.py 对称的 __hash__ **[已修复]**
+- **Assignment 捕获 Python RuntimeError（evaluator.py:775-782）**：environment.py 的 assign 实际抛 Nova RuntimeError_，原 except RuntimeError 永远捕获不到 → 改为 except RuntimeError_ **[已修复]**
+
+### 本次修复内容（基于审查日志 Issue）
+
+1. **vm.py — DUP + MATCH_TEST_* 栈空检查（基于审查日志 vm.py:1165-1168 / P0 栈管理）**
+   - DUP 指令：添加 `if not self.stack: raise RuntimeError_("VM stack underflow: DUP")`
+   - MATCH_TEST_INT/BOOL/STRING/FLOAT/CHAR：各添加对应空栈检查，抛出 RuntimeError_
+
+2. **compiler.py — HALT/AUTO_CALL_MAIN 顺序修正（基于审查日志 compiler.py:253-254 / P0 #1）**
+   - `compile` 方法末尾交换两行：`AUTO_CALL_MAIN` 在前，`HALT` 在后
+   - 确保 VM 执行完主程序声明后能正确触发 main 函数自动调用
+
+3. **evaluator.py — NovaADTValue __hash__（基于审查日志 evaluator.py:59-78 / P0 #10）**
+   - 添加 `__hash__` 方法：`hash((self.type_name, self.variant_name, tuple(self.fields)))`
+   - 与 vm.py 中 NovaADTValue.__hash__ 实现完全一致
+
+4. **evaluator.py — Assignment 异常捕获修正（基于审查日志 evaluator.py:775-782）**
+   - `except RuntimeError` 改为 `except RuntimeError_`
+   - 正确捕获 environment.py assign 抛出的 Nova 运行时错误
+
+### 测试结果
+
+- 全量测试: **664 passed** (1.00s)
+- Evaluator 示例: hello/math/pattern_match/loops/fibonacci 全部正常输出
+- VM 示例: hello/math/pattern_match 全部正常输出
+
+---
+
 ## 2026-07-14 自动改进
 
 ### 每日发现的问题
