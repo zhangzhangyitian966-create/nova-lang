@@ -79,6 +79,9 @@ class CCodeGen:
         self.adt_info: Dict[str, List[Tuple[str, List[str]]]] = {}  # adt_name -> [(variant_name, [field_names])]
         self.adt_field_types: Dict[str, Dict[str, List[str]]] = {}  # adt_name -> {variant_name -> [field_type_strings]}
         self._main_fn_name: Optional[str] = None
+        # 作用域栈：用于闭包捕获变量分析。每层是 {nova_name: c_type}。
+        # 采用类似 VM 的 dict(locals) 方式，捕获当前作用域中所有已定义的变量。
+        self._scope_stack: List[Dict[str, str]] = []
 
     # ----------------------------------------------------------
     # 公开接口
@@ -97,6 +100,7 @@ class CCodeGen:
         self.adt_info = {}
         self.adt_field_types = {}
         self._main_fn_name = None
+        self._scope_stack = []
 
         # 第一遍：收集类型定义和前向声明
         for decl in program.declarations:
@@ -265,6 +269,12 @@ class CCodeGen:
         lines = [f"{ret_type} {c_name}({params_str}) {{"]
         self.indent_level = 1
 
+        # 进入函数作用域，注册参数以便闭包捕获分析
+        self._push_scope()
+        for p in fndef.params:
+            c_type = self._c_type_from_type_expr(p.type_annotation) if p.type_annotation else "int64_t"
+            self._add_var(p.name, c_type)
+
         if isinstance(fndef.body, Block):
             # 编译块中的语句（不包含尾表达式，尾表达式单独处理）
             for stmt in fndef.body.statements:
@@ -296,6 +306,8 @@ class CCodeGen:
 
         lines.append("}")
 
+        # 离开函数作用域
+        self._pop_scope()
         self.indent_level = 0
         self.current_context = old_context
         return "\n".join(lines)
@@ -858,22 +870,113 @@ class CCodeGen:
         lines.append(f"}})")
         return setup, "\n".join(lines)
 
+    # ----------------------------------------------------------
+    # 闭包捕获作用域辅助方法
+    # ----------------------------------------------------------
+
+    def _push_scope(self):
+        self._scope_stack.append({})
+
+    def _pop_scope(self):
+        if self._scope_stack:
+            self._scope_stack.pop()
+
+    def _add_var(self, nova_name: str, c_type: str):
+        """在当前作用域中注册一个变量，以便后续闭包捕获。"""
+        if self._scope_stack:
+            self._scope_stack[-1][nova_name] = c_type
+
+    def _collect_captured(self, exclude: Set[str]) -> List[Tuple[str, str]]:
+        """收集当前所有可见变量 (nova_name, c_type)，排除 exclude 中的名称。
+
+        采用类似 VM 的 dict(locals) 方式：捕获当前作用域中所有已定义的变量。
+        内层作用域的同名变量优先（遮蔽外层）。
+        """
+        seen: Dict[str, str] = {}
+        for scope in reversed(self._scope_stack):
+            for name, typ in scope.items():
+                if name not in seen:
+                    seen[name] = typ
+        result = []
+        for name, typ in seen.items():
+            if name not in exclude:
+                result.append((name, typ))
+        return result
+
+    def _box_to_voidptr(self, c_type: str, expr_str: str, setup: List[str]) -> str:
+        """将一个有类型的 C 表达式装箱为 void*，用于存入闭包捕获数组。"""
+        if c_type in ("double", "float"):
+            # 浮点无法安全地通过指针整数转换，堆分配一个盒子保存值
+            box = self._new_temp()
+            setup.append(f"{c_type}* {box} = ({c_type}*)nova_alloc(sizeof({c_type}));")
+            setup.append(f"*{box} = {expr_str};")
+            return f"(void*){box}"
+        elif c_type.endswith("*"):
+            # 指针类型：直接转换为 void*
+            return f"(void*)({expr_str})"
+        else:
+            # 整数/布尔/字符等标量：通过 intptr_t 转换
+            return f"(void*)(intptr_t)({expr_str})"
+
+    def _unbox_from_voidptr(self, c_type: str, voidptr_expr: str) -> str:
+        """将 void* 拆箱回原始类型的 C 表达式。"""
+        if c_type in ("double", "float"):
+            return f"(*(({c_type}*)({voidptr_expr})))"
+        elif c_type.endswith("*"):
+            return f"(({c_type})({voidptr_expr}))"
+        else:
+            return f"(({c_type})(intptr_t)({voidptr_expr}))"
+
     def _compile_lambda_to_stmt(self, expr: Lambda):
-        """编译 Lambda 为闭包创建"""
+        """编译 Lambda 为闭包创建
+
+        捕获当前作用域中所有可见变量（类似 VM 的 dict(locals)），通过
+        nova_closure_new 的环境数组传递，并在函数体内通过 _nova_closure_env
+        指针访问捕获的变量，避免运行时因环境为 NULL 而崩溃。
+        """
         lambda_fn_name = self._new_temp()
         ret_type = "int64_t"
         if expr.return_type:
             ret_type = self._c_type_from_type_expr(expr.return_type)
 
         params_str = "void* _nova_closure_env"
+        lambda_param_names: Set[str] = set()
         if expr.params:
-            param_parts = [f"{self._c_type_from_type_expr(p.type_annotation) if p.type_annotation else 'int64_t'} {self._mangle_name(p.name)}" for p in expr.params]
+            param_parts = []
+            for p in expr.params:
+                c_type = self._c_type_from_type_expr(p.type_annotation) if p.type_annotation else "int64_t"
+                param_parts.append(f"{c_type} {self._mangle_name(p.name)}")
+                lambda_param_names.add(p.name)
             params_str = "void* _nova_closure_env, " + ", ".join(param_parts)
 
         self.functions.append(f"/* lambda */ {ret_type} nova_lambda_{lambda_fn_name}({params_str});")
 
+        # 收集当前作用域中所有可见变量作为闭包捕获（排除 lambda 自身参数）
+        captured = self._collect_captured(lambda_param_names)
+
         fn_lines = [f"{ret_type} nova_lambda_{lambda_fn_name}({params_str}) {{"]
-        fn_lines.append(f"    (void)_nova_closure_env;")
+        if not captured:
+            # 无捕获变量时，显式标记环境参数未使用以避免编译告警
+            fn_lines.append(f"    (void)_nova_closure_env;")
+        else:
+            # 通过环境指针访问捕获的变量：_nova_closure_env 指向 void* 数组
+            for i, (nova_name, c_type) in enumerate(captured):
+                c_name = self._mangle_name(nova_name)
+                access = f"((void**)_nova_closure_env)[{i}]"
+                fn_lines.append(f"    {c_type} {c_name} = {self._unbox_from_voidptr(c_type, access)};")
+
+        # 在 lambda 函数体自身的作用域内编译：注册参数与捕获变量，
+        # 使函数体内（以及其中嵌套的 lambda）能正确进行捕获分析。
+        old_scope_stack = self._scope_stack
+        self._scope_stack = []
+        self._push_scope()
+        for nova_name, c_type in captured:
+            self._scope_stack[-1][nova_name] = c_type
+        if expr.params:
+            for p in expr.params:
+                c_type = self._c_type_from_type_expr(p.type_annotation) if p.type_annotation else "int64_t"
+                self._scope_stack[-1][p.name] = c_type
+
         if isinstance(expr.body, Block):
             for stmt in expr.body.statements:
                 stmt_setup, stmt_expr = self._compile_expr_to_stmt(stmt)
@@ -891,10 +994,23 @@ class CCodeGen:
             for line in body_setup:
                 fn_lines.append(f"    {line}")
             fn_lines.append(f"    return {body_expr};")
+
+        self._scope_stack = old_scope_stack
         fn_lines.append(f"}}")
         self.functions.append("\n".join(fn_lines))
 
-        return [], f"nova_closure_new(nova_lambda_{lambda_fn_name}, NULL, 0)"
+        # 构造捕获数组并创建闭包
+        setup: List[str] = []
+        if captured:
+            cap_var = self._new_temp()
+            setup.append(f"void* {cap_var}[{len(captured)}];")
+            for i, (nova_name, c_type) in enumerate(captured):
+                c_name = self._mangle_name(nova_name)
+                boxed = self._box_to_voidptr(c_type, c_name, setup)
+                setup.append(f"{cap_var}[{i}] = {boxed};")
+            return setup, f"nova_closure_new(nova_lambda_{lambda_fn_name}, {cap_var}, {len(captured)})"
+        else:
+            return [], f"nova_closure_new(nova_lambda_{lambda_fn_name}, NULL, 0)"
 
     def _compile_nested_fn_def_to_stmt(self, fndef: FnDef):
         """编译嵌套函数定义为闭包"""
@@ -923,6 +1039,8 @@ class CCodeGen:
         c_name = self._mangle_name(expr.name)
         value_setup, value_c = self._compile_expr_to_stmt(expr.value)
         c_type = self._infer_c_type_from_expr(expr.value)
+        # 注册变量到当前作用域，以便闭包捕获
+        self._add_var(expr.name, c_type)
         return value_setup + [f"{c_type} {c_name} = {value_c};"], ""
 
     def _compile_mut_binding_to_stmt(self, expr: MutBinding):
@@ -930,6 +1048,8 @@ class CCodeGen:
         c_name = self._mangle_name(expr.name)
         value_setup, value_c = self._compile_expr_to_stmt(expr.value)
         c_type = self._infer_c_type_from_expr(expr.value)
+        # 注册变量到当前作用域，以便闭包捕获
+        self._add_var(expr.name, c_type)
         return value_setup + [f"{c_type} {c_name} = {value_c};"], ""
 
     def _compile_assignment_to_stmt(self, expr: Assignment):

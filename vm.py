@@ -787,8 +787,12 @@ class NovaVM:
                 # while loop continue: clean stack and jump back to condition check
                 if self._while_loops:
                     loop_info = self._while_loops[-1]
-                    loop_start = loop_info["loop_start"]
                     base_sp = loop_info["base_sp"]
+                    # 优先使用编译器提供的操作数（loop_start），解决首次迭代 loop_start 为 None 的崩溃
+                    if instr.operands:
+                        loop_start = instr.operands[0]
+                    else:
+                        loop_start = loop_info["loop_start"]
                     # 清理栈上循环体产生的值
                     if base_sp < len(self.stack):
                         del self.stack[base_sp:]

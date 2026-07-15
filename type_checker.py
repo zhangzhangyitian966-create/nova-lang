@@ -21,7 +21,7 @@ from nova.ast_nodes import (
     LetBinding, MutBinding, Assignment,
     IfExpr, MatchArm, MatchExpr,
     ForExpr, WhileExpr, BreakExpr, ContinueExpr,
-    ListExpr, ListComprehension, TupleExpr, FieldAccess,
+    ListExpr, ListComprehension, TupleExpr, FieldAccess, MapExpr,
     TypeDef, VariantDef, AliasDef,
     ImportDecl, ExportDecl,
     TypeInt, TypeFloat, TypeString, TypeBool, TypeChar, TypeUnit,
@@ -624,6 +624,34 @@ class TypeChecker:
         elif isinstance(expr, TupleExpr):
             elem_types = [self.check_expr(e) for e in expr.elements]
             return TupleType(elem_types)
+
+        elif isinstance(expr, MapExpr):
+            # Map 表达式：{ key => value, ... }，返回 Map[K, V]
+            if not expr.pairs:
+                return MapType(TypeVar("unknown_map_key"),
+                               TypeVar("unknown_map_value"))
+            key_types = []
+            value_types = []
+            for key_expr, value_expr in expr.pairs:
+                key_types.append(self.check_expr(key_expr))
+                value_types.append(self.check_expr(value_expr))
+            # 检查所有键类型一致
+            first_key = key_types[0]
+            for i, kt in enumerate(key_types[1:], 1):
+                if not self._types_compatible(kt, first_key):
+                    self._report_error(
+                        f"map 键类型不一致：键 0 为 {first_key}，键 {i} 为 {kt}",
+                        expr.pairs[i][0]
+                    )
+            # 检查所有值类型一致
+            first_val = value_types[0]
+            for i, vt in enumerate(value_types[1:], 1):
+                if not self._types_compatible(vt, first_val):
+                    self._report_error(
+                        f"map 值类型不一致：值 0 为 {first_val}，值 {i} 为 {vt}",
+                        expr.pairs[i][1]
+                    )
+            return MapType(first_key, first_val)
 
         elif isinstance(expr, BinaryOp):
             return self._check_binary_op(expr)

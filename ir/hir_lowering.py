@@ -147,7 +147,16 @@ class HIRLowering:
     def _lower_iterable(self, iterable, for_expr) -> HIRExpr:
         """降级 for 循环的可迭代对象"""
         if isinstance(iterable, tuple) and iterable[0] == "range":
-            return HIRIdentifier("_range")
+            # 范围迭代：保留 start/end/step 信息，生成对 range 函数的 HIR 调用。
+            # 之前返回 HIRIdentifier("_range") 会丢弃 start/end/step，
+            # 且 "_range" 是一个不存在的标识符，导致下游无法正确处理范围迭代。
+            start = self._lower_expr(iterable[1])
+            end = self._lower_expr(iterable[2])
+            if iterable[3] is not None:
+                step = self._lower_expr(iterable[3])
+            else:
+                step = HIRIntLiteral(1)
+            return HIRCallExpr(HIRIdentifier("range"), [start, end, step])
         else:
             return self._lower_expr(iterable)
 

@@ -826,12 +826,82 @@ class Parser:
         if tok.type == TokenType.LPAREN:
             return self._parse_tuple_or_grouped()
 
-        # 代码块
+        # 代码块或 map 字面量
         if tok.type == TokenType.LBRACE:
+            if self._is_map_literal():
+                return self._parse_map_expr()
             return self._parse_block()
 
         span = Span(tok.line, tok.column, tok.end_line, tok.end_col) if tok.end_line is not None else Span(tok.line, tok.column)
         raise ParseError(f"意外的 token '{tok.value}'", tok.line, tok.column, source=self._source, span=span)
+
+    def _is_map_literal(self) -> bool:
+        """判断当前位置的 `{` 是 map 字面量还是代码块。
+
+        Nova 的 map 语法为 ``{ key => value, ... }``（见 ast_nodes.MapExpr 文档）。
+        由于 ``=>`` (FAT_ARROW) 在 Nova 语法中仅用于 map 条目分隔，不会出现在
+        代码块的顶层，因此可以安全地用它来区分：
+
+        - ``{}``（紧跟 ``}``）视为空 map；
+        - 在匹配的 ``{ ... }`` 内部顶层（深度为 1）出现 ``=>`` 视为 map；
+        - 否则视为代码块。
+
+        扫描时会跟踪括号/方括号/花括号深度，避免误把嵌套结构（如
+        ``{ let m = { "a" => 1 }; m }`` 中内层 map 的 ``=>``）当作外层的
+        map 条目。
+        """
+        # 当前 token 必须是 {
+        # 空 map: { }
+        if (self.pos + 1 < len(self.tokens)
+                and self.tokens[self.pos + 1].type == TokenType.RBRACE):
+            return True
+
+        depth = 1  # 已经进入 { 内部
+        i = self.pos + 1
+        n = len(self.tokens)
+        open_tokens = (TokenType.LBRACE, TokenType.LPAREN, TokenType.LBRACKET)
+        close_tokens = (TokenType.RBRACE, TokenType.RPAREN, TokenType.RBRACKET)
+        while i < n:
+            t = self.tokens[i].type
+            if t == TokenType.EOF:
+                return False
+            if t in open_tokens:
+                depth += 1
+            elif t in close_tokens:
+                depth -= 1
+                if depth == 0:
+                    # 到达匹配的 }，且未在顶层发现 =>
+                    return False
+            elif t == TokenType.FAT_ARROW and depth == 1:
+                return True
+            i += 1
+        return False
+
+    def _parse_map_expr(self) -> MapExpr:
+        """解析 map 字面量：``{ key => value, key => value, ... }``
+
+        key 和 value 都是表达式；支持空 map ``{}`` 和尾随逗号。
+        """
+        tok = self._expect(TokenType.LBRACE)
+        pairs: List[tuple] = []
+
+        if self._peek_type() != TokenType.RBRACE:
+            key = self._parse_expression()
+            self._expect(TokenType.FAT_ARROW)
+            value = self._parse_expression()
+            pairs.append((key, value))
+
+            while self._match(TokenType.COMMA):
+                # 允许尾随逗号: { "a" => 1, }
+                if self._peek_type() == TokenType.RBRACE:
+                    break
+                key = self._parse_expression()
+                self._expect(TokenType.FAT_ARROW)
+                value = self._parse_expression()
+                pairs.append((key, value))
+
+        self._expect(TokenType.RBRACE)
+        return MapExpr(pairs=pairs, span=self._span(tok))
 
     def _parse_lambda(self) -> Lambda:
         """解析 Lambda 表达式 |params| -> Type { body } 或 |params| expr"""

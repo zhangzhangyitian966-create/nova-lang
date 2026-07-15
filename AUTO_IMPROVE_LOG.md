@@ -650,3 +650,63 @@
 - 全量测试: **662 passed** (1.10s)
 - Evaluator 示例: hello/fibonacci/loops/pattern_match/math 全部正常输出
 - VM 示例: hello/fibonacci/pattern_match 全部正常输出
+
+## 2026-07-15 自动改进（第十一轮）
+
+基于 AUTO_REVIEW_LOG.md 第七轮审查日志的 Top 10 严重问题驱动改进。阶段一 3 个 Explore 并行检查确认问题状态，阶段二 3 个开发 Agent 并行修复，阶段三 3 个并行测试验证。
+
+### 每日发现的问题
+
+#### vm.py
+- **while 循环 CONTINUE 首次迭代崩溃（vm.py:787-795）**：`loop_start` 在 POP_JUMP_IF_FALSE 中初始化为 None，仅由循环体末尾 JUMP 指令回填。若 CONTINUE 在首次迭代触发（JUMP 尚未执行），`self.ip = None` 导致 TypeError 崩溃。→ 借鉴 BREAK 的操作数回填机制，为 CONTINUE 添加 `_while_start_stack` **[已修复]**
+
+#### compiler.py
+- **CONTINUE 不带操作数（compiler.py:490）**：while 循环的 continue 依赖运行时 `loop_info["loop_start"]`，首次迭代时为 None。→ 新增 `_while_start_stack` 并在 CONTINUE 指令附带 loop_start 操作数 **[已修复]**
+
+#### c_codegen.py
+- **C 后端闭包环境指针硬编码为 NULL（c_codegen.py:876,897）**：`(void)_nova_closure_env;` 丢弃环境参数，`nova_closure_new(fn, NULL, 0)` 硬编码 NULL。闭包无法引用外层变量。→ 实现作用域栈 `_scope_stack` 和变量捕获分析 **[已修复]**
+
+#### ir/hir_lowering.py
+- **Range 迭代被完全丢弃（hir_lowering.py:150）**：`return HIRIdentifier("_range")` 返回不存在的标识符，start/end/step 信息全部丢失。→ 生成 `HIRCallExpr(HIRIdentifier("range"), [start, end, step])` **[已修复]**
+
+#### parser.py
+- **MapExpr 完全无法解析（parser.py:829-831）**：遇到 `{` 直接调用 `_parse_block()`，无前瞻区分 block 和 map 字面量。MapExpr AST 节点已定义但从未被创建。→ 新增 `_is_map_literal()` 前瞻和 `_parse_map_expr()` 方法 **[已修复]**
+
+#### type_checker.py
+- **MapExpr 类型检查完全缺失（type_checker.py:926-928）**：check_expr 无 MapExpr 分支，落入 else 报"未知表达式类型"。→ 新增 MapExpr 类型检查分支，返回 `MapType(key_type, value_type)` **[已修复]**
+
+### 本次修复内容（基于审查日志 Issue）
+
+1. **vm.py + compiler.py — while CONTINUE 首次迭代崩溃修复（基于审查日志 VM-7-1 / Top 10 #3）**
+   - compiler.py: 新增 `self._while_start_stack: List[int] = []`
+   - compiler.py: `_compile_while` 中编译循环体前 push loop_start，编译完后 pop
+   - compiler.py: `ContinueExpr` 处理：while 循环中 emit `CONTINUE, loop_start`；for 循环中保持无操作数
+   - vm.py: CONTINUE 处理优先使用 `instr.operands[0]` 作为 loop_start，无操作数时回退到 `loop_info["loop_start"]`
+   - 新增测试: `test_vm_while_continue` 和 `test_vm_while_continue_first_iteration`
+
+2. **c_codegen.py — C 后端闭包变量捕获实现（基于审查日志 CCGEN-7-1 / Top 10 #4）**
+   - 新增作用域栈 `_scope_stack`，记录每层作用域中 `{nova_name: c_type}`
+   - 新增 `_push_scope`/`_pop_scope`/`_add_var`/`_collect_captured`/`_box_to_voidptr`/`_unbox_from_voidptr` 辅助方法
+   - `_collect_captured` 采用 VM 的 `dict(locals)` 方式收集所有可见变量（排除 lambda 自身参数，内层遮蔽外层）
+   - `_compile_lambda_to_stmt` 重写：有捕获时通过 `((void**)_nova_closure_env)[i]` 拆箱声明局部变量；创建闭包时构造 `void* cap[N]` 数组传入 `nova_closure_new(fn, cap, count)`
+
+3. **ir/hir_lowering.py — HIR Range 迭代修复（基于审查日志 HIR-7-1 / Top 10 #7）**
+   - `_lower_iterable` 中 range 分支不再返回 `HIRIdentifier("_range")`
+   - 改为降级 start/end/step 后生成 `HIRCallExpr(HIRIdentifier("range"), [start, end, step])`
+   - 无步长时默认 `HIRIntLiteral(1)`
+
+4. **parser.py — MapExpr 解析实现（基于审查日志 PARSER-7-1 / Top 10 #9）**
+   - 新增 `_is_map_literal()` 前瞻判断：`{}` 为空 map；匹配的 `{...}` 内部顶层出现 `=>` (FAT_ARROW) 则为 map
+   - 深度跟踪确保嵌套结构中内层 map 的 `=>` 不让外层被误判
+   - 新增 `_parse_map_expr()`：解析 `{ key => value, key => value, ... }`，返回 `MapExpr(pairs=[(key, value), ...])`
+
+5. **type_checker.py — MapExpr 类型检查实现（基于审查日志 TC-7-4）**
+   - 在 `check_expr` 中 `TupleExpr` 分支后新增 `MapExpr` 分支
+   - 空 map 返回 `MapType(TypeVar, TypeVar)`
+   - 非空时检查所有 key/value 类型一致性，返回 `MapType(first_key, first_val)`
+
+### 测试结果
+
+- 全量测试: **664 passed** (0.94s)
+- Evaluator 示例: hello/fibonacci/pattern_match/list_comprehension/loops 全部正常输出
+- VM 示例: hello/fibonacci/pattern_match 全部正常输出
