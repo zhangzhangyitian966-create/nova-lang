@@ -475,29 +475,31 @@ class NovaVM:
         self.code = code
         self.constants = constants
         self.ip = 0
-
-        while self.ip < len(self.code) and not self.return_flag:
-            instr = self.code[self.ip]
-            opcode = instr.opcode
-
-            if opcode == Op.HALT:
-                # Stack: unchanged
-                # Halt execution of current code sequence
-                break
-
-            if opcode == Op.AUTO_CALL_MAIN:
-                # Stack: unchanged
-                # Marker for auto-calling main (handled in run()); stop execution
-                break
-
-            if self._execute_instruction(instr):
-                # Early return triggered by TRY_UNWRAP in top-level code
-                break
-
-        self.code = saved_code
-        self.constants = saved_constants
-        self.ip = saved_ip
         self.return_flag = False
+
+        try:
+            while self.ip < len(self.code) and not self.return_flag:
+                instr = self.code[self.ip]
+                opcode = instr.opcode
+
+                if opcode == Op.HALT:
+                    # Stack: unchanged
+                    # Halt execution of current code sequence
+                    break
+
+                if opcode == Op.AUTO_CALL_MAIN:
+                    # Stack: unchanged
+                    # Marker for auto-calling main (handled in run()); stop execution
+                    break
+
+                if self._execute_instruction(instr):
+                    # Early return triggered by TRY_UNWRAP in top-level code
+                    break
+        finally:
+            self.code = saved_code
+            self.constants = saved_constants
+            self.ip = saved_ip
+            self.return_flag = False
 
     def _pop(self, n=1):
         if len(self.stack) < n:
@@ -683,18 +685,24 @@ class NovaVM:
             # Pop two boolean values, compute logical AND, push result
             # Note: short-circuit is handled by POP_JUMP_IF_FALSE in compilation
             a, b = self._pop(2)
+            if not isinstance(a, bool) or not isinstance(b, bool):
+                raise RuntimeError_("逻辑操作数必须是 Bool 类型")
             self.stack.append(a and b)
 
         elif opcode == Op.OR:
             # Stack: [a, b] -> [a or b]
             # Pop two boolean values, compute logical OR, push result
             a, b = self._pop(2)
+            if not isinstance(a, bool) or not isinstance(b, bool):
+                raise RuntimeError_("逻辑操作数必须是 Bool 类型")
             self.stack.append(a or b)
 
         elif opcode == Op.NOT:
             # Stack: [a] -> [not a]
             # Pop boolean value, compute logical NOT, push result
             a = self._pop()[0]
+            if not isinstance(a, bool):
+                raise RuntimeError_("逻辑操作数必须是 Bool 类型")
             self.stack.append(not a)
 
         # === 控制流 ===
@@ -712,6 +720,8 @@ class NovaVM:
             # Stack: [cond] -> []
             # Pop condition; if false, jump to target_ip
             cond = self._pop()[0]
+            if not isinstance(cond, bool):
+                raise RuntimeError_("条件必须是 Bool 类型")
             if not cond:
                 self.ip = instr.operands[0]
 
@@ -719,6 +729,8 @@ class NovaVM:
             # Stack: [cond] -> []
             # Pop condition; if true, jump to target_ip
             cond = self._pop()[0]
+            if not isinstance(cond, bool):
+                raise RuntimeError_("条件必须是 Bool 类型")
             if cond:
                 self.ip = instr.operands[0]
 
@@ -726,6 +738,8 @@ class NovaVM:
             # Stack: [cond] -> []
             # Pop condition; if false, jump to target_ip
             cond = self._pop()[0]
+            if not isinstance(cond, bool):
+                raise RuntimeError_("条件必须是 Bool 类型")
             if not cond:
                 # 退出 while 循环，弹出循环信息
                 if self._while_loops and self._while_loops[-1]["end_ip"] == instr.operands[0]:
@@ -756,7 +770,13 @@ class NovaVM:
             # Stack: [*] -> [result_list or unit]
             # Break out of current loop
             if instr.operands:
-                # while 循环中的 BREAK：操作数为 end_pos，直接跳转
+                # while 循环中的 BREAK：操作数为 end_pos
+                # 清理循环体栈上残留的中间值，并弹出 _while_loops 条目
+                if self._while_loops:
+                    loop_info = self._while_loops.pop()
+                    base_sp = loop_info["base_sp"]
+                    if base_sp < len(self.stack):
+                        del self.stack[base_sp:]
                 self.ip = instr.operands[0]
             elif self._for_iters:
                 loop_info = self._for_iters.pop()

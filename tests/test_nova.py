@@ -1627,6 +1627,71 @@ class TestBytecodeVM(unittest.TestCase):
         self.assertEqual(vm.get_global("i"), 5)
         self.assertEqual(vm.get_global("sum"), 14)
 
+    def test_vm_while_break(self):
+        """while 循环中的 break 应正确跳出循环并清理栈"""
+        vm = self._vm_run("""
+            mut sum = 0
+            mut i = 1
+            while i <= 10 {
+                if i == 5 then break
+                sum = sum + i
+                i = i + 1
+            }
+        """)
+        self.assertEqual(vm.get_global("i"), 5)
+        self.assertEqual(vm.get_global("sum"), 10)
+
+    def test_vm_while_break_first_iteration(self):
+        """首次迭代即触发 break 不应崩溃且栈应正确清理"""
+        vm = self._vm_run("""
+            mut sum = 0
+            mut i = 1
+            while i <= 10 {
+                break
+                sum = sum + i
+                i = i + 1
+            }
+        """)
+        self.assertEqual(vm.get_global("i"), 1)
+        self.assertEqual(vm.get_global("sum"), 0)
+
+    def test_vm_while_break_nested(self):
+        """嵌套 while 循环中 break 应只跳出内层，_while_loops 栈不泄漏"""
+        vm = self._vm_run("""
+            mut outer_sum = 0
+            mut i = 1
+            while i <= 3 {
+                mut inner_sum = 0
+                mut j = 1
+                while j <= 10 {
+                    if j == 4 then break
+                    inner_sum = inner_sum + j
+                    j = j + 1
+                }
+                outer_sum = outer_sum + inner_sum
+                i = i + 1
+            }
+        """)
+        self.assertEqual(vm.get_global("i"), 4)
+        self.assertEqual(vm.get_global("outer_sum"), 18)  # 3 * (1+2+3) = 18
+
+    def test_vm_while_break_with_mutation_after(self):
+        """while break 后继续执行其他代码应正常（验证栈未被污染）"""
+        vm = self._vm_run("""
+            mut result = 0
+            mut i = 1
+            {
+                while i <= 5 {
+                    if i == 3 then break
+                    result = result + i
+                    i = i + 1
+                }
+                result = result * 10
+                result = result + 99
+            }
+        """)
+        self.assertEqual(vm.get_global("result"), 129)  # (1+2)*10 + 99 = 129
+
     def test_vm_adt(self):
         vm = self._vm_run("""
             type Shape { Circle(r: Float) | Rect(w: Float, h: Float) }

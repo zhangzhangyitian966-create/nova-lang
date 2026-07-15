@@ -1,5 +1,55 @@
 # Nova 自动改进日志
 
+## 2026-07-15 自动改进（第十五轮）
+
+基于 AUTO_REVIEW_LOG.md 第十三轮审查日志的 P0 级严重问题驱动改进（阶段一检查 + 阶段二开发 + 阶段三测试）。
+
+### 每日发现的问题
+
+#### vm.py
+- **while 循环 BREAK 不清理栈且不弹出 _while_loops（vm.py:758-760）**：带操作数的 while BREAK 仅设置 ip，不清理循环体栈残留值，也不弹出 _while_loops 条目 → 使用 base_sp 截断栈 + 弹出循环条目 **[已修复]**
+- **`_run_code` 无 try/finally 异常安全保护（vm.py:469-500）**：状态恢复代码不在 finally 块中，执行中抛异常时 VM 全局状态被破坏 → 改为 try/finally 结构 **[已修复]**
+- **JUMP_IF_FALSE/JUMP_IF_TRUE/POP_JUMP_IF_FALSE 无 Bool 类型检查（vm.py:711-734）**：直接用 Python truthiness 判断条件，非 Bool 值也能通过 → 添加 `isinstance(cond, bool)` 检查 **[已修复]**
+- **AND/OR/NOT 逻辑指令无 Bool 类型检查（vm.py:681-698）**：直接 `a and b` / `a or b` / `not a`，非 Bool 值也能操作 → 添加 Bool 类型检查 **[已修复]**
+
+#### evaluator.py
+- **if 条件接受非 Bool 值（evaluator.py:741-747）**：`if cond:` 直接使用 Python truthiness，任何值都可作为条件 → 添加 `isinstance(cond, bool)` 检查 **[已修复]**
+- **while 条件接受非 Bool 值（evaluator.py:967-968）**：`if not cond:` 同样无类型检查 → 同上修复 **[已修复]**
+- **`!` 操作符接受非 Bool 操作数（evaluator.py:928-929）**：`not operand` 对任意值生效 → 添加 Bool 类型检查 **[已修复]**
+
+### 本次修复内容（基于审查日志 Issue）
+
+1. **vm.py — while BREAK 栈清理 + _while_loops 弹出（基于审查日志 vm.py:751-756 / 第十三轮严重问题 #2）**
+   - 带操作数的 while BREAK 分支：从 `_while_loops` 栈顶弹出循环信息
+   - 使用 `base_sp` 截断栈，清理循环体产生的中间值
+   - 然后跳转到 `end_pos`
+   - 修复后与 CONTINUE 和 for BREAK 行为保持一致
+   - 新增 4 个测试用例：基本 break、首次迭代 break、嵌套 break、break 后栈不污染
+
+2. **vm.py — _run_code 异常安全保护（基于审查日志 vm.py:469-500 / 第十三轮严重问题 #3）**
+   - 将 `_run_code` 改为 try/finally 结构
+   - 状态保存（saved_code/saved_constants/saved_ip）保持在 try 之前
+   - 整个 while 执行循环放入 try 块
+   - 状态恢复（code/constants/ip/return_flag）全部移入 finally 块
+   - 与 `_call_closure` 的 try/finally 模式保持一致
+
+3. **evaluator.py + vm.py — if/while/逻辑操作符强类型检查（基于审查日志 evaluator.py:741-747 / 第十三轮严重问题 #1）**
+   - **evaluator.py**：IfExpr 分支、_eval_while_expr、_eval_unary_op 的 `!` 操作符添加 Bool 类型检查
+   - **vm.py**：JUMP_IF_FALSE/JUMP_IF_TRUE/POP_JUMP_IF_FALSE 添加条件 Bool 检查
+   - **vm.py**：AND/OR/NOT 逻辑指令添加操作数 Bool 检查
+   - 错误消息风格与 type_checker.py 保持一致
+   - 形成多层防御：类型检查器静态检查 + 运行时动态检查
+
+### 测试结果
+
+- 全量测试: **668 passed** (1.44s)
+- Evaluator 示例: hello/fibonacci/pattern_match/loops/math 全部正常输出
+- VM 示例: hello/fibonacci/pattern_match 全部正常输出
+- while BREAK: 基本/首次迭代/嵌套/栈不污染 4 个测试全部通过 ✅
+- 强类型检查: `if 42 then 1 else 2` 正确抛出 RuntimeError_ ✅
+
+---
+
 ## 2026-07-15 自动改进（第十四轮）
 
 基于 AUTO_REVIEW_LOG.md 第十二轮审查日志的 P0 级严重问题驱动改进（阶段一检查 + 阶段二开发 + 阶段三测试）。

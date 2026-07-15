@@ -740,6 +740,9 @@ class Evaluator:
         # --- if-then-else ---
         elif isinstance(expr, IfExpr):
             cond = self.eval_expr(expr.condition)
+            if not isinstance(cond, bool):
+                cond_ty = type(cond).__name__
+                raise RuntimeError_(f"if 条件必须是 Bool 类型，得到 {cond_ty}")
             if cond:
                 return self.eval_expr(expr.then_branch)
             elif expr.else_branch:
@@ -926,6 +929,8 @@ class Evaluator:
         if expr.op == "-":
             return -operand
         elif expr.op == "!":
+            if not isinstance(operand, bool):
+                raise RuntimeError_(f"! 操作数必须是 Bool 类型，得到 {type(operand).__name__}")
             return not operand
         raise RuntimeError_(f"未知的一元操作符 '{expr.op}'")
 
@@ -965,6 +970,8 @@ class Evaluator:
         result = UNIT_VALUE
         while True:
             cond = self.eval_expr(expr.condition)
+            if not isinstance(cond, bool):
+                raise RuntimeError_(f"while 条件必须是 Bool 类型，得到 {type(cond).__name__}")
             if not cond:
                 break
             try:
