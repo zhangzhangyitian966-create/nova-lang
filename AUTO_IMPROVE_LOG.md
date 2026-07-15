@@ -1,5 +1,63 @@
 # Nova 自动改进日志
 
+## 2026-07-16 自动改进（第二十三轮）
+
+基于 AUTO_REVIEW_LOG.md 第二十轮审查日志的 P1 级严重问题驱动改进（阶段一检查 + 阶段二开发 + 阶段三测试）。
+
+### 每日发现的问题
+
+#### compiler.py + vm.py
+- **while 循环返回值与语义规范不一致（compiler.py:1040-1070）**：ast_nodes.py 明确声明 while 循环"返回体中最后一个表达式的最后一次迭代的值"，但编译器直接 POP 丢弃 body 结果，循环结束后压入 CONST_UNIT；VM 执行路径中 break 也跳转到 CONST_UNIT 后，返回值永远是 unit
+  - 审查日志追问结论：不能，文档和实现不一致是最危险的 bug
+  - 复现：`mut i = 0; let result = while i < 3 { i = i + 1; i }; print(result)` Evaluator 输出 3，VM 输出 ()
+  - 现状：Evaluator 正确，VM/编译器错误；所有 11 个 while 测试都不检查返回值，只验证副作用
+
+#### parser.py
+- **管道操作符 |> 优先级严重错误（parser.py:672-678）**：管道优先级高于比较运算符，`a == b |> f` 被解析为 `a == (b |> f)` 而非 `(a == b) |> f`，与 Elm/F# 等函数式语言常规相反
+  - 审查日志追问结论：绝对不能，优先级错误是编译器前端最严重的错误类别之一
+  - 现状：_parse_pipe 被 _parse_comparison_expr 调用（管道 > 比较），正确应该是比较 > 管道
+  - 参考：Elm 管道优先级 0（最低），F# 管道优先级极低（仅高于 ; let 等）
+
+#### type_checker.py
+- **管道运算符类型检查完全错误（type_checker.py:777-792）**：同时检查第一个和最后一个参数、不做类型变量绑定、类型不匹配不报错、非函数右侧不报错——四大问题导致管道类型检查形同虚设
+  - 审查日志追问结论：绝对不能，管道是函数式语言的核心运算符
+  - 复现1：`fn id(x) { x }; 42 |> id` 返回类型是未绑定的类型变量而非 Int
+  - 复现2：`"hello" |> fn(x: Int) { x + 1 }` 不报错
+  - 复现3：`42 |> 100` 不报错（右侧非函数）
+
+### 本次修复内容（基于审查日志 Issue）
+
+1. **compiler.py + vm.py — while 循环返回最后一次迭代值（基于审查日志 compiler.py:1040-1070 / 第二十轮 P1 级 #12）**
+   - 新增 `SWAP` 操作码（Op.SWAP + VM 实现），用于交换栈顶两个元素
+   - `_compile_while` 重写：循环开始前压入 CONST_UNIT 作为结果槽，每次迭代 body 后用 SWAP+POP 替换结果槽
+   - VM BREAK/CONTINUE 的 while 路径：保留结果槽（base_sp 处），只清理 body 中间值
+   - JUMP while 回跳检测：从依赖下一条指令是 CONST_UNIT 改为通过 _while_loops 非空判断
+   - 语义：正常结束返回最后一次迭代值，零次迭代返回 UNIT，break 返回 break 前最后一次完整迭代值
+
+2. **parser.py — 修复管道操作符优先级（基于审查日志 parser.py:672-678 / 第二十轮 P1 级 #13）**
+   - 将 `_parse_pipe` 从比较运算符之下移动到相等性运算符之上
+   - 优先级变化：`or → and → equality → comparison → pipe` 改为 `or → and → pipe → equality → comparison`
+   - 管道优先级现在低于相等性和比较、高于逻辑与，与 Elm/F# 设计一致
+   - 新增 3 个测试：低于相等性、低于比较、高于逻辑与
+
+3. **type_checker.py — 重写管道运算符类型检查（基于审查日志 type_checker.py:777-792 / 第二十轮 P1 级 #16）**
+   - 修复四大 bug：同时检查首尾参数 → 只检查第一个参数；不做类型变量绑定 → 完整绑定替换；类型不匹配不报错 → 正确报错；非函数右侧不报错 → 正确报错
+   - 参考 CallExpr 实现，使用 _collect_type_bindings + _substitute_type_vars 做完整类型推断
+   - 支持多参数函数部分应用：管道后返回剩余参数的柯里化函数类型
+   - 新增 6 个测试：基本管道、泛型管道、类型不匹配、非函数右侧、多参数部分应用、多参数返回函数类型
+
+### 测试结果
+
+- 全量测试: **802 passed** (1.11s)
+- Evaluator 示例: hello/fibonacci/pattern_match/loops/math/pipe/list_comprehension 全部正常输出
+- VM 示例: hello/math/pattern_match 全部正常输出
+- while 循环返回值（VM）: `while i < 3 { i = i + 1; i }` 返回 3 ✅
+- 管道优先级: `2 + 3 |> double` 结果为 10（先加后管道） ✅
+- 管道类型检查: 6 个新增测试全部通过 ✅
+- 管道优先级: 3 个新增测试全部通过 ✅
+
+---
+
 ## 2026-07-16 自动改进（第二十二轮）
 
 基于 AUTO_REVIEW_LOG.md 第二十轮审查日志的 P1/P2 级严重问题驱动改进（阶段一检查 + 阶段二开发 + 阶段三测试）。

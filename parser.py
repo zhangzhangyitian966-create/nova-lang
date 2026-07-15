@@ -430,11 +430,11 @@ class Parser:
         return self._parse_for_while_expr()
 
     def _parse_pipe(self):
-        """管道操作符 |> (优先级：高于比较，低于 cons)"""
-        left = self._parse_cons_expr()
+        """管道操作符 |> (优先级：低于相等性，高于逻辑与)"""
+        left = self._parse_equality_expr()
         while self._match(TokenType.PIPE_GT):
             tok = self.tokens[self.pos - 1]
-            right = self._parse_cons_expr()
+            right = self._parse_equality_expr()
             left = PipeExpr(left=left, right=right, span=self._span(tok))
         return left
 
@@ -646,10 +646,10 @@ class Parser:
     # ----------------------------------------------------------
 
     def _parse_and_expr(self):
-        left = self._parse_equality_expr()
+        left = self._parse_pipe()
         while self._match(TokenType.AND):
             tok = self.tokens[self.pos - 1]
-            right = self._parse_equality_expr()
+            right = self._parse_pipe()
             left = BinaryOp(op="&&", left=left, right=right, span=self._span(tok))
         return left
 
@@ -670,10 +670,10 @@ class Parser:
     # ----------------------------------------------------------
 
     def _parse_comparison_expr(self):
-        left = self._parse_pipe()
+        left = self._parse_cons_expr()
         while self._peek_type() in (TokenType.LT, TokenType.GT, TokenType.LTE, TokenType.GTE):
             tok = self._advance()
-            right = self._parse_pipe()
+            right = self._parse_cons_expr()
             left = BinaryOp(op=tok.value, left=left, right=right, span=self._span(tok))
         return left
 

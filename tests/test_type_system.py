@@ -895,3 +895,60 @@ class TestMatchGuardTypeCheck:
         with pytest.raises(TypeCheckError) as exc_info:
             check_source(source)
         assert "守卫条件必须是 Bool 类型" in str(exc_info.value)
+
+
+class TestPipeExpr:
+    """测试管道运算符 |> 的类型检查"""
+
+    def test_pipe_basic(self):
+        """基本管道：42 |> int_to_str 返回 String 类型"""
+        source = """
+        let result: String = 42 |> int_to_str
+        """
+        checker = check_source(source)
+        assert len(checker.error_collector.errors) == 0
+
+    def test_pipe_generic(self):
+        """泛型管道：fn id(x) { x }; 42 |> id 返回 Int 类型"""
+        source = """
+        fn id(x) { x }
+        let result: Int = 42 |> id
+        """
+        checker = check_source(source)
+        assert len(checker.error_collector.errors) == 0
+
+    def test_pipe_type_mismatch(self):
+        """类型错误："hello" |> |x: Int| { x + 1 } 应该报错"""
+        source = """
+        "hello" |> |x: Int| { x + 1 }
+        """
+        with pytest.raises(TypeCheckError) as exc_info:
+            check_source(source)
+        assert "不匹配" in str(exc_info.value)
+
+    def test_pipe_non_function_right(self):
+        """非函数右侧：42 |> 100 应该报错"""
+        source = """
+        42 |> 100
+        """
+        with pytest.raises(TypeCheckError) as exc_info:
+            check_source(source)
+        assert "管道右侧必须是函数类型" in str(exc_info.value)
+
+    def test_pipe_multi_param_partial_apply(self):
+        """多参数函数管道（部分应用）：5 |> add(3) 应正确检查类型"""
+        source = """
+        fn add(x: Int, y: Int) -> Int { x + y }
+        let result: Int = 5 |> add(3)
+        """
+        checker = check_source(source)
+        assert len(checker.error_collector.errors) == 0
+
+    def test_pipe_multi_param_return_fn(self):
+        """多参数函数管道（部分应用）：管道后返回剩余参数的函数"""
+        source = """
+        fn add(x: Int, y: Int) -> Int { x + y }
+        let f: Int -> Int = 5 |> add
+        """
+        checker = check_source(source)
+        assert len(checker.error_collector.errors) == 0

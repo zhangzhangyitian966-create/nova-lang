@@ -285,6 +285,57 @@ class TestParser(unittest.TestCase):
         self.assertIsInstance(decl.right, BinaryOp)
         self.assertEqual(decl.right.op, "*")
 
+    def test_pipe_precedence_lower_than_equality(self):
+        """a == b |> f 应解析为 (a == b) |> f（相等性优先级高于管道）"""
+        ast = parse("a == b |> f")
+        decl = ast.declarations[0]
+        # 最外层应该是管道表达式
+        self.assertIsInstance(decl, PipeExpr)
+        # 管道的左操作数应该是相等比较 a == b
+        self.assertIsInstance(decl.left, BinaryOp)
+        self.assertEqual(decl.left.op, "==")
+        self.assertIsInstance(decl.left.left, Identifier)
+        self.assertEqual(decl.left.left.name, "a")
+        self.assertIsInstance(decl.left.right, Identifier)
+        self.assertEqual(decl.left.right.name, "b")
+        # 管道的右操作数是 f
+        self.assertIsInstance(decl.right, Identifier)
+        self.assertEqual(decl.right.name, "f")
+
+    def test_pipe_precedence_lower_than_comparison(self):
+        """a < b |> f 应解析为 (a < b) |> f（比较优先级高于管道）"""
+        ast = parse("a < b |> f")
+        decl = ast.declarations[0]
+        # 最外层应该是管道表达式
+        self.assertIsInstance(decl, PipeExpr)
+        # 管道的左操作数应该是比较 a < b
+        self.assertIsInstance(decl.left, BinaryOp)
+        self.assertEqual(decl.left.op, "<")
+        self.assertIsInstance(decl.left.left, Identifier)
+        self.assertEqual(decl.left.left.name, "a")
+        self.assertIsInstance(decl.left.right, Identifier)
+        self.assertEqual(decl.left.right.name, "b")
+        # 管道的右操作数是 f
+        self.assertIsInstance(decl.right, Identifier)
+        self.assertEqual(decl.right.name, "f")
+
+    def test_pipe_precedence_higher_than_and(self):
+        """a && b |> f 应解析为 a && (b |> f)（管道优先级高于逻辑与）"""
+        ast = parse("a && b |> f")
+        decl = ast.declarations[0]
+        # 最外层应该是逻辑与
+        self.assertIsInstance(decl, BinaryOp)
+        self.assertEqual(decl.op, "&&")
+        # 左操作数是 a
+        self.assertIsInstance(decl.left, Identifier)
+        self.assertEqual(decl.left.name, "a")
+        # 右操作数是管道表达式 b |> f
+        self.assertIsInstance(decl.right, PipeExpr)
+        self.assertIsInstance(decl.right.left, Identifier)
+        self.assertEqual(decl.right.left.name, "b")
+        self.assertIsInstance(decl.right.right, Identifier)
+        self.assertEqual(decl.right.right.name, "f")
+
     def test_unary_minus(self):
         ast = parse("-42")
         from nova.ast_nodes import UnaryOp

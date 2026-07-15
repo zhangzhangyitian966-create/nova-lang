@@ -117,6 +117,7 @@ class Op:
     # 其他
     POP = "POP"
     DUP = "DUP"
+    SWAP = "SWAP"
     PRINT = "PRINT"
     HALT = "HALT"
     TRY_UNWRAP = "TRY_UNWRAP"
@@ -1038,7 +1039,24 @@ class BytecodeCompiler:
         self._loop_stack.pop()
 
     def _compile_while(self, expr: WhileExpr):
-        """编译 while 循环"""
+        """编译 while 循环
+
+        栈布局：
+          循环开始前压入 CONST_UNIT 作为结果槽
+          每次迭代 body 执行后，用 body 值替换结果槽
+          循环结束后，结果槽保留在栈顶作为返回值
+
+        Stack at loop_start: [..., result]
+        After condition:     [..., result, cond]
+        After POP_JUMP_IF_FALSE (true): [..., result]
+        After body:          [..., result, body_value]
+        After SWAP+POP:      [..., body_value]  (new result)
+        After JUMP back:     [..., body_value]  (matches loop_start state)
+        After loop end:      [..., result]      (POP_JUMP_IF_FALSE jumps here)
+        """
+        # 压入初始结果槽（UNIT）
+        self.bytecode.emit_op(Op.CONST_UNIT)
+
         loop_start = self.bytecode.current_pos()
 
         self._compile_expr(expr.condition)
@@ -1055,14 +1073,16 @@ class BytecodeCompiler:
         })
 
         self._compile_expr(expr.body)
-        self.bytecode.emit_op(Op.POP)  # 弹出体结果
+        # 用 body 值替换结果槽：[..., old_result, body_value] -> [..., body_value]
+        self.bytecode.emit_op(Op.SWAP)
+        self.bytecode.emit_op(Op.POP)
 
         self.bytecode.emit_op(Op.JUMP, loop_start)
 
         end_pos = self.bytecode.current_pos()
         self.bytecode.patch_jump(jump_to_end, end_pos)
 
-        self.bytecode.emit_op(Op.CONST_UNIT)
+        # 循环结束：结果槽已在栈顶，无需额外压入 CONST_UNIT
 
         # 弹出循环栈帧并回填所有 BREAK 指令的跳转目标
         self._loop_stack.pop()

@@ -775,21 +775,40 @@ class TypeChecker:
                 return ERROR_TYPE
 
         elif isinstance(expr, PipeExpr):
-            # expr |> f  等价于 f(expr)
+            # x |> f 等价于 f(x) —— 管道值作为第一个参数传入函数
             left_ty = self.check_expr(expr.left)
             right_ty = self.check_expr(expr.right)
-            if isinstance(right_ty, FnType):
-                if len(right_ty.param_types) >= 1:
-                    # 检查管道值是否与函数最后一个参数兼容
-                    # 因为管道的典型用法是 f(arg1) |> 等价于 f(piped_value)
-                    last_param = right_ty.param_types[-1] if right_ty.param_types else None
-                    # 也检查第一个参数（直接调用场景）
-                    first_param = right_ty.param_types[0]
-                    if (self._types_compatible(left_ty, last_param)
-                            or self._types_compatible(left_ty, first_param)):
-                        return right_ty.return_type
-            # 如果无法确定，返回右侧类型
-            return right_ty
+
+            if not isinstance(right_ty, FnType):
+                self._report_error("管道右侧必须是函数类型", expr)
+                return ERROR_TYPE
+
+            if len(right_ty.param_types) < 1:
+                self._report_error("管道右侧函数至少需要一个参数", expr)
+                return ERROR_TYPE
+
+            # 收集类型变量绑定（管道值 -> 第一个参数类型）
+            bindings: Dict[TypeVar, NovaType] = {}
+            first_param_ty = right_ty.param_types[0]
+            self._collect_type_bindings(left_ty, first_param_ty, bindings)
+
+            # 检查类型兼容性
+            substituted_param = self._substitute_type_vars(first_param_ty, bindings)
+            if not self._types_compatible(left_ty, substituted_param):
+                self._report_error(
+                    f"管道值类型不匹配：期望 {substituted_param}，得到 {left_ty}",
+                    expr.left
+                )
+                return ERROR_TYPE
+
+            if len(right_ty.param_types) == 1:
+                # 单参数函数：直接返回替换后的返回类型
+                return self._substitute_type_vars(right_ty.return_type, bindings)
+            else:
+                # 多参数函数（部分应用）：返回剩余参数 -> 返回值 的函数类型
+                remaining = [self._substitute_type_vars(p, bindings) for p in right_ty.param_types[1:]]
+                ret = self._substitute_type_vars(right_ty.return_type, bindings)
+                return FnType(remaining, ret)
 
         elif isinstance(expr, Block):
             for stmt in expr.statements:

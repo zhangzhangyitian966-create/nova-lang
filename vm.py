@@ -830,10 +830,9 @@ class NovaVM:
             # Stack: unchanged
             # Unconditional jump to target_ip
             target = instr.operands[0]
-            # 检测 while 循环回跳: JUMP 目标在前面，且下一条指令是 CONST_UNIT
-            if target < self.ip and self.ip < len(self.code) and self.code[self.ip].opcode == Op.CONST_UNIT:
-                if self._while_loops:
-                    self._while_loops[-1]["loop_start"] = target
+            # 检测 while 循环回跳: JUMP 目标在前面，且当前在 while 循环中
+            if target < self.ip and self._while_loops:
+                self._while_loops[-1]["loop_start"] = target
             self.ip = target
 
         elif opcode == Op.JUMP_IF_FALSE:
@@ -887,16 +886,19 @@ class NovaVM:
             self.ip = loop_start
 
         elif opcode == Op.BREAK:
-            # Stack: [*] -> [result_list or unit]
+            # Stack: [*] -> [result_list or while_result]
             # Break out of current loop
             if instr.operands:
                 # while 循环中的 BREAK：操作数为 end_pos
-                # 清理循环体栈上残留的中间值，并弹出 _while_loops 条目
+                # 保留结果槽（base_sp 处的值），清理 body 产生的中间值，并弹出 _while_loops 条目
+                # 新栈布局：[..., result_slot, ...body_values...]
+                #   base_sp 指向结果槽的位置（结果槽本身需要保留）
+                #   清理 base_sp+1 及以上的 body 中间值
                 if self._while_loops:
                     loop_info = self._while_loops.pop()
                     base_sp = loop_info["base_sp"]
-                    if base_sp < len(self.stack):
-                        del self.stack[base_sp:]
+                    if base_sp + 1 < len(self.stack):
+                        del self.stack[base_sp + 1:]
                 self.ip = instr.operands[0]
             elif self._for_iters:
                 loop_info = self._for_iters.pop()
@@ -926,13 +928,15 @@ class NovaVM:
             # Continue to next iteration: clean body values and jump back to loop start
             if instr.operands:
                 # while loop continue: 操作数为 loop_start，直接使用
+                # 新栈布局：[..., result_slot, ...body_values...]
+                #   保留结果槽，清理 body 中间值，跳回循环开始
                 if self._while_loops:
                     loop_info = self._while_loops[-1]
                     base_sp = loop_info["base_sp"]
                     loop_start = instr.operands[0]
-                    # 清理栈上循环体产生的值
-                    if base_sp < len(self.stack):
-                        del self.stack[base_sp:]
+                    # 保留结果槽（base_sp 处），清理 body 产生的值
+                    if base_sp + 1 < len(self.stack):
+                        del self.stack[base_sp + 1:]
                     self.ip = loop_start
             elif self._for_iters:
                 # for loop continue: 清理 body 值并跳回 FOR_ITER
@@ -1365,6 +1369,13 @@ class NovaVM:
             if not self.stack:
                 raise RuntimeError_("VM stack underflow: DUP")
             self.stack.append(self.stack[-1])
+
+        elif opcode == Op.SWAP:
+            # Stack: [a, b] -> [b, a]
+            # Swap the top two elements of the stack
+            if len(self.stack) < 2:
+                raise RuntimeError_("VM stack underflow: SWAP")
+            self.stack[-1], self.stack[-2] = self.stack[-2], self.stack[-1]
 
         elif opcode == Op.PRINT:
             # Stack: [value] -> [()]
