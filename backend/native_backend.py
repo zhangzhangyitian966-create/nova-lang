@@ -208,7 +208,15 @@ class NativeCodeGen:
         """
         if name not in vregs:
             if preallocated is not None and name in preallocated:
-                vregs[name] = preallocated[name]
+                reg = preallocated[name]
+                vregs[name] = reg
+                # 从对应的 free 列表中移除预分配的寄存器，避免重复分配
+                if is_float:
+                    if reg in free_xmms:
+                        free_xmms.remove(reg)
+                else:
+                    if reg in free_gprs:
+                        free_gprs.remove(reg)
             elif is_float and free_xmms:
                 vregs[name] = free_xmms.pop(0)
             elif not is_float and free_gprs:
@@ -663,13 +671,20 @@ class NativeCodeGen:
                 # 从 vregs 中查找操作数寄存器
                 left_reg = RAX
                 right_reg = RCX
+                is_float_left = False
+                is_float_right = False
                 if instr.src_locs:
                     if len(instr.src_locs) >= 1:
-                        left_name = instr.src_locs[0][0]
+                        left_name, left_type = instr.src_locs[0]
                         left_reg = self._get_vreg(vregs, left_name)
+                        is_float_left = (left_type == FLOAT_TYPE)
                     if len(instr.src_locs) >= 2:
-                        right_name = instr.src_locs[1][0]
+                        right_name, right_type = instr.src_locs[1]
                         right_reg = self._get_vreg(vregs, right_name)
+                        is_float_right = (right_type == FLOAT_TYPE)
+
+                # 操作数是否为浮点（两个操作数类型应一致）
+                is_float_op = is_float_left or is_float_right
 
                 # 确定目标寄存器：默认结果留在左操作数寄存器中
                 dst_reg = left_reg
@@ -685,52 +700,90 @@ class NativeCodeGen:
                         )
 
                 if op in ("+", "-", "*", "/", "%"):
-                    dst = left_reg
-                    src = right_reg
-                    if op == "+":
-                        e.add_reg_reg(dst, src)
-                    elif op == "-":
-                        e.sub_reg_reg(dst, src)
-                    elif op == "*":
-                        e.imul_reg_reg(dst, src)
-                    elif op == "/":
-                        # idiv 要求被除数在 RDX:RAX
-                        if dst != RAX:
-                            e.mov_reg_reg64(RAX, dst)
-                        e.cqo()
-                        e.idiv_reg(src)
-                        if dst != RAX:
-                            e.mov_reg_reg64(dst, RAX)
-                    elif op == "%":
-                        if dst != RAX:
-                            e.mov_reg_reg64(RAX, dst)
-                        e.cqo()
-                        e.idiv_reg(src)
-                        e.mov_reg_reg64(dst, RDX)
-                elif op == "==":
-                    e.cmp_reg_reg(left_reg, right_reg)
-                    e.sete(left_reg)
-                    e.movzx_reg32_reg8(left_reg, left_reg)
-                elif op == "!=":
-                    e.cmp_reg_reg(left_reg, right_reg)
-                    e.setne(left_reg)
-                    e.movzx_reg32_reg8(left_reg, left_reg)
-                elif op == "<":
-                    e.cmp_reg_reg(left_reg, right_reg)
-                    e.setl(left_reg)
-                    e.movzx_reg32_reg8(left_reg, left_reg)
-                elif op == ">":
-                    e.cmp_reg_reg(left_reg, right_reg)
-                    e.setg(left_reg)
-                    e.movzx_reg32_reg8(left_reg, left_reg)
-                elif op == "<=":
-                    e.cmp_reg_reg(left_reg, right_reg)
-                    e.setle(left_reg)
-                    e.movzx_reg32_reg8(left_reg, left_reg)
-                elif op == ">=":
-                    e.cmp_reg_reg(left_reg, right_reg)
-                    e.setge(left_reg)
-                    e.movzx_reg32_reg8(left_reg, left_reg)
+                    if is_float_op:
+                        # 浮点算术运算：使用 SSE2 指令
+                        dst = left_reg
+                        src = right_reg
+                        if op == "+":
+                            e.addsd_reg_reg(dst, src)
+                        elif op == "-":
+                            e.subsd_reg_reg(dst, src)
+                        elif op == "*":
+                            e.mulsd_reg_reg(dst, src)
+                        elif op == "/":
+                            e.divsd_reg_reg(dst, src)
+                        elif op == "%":
+                            raise NotImplementedError(
+                                "LIRBinOp float '%' is not yet implemented in native backend"
+                            )
+                    else:
+                        # 整数算术运算
+                        dst = left_reg
+                        src = right_reg
+                        if op == "+":
+                            e.add_reg_reg(dst, src)
+                        elif op == "-":
+                            e.sub_reg_reg(dst, src)
+                        elif op == "*":
+                            e.imul_reg_reg(dst, src)
+                        elif op == "/":
+                            # idiv 要求被除数在 RDX:RAX
+                            if dst != RAX:
+                                e.mov_reg_reg64(RAX, dst)
+                            e.cqo()
+                            e.idiv_reg(src)
+                            if dst != RAX:
+                                e.mov_reg_reg64(dst, RAX)
+                        elif op == "%":
+                            if dst != RAX:
+                                e.mov_reg_reg64(RAX, dst)
+                            e.cqo()
+                            e.idiv_reg(src)
+                            e.mov_reg_reg64(dst, RDX)
+                elif op in ("==", "!=", "<", ">", "<=", ">="):
+                    if is_float_op:
+                        # 浮点比较：ucomisd + setcc
+                        # 比较结果为布尔值（0/1），存储在左操作数寄存器（整型）
+                        e.ucomisd(left_reg, right_reg)
+                        if op == "==":
+                            e.sete(left_reg)
+                        elif op == "!=":
+                            e.setne(left_reg)
+                        elif op == "<":
+                            e.setb(left_reg)
+                        elif op == ">":
+                            e.seta(left_reg)
+                        elif op == "<=":
+                            e.setbe(left_reg)
+                        elif op == ">=":
+                            e.setae(left_reg)
+                        e.movzx_reg32_reg8(left_reg, left_reg)
+                    else:
+                        # 整数比较
+                        if op == "==":
+                            e.cmp_reg_reg(left_reg, right_reg)
+                            e.sete(left_reg)
+                            e.movzx_reg32_reg8(left_reg, left_reg)
+                        elif op == "!=":
+                            e.cmp_reg_reg(left_reg, right_reg)
+                            e.setne(left_reg)
+                            e.movzx_reg32_reg8(left_reg, left_reg)
+                        elif op == "<":
+                            e.cmp_reg_reg(left_reg, right_reg)
+                            e.setl(left_reg)
+                            e.movzx_reg32_reg8(left_reg, left_reg)
+                        elif op == ">":
+                            e.cmp_reg_reg(left_reg, right_reg)
+                            e.setg(left_reg)
+                            e.movzx_reg32_reg8(left_reg, left_reg)
+                        elif op == "<=":
+                            e.cmp_reg_reg(left_reg, right_reg)
+                            e.setle(left_reg)
+                            e.movzx_reg32_reg8(left_reg, left_reg)
+                        elif op == ">=":
+                            e.cmp_reg_reg(left_reg, right_reg)
+                            e.setge(left_reg)
+                            e.movzx_reg32_reg8(left_reg, left_reg)
                 elif op in ("&&", "||"):
                     # 逻辑运算：先将操作数规范化为 0/1 布尔值，再执行位运算。
                     # 注意：LIR 层两个操作数已求值完毕，无法实现真正的短路求值，
@@ -810,7 +863,19 @@ class NativeCodeGen:
                 self._compile_call(e, instr, vregs, free_gprs, free_xmms, func.name)
 
             elif isinstance(instr, LIRReturn):
-                # 返回值已在 RAX（整数/指针）或 XMM0（浮点）中
+                # 从 src_locs 获取返回值，确保它在正确的返回寄存器中
+                # 整数返回 -> RAX, 浮点返回 -> XMM0
+                if instr.src_locs:
+                    src_name, src_type = instr.src_locs[0]
+                    is_float_ret = (src_type == FLOAT_TYPE)
+                    src_reg = vregs.get(src_name)
+                    if src_reg is not None:
+                        if is_float_ret:
+                            if src_reg != XMM0:
+                                e.movsd_reg_reg(XMM0, src_reg)
+                        else:
+                            if src_reg != RAX:
+                                e.mov_reg_reg64(RAX, src_reg)
                 # 发射完整尾声（恢复栈帧 + pop callee-saved + ret），而非裸 ret。
                 # 否则显式 return 会跳过栈帧恢复，导致栈损坏。
                 self._emit_epilogue(e, func)

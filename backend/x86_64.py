@@ -540,6 +540,30 @@ class X86_64Emitter:
         self.emit_byte(0x9D)
         self.emit_byte(self._modrm(0b11, 0, reg & 7))
 
+    def setb(self, reg):
+        """setb reg (set if below / CF=1)"""
+        self.emit_byte(0x0F)
+        self.emit_byte(0x92)
+        self.emit_byte(self._modrm(0b11, 0, reg & 7))
+
+    def seta(self, reg):
+        """seta reg (set if above / CF=0 and ZF=0)"""
+        self.emit_byte(0x0F)
+        self.emit_byte(0x97)
+        self.emit_byte(self._modrm(0b11, 0, reg & 7))
+
+    def setbe(self, reg):
+        """setbe reg (set if below or equal / CF=1 or ZF=1)"""
+        self.emit_byte(0x0F)
+        self.emit_byte(0x96)
+        self.emit_byte(self._modrm(0b11, 0, reg & 7))
+
+    def setae(self, reg):
+        """setae reg (set if above or equal / CF=0)"""
+        self.emit_byte(0x0F)
+        self.emit_byte(0x93)
+        self.emit_byte(self._modrm(0b11, 0, reg & 7))
+
     def movzx_reg32_reg8(self, dst32, src8):
         """movzx dst32, src8 (零扩展)"""
         self.emit_byte(0x0F)

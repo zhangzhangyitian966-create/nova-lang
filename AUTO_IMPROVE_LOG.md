@@ -1332,3 +1332,62 @@
 - 全量测试: **664 passed** (0.90s–1.16s)
 - Evaluator 示例: hello/math/pattern_match/list_comprehension/loops 全部正常输出
 - VM 示例: hello/fibonacci/pattern_match 全部正常输出
+
+---
+
+## 2026-07-16 自动改进（第二十一轮）
+
+基于 AUTO_REVIEW_LOG.md 第十九轮审查日志的 P0 级严重问题驱动改进（阶段一检查 + 阶段二开发 + 阶段三测试）。
+
+### 每日发现的问题
+
+#### compiler.py + vm.py
+- **嵌套循环 break/continue 跨类型嵌套目标错误（compiler.py:491-507, vm.py:858-915）**：当 while 包含 for 时，内层 for 的 break/continue 被错误地作用于外层 while
+  - 编译器根因：只用 `_while_end_stack` 跟踪 while 循环，for 循环无栈跟踪，BreakExpr 只检查 while 栈是否非空
+  - VM 根因：BREAK 优先检查操作数（while 路径），CONTINUE 优先检查 `_for_iters`（for 路径），判断方向不一致
+  - 复现：`mut i = 1 while i <= 3 { for x in [10,20,30] { if x == 20 then break } i = i + 1 }` → while 只执行 1 次
+  - 审查日志追问结论：绝对不能。控制流基本语义错误是 P0 级 bug。
+
+#### evaluator.py
+- **BuiltinFn 超额参数未校验（evaluator.py:408-414）**：`_call_fn` 的 BuiltinFn 分支只检查参数不足的部分应用，未检查参数超额，多余参数被静默吞掉（如 `abs(1,2)` 返回 1.0）→ 添加超额参数检查，抛 RuntimeError_
+- **守卫条件缺少 Bool 类型检查（evaluator.py:1066）**：guard 求值结果直接用于 `if not guard_val`，无 `isinstance(..., bool)` 校验，非 Bool 值可当 guard 使用 → 添加 Bool 类型检查
+- **列表推导过滤条件缺少 Bool 类型检查（evaluator.py:1041）**：`filter_cond` 求值结果直接用于 `if not ...`，无 Bool 类型校验 → 添加 Bool 类型检查
+- **MapExpr 中非可哈希键导致 Python TypeError 泄露（evaluator.py:799-800）**：字典推导式中 key 为非可哈希值时抛出原生 Python TypeError，泄露到底层异常 → 捕获 TypeError 并转为 RuntimeError_
+
+#### backend/native_backend.py
+- **预分配寄存器未从 free 列表移除（native_backend.py:202-218）**：`_alloc_vreg` 使用 preallocated 时不从 free_gprs/free_xmms 中移除，后续按需分配可能复用同一物理寄存器，造成数据覆盖 → 使用预分配后从对应 free 列表移除
+- **LIRReturn 不处理返回值寄存器（native_backend.py:812-816）**：完全忽略 instr.src_locs，假设返回值已在 RAX/XMM0，当返回值在其他寄存器时返回错误值 → 从 src_locs 获取返回值并移动到 RAX/XMM0
+- **LIRBinOp 浮点操作完全缺失（native_backend.py:661-758）**：所有二元运算都使用整数指令（add/sub/cmp），浮点操作数会产生错误机器码 → 浮点操作使用 SSE2 指令（addsd/subsd/mulsd/divsd/ucomisd）
+
+### 本次修复内容（基于审查日志 Issue）
+
+1. **compiler.py + vm.py — 嵌套循环 break/continue 统一循环栈修复（基于审查日志第十九轮 vm.py:717-728 / compiler.py:491-507 严重问题 #1）**
+   - **编译器端**：新增 `_loop_stack` 统一循环栈，每个元素为 `{type, break_patches, continue_target}`
+     - `_compile_while`：push while 类型栈帧，替换原有双栈机制
+     - `_compile_for`：新增 push for 类型栈帧，退出时 pop
+     - BreakExpr/ContinueExpr：通过 `_loop_stack[-1]["type"]` 判断最内层循环类型
+   - **VM 端**：BREAK 和 CONTINUE 统一判断逻辑——优先检查操作数是否存在
+     - 有操作数 → while 循环（操作数即跳转目标）
+     - 无操作数 → for 循环（通过 `_for_iters` 栈处理）
+   - 支持 while↔for 任意嵌套组合，break/continue 始终作用于最内层循环
+
+2. **evaluator.py — 4个类型安全严重问题修复（基于审查日志第十九轮 evaluator.py 严重问题）**
+   - **BuiltinFn 超额参数检查**：`_call_fn` 的 BuiltinFn 分支添加 `fn.arity > 0 and len(args) > fn.arity` 检查，与 VM 端错误信息格式一致
+   - **守卫条件 Bool 检查**：`_eval_match` 中 guard 求值后添加 `isinstance(guard_val, bool)` 检查
+   - **列表推导过滤条件 Bool 检查**：ListComprehension 过滤条件求值后添加 Bool 检查
+   - **MapExpr 非可哈希键错误处理**：字典推导式用 try/except 包裹，捕获 TypeError 并定位第一个不可哈希键后转为 RuntimeError_
+
+3. **backend/native_backend.py + backend/x86_64.py — Native后端3个严重问题修复（基于审查日志第十九轮 native_backend.py 严重问题）**
+   - **寄存器分配冲突修复**：`_alloc_vreg` 使用预分配寄存器后，从 `free_gprs` 或 `free_xmms` 中移除该寄存器，防止同物理寄存器被分配给多个 vreg
+   - **LIRReturn 返回值寄存器处理**：从 `src_locs` 获取返回值位置，整数移到 RAX，浮点移到 XMM0
+   - **LIRBinOp 浮点操作支持**：新增 `is_float_op` 判断，浮点算术使用 SSE2 addsd/subsd/mulsd/divsd，浮点比较使用 ucomisd + setcc
+   - **x86_64.py**：新增 setb、seta、setbe、setae 四条 setcc 指令，用于浮点比较
+
+### 测试结果
+
+- 全量测试: **783 passed** (1.79s)
+- Evaluator 示例: hello/fibonacci/pattern_match/loops/pipe 全部正常输出
+- VM 示例: hello/fibonacci/pattern_match 全部正常输出
+- 嵌套循环 break/continue: while↔for 跨类型嵌套全部正确 ✅
+- evaluator 类型安全: 4个修复点全部正确报错 ✅
+- native 后端: 116 passed，寄存器分配/返回值/浮点运算全部正常 ✅

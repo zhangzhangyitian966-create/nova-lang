@@ -633,8 +633,8 @@ class TestLinearScanIntegration(unittest.TestCase):
                                   preallocated=preallocated)
         self.assertEqual(reg, R15,
             "preallocated vreg should use the pre-assigned register")
-        # 验证 free_gprs 没有弹出 R15（因为是预分配的）
-        self.assertIn(R15, free_gprs)
+        # 验证预分配的寄存器已从 free_gprs 中移除，避免重复分配
+        self.assertNotIn(R15, free_gprs)
 
     def test_compile_with_preallocated_none(self):
         """preallocated=None 时应使用按需分配（fallback 模式）"""

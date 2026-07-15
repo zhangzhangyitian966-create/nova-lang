@@ -411,6 +411,11 @@ class Evaluator:
                 def curried(*more_args):
                     return fn.fn(*(args + list(more_args)))
                 return BuiltinFn(fn.name, curried, fn.arity - len(args))
+            # 超额参数检查
+            if fn.arity > 0 and len(args) > fn.arity:
+                raise RuntimeError_(
+                    f"函数 '{fn.name}' 期望 {fn.arity} 个参数，得到 {len(args)} 个"
+                )
             return fn.fn(*args)
 
         if isinstance(fn, NovaClosure):
@@ -797,7 +802,18 @@ class Evaluator:
 
         # --- 字典 ---
         elif isinstance(expr, MapExpr):
-            return {self.eval_expr(k): self.eval_expr(v) for k, v in expr.pairs}
+            try:
+                return {self.eval_expr(k): self.eval_expr(v) for k, v in expr.pairs}
+            except TypeError as e:
+                # 捕获不可哈希键的错误，转换为 Nova 运行时错误
+                # 找到第一个不可哈希的键
+                for k, v in expr.pairs:
+                    key_val = self.eval_expr(k)
+                    try:
+                        hash(key_val)
+                    except TypeError:
+                        raise RuntimeError_(f"Map 的键必须是可哈希的，得到 {type(key_val).__name__}")
+                raise RuntimeError_(f"Map 的键必须是可哈希的: {e}")
 
         # --- 列表推导式 ---
         elif isinstance(expr, ListComprehension):
@@ -1038,7 +1054,10 @@ class Evaluator:
             try:
                 # 检查过滤条件
                 if expr.filter_cond is not None:
-                    if not self.eval_expr(expr.filter_cond):
+                    filter_val = self.eval_expr(expr.filter_cond)
+                    if not isinstance(filter_val, bool):
+                        raise RuntimeError_(f"列表推导过滤条件必须是 Bool 类型，得到 {type(filter_val).__name__}")
+                    if not filter_val:
                         continue
                 results.append(self.eval_expr(expr.expr))
             finally:
@@ -1063,6 +1082,8 @@ class Evaluator:
                         guard_val = self.eval_expr(arm.guard)
                     finally:
                         self.env = old_env
+                    if not isinstance(guard_val, bool):
+                        raise RuntimeError_(f"守卫条件必须是 Bool 类型，得到 {type(guard_val).__name__}")
                     if not guard_val:
                         continue
                 # 在新作用域中绑定模式变量并求值分支

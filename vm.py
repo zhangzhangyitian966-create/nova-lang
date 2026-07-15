@@ -893,26 +893,23 @@ class NovaVM:
         elif opcode == Op.CONTINUE:
             # Stack: [iterable, result_list, ...body_values] -> [iterable, result_list]
             # Continue to next iteration: clean body values and jump back to loop start
-            if self._for_iters:
+            if instr.operands:
+                # while loop continue: 操作数为 loop_start，直接使用
+                if self._while_loops:
+                    loop_info = self._while_loops[-1]
+                    base_sp = loop_info["base_sp"]
+                    loop_start = instr.operands[0]
+                    # 清理栈上循环体产生的值
+                    if base_sp < len(self.stack):
+                        del self.stack[base_sp:]
+                    self.ip = loop_start
+            elif self._for_iters:
+                # for loop continue: 清理 body 值并跳回 FOR_ITER
                 loop_info = self._for_iters[-1]
                 base_sp = loop_info["base_sp"]
                 loop_start = loop_info["loop_start"]
                 del self.stack[base_sp + 2:]
                 self.ip = loop_start
-            else:
-                # while loop continue: clean stack and jump back to condition check
-                if self._while_loops:
-                    loop_info = self._while_loops[-1]
-                    base_sp = loop_info["base_sp"]
-                    # 优先使用编译器提供的操作数（loop_start），解决首次迭代 loop_start 为 None 的崩溃
-                    if instr.operands:
-                        loop_start = instr.operands[0]
-                    else:
-                        loop_start = loop_info["loop_start"]
-                    # 清理栈上循环体产生的值
-                    if base_sp < len(self.stack):
-                        del self.stack[base_sp:]
-                    self.ip = loop_start
 
         # === 函数 ===
         elif opcode == Op.CLOSURE:
