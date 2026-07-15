@@ -5,7 +5,6 @@ Nova Pass 管理器
 Pass 管理器负责按序运行各层 Pass，并在达到不动点（无新变化）时停止。
 """
 
-import sys
 from typing import List, Dict, Set, Tuple, Any
 from nova.ir.ir_nodes import (
     IRType, NovaType,
@@ -701,7 +700,6 @@ class PassManager:
         self.mir_passes = []
         self.lir_passes = []
         self._verbose = False
-        self.errors: List[str] = []
 
     def add_hir_pass(self, pass_):
         self.hir_passes.append(pass_)
@@ -717,12 +715,7 @@ class PassManager:
         for iteration in range(max_iterations):
             changed = False
             for pass_ in self.hir_passes:
-                try:
-                    changed |= pass_.run(hir_module)
-                except Exception as exc:
-                    msg = f"HIR pass '{type(pass_).__name__}' failed: {exc}"
-                    self.errors.append(msg)
-                    print(msg, file=sys.stderr)
+                changed |= pass_.run(hir_module)
             if not changed:
                 break
             total_changed = True
@@ -733,12 +726,7 @@ class PassManager:
         for iteration in range(max_iterations):
             changed = False
             for pass_ in self.mir_passes:
-                try:
-                    changed |= pass_.run(mir_module)
-                except Exception as exc:
-                    msg = f"MIR pass '{type(pass_).__name__}' failed: {exc}"
-                    self.errors.append(msg)
-                    print(msg, file=sys.stderr)
+                changed |= pass_.run(mir_module)
             if not changed:
                 break
             total_changed = True
@@ -749,12 +737,7 @@ class PassManager:
         for iteration in range(max_iterations):
             changed = False
             for pass_ in self.lir_passes:
-                try:
-                    changed |= pass_.run(lir_module)
-                except Exception as exc:
-                    msg = f"LIR pass '{type(pass_).__name__}' failed: {exc}"
-                    self.errors.append(msg)
-                    print(msg, file=sys.stderr)
+                changed |= pass_.run(lir_module)
             if not changed:
                 break
             total_changed = True

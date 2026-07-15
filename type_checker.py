@@ -1124,6 +1124,13 @@ class TypeChecker:
 
         # 比较操作
         if expr.op in ("==", "!=", "<", ">", "<=", ">="):
+            if expr.op in ("==", "!="):
+                if not self._types_compatible(left_ty, right_ty):
+                    self._report_error(
+                        f"操作符 '{expr.op}' 的操作数类型不兼容：{left_ty} 和 {right_ty}",
+                        expr
+                    )
+                    return ERROR_TYPE
             if expr.op in ("<", ">", "<=", ">="):
                 if not (self._types_compatible(left_ty, INT_T) and self._types_compatible(right_ty, INT_T)
                         or self._types_compatible(left_ty, FLOAT_T) and self._types_compatible(right_ty, FLOAT_T)):

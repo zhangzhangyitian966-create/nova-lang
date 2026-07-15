@@ -1042,6 +1042,40 @@ class TestErrors(unittest.TestCase):
                 }
             """, check_types=False)
 
+    def test_try_expr_non_adt_error(self):
+        """:`?` 操作符作用于非 ADT 值应抛 RuntimeError_"""
+        with self.assertRaises(RuntimeError_) as ctx:
+            eval_source("""
+                let x = 42?
+            """, check_types=False)
+        self.assertIn("? 操作符只能在 Option 或 Result 类型上使用", str(ctx.exception))
+
+    def test_try_expr_non_adt_string_error(self):
+        """:`?` 操作符作用于字符串应抛 RuntimeError_"""
+        with self.assertRaises(RuntimeError_) as ctx:
+            eval_source("""
+                let x = "hello"?
+            """, check_types=False)
+        self.assertIn("? 操作符只能在 Option 或 Result 类型上使用", str(ctx.exception))
+
+    def test_try_expr_unknown_adt_variant_error(self):
+        """:`?` 操作符作用于非 Option/Result 的 ADT 值应抛 RuntimeError_"""
+        with self.assertRaises(RuntimeError_) as ctx:
+            eval_source("""
+                type Color { Red | Green | Blue }
+                let x = Red?
+            """, check_types=False)
+        self.assertIn("? 操作符只能在 Option 或 Result 类型上使用", str(ctx.exception))
+
+    def test_try_expr_unknown_adt_with_fields_error(self):
+        """:`?` 操作符作用于带字段的非 Option/Result ADT 应抛 RuntimeError_"""
+        with self.assertRaises(RuntimeError_) as ctx:
+            eval_source("""
+                type Shape { Circle(r: Float) | Rect(w: Float, h: Float) }
+                let x = Circle(5.0)?
+            """, check_types=False)
+        self.assertIn("? 操作符只能在 Option 或 Result 类型上使用", str(ctx.exception))
+
 
 if __name__ == "__main__":
     unittest.main()
@@ -1074,6 +1108,20 @@ class TestLoops(unittest.TestCase):
             let result = for i <- 0..10 step 2 { i }
         """, check_types=False)
         self.assertEqual(ev.env.lookup("result"), [0, 2, 4, 6, 8, 10])
+
+    def test_for_range_negative_step(self):
+        """for i <- 5..0 step -1 { i } == [5, 4, 3, 2, 1, 0]（负步长闭区间）"""
+        ev = eval_source("""
+            let result = for i <- 5..0 step -1 { i }
+        """, check_types=False)
+        self.assertEqual(ev.env.lookup("result"), [5, 4, 3, 2, 1, 0])
+
+    def test_for_range_negative_step_by_two(self):
+        """for i <- 10..0 step -2 { i } == [10, 8, 6, 4, 2, 0]（负步长步长为2）"""
+        ev = eval_source("""
+            let result = for i <- 10..0 step -2 { i }
+        """, check_types=False)
+        self.assertEqual(ev.env.lookup("result"), [10, 8, 6, 4, 2, 0])
 
     def test_while_loop(self):
         """while 计数"""
@@ -1309,6 +1357,33 @@ class TestListComprehension(unittest.TestCase):
             let result = [x for x <- 1..10 if x % 2 == 0]
         """, check_types=False)
         self.assertEqual(ev.env.lookup("result"), [2, 4, 6, 8, 10])
+
+    def test_list_comprehension_negative_step(self):
+        """[x * x for x <- 5..0 step -1]（负步长闭区间）- 直接构造 AST 测试"""
+        from nova.ast_nodes import ListComprehension, IntLiteral, BinaryOp
+        # 手动构造 ListComprehension AST，range 元组带负步长
+        lc = ListComprehension(
+            expr=BinaryOp(left=Identifier("x"), op="*", right=Identifier("x")),
+            var_name="x",
+            iterable=("range", IntLiteral(5), IntLiteral(0), IntLiteral(-1)),
+            filter_cond=None,
+        )
+        ev = Evaluator(check_types=False)
+        result = ev.eval_expr(lc)
+        self.assertEqual(result, [25, 16, 9, 4, 1, 0])
+
+    def test_list_comprehension_negative_step_filter(self):
+        """[x for x <- 10..0 step -2 if x > 4]（负步长带过滤）- 直接构造 AST 测试"""
+        from nova.ast_nodes import ListComprehension, IntLiteral, BinaryOp
+        lc = ListComprehension(
+            expr=Identifier("x"),
+            var_name="x",
+            iterable=("range", IntLiteral(10), IntLiteral(0), IntLiteral(-2)),
+            filter_cond=BinaryOp(left=Identifier("x"), op=">", right=IntLiteral(4)),
+        )
+        ev = Evaluator(check_types=False)
+        result = ev.eval_expr(lc)
+        self.assertEqual(result, [10, 8, 6])
 
     def test_list_comprehension_type_check(self):
         """列表推导式类型检查"""

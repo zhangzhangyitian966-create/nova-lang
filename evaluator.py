@@ -721,7 +721,8 @@ class Evaluator:
                     raise ReturnSignal(val)
                 if val.variant_name in ("Some", "Ok"):
                     return val.fields[0]
-            return val
+                raise RuntimeError_(f"? 操作符只能在 Option 或 Result 类型上使用，得到 {val.type_name}")
+            raise RuntimeError_(f"? 操作符只能在 Option 或 Result 类型上使用，得到 {type(val).__name__}")
 
         # --- 函数调用 ---
         elif isinstance(expr, FnCall):
@@ -943,7 +944,12 @@ class Evaluator:
             start = self.eval_expr(expr.iterable[1])
             end = self.eval_expr(expr.iterable[2])
             step = self.eval_expr(expr.iterable[3]) if expr.iterable[3] else 1
-            items = list(range(start, end + 1, step))
+            if step > 0:
+                items = list(range(start, end + 1, step))
+            elif step < 0:
+                items = list(range(start, end - 1, step))
+            else:
+                raise RuntimeError_("range 步长不能为 0")
         else:
             # 列表遍历
             items = self.eval_expr(expr.iterable)
@@ -990,7 +996,12 @@ class Evaluator:
             start = self.eval_expr(expr.iterable[1])
             end = self.eval_expr(expr.iterable[2])
             step = self.eval_expr(expr.iterable[3]) if expr.iterable[3] else 1
-            items = list(range(start, end + 1, step))
+            if step > 0:
+                items = list(range(start, end + 1, step))
+            elif step < 0:
+                items = list(range(start, end - 1, step))
+            else:
+                raise RuntimeError_("range 步长不能为 0")
         else:
             items = self.eval_expr(expr.iterable)
 

@@ -1,5 +1,60 @@
 # Nova 自动改进日志
 
+## 2026-07-15 自动改进（第十七轮）
+
+基于 AUTO_REVIEW_LOG.md 第十五轮审查日志的 P0 级严重问题驱动改进（阶段一检查 + 阶段二开发 + 阶段三测试）。
+
+### 每日发现的问题
+
+#### evaluator.py
+- **负步长 range 循环计算错误（evaluator.py:946, 993）**：`range(start, end + 1, step)` 对负步长完全错误，`end + 1` 只对正步长正确 → 正负步长分支判断 + 零步长报错 **[已修复]**
+- **TryExpr 对非 ADT 值静默放行（evaluator.py:718-724）**：`?` 运算符仅对 NovaADTValue 做判断，`42?`、`"hello"?` 静默通过 → 非 ADT 值和未知 variant 均抛 RuntimeError_ **[已修复]**
+
+#### ir/pass_manager.py
+- **Pass 管理器静默吞掉所有 Pass 异常（pass_manager.py:720-757）**：三个 run_*_passes 方法均捕获所有异常仅打印到 stderr，不中断执行、不向上传播，self.errors 从未被读取 → 移除 try-except，异常直接传播 **[已修复]**
+
+#### type_checker.py
+- **== 和 != 操作符完全不检查操作数类型兼容性（type_checker.py:1126-1132）**：`42 == "hello"` 不会被类型检查器捕获，两个操作数类型不同也能通过 → 使用 _types_compatible 添加类型兼容性检查 **[已修复]**
+
+### 本次修复内容（基于审查日志 Issue）
+
+1. **evaluator.py — 负步长 range 循环修复（基于审查日志 evaluator.py:946 / 第十五轮严重问题 #1）**
+   - `_eval_for_expr` 和 `_eval_list_comprehension` 两处 `range(start, end + 1, step)` 改为正负步长分支
+   - 正步长：`range(start, end + 1, step)`
+   - 负步长：`range(start, end - 1, step)`
+   - 零步长：抛 `RuntimeError_("range 步长不能为 0")`
+   - 新增 4 个测试用例：for 负步长-1、for 负步长-2、列表推导负步长、列表推导负步长带过滤
+
+2. **evaluator.py — TryExpr 非 ADT 值类型安全修复（基于审查日志 evaluator.py:718-724 / 第十五轮严重问题 #2）**
+   - TryExpr 处理中，非 NovaADT 值抛 RuntimeError_
+   - 未知 variant 的 ADT 值（非 Option/Result）也抛 RuntimeError_
+   - 错误信息：`? 操作符只能在 Option 或 Result 类型上使用，得到 <类型名>`
+   - 新增 4 个测试用例：整数?报错、字符串?报错、未知ADT variant（无字段）报错、未知ADT variant（带字段）报错
+
+3. **ir/pass_manager.py — Pass 异常静默吞掉修复（基于审查日志 pass_manager.py:720-757 / 第十五轮严重问题 #1）**
+   - 删除 `run_hir_passes`、`run_mir_passes`、`run_lir_passes` 三个方法中的 try-except 块
+   - Pass 失败时异常直接向上传播，不再静默继续
+   - 删除未使用的 `self.errors` 列表和 `import sys`
+   - 新增 3 个测试用例：HIR pass 异常传播、MIR pass 异常传播、LIR pass 异常传播
+
+4. **type_checker.py — ==/!= 操作数类型兼容性检查（基于审查日志 type_checker.py:1126-1132 / 第十五轮严重问题 #8）**
+   - 在比较操作处理中，为 `==` 和 `!=` 添加 `_types_compatible(left_ty, right_ty)` 检查
+   - 类型不兼容时报错：`操作符 '==' 的操作数类型不兼容：<左类型> 和 <右类型>`
+   - 与 `<`/`>` 等运算符形成一致的类型检查防御
+   - 新增 4 个测试用例：Int==String报错、Int!=String报错、Int==Int通过、List[Int]==List[String]报错
+
+### 测试结果
+
+- 全量测试: **695 passed** (1.40s)
+- Evaluator 示例: hello/fibonacci/pattern_match/loops/math 全部正常输出
+- VM 示例: hello/fibonacci/pattern_match 全部正常输出
+- 负步长 range: `for i <- 5..0 step -1` 正确产出 [5,4,3,2,1,0] ✅
+- TryExpr 类型安全: `42?` 正确抛出 RuntimeError_ ✅
+- Pass 异常传播: pass 失败时异常正确向上传播 ✅
+- ==/!= 类型检查: `42 == "hello"` 被类型检查器正确捕获 ✅
+
+---
+
 ## 2026-07-15 自动改进（第十六轮）
 
 基于 AUTO_REVIEW_LOG.md 第十四轮审查日志的 P0 级严重问题驱动改进（阶段一检查 + 阶段二开发 + 阶段三测试）。

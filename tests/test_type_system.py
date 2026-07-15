@@ -392,3 +392,34 @@ class TestADTFieldAccess:
         """
         checker = check_source(source)
         assert len(checker.error_collector.errors) == 0
+
+
+class TestEqualityTypeCheck:
+    """测试 == 和 != 操作符的类型兼容性检查"""
+
+    def test_eq_int_string_error(self):
+        """Int == String 应报错"""
+        source = 'let result = 42 == "hello"'
+        with pytest.raises(TypeCheckError) as exc_info:
+            check_source(source)
+        assert "不兼容" in str(exc_info.value)
+
+    def test_neq_int_string_error(self):
+        """Int != String 应报错"""
+        source = 'let result = 42 != "hello"'
+        with pytest.raises(TypeCheckError) as exc_info:
+            check_source(source)
+        assert "不兼容" in str(exc_info.value)
+
+    def test_eq_int_int_ok(self):
+        """Int == Int 应通过"""
+        source = "let result = 42 == 100"
+        checker = check_source(source)
+        assert len(checker.error_collector.errors) == 0
+
+    def test_eq_list_int_list_string_error(self):
+        """List[Int] == List[String] 应报错"""
+        source = "let result = [1, 2, 3] == [\"a\", \"b\", \"c\"]"
+        with pytest.raises(TypeCheckError) as exc_info:
+            check_source(source)
+        assert "不兼容" in str(exc_info.value)

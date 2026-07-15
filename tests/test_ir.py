@@ -515,6 +515,62 @@ class TestPassManager(unittest.TestCase):
         changed = pm.run_mir_passes(mir)
         # 不应抛出异常
 
+    def test_hir_pass_exception_propagates(self):
+        """HIR pass 抛出异常时应向上传播，而非被静默吞掉"""
+        from nova.ir.pass_manager import Pass
+
+        class FailingHIRPass(Pass):
+            name = "failing_hir"
+
+            def run(self, module):
+                raise RuntimeError("intentional HIR pass failure")
+
+        hir = compile_to_hir("let x = 1 + 2")
+        pm = PassManager()
+        pm.add_hir_pass(FailingHIRPass())
+        with self.assertRaises(RuntimeError) as ctx:
+            pm.run_hir_passes(hir)
+        self.assertIn("intentional HIR pass failure", str(ctx.exception))
+
+    def test_mir_pass_exception_propagates(self):
+        """MIR pass 抛出异常时应向上传播，而非被静默吞掉"""
+        from nova.ir.pass_manager import Pass
+
+        class FailingMIRPass(Pass):
+            name = "failing_mir"
+
+            def run(self, module):
+                raise ValueError("intentional MIR pass failure")
+
+        mir = compile_to_mir("fn test(x) { x + 1 }")
+        pm = PassManager()
+        pm.add_mir_pass(FailingMIRPass())
+        with self.assertRaises(ValueError) as ctx:
+            pm.run_mir_passes(mir)
+        self.assertIn("intentional MIR pass failure", str(ctx.exception))
+
+    def test_lir_pass_exception_propagates(self):
+        """LIR pass 抛出异常时应向上传播，而非被静默吞掉"""
+        from nova.ir.pass_manager import Pass
+
+        class FailingLIRPass(Pass):
+            name = "failing_lir"
+
+            def run(self, module):
+                raise TypeError("intentional LIR pass failure")
+
+        body = [
+            LIRLoadConst(value=1, const_type="int", dst_loc=("r0", INT_TYPE)),
+            LIRReturn(src_locs=[("r0", INT_TYPE)]),
+        ]
+        fn = _make_lir_fn(body=body)
+        mod = _make_lir_module({"test": fn})
+        pm = PassManager()
+        pm.add_lir_pass(FailingLIRPass())
+        with self.assertRaises(TypeError) as ctx:
+            pm.run_lir_passes(mod)
+        self.assertIn("intentional LIR pass failure", str(ctx.exception))
+
 
 # ============================================================
 # 测试端到端编译管道
