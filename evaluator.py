@@ -416,18 +416,19 @@ class Evaluator:
         if isinstance(fn, NovaClosure):
             if len(args) < len(fn.params):
                 # 部分应用：返回捕获已提供参数的闭包
+                captured_params = fn.params[:len(args)]
                 remaining_params = fn.params[len(args):]
-                captured = args
 
-                def partially_applied(*more_args):
-                    all_args = captured + list(more_args)
-                    return self._call_fn(fn, all_args)
+                # 创建捕获环境：在原始 env 基础上绑定已捕获的参数
+                captured_env = fn.env.child()
+                for param, arg in zip(captured_params, args):
+                    captured_env.define(param.name, arg)
 
                 return NovaClosure(
                     name=f"<partial {fn.name}>",
                     params=remaining_params,
                     body=fn.body,
-                    env=fn.env,
+                    env=captured_env,
                 )
             if len(args) > len(fn.params):
                 raise RuntimeError_(

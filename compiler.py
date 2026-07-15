@@ -834,9 +834,13 @@ class BytecodeCompiler:
             return []  # 变量绑定总是匹配
 
         elif isinstance(pattern, PatternConstructor):
+            fail_positions = []
             fail_pos = self.bytecode.current_pos()
             self.bytecode.emit_op(Op.MATCH_CONSTRUCTOR, pattern.name, len(pattern.fields), 0)
-            return [fail_pos]
+            fail_positions.append(fail_pos)
+            for field_pattern in pattern.fields:
+                fail_positions.extend(self._compile_pattern_test_with_fail(field_pattern))
+            return fail_positions
 
         elif isinstance(pattern, PatternTuple):
             fail_positions = []

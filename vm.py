@@ -377,6 +377,27 @@ class NovaVM:
             return NovaADTValue(fn.type_name, fn.variant_name, list(args), fn.field_names)
 
         if isinstance(fn, NovaClosure):
+            # 部分应用支持：参数不足时返回捕获已提供参数的闭包
+            if len(args) < fn.param_count:
+                captured = dict(fn.captured_vars)
+                # 获取函数参数名用于绑定已捕获参数
+                func_block = self.functions.get(fn.func_name)
+                if func_block is None:
+                    raise RuntimeError_(f"未找到函数 '{fn.func_name}'")
+                # 已捕获的参数数量 = 总形参数 - 当前剩余参数
+                total_params = len(func_block.param_names)
+                already_bound = total_params - fn.param_count
+                # 将新提供的参数绑定到捕获变量中
+                for i, arg in enumerate(args):
+                    param_idx = already_bound + i
+                    if param_idx < total_params:
+                        captured[func_block.param_names[param_idx]] = arg
+                remaining_count = fn.param_count - len(args)
+                return NovaClosure(
+                    func_name=fn.func_name,
+                    param_count=remaining_count,
+                    captured_vars=captured,
+                )
             return self._call_closure(fn, args)
 
         raise RuntimeError_(f"无法调用非函数值: {fn}")
@@ -390,11 +411,20 @@ class NovaVM:
         if func_block is None:
             raise RuntimeError_(f"未找到函数 '{closure.func_name}'")
 
+        # 参数数量校验
+        if len(args) > closure.param_count:
+            raise RuntimeError_(
+                f"函数 '{closure.func_name}' 期望 {closure.param_count} 个参数，但传入了 {len(args)} 个"
+            )
+
         # 合并捕获变量和参数
         locals_ = dict(closure.captured_vars)
+        # 计算已绑定的参数数量（总参数 - 剩余参数）
+        total_params = len(func_block.param_names)
+        already_bound = total_params - closure.param_count
         for i, arg in enumerate(args):
-            if i < len(func_block.param_names):
-                locals_[func_block.param_names[i]] = arg
+            param_idx = already_bound + i
+            locals_[func_block.param_names[param_idx]] = arg
 
         # 保存当前帧
         frame = Frame(

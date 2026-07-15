@@ -1,5 +1,65 @@
 # Nova 自动改进日志
 
+## 2026-07-15 自动改进（第十六轮）
+
+基于 AUTO_REVIEW_LOG.md 第十四轮审查日志的 P0 级严重问题驱动改进（阶段一检查 + 阶段二开发 + 阶段三测试）。
+
+### 每日发现的问题
+
+#### evaluator.py
+- **NovaClosure 部分应用完全失效——捕获参数从未进入作用域（evaluator.py:416-431）**：`partially_applied` 函数是死代码，返回的 NovaClosure 直接复用原始 body 和 env，已捕获参数完全不在作用域中 → 创建子环境绑定捕获参数 **[已修复]**
+
+#### compiler.py
+- **构造器模式的字段子模式从未被测试（compiler.py:836-839）**：PatternConstructor 仅发出 MATCH_CONSTRUCTOR 测试名称和字段数，完全没有递归测试字段子模式，导致 `Some(0)` 错误匹配 `Some(42)` → 递归生成字段子模式测试指令 **[已修复]**
+
+#### vm.py
+- **闭包调用缺少参数数量校验——参数过多静默丢弃（vm.py:393-397）**：传入参数多于形参时，多余参数被静默丢弃，调用方错误无法及时发现 → 添加参数数量检查，过多时抛 RuntimeError_ **[已修复]**
+- **闭包缺少部分应用（柯里化）支持（vm.py:379-380）**：NovaClosure 分支直接调用 _call_closure，参数不足时不返回部分应用闭包 → 在 _call_fn 中添加部分应用逻辑，复用 NovaClosure 类存储已捕获参数 **[已修复]**
+- **_call_closure 参数绑定偏移错误（vm.py:422-423）**：部分应用的闭包被调用时，新参数从 param_names[0] 开始绑定，覆盖已捕获的参数 → 根据已绑定数量计算偏移量，从剩余参数位置开始绑定 **[已修复]**
+
+### 本次修复内容（基于审查日志 Issue）
+
+1. **evaluator.py — NovaClosure 部分应用修复（基于审查日志 evaluator.py:416-431 / 第十四轮严重问题 #1）**
+   - 删除死代码 `partially_applied` 函数
+   - 创建捕获环境 `captured_env = fn.env.child()`
+   - 遍历已捕获参数，通过 `captured_env.define(param.name, arg)` 绑定到子环境
+   - 返回的 NovaClosure 使用扩展后的 `captured_env`
+   - 后续调用时通过作用域链找到已捕获的参数
+   - 新增 4 个测试用例：双参数部分应用、三参数链式、lambda 部分应用、闭包环境+部分应用组合
+
+2. **compiler.py — 构造器模式字段子模式递归测试（基于审查日志 compiler.py:836-839 / 第十四轮严重问题 #1）**
+   - `_compile_pattern_test_with_fail` 的 PatternConstructor 分支仿照 PatternTuple/PatternList 模式
+   - 发射 MATCH_CONSTRUCTOR 后，遍历每个字段子模式递归调用 `_compile_pattern_test_with_fail`
+   - 收集所有 fail 位置统一返回，由上层回填
+   - 与 MATCH_TEST_TUPLE/MATCH_TEST_LIST 栈行为一致：匹配成功后弹出 subject 并压入 reversed 字段
+   - 新增 4 个测试用例：字段不匹配、字段匹配、自定义ADT、嵌套构造器子模式
+
+3. **vm.py — 闭包参数数量校验（基于审查日志 vm.py:395-397 / 第十四轮严重问题 #1）**
+   - `_call_closure` 开头添加参数数量校验：`len(args) > closure.param_count` 时抛 RuntimeError_
+   - 错误消息风格与 Evaluator 和 NovaConstructor 保持一致
+   - 同时修复了参数绑定偏移问题（为部分应用做准备）
+   - 新增 2 个测试用例：CALL 指令参数过多、PIPE_CALL 参数过多
+
+4. **vm.py — 闭包部分应用/柯里化支持（基于审查日志 vm.py:379-429 / 第十四轮严重问题 #2）**
+   - `_call_fn` 的 NovaClosure 分支添加参数不足检查
+   - 参数不足时创建新的 NovaClosure，已提供的参数合并到 captured_vars
+   - 复用 NovaClosure 类，param_count 表示剩余参数数量
+   - `_call_closure` 中根据 `already_bound = total_params - closure.param_count` 计算绑定偏移量
+   - 与 Evaluator 的部分应用行为保持一致
+   - 新增 2 个测试用例：双参数部分应用、三参数链式部分应用
+
+### 测试结果
+
+- 全量测试: **680 passed** (0.76s)
+- Evaluator 示例: hello/fibonacci/pattern_match/loops/math 全部正常输出
+- VM 示例: hello/fibonacci/pattern_match 全部正常输出
+- Evaluator 部分应用: `add(3)(7) = 10` ✅
+- VM 部分应用: `add(3)(7) = 10` ✅
+- 构造器字段子模式: `Some(0)` 不匹配 `Some(42)` ✅
+- 参数过多校验: VM 和 Evaluator 均正确抛出 RuntimeError_ ✅
+
+---
+
 ## 2026-07-15 自动改进（第十五轮）
 
 基于 AUTO_REVIEW_LOG.md 第十三轮审查日志的 P0 级严重问题驱动改进（阶段一检查 + 阶段二开发 + 阶段三测试）。

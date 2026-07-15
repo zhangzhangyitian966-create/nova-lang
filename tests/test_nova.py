@@ -629,6 +629,46 @@ class TestEvaluator(unittest.TestCase):
         """, check_types=False)
         self.assertEqual(ev.env.lookup("result"), 15)
 
+    def test_partial_application_two_args(self):
+        """双参数函数部分应用：f(3) 返回闭包，再调用得结果"""
+        ev = eval_source("""
+            fn add(x: Int, y: Int) -> Int { x + y }
+            let add3 = add(3)
+            let result = add3(7)
+        """, check_types=False)
+        self.assertEqual(ev.env.lookup("result"), 10)
+
+    def test_partial_application_three_args_chain(self):
+        """三参数函数链式部分应用：f(1)(2)(3)"""
+        ev = eval_source("""
+            fn sum3(a: Int, b: Int, c: Int) -> Int { a + b + c }
+            let sum1 = sum3(1)
+            let sum12 = sum1(2)
+            let result = sum12(3)
+        """, check_types=False)
+        self.assertEqual(ev.env.lookup("result"), 6)
+
+    def test_partial_application_lambda(self):
+        """lambda 部分应用"""
+        ev = eval_source("""
+            let f = |x: Int, y: Int| -> Int { x * y }
+            let f4 = f(4)
+            let result = f4(5)
+        """, check_types=False)
+        self.assertEqual(ev.env.lookup("result"), 20)
+
+    def test_partial_application_with_closure_env(self):
+        """部分应用应正确捕获闭包环境中的变量"""
+        ev = eval_source("""
+            fn make_multiplier(factor: Int) -> (Int, Int) -> Int {
+              |x: Int, y: Int| -> Int { x * y * factor }
+            }
+            let mul_by_3 = make_multiplier(3)
+            let mul_by_3_then_5 = mul_by_3(5)
+            let result = mul_by_3_then_5(2)
+        """, check_types=False)
+        self.assertEqual(ev.env.lookup("result"), 30)
+
     def test_match_int(self):
         ev = eval_source("""
             let x = match 1 {
@@ -2139,6 +2179,53 @@ class TestBytecodeVM(unittest.TestCase):
         self.assertEqual(vm.get_global("b"), 3)
         self.assertEqual(vm.get_global("y"), 4)
 
+    def test_vm_match_constructor_field_subpattern_mismatch(self):
+        """构造器字段子模式不匹配：Some(0) 不应匹配 Some(42)"""
+        vm = self._vm_run("""
+            let result = match Some(42) {
+                Some(0)  -> "zero"
+                _        -> "other"
+            }
+        """)
+        self.assertEqual(vm.get_global("result"), "other")
+
+    def test_vm_match_constructor_field_subpattern_match(self):
+        """构造器字段子模式匹配：Some(42) 应匹配 Some(42)"""
+        vm = self._vm_run("""
+            let result = match Some(42) {
+                Some(42) -> "yes"
+                _        -> "no"
+            }
+        """)
+        self.assertEqual(vm.get_global("result"), "yes")
+
+    def test_vm_match_custom_adt_field_subpattern(self):
+        """自定义 ADT 构造器字段子模式匹配"""
+        vm = self._vm_run("""
+            type Shape { Circle(r: Float) | Rect(w: Float, h: Float) }
+            let s = Rect(3.0, 4.0)
+            let result = match s {
+                Rect(3.0, h) -> h * 10.0
+                Circle(r)    -> r
+                _            -> 0.0
+            }
+        """)
+        self.assertAlmostEqual(vm.get_global("result"), 40.0)
+
+    def test_vm_match_constructor_nested_field_subpattern(self):
+        """嵌套构造器字段子模式匹配：Some(Ok(42)) 匹配 Some(Ok(42))"""
+        vm = self._vm_run("""
+            type Result[T, E] { Ok(T) Err(E) }
+            let x = Some(Ok(42))
+            let result = match x {
+                Some(Ok(42)) -> "found"
+                Some(Err(_)) -> "error"
+                None         -> "none"
+                _            -> "other"
+            }
+        """)
+        self.assertEqual(vm.get_global("result"), "found")
+
     # ============================================================
     # 空循环测试
     # ============================================================
@@ -2459,6 +2546,81 @@ class TestBytecodeVM(unittest.TestCase):
         vm = NovaVM(bytecode)
         with self.assertRaises(RuntimeError_):
             vm.run()
+
+    def test_vm_closure_too_many_args(self):
+        """闭包调用时实参数量多于形参应抛出错误，而非静默丢弃多余参数"""
+        from nova.compiler import Bytecode, Op, FunctionBlock
+        from nova.vm import NovaVM, NovaClosure
+        bytecode = Bytecode()
+
+        # 构造一个接受 1 个参数的函数（直接返回该参数）
+        from nova.compiler import Instruction
+        func_code = [
+            Instruction(Op.LOAD_VAR, ("x",)),
+            Instruction(Op.RETURN, ()),
+        ]
+        func_block = FunctionBlock("test_fn", 1, func_code, [], param_names=["x"])
+        bytecode.functions["test_fn"] = func_block
+
+        # 主程序：创建闭包，然后用 3 个参数调用（应报错）
+        bytecode.emit_op(Op.CLOSURE, "test_fn", 1, "test_fn")
+        bytecode.emit_op(Op.CONST_INT, 10)
+        bytecode.emit_op(Op.CONST_INT, 20)
+        bytecode.emit_op(Op.CONST_INT, 30)
+        bytecode.emit_op(Op.CALL, 3)
+        bytecode.emit_op(Op.HALT)
+
+        vm = NovaVM(bytecode)
+        with self.assertRaises(RuntimeError_) as ctx:
+            vm.run()
+        self.assertIn("期望 1 个参数，但传入了 3 个", str(ctx.exception))
+
+    def test_vm_closure_partial_application(self):
+        """VM 闭包部分应用：参数不足时返回捕获已提供参数的新闭包"""
+        vm = self._vm_run("""
+            fn add(x: Int, y: Int) -> Int { x + y }
+            let add3 = add(3)
+            let result = add3(7)
+        """)
+        self.assertEqual(vm.get_global("result"), 10)  # 3 + 7 = 10
+
+    def test_vm_closure_partial_application_chain(self):
+        """VM 闭包链式部分应用：三参数函数链式部分应用"""
+        vm = self._vm_run("""
+            fn sum3(a: Int, b: Int, c: Int) -> Int { a + b + c }
+            let s1 = sum3(1)
+            let s2 = s1(2)
+            let result = s2(3)
+        """)
+        self.assertEqual(vm.get_global("result"), 6)  # 1 + 2 + 3 = 6
+
+    def test_vm_closure_pipe_call_too_many_args(self):
+        """管道调用闭包时实参数量过多也应抛出错误"""
+        from nova.compiler import Bytecode, Op, FunctionBlock
+        from nova.vm import NovaVM
+        bytecode = Bytecode()
+
+        # 构造一个接受 1 个参数的函数
+        from nova.compiler import Instruction
+        func_code = [
+            Instruction(Op.LOAD_VAR, ("x",)),
+            Instruction(Op.RETURN, ()),
+        ]
+        func_block = FunctionBlock("pipe_fn", 1, func_code, [], param_names=["x"])
+        bytecode.functions["pipe_fn"] = func_block
+
+        # 主程序：管道值 + 2 个额外参数 + 闭包，共 3 个实参调用 1 形参函数（应报错）
+        bytecode.emit_op(Op.CONST_INT, 100)   # pipe value
+        bytecode.emit_op(Op.CONST_INT, 10)    # extra arg 1
+        bytecode.emit_op(Op.CONST_INT, 20)    # extra arg 2
+        bytecode.emit_op(Op.CLOSURE, "pipe_fn", 1, "pipe_fn")
+        bytecode.emit_op(Op.PIPE_CALL, 2)     # 2 extra args + pipe value = 3 args
+        bytecode.emit_op(Op.HALT)
+
+        vm = NovaVM(bytecode)
+        with self.assertRaises(RuntimeError_) as ctx:
+            vm.run()
+        self.assertIn("期望 1 个参数，但传入了 3 个", str(ctx.exception))
 
 
 # ============================================================
