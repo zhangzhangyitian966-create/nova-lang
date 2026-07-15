@@ -1,7 +1,7 @@
 
 
 > **审查标准**：生产级编译器/语言标准（参考 OCaml/Haskell/Elm/F# 最佳实践）
-> **审查时间**：2026-07-14（第一轮）, 2026-07-15（第二轮~第十一轮）, 2026-07-15（第十二轮）, 2026-07-15（第十三轮）, 2026-07-15（第十四轮）, 2026-07-15（第十五轮）
+> **审查时间**：2026-07-14（第一轮）, 2026-07-15（第二轮~第十一轮）, 2026-07-15（第十二轮）, 2026-07-15（第十三轮）, 2026-07-15（第十四轮）, 2026-07-15（第十五轮）, 2026-07-15（第十六轮）
 > **审查版本**：main 分支最新提交
 
 ---
@@ -10,30 +10,30 @@
 
 | 模块 | 文件 | 审查状态 | 上次审查 | 严重问题数 | 中等问题数 | 轻微问题数 |
 |------|------|---------|---------|-----------|-----------|-----------|
-| VM 虚拟机 | `vm.py` | ✅ 已审查 | 2026-07-15(第十五轮) | 13 | 18 | 14 |
-| 编译器 | `compiler.py` | ✅ 已审查 | 2026-07-15(第十五轮) | 10 | 12 | 13 |
-| 求值器 | `evaluator.py` | ✅ 已审查 | 2026-07-15(第十五轮) | 10 | 17 | 15 |
+| VM 虚拟机 | `vm.py` | ✅ 已审查 | 2026-07-15(第十六轮) | 13 | 15 | 10 |
+| 编译器 | `compiler.py` | ✅ 已审查 | 2026-07-15(第十六轮) | 6 | 9 | 10 |
+| 求值器 | `evaluator.py` | ✅ 已审查 | 2026-07-15(第十六轮) | 6 | 8 | 10 |
 | AST 节点 | `ast_nodes.py` | ✅ 已审查 | 2026-07-15(第九轮) | 0 | 0 | 0 |
-| 类型检查器 | `type_checker.py` | ✅ 已审查 | 2026-07-15(第十五轮) | 14 | 18 | 15 |
-| 词法分析器 | `lexer.py` | ✅ 已审查 | 2026-07-15(第十五轮) | 4 | 11 | 22 |
-| 语法分析器 | `parser.py` | ✅ 已审查 | 2026-07-15(第十五轮) | 14 | 21 | 19 |
-| 错误处理 | `errors.py` | ✅ 已审查 | 2026-07-15(第十五轮) | 6 | 11 | 12 |
-| 模块系统 | `modules.py` | ✅ 已审查 | 2026-07-15(第十五轮) | 7 | 11 | 11 |
-| 环境 | `environment.py` | ✅ 已审查 | 2026-07-15(第十五轮) | 2 | 5 | 8 |
+| 类型检查器 | `type_checker.py` | ✅ 已审查 | 2026-07-15(第十六轮) | 8 | 10 | 9 |
+| 词法分析器 | `lexer.py` | ✅ 已审查 | 2026-07-15(第十六轮) | 1 | 5 | 8 |
+| 语法分析器 | `parser.py` | ✅ 已审查 | 2026-07-15(第十六轮) | 6 | 9 | 8 |
+| 错误处理 | `errors.py` | ✅ 已审查 | 2026-07-15(第十六轮) | 3 | 4 | 5 |
+| 模块系统 | `modules.py` | ✅ 已审查 | 2026-07-15(第十六轮) | 3 | 4 | 5 |
+| 环境 | `environment.py` | ✅ 已审查 | 2026-07-15(第十六轮) | 2 | 3 | 4 |
 | C 代码生成 | `c_codegen.py` | ✅ 已审查 | 2026-07-15(第十五轮) | 5 | 10 | 9 |
-| Native 后端 | `backend/native_backend.py` | ✅ 已审查 | 2026-07-15(第十五轮) | 10 | 10 | 9 |
-| Cranelift 后端 | `backend/cranelift_backend.py` | ✅ 已审查 | 2026-07-15(第十五轮) | 5 | 6 | 6 |
-| WASM 后端 | `backend/wasm_backend.py` | ✅ 已审查 | 2026-07-15(第十五轮) | 7 | 7 | 7 |
-| x86_64 指令发射 | `backend/x86_64.py` | ✅ 已审查 | 2026-07-15(第十五轮) | 2 | 2 | 5 |
-| 编译管道 | `backend/compiler_pipeline.py` | ✅ 已审查 | 2026-07-15(第十五轮) | 3 | 4 | 2 |
+| Native 后端 | `backend/native_backend.py` | ✅ 已审查 | 2026-07-15(第十六轮) | 4 | 3 | 3 |
+| Cranelift 后端 | `backend/cranelift_backend.py` | ✅ 已审查 | 2026-07-15(第十六轮) | 4 | 1 | 1 |
+| WASM 后端 | `backend/wasm_backend.py` | ✅ 已审查 | 2026-07-15(第十六轮) | 3 | 2 | 2 |
+| x86_64 指令发射 | `backend/x86_64.py` | ✅ 已审查 | 2026-07-15(第十六轮) | 2 | 1 | 0 |
+| 编译管道 | `backend/compiler_pipeline.py` | ✅ 已审查 | 2026-07-15(第十六轮) | 2 | 0 | 1 |
 | IR 节点 | `ir/ir_nodes.py` | ✅ 已审查 | 2026-07-15(第十五轮) | 0 | 2 | 5 |
 | HIR Lowering | `ir/hir_lowering.py` | ✅ 已审查 | 2026-07-15(第十五轮) | 1 | 5 | 7 |
-| MIR Lowering | `ir/mir_lowering.py` | ✅ 已审查 | 2026-07-15(第十五轮) | 10 | 9 | 8 |
-| LIR Lowering | `ir/lir_lowering.py` | ✅ 已审查 | 2026-07-15(第十五轮) | 10 | 11 | 8 |
-| Pass 管理器 | `ir/pass_manager.py` | ✅ 已审查 | 2026-07-15(第十五轮) | 6 | 12 | 11 |
-| C 运行时 | `runtime/nova_runtime.c` | ✅ 已审查 | 2026-07-15(第十五轮) | 11 | 15 | 13 |
-| 测试套件 | `tests/` | ✅ 已审查 | 2026-07-15(第十五轮) | 4 | 8 | 8 |
-| Tree-sitter | `tree-sitter-nova/` | ✅ 已审查 | 2026-07-15(第十五轮) | 5 | 5 | 7 |
+| MIR Lowering | `ir/mir_lowering.py` | ✅ 已审查 | 2026-07-15(第十六轮) | 6 | 5 | 4 |
+| LIR Lowering | `ir/lir_lowering.py` | ✅ 已审查 | 2026-07-15(第十六轮) | 5 | 4 | 3 |
+| Pass 管理器 | `ir/pass_manager.py` | ✅ 已审查 | 2026-07-15(第十六轮) | 2 | 4 | 4 |
+| C 运行时 | `runtime/nova_runtime.c` | ✅ 已审查 | 2026-07-15(第十六轮) | 9 | 6 | 5 |
+| 测试套件 | `tests/` | ✅ 已审查 | 2026-07-15(第十六轮) | 2 | 4 | 4 |
+| Tree-sitter | `tree-sitter-nova/` | ✅ 已审查 | 2026-07-15(第十六轮) | 2 | 0 | 0 |
 
 ---
 
@@ -8719,4 +8719,844 @@ C 运行时的内存管理设计是完全照搬基础引用计数模式，没有
 16. **长期：重写 IR 降级链，实现真正的 SSA + Phi 消除**
 17. **长期：实现真正的 GC 或循环引用检测**
 18. **长期：建立模块命名空间系统，摆脱 from module import * 模式**
+
+
+---
+
+## [2026-07-15] 第十六轮全面代码审查报告
+
+> **审查方法**：3 轮 × 3 并行 = 9 个 Explore 子代理，逐行审查全部源文件
+> **审查标准**：生产级编译器/语言标准（参考 OCaml/Haskell/Elm/F# 最佳实践）
+> **审查轮次**：第十六轮
+
+---
+
+### 第十六轮 P0 级问题完整追踪
+
+| # | 问题 | 模块 | 状态 |
+|---|------|------|------|
+| 1 | CLOSURE 捕获整个帧 | vm.py, compiler.py | 连续十六轮未修 |
+| 2 | TypeVar 万能兼容（_types_compatible） | type_checker.py | 连续十六轮未修 |
+| 3 | let 多态未实现 | type_checker.py | 连续十六轮未修 |
+| 4 | 无 occurs check / 无真正 unification | type_checker.py | 连续十六轮未修 |
+| 5 | `\|>` 优先级 parser.py vs grammar.js 矛盾 | parser.py, grammar.js | 连续十六轮未修 |
+| 6 | C 运行时 GC 空壳 | nova_runtime.c | 连续十六轮未修 |
+| 7 | MIR match 完全退化 | mir_lowering.py | 连续十六轮未修 |
+| 8 | LIR Branch/Switch/Match 退化 | lir_lowering.py | 连续十六轮未修 |
+| 9 | Evaluator 闭包引用捕获 vs VM 值快照 | evaluator.py vs vm.py | 连续十六轮未修 |
+| 10 | STORE_VAR 静默创建全局 | vm.py | 连续十六轮未修 |
+| 11 | 嵌套 PatternTuple/PatternList 子模式测试缺失 | compiler.py | 连续十六轮未修 |
+| 12 | Native 后端寄存器分配从未调用 | native_backend.py | 连续十六轮未修 |
+| 13 | Lambda 闭包自由变量丢失 | mir_lowering.py | 连续十六轮未修 |
+| 14 | 所有后端无端到端测试 | tests/ | 连续十六轮未修 |
+| 15 | 闭包语义 Evaluator vs VM 根本不一致 | evaluator.py vs vm.py | 持续性问题 |
+| 16 | 模块系统路径遍历安全漏洞 | modules.py | 连续十六轮未修 |
+| 17 | ListComprehension 降级为空列表 | mir_lowering.py | 连续十六轮未修 |
+| 18 | Pipe MIR 降级对未绑定函数名生成空 callee | mir_lowering.py | 连续十六轮未修 |
+| 19 | Cranelift 后端 SSA 值不传播 | cranelift_backend.py | 连续十六轮未修 |
+| 20 | WASM 后端 Block/Label/Jump 语义完全错误 | wasm_backend.py | 连续十六轮未修 |
+| 21 | match guard 位置 parser.py vs grammar.js 不一致 | parser.py, grammar.js | 连续十六轮未修 |
+| 22 | grammar.js 不支持 `?` | grammar.js | 连续十六轮未修 |
+| 23 | LIR Phi 只取第一个 source | lir_lowering.py | 连续十六轮未修 |
+| 24 | C 运行时引用计数不递归（list/map/ADT/closure） | nova_runtime.c | 连续十六轮未修 |
+| 25 | 算术运算 bool/int 不分 | vm.py, evaluator.py | **本轮新确认** |
+| 26 | MATCH_BIND 作用域污染（失败分支绑定残留） | vm.py | **本轮新确认** |
+| 27 | TRY_UNWRAP 仅检查 variant_name 不检查 type_name | vm.py, evaluator.py | **本轮新确认** |
+| 28 | BREAK 前向扫描脆弱设计 | vm.py | **本轮新确认** |
+| 29 | while 循环 CONTINUE 依赖 JUMP 启发式检测 | vm.py | **本轮新确认** |
+| 30 | 错误信息缺少文件名 | errors.py | **本轮新确认** |
+| 31 | caret 下划线 off-by-one 错误 | errors.py | **本轮新确认** |
+| 32 | AST 节点 span 信息不完整（仅起始位置） | parser.py | **本轮新确认** |
+| 33 | Parser 完全无语法错误恢复 | parser.py | **本轮新确认** |
+
+---
+
+## [2026-07-15] VM 虚拟机 (vm.py) 第十六轮审查报告
+
+### 总体评分
+| 维度 | 评分 | 说明 |
+|------|------|------|
+| 原创性 | ⭐⭐⭐ | PIPE_CALL 专用指令、MATCH_TEST_* 系列有特色 |
+| 可行性 | ⭐⭐⭐ | 核心路径可用；闭包全量捕获、STORE_VAR 全局泄漏影响表达力 |
+| 正确性 | ⭐⭐ | 闭包全量捕获、STORE_VAR 全局泄漏、bool/int 不分、MATCH_BIND 作用域污染 |
+| 安全性 | ⭐⭐⭐ | 栈下溢保护已到位（_pop），但 BUILD_MAP/FIELD_ACCESS 等仍有原生错误 |
+| 一致性 | ⭐⭐ | 与 Evaluator 在闭包语义、作用域、STORE_VAR、range步长等存在差异 |
+| 完整性 | ⭐⭐⭐⭐⭐ | 64 个操作码全部有处理路径，无遗漏 |
+| 工程质量 | ⭐⭐⭐ | 代码结构清晰，但 _execute_instruction 仍过长（~750行） |
+| 性能 | ⭐⭐⭐ | 闭包全量复制、dict 管理循环状态有开销 |
+
+### 发现的问题
+
+#### 严重问题（阻碍正常使用）
+
+- [vm.py:859-868] **CLOSURE 捕获整个帧 locals 而非仅自由变量** → 每次创建闭包 dict 浅拷贝所有局部变量，时间 O(n)，阻止 GC 回收不需要的大对象，可变对象在闭包间共享违反不可变性预期 → 编译器分析自由变量，CLOSURE 指令携带变量名列表，VM 仅拷贝指定变量
+  - 追问：如果 OCaml 的闭包捕获了整个作用域的 dict 拷贝，性能影响能被接受吗？→ **结论：绝对不能。** 内存使用可膨胀 10-100 倍，是函数式语言实现的核心正确性+性能问题。
+  - 历史状态：第 1 轮即发现，经 16 轮仍未修复。
+
+- [vm.py:592-605] **STORE_VAR 在函数体内对未定义变量静默创建全局** → 函数内打错变量名会静默创建/修改全局变量，违背静态作用域原则，与 Evaluator 的 Environment.assign() 语义不一致 → 在函数帧中，STORE_VAR 仅应修改已存在的局部变量；若变量不存在，应报错而非泄漏到全局
+  - 追问：如果 OCaml 中未声明变量可以赋值，能被接受吗？→ **结论：绝对不能。**
+
+- [vm.py:608-651] **算术运算不区分 bool 和 int** → Python 的 bool 是 int 子类，True + 1 = 2、False * 5 = 0 会静默通过，而比较运算明确区分了 bool 和非 bool，造成算术运算和比较运算的类型检查标准不一致 → 所有算术运算前检查 isinstance(val, bool)，若为 bool 则抛类型错误
+  - 追问：如果 Haskell 的 True + 1 能编译通过还返回 2，能被接受吗？→ **结论：绝对不能。** 类型系统的基本意义就是防止这种隐式转换。
+
+- [vm.py:1137-1145] **MATCH_BIND 失败分支的绑定残留于当前帧** → MATCH_BIND 直接写入 frame.locals，无回滚机制；模式匹配 arm1 部分匹配成功后子模式失败，跳转到 arm2 时，arm1 的绑定仍在局部变量表中，可能误读到前一个 arm 的绑定值 → MATCH_START 时保存当前局部变量快照，MATCH_END 或失败跳转时恢复到快照状态
+  - 追问：如果 Haskell 的 case 表达式中，失败分支的变量绑定会泄漏到下一个分支，能被接受吗？→ **结论：绝对不能。** 模式匹配的作用域隔离是基本语义保证。
+
+- [vm.py:1269-1283] **TRY_UNWRAP 仅检查 variant_name 不检查 type_name** → 任何 ADT 只要变体名是 "Some"/"None"/"Ok"/"Err" 就会被当作 Option/Result 处理，自定义 type Foo = Some(Int) | Bar(String) 的 Some(42) 会被错误解包 → 同时检查 val.type_name in ("Option", "Result")
+  - 追问：如果 Rust 的 ? 运算符对任何叫 Some 的枚举都起作用，能被接受吗？→ **结论：不能。** 类型安全是 Result/Option 模式的核心价值。
+
+- [vm.py:825-832] **BREAK 无操作数时的前向扫描脆弱且错误** → 向前扫描直到遇到 LOOP_END 或 CONST_UNIT 就停止，CONST_UNIT 极其常见，扫描极可能匹配到循环体内无关位置 → 删除前向扫描 fallback，BREAK 无操作数且不在循环中时直接报错
+  - 追问：如果 CPython 的 BREAK 指令找不到循环结尾就瞎跳一个最近的常量，能被接受吗？→ **结论：绝对不能。** 这是定时炸弹级别的设计。
+
+- [vm.py:743-746] **while 循环 CONTINUE 依赖 JUMP 指令启发式检测** → 用"JUMP 向前跳 + 下一条指令是 CONST_UNIT"来判断是否是 while 循环的回跳，极度脆弱，任何前向 JUMP 后恰好有 CONST_UNIT 的情况都会误触发 → 删除 JUMP 中的 while 循环检测逻辑，完全依赖编译器提供的显式操作数
+  - 追问：如果 JVM 的 GOTO 指令靠猜测下一条指令来维护循环状态，能被接受吗？→ **结论：绝对不能。** VM 执行应完全基于指令语义，而非启发式猜测。
+
+- [vm.py:913-923] **BUILD_MAP 非哈希键抛 Python 错误而非 Nova 错误** → 传入 list 等不可哈希类型作为键时，抛出 Python 原生 TypeError 而非 RuntimeError_，错误信息和类型都不符合 Nova 语言的错误规范 → 用 try/except 包装键赋值，转换为 RuntimeError_
+
+- [vm.py:943-944] **FIELD_ACCESS 元组索引越界/非整数时崩溃** → 元组索引越界 → Python IndexError，field 不是数字字符串 → Python ValueError；对比 INDEX 指令有完整的 try/except 错误处理，FIELD_ACCESS 明显遗漏 → 添加 try/except 捕获 IndexError/ValueError，转换为 RuntimeError_
+
+- [vm.py:358-363] **内置函数无超额参数检查** → 所有 arity > 0 的内置函数都可以传入任意多的参数，多余参数被 Python *args 静默忽略，例如 print(1, 2, 3) 只打印 1 → 添加 if fn.arity > 0 and len(args) > fn.arity 检查
+  - 追问：如果 Haskell 的内置函数传多了参数不报错而是静默丢弃，能被接受吗？→ **结论：不能。** 参数数量不匹配是基本的调用约定错误。
+
+- [vm.py:993] **FOR_ITER range 步长为 0 时与 Evaluator 语义不一致** → VM 中 step == 0 时直接退出（返回空列表），而 Evaluator 报错 "range 步长不能为 0" → VM 应在 step == 0 时抛错，与 Evaluator 对齐
+
+- [vm.py:163-170] **迭代状态异常退出时 _for_iters/_while_loops 不清理** → for 循环体中发生 RuntimeError_ 异常时，_for_iters 栈顶条目、_range_index/_list_index 对应条目不会被清理，异常被外部捕获后继续使用 VM 时循环状态被污染 → FOR_ITER 注册的循环状态应与当前帧关联，帧弹出时清理
+  - 追问：如果 JVM 异常退出后局部变量表不清理，导致下次方法调用看到旧值，能被接受吗？→ **结论：不能。** 这是基本的执行隔离要求。
+
+- [vm.py:572-576] **LOAD_CONST 无边界检查** → 索引越界时抛 Python IndexError 而非 Nova 运行时错误 → 添加边界检查
+
+#### 中等问题（影响特定场景）
+
+- [vm.py:467-471] **RETURN 在 _execute_function 和 _execute_instruction 中重复处理** → 两套逻辑一套死码一套活码，维护成本高
+- [vm.py:134,140,436] **Frame.ip 死字段** → 设置但从未读取
+- [vm.py:713-728] **AND/OR 操作码死代码** → 编译器用 DUP + JUMP 实现短路，从不生成 AND/OR 操作码；VM 中的实现是非短路版本，若未来被误启用会导致严重语义错误
+- [vm.py:239-257] **内置函数缺少类型检查** → filter/map/head/tail/str_len/list_length 等无参数类型校验
+- [vm.py:653-660] **CONCAT 仅支持字符串，不支持列表拼接**
+- [vm.py:974-1059] **FOR_ITER 仅支持 range 和 list，不支持 string/tuple 迭代**
+- [vm.py:541-1294] **_execute_instruction 方法过长（约 750 行 if-elif 链）** → 可读性差、维护成本高
+- [vm.py:181] **read_line 与 Evaluator 不一致，无 EOF 处理** → VM 用 lambda 带死代码，input() 遇 EOF 抛 EOFError 未被捕获
+- [vm.py:1062-1065,1199-1202] **MATCH_START/MATCH_END 是空操作** → 标记指令无实际功能
+- [vm.py:204-218] **数学函数非数值参数抛 Python 错误** → 应转换为 Nova RuntimeError_
+- [vm.py:220-223] **_to_float 命名误导** → 实际是 int_to_float，非通用转换
+- [vm.py:100-109] **NovaPartialBuiltin 与 BuiltinFn 部分应用不一致** → 两套部分应用机制，代码重复
+
+#### 轻微问题（代码质量）
+
+- [vm.py:30-46] **UNIT 单例类与 Evaluator 不同（UNIT_TYPE vs _UnitValue）**
+- [vm.py:65-69] **NovaADTValue.__eq__ 不比较 field_names**
+- [vm.py:330] **json_stringify dict 键强制转 str**
+- [vm.py:632] **DIV 整数除法用 floor 除法，负数行为与 C 风格不同** → 需明确文档化
+- [vm.py:1285-1289] **LOOP 指令功能与 JUMP 完全相同**
+- [vm.py:156,178-218] **globals 字典包含内置函数，与用户定义的全局变量混在一起**
+
+#### 原创性分析
+
+**Nova 特色**：
+1. PIPE_CALL 专用管道指令——为管道操作定制的指令，管道值作为最后一个参数传入函数
+2. MATCH_START/MATCH_END 标记指令——为模式匹配提供显式边界标记（当前是空操作，但设计意图好）
+3. TRY_UNWRAP 统一 Option/Result 解包——用单条指令同时处理 Option 和 Result 的 ? 运算符语义
+4. ADT 原生指令集——MAKE_ADT/REGISTER_CTOR/MATCH_CONSTRUCTOR 将代数数据类型操作内建为 VM 原语
+5. FOR_ITER + LOOP_END 双指令循环——迭代器状态在 VM 内部维护
+
+**参考已有**：基本栈机架构参考 CPython/JVM，闭包+调用帧模型是标准函数式语言实现方式。
+
+#### Evaluator vs VM 对比表
+| 行为 | Evaluator | VM | 是否一致 |
+|------|-----------|-----|---------|
+| 闭包捕获机制 | Environment 引用链（引用语义） | dict 浅拷贝（值语义） | ❌ 不一致 |
+| 闭包捕获范围 | 整个环境链（所有父作用域） | 仅当前帧 locals | ❌ 不一致 |
+| 递归深度保护 | _call_depth + MAX_CALL_DEPTH | call_stack 长度检查 | ✅ 一致 |
+| read_line EOF 处理 | 有 try/except EOFError → "" | 无处理 → 抛 Python 错误 | ❌ 不一致 |
+| range 步长为 0 | 报错 "步长不能为 0" | 静默返回空列表 | ❌ 不一致 |
+| 赋值语义 | 沿作用域链向上找可变绑定 | 仅当前帧或直接写全局 | ❌ 不一致（严重） |
+| 模式匹配作用域 | 每个 arm 新 child_env，失败不污染 | 失败分支 bindings 残留 | ❌ 不一致（严重） |
+| bool 参与算术运算 | 未检查（True+1=2） | 未检查（True+1=2） | ✅ 都错 |
+| TRY_UNWRAP 类型检查 | 仅 variant_name | 仅 variant_name | ✅ 都错 |
+| for 循环可迭代类型 | 依赖 items = eval(iterable) | 仅 range 和 list | ❌ 不一致 |
+| 基本算术运算 | 正确 | 正确 | ✅ 一致 |
+| ADT 构造/解构 | 正确 | 正确 | ✅ 一致 |
+| 管道操作 | 正确（最后参数） | 正确（最后参数） | ✅ 一致 |
+| Unit 值 bool 语义 | __bool__ = False | __bool__ = False | ✅ 已修复 |
+
+
+---
+
+## [2026-07-15] 编译器 (compiler.py) 第十六轮审查报告
+
+### 总体评分
+| 维度 | 评分 | 说明 |
+|------|------|------|
+| 原创性 | ⭐⭐⭐⭐ | PIPE_CALL 专用指令、MATCH_START/END 标记、ADT 原生指令 |
+| 可行性 | ⭐⭐⭐⭐ | 编译器-VM 协作清晰，能正确执行大部分程序 |
+| 正确性 | ⭐⭐⭐ | 嵌套模式匹配是严重 bug；闭包全量捕获；Import 冲突检测不全 |
+| 安全性 | ⭐⭐⭐ | 栈溢出保护有，但无运行时类型安全检查 |
+| 一致性 | ⭐⭐⭐⭐ | 栈布局编译器与 VM 基本一致；短路求值正确 |
+| 完整性 | ⭐⭐⭐⭐ | AST 覆盖完整；所有指令有 VM 处理 |
+| 工程质量 | ⭐⭐⭐ | 存在死代码（旧方法、AND/OR 指令）、无意义 if/else |
+| 性能 | ⭐⭐⭐ | 闭包全量复制、循环状态用 dict |
+
+### 发现的问题
+
+#### 严重问题（阻碍正常使用）
+
+- [compiler.py:836-861] **嵌套构造器/元组/列表模式的子模式测试栈错位** → _compile_pattern_test_with_fail 处理多元素模式时，按正序递归处理子模式，但 VM 压栈顺序是 reversed 的，导致子模式测试的是错位的元素 → 递归处理子模式时按 reversed 顺序遍历，与 VM 压栈顺序一致
+  - 追问：如果 Haskell GHC 编译器跳过嵌套 Pattern 的测试代码生成，能被接受吗？→ **结论：绝对不能。** 模式匹配是函数式语言核心特性，嵌套模式错位是 P0 级缺陷。
+
+- [compiler.py:866-904] **模式匹配 extract_and_bind 同样存在子模式顺序错位** → 与上面同源，按正序递归处理子模式，但 VM 压栈顺序是 reversed 的，导致绑定到错误的值 → 子模式递归以 reversed 顺序遍历
+  - 追问：如果 OCaml 的模式匹配变量绑定错位，能被接受吗？→ **结论：绝对不能。** 这是模式匹配的基本正确性问题。
+
+- [compiler.py:402,682] **闭包全量捕获当前帧所有局部变量** → CLOSURE 指令不含捕获列表，由 VM 在运行时全量捕获；空间浪费严重，意外保留引用，语义不精确 → 编译器实现自由变量分析，通过 CLOSURE 指令传递精确的捕获列表
+  - 追问：如果 OCaml 的闭包捕获了整个作用域的所有变量，能被接受吗？→ **结论：不能。** 闭包转换是编译流程核心 pass，精确计算自由变量是基本要求。
+
+- [compiler.py:362-368] **Import 内联的名称冲突检测不完整** → 只检查 functions 和 _builtin_names，不检查已编译的 LetBinding/MutBinding 和 ADT 构造器；导入的模块可以静默覆盖当前模块中已有的 let/mut 绑定 → 维护统一的"已定义名称"集合，import 内联时检查所有声明类型的名称冲突
+  - 追问：生产级编译器的模块系统名称冲突检测如此不完整，能被接受吗？→ **结论：不能。** OCaml 的模块系统会对所有名称做冲突检查。
+
+- [compiler.py:1017,1034] **FOR_ITER 回填方式错误——使用 patch_jump 回填单操作数** → patch_jump 将整条指令替换为单操作数指令，与 FOR_ITER 语义完全不同（FOR_ITER 是"迭代一步，耗尽则跳"），当前能工作只是因为 FOR_ITER 恰好只有一个操作数 → 增加专用的 patch_for_iter_fail 方法
+  - 追问：成熟编译器中这种"碰巧能用"的设计能被接受吗？→ **结论：不能。** 指令回填必须按指令类型精确处理，不能依赖操作数数量巧合。
+
+- [compiler.py:770-777] **_compile_match 中 fail_cleanup_pos 的计算依赖 next_arm_start** → 变量名与其值的语义不一致，代码结构让人困惑，容易引入 bug → 拆分变量，用 fail_cleanup_pos 和 next_arm_pos 两个独立变量
+
+#### 中等问题（影响特定场景）
+
+- [compiler.py:906-970] **_compile_pattern_test 和 _compile_pattern_bindings 是死代码** → 从未被调用，增加维护成本
+- [compiler.py:420-421] **CharLiteral 编译为 CONST_STRING** → 运行时无法区分单字符字符串和 char 值
+- [compiler.py:535-557] **BinaryOp 中 &&/|| 栈注释与实际行为有微妙差异** → false 分支栈上保留的是 left 值而不是"结果值"
+- [compiler.py:597-602] **管道表达式中 builtin 与普通函数的处理完全相同** → 两个分支代码完全一样，失去了 CALL_BUILTIN 的优化机会
+- [compiler.py:431-434] **Identifier("None") 特殊处理会与变量名冲突** → None 被硬编码为 ADT 构造器，用户无法定义名为 None 的变量
+- [compiler.py:491-495] **while 循环的 BREAK 操作数使用 patch_jump** → 与 FOR_ITER 同样的"巧合能工作"问题
+- [compiler.py:1020,1108] **for 循环中循环变量被标记为 mutable** → 函数式语言中 for 循环的每次迭代应当创建新的绑定，而非修改同一个可变变量
+- [compiler.py:304-307] **顶层表达式声明会 POP 掉值** → 没有 main 函数的脚本，最后一个表达式的值被丢弃，与大多数脚本语言直觉不符
+
+#### 轻微问题（代码质量）
+
+- [compiler.py:168-177] **add_const 使用 list.index() 做去重，时间复杂度 O(n)**
+- [compiler.py:48] **LOAD_CONST 操作码定义了但从未使用**
+- [compiler.py:66-67] **Op.AND / Op.OR 指令是死代码**
+- [compiler.py:882-946] **旧版模式匹配方法从未被调用**
+- [compiler.py:924-939] **列表推导式 filter_cond 被完全忽略** → 历史问题，已确认 16 轮未修
+- [compiler.py:80 vs 375] **CLOSURE 指令的 code_key 操作数定义但未使用**
+- [compiler.py:607-608] **pipe_call 的栈布局与注释不一致**
+- [compiler.py:844-849] **Block 中 BreakExpr/ContinueExpr 后多余的 POP 导致栈错位** → 历史问题
+
+#### 原创性分析
+
+**Nova 特色**：
+1. MATCH_* 系列指令的"测试即弹出"设计——将模式匹配的"测试"和"解构"合并到一条指令中
+2. FOR_ITER + LOOP_END 的循环抽象——将 for 循环的迭代控制和结果收集封装为两条指令
+3. TRY_UNWRAP 的早期返回机制——`?` 操作符直接通过 VM 层面的早期返回实现
+4. PIPE_CALL 指令——将管道操作直接编码为字节码指令
+5. 全量捕获闭包——简单但低效，在现代函数式语言编译器中很少见
+
+**参考已有**：基本栈机结构参考 CPython/JVM；跳转回填参考标准编译器教材。
+
+---
+
+## [2026-07-15] 求值器 (evaluator.py) 第十六轮审查报告
+
+### 总体评分
+| 维度 | 评分 | 说明 |
+|------|------|------|
+| 原创性 | ⭐⭐⭐⭐⭐ | 完整的函数式语言解释器，支持闭包/ADT/模式匹配/管道/柯里化 |
+| 可行性 | ⭐⭐⭐⭐ | 核心功能完整可用 |
+| 正确性 | ⭐⭐⭐ | 闭包语义与 VM 根本不一致，短路运算无类型检查，算术运算无类型检查 |
+| 安全性 | ⭐⭐⭐⭐ | 递归深度保护到位，但算术运算类型安全缺失 |
+| 一致性 | ⭐⭐ | 与 VM 在闭包、作用域、STORE_VAR、比较运算等多处不一致 |
+| 完整性 | ⭐⭐⭐⭐⭐ | AST 覆盖 100%，模式匹配覆盖所有类型+嵌套+守卫 |
+| 工程质量 | ⭐⭐⭐ | eval_decl 重复代码、self.env 切换模式脆弱 |
+| 性能 | ⭐⭐⭐ | Python 解释器性能受限 |
+
+### 发现的问题
+
+#### 严重问题（阻碍正常使用）
+
+- [evaluator.py:49,735-740,502-508] **闭包引用捕获 vs VM 值快照不一致** → Evaluator 的 NovaClosure 捕获 Environment 对象引用（引用语义），VM 的 NovaClosure.captured_vars 是 dict 值快照（值语义）；同一程序在 Evaluator 和 VM 下行为不一致 → 统一闭包模型，要么都用引用语义（实现 upvalue 机制），要么都用值快照
+  - 追问：如果 GHC 的两个执行后端语义不一致，能被接受吗？→ **结论：绝对不能。** 闭包语义是函数式语言的核心，属于 P0 级缺陷。
+
+- [evaluator.py:872-882] **短路逻辑运算 &&/|| 不做类型检查** → 直接用 if not left: 判断，没有检查 left 是否为 bool 类型；Python 中 0、""、[]、None 都是 falsy，会被当作 false 处理 → 在短路求值前添加 isinstance(left, bool) 检查，与 if/while 保持一致
+  - 追问：如果是成熟语言的解释器，逻辑运算符不检查类型能被接受吗？→ **结论：不能。** ML 家族语言的逻辑运算符严格要求 Bool 类型。
+
+- [evaluator.py:887-900] **算术运算完全无类型检查** → +、-、*、/、% 等直接委托给 Python 运算符，没有类型检查；True + 1 → 2，"hello" * 3 → "hellohellohello" → 对所有算术运算符添加类型检查，确保操作数类型匹配
+  - 追问：如果 OCaml 的解释器允许 True + 1 还返回 2，能被接受吗？→ **结论：绝对不能。** 类型安全的基本防线。
+
+- [evaluator.py:716-725] **TryExpr (? 操作符) 在非函数上下文中使用会用 ReturnSignal 炸出顶层** → TryExpr 抛出 ReturnSignal(val)，依赖 _call_fn 捕获；但如果 ? 出现在顶层代码或循环体内但不在函数中，ReturnSignal 不会被捕获，直接导致程序崩溃 → 在 eval_program 或 eval_expr 顶层入口处捕获 ReturnSignal，给出明确的错误信息
+
+- [evaluator.py:942,995] **ForExpr 和 ListComprehension 中 iterable 用 tuple hack 表示范围** → expr.iterable 应该是 AST 节点，但范围形式被构造成 tuple ("range", start, end, step) 而非 proper AST 节点，破坏了类型安全性和可维护性 → 定义 proper 的 AST 节点（如 RangeExpr）来表示范围
+
+- [evaluator.py:975-990] **while 循环体不创建子作用域，变量泄漏到外部** → 直接在当前环境中求值循环体 body，没有创建子作用域；body 中的 let/mut 可能泄漏到外部 → 无论 body 是否为 Block，循环结构本身应保证一致的作用域语义
+
+#### 中等问题（影响特定场景）
+
+- [evaluator.py:571-626] **eval_decl 与 _collect_decl + _eval_decl_body 代码重复**
+- [evaluator.py:208] **_builtin_filter 用 is True 严格判断谓词返回值** → 谓词返回非布尔值时静默当作 false 过滤掉，而不是报错
+- [evaluator.py:851-864] **IndexExpr 对字符串索引行为不一致** → Python 字符串索引返回长度为 1 的字符串，而 Nova 应该有 Char 类型
+- [evaluator.py:833-847] **FieldAccess 对 ADT 值同时支持索引访问和名称访问，优先级不清** → 先尝试 int(expr.field) 做索引访问，失败则按名称访问，字段名叫 "0" 时永远无法通过名称访问
+- [evaluator.py:797-798] **MapExpr 的键直接用 Python 值作 dict key，不支持不可哈希类型**
+- [evaluator.py:443-447] **递归深度检查只在 _call_fn 中，非函数递归无保护**
+- [evaluator.py:287-290] **JSON 对象转换为 Python dict，但键类型是 Python 字符串而非 Nova String 值**
+- [evaluator.py:337-338] **BreakSignal 携带 value 但 Evaluator 未使用**
+
+#### 轻微问题（代码质量）
+
+- [evaluator.py:106] **UNIT_VALUE 与 VM 的 UNIT 命名不一致**
+- [evaluator.py:59-82] **NovaADTValue 在 evaluator 和 vm 中重复定义**
+- [evaluator.py:671-867] **eval_expr 是超长 if-elif 链，无结构化分发**
+- [evaluator.py:384-404] **_format_value 对 dict 类型无格式化处理**
+- [evaluator.py:219-227] **_builtin_head/_builtin_tail 中 None variant 的 field_names 不一致**
+- [evaluator.py:214-215] **_builtin_sum 对空列表返回 0（int），但列表元素可能是 float**
+- [evaluator.py:335-378] **数学内置函数返回 float 即使输入是 int**
+- [evaluator.py:684-685] **CharLiteral 求值为 Python str，与 String 类型无法区分**
+
+#### 原创性分析
+
+**亮点**：
+1. 两遍扫描的程序求值——正确支持了前向引用和相互递归的函数定义
+2. 模式匹配实现完整——支持所有 10 种 Pattern 类型，嵌套模式递归匹配正确，守卫条件有独立作用域
+3. 部分应用/柯里化——_call_fn 中对参数不足的情况正确返回新闭包
+4. 比较运算类型安全——==/!= 对 bool 和非 bool 做了隔离，</> 等对跨类型比较抛错
+
+**不足**：类型安全不彻底（算术运算完全依赖 Python）、闭包语义与 VM 不一致、AST 设计不纯。
+
+
+---
+
+## [2026-07-15] 类型检查器 (type_checker.py) 第十六轮审查报告
+
+### 总体评分
+| 维度 | 评分 | 说明 |
+|------|------|------|
+| 类型系统正确性 | ⭐⭐ | TypeVar 万能兼容导致核心 soundness 崩坏，无真正 unification |
+| 类型推断能力 | ⭐⭐ | 非 Algorithm W，是"带通配符的类型检查"，推断能力极弱 |
+| 模式匹配检查 | ⭐⭐⭐ | 所有 Pattern 类型有覆盖，但构造器模式缺少主题类型校验 |
+| 错误恢复能力 | ⭐⭐⭐ | ErrorCollector 框架存在，但部分路径绕过 |
+| 泛型支持 | ⭐⭐⭐ | ADT 类型参数比较正确，但函数级泛型依赖 TypeVar 通配符机制 |
+| 递归类型处理 | ⭐⭐ | 无专门处理，靠结构比较侥幸工作 |
+| 代码质量与架构 | ⭐⭐⭐ | 结构清晰，两遍扫描设计合理，但核心算法有根本缺陷 |
+
+### 发现的问题
+
+#### 严重问题（阻碍正常使用）
+
+- [type_checker.py:1325] **TypeVar 万能兼容——类型系统 soundness 核心崩坏** → `if isinstance(a, TypeVar) or isinstance(b, TypeVar): return True` 使任何包含 TypeVar 的类型比较都返回 True；未标注类型的函数参数可以接受任意类型的实参，类型检查形同虚设 → 实现真正的合一算法，用 union-find 管理类型变量等价类
+  - 追问：如果是 OCaml/Haskell/GHC 的类型检查器，这个 bug 能被接受吗？→ **结论：绝对不能。** 这相当于把类型系统降级为"有标注才检查，没标注就全放过"的可选类型系统。
+
+- [type_checker.py:1195-1215] **无真正的合一（Unification）算法** → _collect_type_bindings 是单向模式匹配（actual → expected），不是双向合一；无法处理两侧都是 TypeVar 的情况，也无法处理 actual 含 TypeVar 但 expected 是具体类型的情况 → 实现基于 union-find 的高效合一算法，支持 occurs check、递归类型检测
+  - 追问：成熟语言的类型检查器能没有真正的合一算法吗？→ **结论：不能。** 合一（unification）是 HM 类型推断的基石。
+
+- [type_checker.py:779-789] **无 let 多态（Let-Polymorphism）** → let 绑定直接将推断类型存入环境，没有泛化（generalization）步骤；let id = fun x -> x in id 1 + id "a" 之所以能通过，是因为 TypeVar 是万能兼容的，而非 id 被泛化为 forall a. a -> a → 引入类型方案（type scheme）概念 Forall [vars] ty，let 绑定时泛化自由变量，使用时实例化新鲜副本
+  - 追问：没有 let 多态能叫 HM 类型系统吗？→ **结论：不能。** let-polymorphism 是 Hindley-Milner 的定义性特征之一。
+
+- [type_checker.py 全文] **无 Occurs Check — 潜在无限类型风险** → 整个文件无 occurs check 实现；虽然当前由于 TypeVar 是通配符不会产生无限类型，但一旦修复合一算法，缺少 occurs check 会导致类型检查器可能因用户输入而挂起或崩溃 → 在合一算法中添加 occurs check，检测类型变量是否出现在待合一的类型中
+  - 追问：生产级类型检查器能没有 occurs check 吗？→ **结论：绝对不能。** 这是 Robinson 合一算法的标准组成部分。
+
+- [type_checker.py:543-563] **函数返回类型推断后不更新环境** → _check_decl_body 中检查 FnDef 函数体后，仅在有 return_type 标注时报错比较，但从不更新环境中函数的返回类型；所有未标注返回类型的函数，其返回值在类型系统中等同于 dyn → 函数体检查完成后，用推断出的 body_type 与函数签名中的返回类型进行合一
+
+- [type_checker.py:740-750] **函数调用 TypeVar 类型值直接放行的 duck typing** → 当被调用者类型是 TypeVar 时，直接允许调用，不做任何检查，返回一个新的 TypeVar；完全破坏了类型安全 → 如果 callee 类型是 TypeVar 且无法确定是函数类型，报告类型错误并返回 ERROR_TYPE
+  - 追问：生产级静态类型系统能允许对未知类型的值随意调用吗？→ **结论：不能。**
+
+- [type_checker.py:1043-1076] **PatternConstructor 不校验主题类型是否为对应 ADT** → 在 _check_pattern 中，PatternInt/PatternFloat 等都检查了主题类型兼容，但 PatternConstructor 完全没有检查主题类型是否是对应的 ADT；对一个 Int 类型的值做 match x { Some(y) -> ... } 不会报错 → 在 PatternConstructor 分支开头，验证 subject_type 是对应 ADT 类型
+
+- [type_checker.py:953,981] **for 循环/列表推导的循环变量是万能 TypeVar** → 循环变量的类型被设为 TypeVar，而不是从可迭代对象推断；for x in [1, 2, 3] { x ++ "hello" } 会通过类型检查 → 从 iterable 类型（ListType 的 elem_type，或 range 情况的 INT_T）推断循环变量类型
+
+#### 中等问题（影响特定场景）
+
+- [type_checker.py:755-770] **PipeExpr 类型检查完全是启发式的** → 既不绑定也不校验，只要一个兼容就通过
+- [type_checker.py:791-794] **MutBinding 表达式内不检查类型注解** → LetBinding 有类型注解检查，但 MutBinding 没有
+- [type_checker.py:744-749] **TypeVar 函数调用错误绕过 _report_error** → 直接调用 error_collector.add() 而非 _report_error()，行为不一致
+- [type_checker.py:350] **json_parse 返回 TypeVar——本质上是动态类型逃逸口**
+- [type_checker.py:613,631-632] **空列表/空 Map 的元素类型是 TypeVar 通配符**
+- [type_checker.py:925-937] **TryExpr（? 操作符）不校验上下文类型**
+- [type_checker.py:445-450] **顶层 let/mut 绑定两遍扫描的类型占位问题**
+- [type_checker.py:677-689] **MatchExpr 无穷尽性检查**
+- [type_checker.py 全文] **无冗余/不可达模式检查**
+- [type_checker.py:1101-1110] **二元操作符不支持隐式 Int→Float 转换**
+
+#### 轻微问题（代码质量）
+
+- [type_checker.py:169-174] **TypeVar._counter 是全局类变量，跨实例共享**
+- [type_checker.py:1144-1149] **逻辑操作符错误消息硬编码为 '&&'**
+- [type_checker.py:1301-1319] **_expand_alias 不展开别名内部的 TypeIdentifier 引用**
+- [type_checker.py:431] **ADT 构造函数字段名在比较时被忽略**
+- [type_checker.py:891-892] **FieldAccess 对非元组/ADT 类型不检查是否有 TypeVar**
+
+#### 原创性分析
+
+**架构设计（有一定思考）**：两遍扫描支持前向引用和相互递归，ErrorType 单例模式，TypeEnv 父子环境链，ADT 变体信息与类型参数分离存储。
+
+**核心算法（无原创性，且有根本缺陷）**：声称实现"简化的 Hindley-Milner"，但缺少 HM 的三大支柱：合一（unification）、泛化（generalization）、实例化（instantiation）。TypeVar 被当作万能通配符使用，这不是"简化"而是"错误"。
+
+**历史问题修复评估**：
+- ✅ ADTType.__eq__ 比较类型参数：已修复
+- ❌ TypeVar 万能兼容：仍然存在
+- ❌ let 多态未实现：仍然存在
+- ❌ 无真正 unification：仍然存在
+- ❌ 无 occurs check：仍然存在
+
+---
+
+## [2026-07-15] 词法/语法分析器 (lexer.py + parser.py) 第十六轮审查报告
+
+### 总体评分
+| 维度 | 评分 | 说明 |
+|------|------|------|
+| Token 覆盖完整性 | ⭐⭐⭐⭐ | 基本覆盖所有语法元素，但有死代码 token |
+| 词法错误恢复 | ⭐⭐⭐ | 有基本恢复，但错误非结构化，且不影响解析流程 |
+| 语法错误恢复 | ⭐ | 完全没有错误恢复，遇错即停 |
+| 运算符优先级正确性 | ⭐⭐ | 管道操作符优先级与 grammar.js 严重不一致 |
+| 结合性正确性 | ⭐⭐⭐⭐ | 大部分运算符结合性正确 |
+| 语法歧义处理 | ⭐⭐⭐ | if-then-else 无悬挂歧义，但 match 分支隐式分隔有风险 |
+| 错误位置准确性 | ⭐ | 绝大多数 AST 节点 span 仅含起始 token，非完整范围 |
+
+### 发现的问题
+
+#### 严重问题（阻碍正常使用）
+
+- [parser.py:672-678] **管道操作符优先级严重错误** → _parse_comparison_expr 调用 _parse_pipe 获取操作数，意味着管道操作符优先级高于比较操作符；与 grammar.js 定义完全矛盾，与函数式语言的常规直觉相悖 → 调整优先级链，将 _parse_pipe 放在 _parse_or_expr 之下（最低优先级之一）
+  - 追问：如果是 GCC/Clang 的前端，运算符优先级不一致的 bug 能被接受吗？→ **结论：绝对不能。** 优先级错误会导致用户代码被静默地错误解析，是编译器前端最严重的错误类别之一。
+
+- [parser.py:534-536] vs [grammar.js:402] **match arm guard 位置语法不一致** → parser.py: pattern if cond -> body（guard 在 -> 之前）；grammar.js: pattern -> body if cond（guard 在 -> 之后）；两种语法完全不兼容 → 明确规范，统一两者。建议 guard 在 -> 之前（parser.py 的方式）
+  - 追问：如果是 GCC/Clang 的前端，语法定义不一致能被接受吗？→ **结论：绝对不能。** 语法定义的不一致意味着语言规范本身不明确。
+
+- [parser.py 全局] **AST 节点位置信息严重不完整** → 几乎所有 AST 节点的 span 都只包含起始关键字或操作符的位置，而非整个表达式/语句的完整范围；FnCall 的 span 只是右括号位置，BinaryOp 的 span 只是操作符位置 → 为每个 AST 节点计算完整的 span，从第一个 token 的起始位置到最后一个 token 的结束位置
+  - 追问：如果是 GCC/Clang 的前端，AST 节点位置信息不准确能被接受吗？→ **结论：绝对不能。** 位置信息不准确会严重影响诊断质量，是生产级编译器的硬性要求。
+
+- [parser.py 全局] **Parser 完全没有语法错误恢复** → 解析器遇到第一个语法错误就抛出 ParseError 并终止，没有任何错误恢复机制 → 实现基本的 panic mode 错误恢复，在同步 token（如 ;、}、换行后的关键字）处重新同步解析流程
+  - 追问：如果是 GCC/Clang 的前端，完全没有错误恢复能被接受吗？→ **结论：不能。** 现代编译器前端的基本要求就是"遇错不止"。
+
+- [lexer.py:254-267,454-458] **词法错误不影响解析流程** → 词法错误只存储在 self.errors 中并打印到 stderr，但解析器从不检查 lexer 是否有错误，直接继续解析；错误是字符串而非结构化对象 → 使用 ErrorCollector 统一收集词法错误，错误应为 LexerError 对象而非字符串
+
+- [grammar.js:466-470] vs [parser.py:386-391] **赋值表达式设计不一致** → grammar.js 中 assignment_expr 是一个表达式，优先级最低；parser.py 中赋值只在 _parse_block 中通过前瞻检测特殊处理，不是真正的表达式 → 明确设计决策，统一两者
+
+#### 中等问题（影响特定场景）
+
+- [lexer.py:91, parser.py:804-806] **UNIT token 是死代码**
+- [lexer.py:88] **PIPE_VARIANT token 是死代码**
+- [lexer.py:13,155-160] **_make_error 方法和 LexerError import 是死代码**
+- [parser.py:764-767] **? 操作符不支持链式** → 在 postfix 循环之外单独处理一次
+- [parser.py:464-466] **<- 左箭头没有专用 token** → LT + MINUS 手动组合
+- [lexer.py, grammar.js] **缺少块注释支持** → 无 /* */
+- [lexer.py:202-221] **数字字面量功能不足** → 缺科学计数法、十六进制、八进制、二进制、数字分隔符
+- [lexer.py:240-251] **字符串转义序列不完整** → 缺 \0、\xNN、\u{NNNN}、无效转义错误处理
+- [parser.py:522] **match 分支隐式分隔可能导致错误恢复差**
+- [parser.py:463,474] **ForExpr.iterable 类型不一致** → 有时是表达式，有时是 tuple
+
+#### 轻微问题（代码质量）
+
+- [lexer.py:168-173] **_peek_ahead 参数命名误导**
+- [parser.py:252-273] **_parse_variant_def 中使用位置回溯**
+- [parser.py:844-884] **_is_map_literal 前瞻扫描的健壮性**
+- [lexer.py:284-298] **缺少字符字面量的 Unicode 转义支持**
+- [parser.py:57-62] **_advance 在 EOF 的静默处理**
+- [parser.py:367-370] **_parse_expression_statement 是多余包装**
+
+#### parser.py vs grammar.js 对比表
+| 特性 | parser.py | grammar.js | 一致？ |
+|------|-----------|------------|--------|
+| 管道优先级 | 高于比较（第8级） | 最低之一（第2级） | ❌ 严重不一致 |
+| match guard 位置 | pat if cond -> body（-> 前） | pat -> body if cond（-> 后） | ❌ 严重不一致 |
+| 赋值表达式 | 仅在 block 中特殊处理 | 是最低优先级表达式 | ❌ 不一致 |
+| 泛型类型参数 | 支持 type Option[T] { ... } | 不支持 | ❌ 不一致 |
+| <- token | LT + MINUS 组合 | 单个 token <- | ❌ 不一致 |
+| match 分支分隔 | 逗号或隐式换行 | 逗号分隔 | ⚠️ 部分不一致 |
+| ADT 变体分隔 | \| 或换行 | \| 分隔 | ⚠️ 部分不一致 |
+| 管道结合性 | 左结合 | 左结合 | ✅ 一致 |
+| 算术优先级 | 正确 | 正确 | ✅ 一致 |
+| 索引表达式 | 支持（后缀循环中） | 支持（PREC.CALL） | ✅ 一致 |
+| 函数调用 | 支持（后缀循环中） | 支持（PREC.CALL） | ✅ 一致 |
+| if-then-else | if c then t else e | if c then t else e | ✅ 一致 |
+| Lambda 语法 | \|params\| body | \|params\| body | ✅ 一致 |
+| ? 操作符 | 支持 | 不支持 | ❌ 不一致 |
+
+
+---
+
+## [2026-07-15] 错误处理 + 模块系统 + 环境 第十六轮审查报告
+
+### 总体评分
+
+#### errors.py
+| 维度 | 评分 | 说明 |
+|------|------|------|
+| 错误格式化质量 | ⭐⭐⭐ | 有基本的上下文显示，但缺少文件名、错误码，caret 有 off-by-one 问题 |
+| 源码上下文完整性 | ⭐⭐ | 仅显示前后各1行，无文件名 |
+| 错误分类完整性 | ⭐⭐⭐ | 4大类（词法/语法/类型/运行时），但缺少细分错误码 |
+| 错误恢复能力 | ⭐⭐ | ErrorCollector 存在但集成度低 |
+| ANSI 颜色支持 | ⭐⭐⭐ | 支持 NO_COLOR，但不支持 CLICOLOR/CLICOLOR_FORCE 标准 |
+| 可维护性 | ⭐⭐⭐ | 结构清晰但有冗余 |
+| 生产就绪度 | ⭐⭐ | 缺少错误码系统、文件名、行号列号一致性校验 |
+
+#### modules.py
+| 维度 | 评分 | 说明 |
+|------|------|------|
+| 路径解析完整性 | ⭐⭐⭐ | 支持绝对/相对/包导入，但相对路径基准逻辑有歧义 |
+| 循环导入检测 | ⭐⭐ | 基于加载栈检测，但无部分加载状态 |
+| 路径遍历安全 | ⭐ | **严重安全漏洞**：无沙箱限制，可直接读取任意文件 |
+| 缓存机制正确性 | ⭐⭐⭐ | 基本缓存可用，但缓存键仅用 file_path |
+| export 语义正确性 | ⭐⭐ | 仅收集 ExportDecl 的 name 字符串，不校验导出名称是否真实存在 |
+| 可维护性 | ⭐⭐⭐ | 结构清晰，但全局单例模式有状态污染风险 |
+| 生产就绪度 | ⭐⭐ | 缺少命名空间导入、重导出、选择性导入等关键特性 |
+
+#### environment.py
+| 维度 | 评分 | 说明 |
+|------|------|------|
+| 作用域链正确性 | ⭐⭐⭐⭐ | 基本实现正确，查找逻辑清晰 |
+| 闭包环境生命周期 | ⭐⭐ | 闭包持有完整环境引用（含父链），存在内存泄漏风险 |
+| 不可变性区分 | ⭐⭐⭐ | mutable/immutable 区分正确，但 assign 错误信息不够精确 |
+| 环境快照/恢复 | ⭐ | **完全缺失**，无快照、无事务回滚能力 |
+| Evaluator/VM 一致性 | ⭐ | **严重不一致**：Evaluator 用 Environment 作用域链，VM 用扁平 locals + captured_vars 字典 |
+| 可维护性 | ⭐⭐⭐⭐ | 代码简洁，职责单一 |
+| 生产就绪度 | ⭐⭐ | 缺少阴影检测、作用域调试信息 |
+
+### 发现的问题
+
+#### 严重问题（阻碍正常使用）
+
+- [modules.py:118-121] **路径遍历安全漏洞——任意文件读取** → ModuleResolver.resolve() 对绝对路径直接返回，对相对路径仅做 os.path.abspath 拼接，完全没有沙箱边界检查；攻击者可以通过 import "../../../etc/passwd" 读取系统任意文件 → 实现 _is_within_allowed_paths() 沙箱检查
+  - 追问：如果 Rust 编译器允许 mod "../../etc/passwd" 读取任意系统文件，能被接受吗？→ **结论：绝对不能。** 这是 P0 级安全漏洞。
+
+- [environment.py:23-73] vs [vm.py:75-84,405-420] **Evaluator 与 VM 的环境语义严重不一致** → Evaluator 使用 Environment 链式作用域实现闭包（引用语义），VM 的 NovaClosure 使用扁平字典 captured_vars（值拷贝语义）；同一程序在 Evaluator 和 VM 中运行结果可能不同 → 统一闭包模型
+  - 追问：Rust 编译器的 MIR 和代码生成后端必须保证语义一致吗？→ **结论：是的，必须一致。** 同一程序在不同后端运行结果不同是 P0 级正确性缺陷。
+
+- [errors.py:186-191] **错误信息缺少文件名——无法定位错误源** → _format_with_context() 方法的位置信息只有行号和列号，完全没有文件名；在多文件项目中，用户看到错误却不知道是哪个文件的错误 → NovaError 增加 file_path 字段，位置格式改为 文件名:行号:列号
+  - 追问：Rust 编译器错误信息如果没有文件名，能被接受吗？→ **结论：绝对不能。** 这是 P0 级可用性缺陷。
+
+- [errors.py:271-274] **caret 下划线计算有 off-by-one 错误** → _compute_underline 方法中 end_col - start_col 少一个字符，在排他模型下少一个字符 → 明确 Span 的 end_column 是排他还是包含，并修正计算
+
+- [modules.py:216-218,228,273-274] **循环导入检测过于脆弱** → 基于 loading_stack，但模块加载失败时 finally 块从栈中移除，modules 中没有缓存半成品；没有"部分加载"状态 → 引入"加载中"状态（LOADING/LOADED/FAILED）
+
+- [modules.py:276-291] **导出收集不校验名称是否存在** → _collect_exports() 只是简单收集 ExportDecl 的 name 字段，完全不检查这个名称是否真的在模块中定义了 → 导出收集后，校验每个导出名称是否存在于类型环境和求值环境中
+
+#### 中等问题（影响特定场景）
+
+- [errors.py:47-48] **ANSI 颜色检测不遵循通用标准** → 只检查 NO_COLOR 和 isatty()，缺少 CLICOLOR/CLICOLOR_FORCE/FORCE_COLOR/TERM=dumb 支持
+- [errors.py:405-411] **ErrorCollector.raise_all 滥用 note 机制** → 将后续错误作为第一个错误的"注释"，每个错误都是独立的，应该分别报告
+- [modules.py:98-105] **默认搜索路径包含相对路径且顺序有歧义** → 空字符串 "" 作为搜索路径含义模糊
+- [modules.py:328-330] **导入的绑定一律设为 immutable——语义是否正确？** → 需明确文档化并在类型检查中一致处理
+- [environment.py:34-48] **lookup 与 lookup_binding 重复代码** → 违反 DRY 原则
+- [environment.py:50-61] **assign 错误信息无法区分"未定义"还是"不可变"**
+- [errors.py:249] **相关注释的源码上下文与主错误共享行号宽度** → note 行号远大于主错误时显示会错位
+- [modules.py:293-299] **_collect_exported_types 与 _collect_exports 重复，且返回值未使用**
+
+#### 轻微问题（代码质量）
+
+- [errors.py:61] **SourceSpan = Span 无意义别名**
+- [errors.py:93] **highlight_span 旧格式兼容造成冗余**
+- [errors.py:124-128] **__str__ 和 format() 重复**
+- [modules.py:29] **RuntimeError_ 命名不一致**
+- [modules.py:366] **全局模块管理器单例**
+- [modules.py:56-57] **get_exported_bindings 静默跳过未定义名称**
+- [environment.py:67-73] **all_bindings 递归效率低**
+- [environment.py 全文] **缺少 has / is_defined 方法**
+- [errors.py:179] **ctx_end 计算 off-by-one 疑虑**
+
+#### 原创性分析
+
+**errors.py**：中等原创性（⭐⭐⭐）。Rust 风格的错误格式是借鉴，但多行 span 的下划线计算在 Python 实现中不多见。
+
+**modules.py**：低原创性（⭐⭐）。模块解析器是教科书式实现，与 Python importlib、Node.js require 思路类似。
+
+**environment.py**：低原创性（⭐⭐）。链式作用域环境是解释器实现的标准做法，与 SICP 中的环境模型完全一致。
+
+
+---
+
+## [2026-07-15] 所有后端 第十六轮审查报告
+
+### 总体评分
+| 维度 | Native后端 | Cranelift后端 | Wasm后端 | x86_64编码器 | 编译管道 |
+|------|:----------:|:-------------:|:--------:|:------------:|:--------:|
+| 指令覆盖 | ⭐⭐⭐ | ⭐⭐⭐ | ⭐⭐ | ⭐⭐⭐⭐ | ⭐⭐ |
+| 生成代码正确性 | ⭐ | ⭐ | ⭐ | ⭐⭐⭐ | ⭐⭐ |
+| 可行性(生产可用) | ⭐ | ⭐ | ⭐ | ⭐⭐⭐ | ⭐⭐ |
+| 与Nova语义对应 | ⭐⭐ | ⭐ | ⭐ | N/A | ⭐⭐ |
+| 寄存器分配 | ⭐ | N/A | N/A | N/A | N/A |
+| 指令编码正确性 | N/A | N/A | N/A | ⭐⭐⭐ | N/A |
+| 编译管道连接 | ⭐ | ⭐⭐ | ⭐⭐ | N/A | ⭐⭐ |
+
+### 发现的问题
+
+#### 严重问题（阻碍正常使用）
+
+- [native_backend.py:45-82] **Native 后端寄存器分配器 LinearScanAllocator 完全未使用** → 完整实现了线性扫描算法，但在整个代码库中从未被调用；实际代码生成使用 _alloc_vreg，只从 free_gprs/free_xmms 列表中弹出寄存器，永远不回收，分配完 12 个 GPR 和 8 个 XMM 后所有后续分配返回 None → 在 _compile_function 入口处调用 LinearScanAllocator
+  - 追问：如果是 OCaml 的 native 编译器，寄存器分配器从未调用能被接受吗？→ **结论：绝对不能。**
+
+- [native_backend.py:410-485] **Native 后端 BinOp 结果目标 dst_loc 完全被忽略** → LIRBinOp 的结果总是写入 left_reg（第一个操作数寄存器），dst_loc 字段从未被读取；导致操作数被覆盖，后续指令读取错误的值 → 编译完 BinOp 后，如果 dst_loc 存在且目标寄存器与 left_reg 不同，发射 mov 指令将结果移到目标位置
+  - 追问：OCaml native 编译器会允许算术运算结果不写入目标位置吗？→ **结论：不会。** 这是最基本的 SSA 语义正确性要求。
+
+- [native_backend.py:412-419] **Native 后端 src_locs 操作数静默回退到错误寄存器** → 当 vregs.get() 返回 None 时（寄存器耗尽或操作数未注册），代码静默回退到 RAX/RCX；操作数实际上是 RAX/RCX 中碰巧存在的任何值 → 寄存器未找到时应抛出明确错误，或正确实现 spilling
+
+- [native_backend.py:734-798] **BuildList/BuildTuple/BuildADT 栈分配未被追踪，导致返回时栈损坏** → 直接调用 e.sub_rsp_imm() 在栈上分配空间，但这些分配不计入 func.stack_size；函数尾声只 add rsp, func.stack_size，不会恢复这些额外的栈分配 → 在构建操作后恢复栈指针，或在计算 func.stack_size 时包含所有构建操作的栈需求
+
+- [cranelift_backend.py:137-200] **Cranelift 后端 SSA 值传播完全失效** → 每条指令都生成新的临时变量名 v{counter}，但后续指令的操作数直接使用 LIR 的 src_locs 位置名（如 "r0"、"const_42"），这些名字在 Cranelift IR 中不存在；生成的 .clif 文件无法被解析 → 建立 LIR 位置名 → Cranelift SSA 名的映射表
+
+- [cranelift_backend.py:162-168] **Cranelift 后端分支使用硬编码标签名** → LIRBranch 编译时总是跳转到 block_false 和 block_true，而不是 instr.true_label 和 instr.false_label → 使用 instr.true_label 和 instr.false_label
+
+- [cranelift_backend.py:156-157] **Cranelift 后端 Return 不返回值** → LIRReturn 只发射 return，没有返回值；函数返回值丢失 → 返回值应从 src_locs 或最后一个 SSA 值中获取
+
+- [cranelift_backend.py:216-238] **Cranelift 后端浮点运算使用整数操作码** → _emit_binop 总是使用 int_op_map，即使操作数是浮点类型；浮点加/减/乘/除会生成整数 iadd/isub/imul/sdiv 指令 → 根据操作数类型选择 float_op_map 或 int_op_map
+
+- [wasm_backend.py:230-264] **Wasm 后端 Block/Label/Jump 语义完全错误** → LIRLabel 被编译为 (block $block_name ...)，打开新 block 但从未关闭；LIRJump 被编译为 (br $block_target)，在 Wasm 中 br 是向外跳出块，不是向前跳转到标签 → 需要重新设计：将 LIR 的 CFG 转换为 Wasm 的 block/loop/if 结构
+  - 追问：如果是生产级编译器后端，生成的目标代码语法都无效能被接受吗？→ **结论：绝对不能。**
+
+- [compiler_pipeline.py:33-35] **编译管道 BACKEND_NATIVE 实际使用 CraneliftBackend** → 当 target == BACKEND_NATIVE 时，实际实例化的是 CraneliftBackend，而不是 NativeCodeGen；真正的自研 native 后端完全游离于管道之外 → 要么接入 NativeCodeGen，要么重命名常量为 BACKEND_CRANELIFT
+
+- [compiler_pipeline.py:80-84] **编译管道 C 后端绕过整个 IR 管道** → C 后端直接接收 AST 调用 self.backend.generate(ast)，绕过了 HIR→MIR→LIR 的整个降级管道 → 统一编译管道，所有后端都从 LIR 开始
+
+#### 中等问题（影响特定场景）
+
+- [x86_64.py:375-386] **mov_mem_imm64 只写入 32 位立即数** → 函数名声称写入 64 位，但实际只调用 emit_uint32(imm)
+- [x86_64.py:451-457,467-473] **je_rel32 重复定义** → 第二个定义覆盖第一个
+- [x86_64.py:507-547] **setcc/movzx 缺少 REX 前缀** → R8-R15 寄存器无法正确访问低 8 位
+- [native_backend.py:248-264] **函数调用时若 src_reg 为 None，参数被静默跳过**
+- [cranelift_backend.py:210-211] **字符串常量引用但数据段未定义**
+- [wasm_backend.py:296-297] **LIRStoreReg 是空操作**
+- [wasm_backend.py:161] **字符串 null 字节编码错误** → b"\\x00" 是 4 个字面量字符
+- [wasm_backend.py:153-163,368-374] **字符串表逻辑重复**
+- [c_codegen.py:590-600] **C 代码生成 TryExpr 返回类型不匹配**
+
+#### 轻微问题（代码质量）
+
+- [x86_64.py:68-71] **_rex 方法在 rex == 0x40 时跳过发射**
+- [native_backend.py:202-211] **_alloc_vreg 使用 f"const_{instr.value}" 等作为 key**
+- [wasm_backend.py:79] **模块名硬编码为 $nova**
+- [cranelift_backend.py:116-118] **函数前缀硬编码为 %nova_**
+- [native_backend.py:804-826] **_compile_counted_loop 是空方法**
+- [compiler_pipeline.py:88-107] **compile_to_ir_text 不运行 TypeChecker**
+
+#### 指令覆盖对比表
+| LIR 指令 | Native后端 | Cranelift后端 | Wasm后端 |
+|----------|:----------:|:-------------:|:--------:|
+| LIRLoadConst (int/float/bool/string) | ✅/✅/✅/⚠️ | ✅/✅/✅/⚠️ | ✅/✅/✅/⚠️ |
+| LIRBinOp (算术 +-* /%) | ✅ | ⚠️（仅整数） | ⚠️ |
+| LIRBinOp (比较 == != < > <= >=) | ✅ | ⚠️（仅整数） | ⚠️ |
+| LIRBinOp (逻辑 && \|\|) | ✅ | ❌ | ❌ |
+| LIRCall (直接) | ✅ | ✅ | ✅ |
+| LIRJump | ✅ | ✅ | ❌（语义错误） |
+| LIRBranch | ✅ | ❌（硬编码标签） | ❌（语义错误） |
+| LIRReturn | ✅ | ❌（无返回值） | ⚠️ |
+| LIRBuildList/Tuple/ADT | ✅ | ✅ | ✅ |
+| LIRPanic | ✅ | ✅ | ✅ |
+
+#### 原创性分析
+
+- **x86_64 指令编码器**：自研实现，从零编码 ModR/M、REX 前缀、SSE 指令等，是项目中技术含量最高、最原创的部分
+- **ELF 生成器**：自研实现，直接构建 ELF64 header + program headers，属于基础系统编程
+- **LinearScanAllocator**：经典线性扫描算法的标准实现，非原创但正确实现了算法（可惜未被使用）
+- **三层 IR 设计**：借鉴 MLIR Dialect 思想，属于业界标准做法
+
+---
+
+## [2026-07-15] IR 系统 + Pass 管理器 第十六轮审查报告
+
+### 总体评分
+| 维度 | ir_nodes.py | hir_lowering.py | mir_lowering.py | lir_lowering.py | pass_manager.py |
+|------|-------------|-----------------|-----------------|-----------------|-----------------|
+| 设计合理性 | ⭐⭐⭐ | ⭐⭐⭐ | ⭐⭐ | ⭐⭐ | ⭐⭐ |
+| 正确性 | ⭐⭐⭐⭐ | ⭐⭐⭐ | ⭐ | ⭐ | ⭐⭐⭐ |
+| 完整性 | ⭐⭐⭐ | ⭐⭐⭐ | ⭐⭐ | ⭐⭐ | ⭐⭐ |
+| 健壮性 | ⭐⭐⭐ | ⭐⭐ | ⭐ | ⭐⭐ | ⭐⭐ |
+| 可维护性 | ⭐⭐⭐ | ⭐⭐⭐ | ⭐⭐ | ⭐⭐⭐ | ⭐⭐⭐ |
+| 文档质量 | ⭐⭐⭐⭐ | ⭐⭐⭐ | ⭐⭐ | ⭐⭐ | ⭐⭐⭐ |
+
+### 发现的问题
+
+#### 严重问题（阻碍正常使用）
+
+- [mir_lowering.py:351-384] **MIR Match 表达式完全退化——所有分支只有第一个被执行** → _lower_match_expr 将 match 完全降级为错误的控制流；计算了 value_ssa 但从未用于分支判断；所有 arm 通过 MIRJump 无条件依次连接，形成线性链；第一个 arm 执行后直接跳转到 merge_block → 正确的 match 降级应当对每个 arm 生成模式匹配代码（比较、守卫检查），条件满足则进入 arm body
+  - 追问：如果 LLVM 的 switch 指令降级后只执行第一个 case，能被接受吗？→ **结论：绝对不能。** 这是编译器正确性的致命缺陷。
+
+- [lir_lowering.py:204-211] **LIR Phi 节点只取第一个 source——SSA 语义彻底破坏** → Phi 节点的核心语义是"根据前驱基本块选择对应的值"，但这里直接丢弃了除第一个以外的所有 source；所有涉及控制流汇合点（if-else、match、循环）的变量值都是错误的 → 在 LIR 层正确实现 Phi 节点语义，或在每个前驱块末尾插入 copy 指令
+  - 追问：如果 LLVM 的 Phi 节点只取第一个 source，能被接受吗？→ **结论：绝对不能。** SSA 形式名存实亡。
+
+- [mir_lowering.py:285-289] **ListComprehension 降级为空列表** → 列表推导式直接返回空列表常量，完全丢弃了映射表达式、迭代变量、可迭代对象和过滤条件 → 正确实现列表推导式的 MIR 降级
+
+- [mir_lowering.py:247-250] **Lambda 闭包自由变量完全丢失 + 函数体丢失** → captures 字段从未被填充；Lambda 的参数和 body 完全丢失；fn_name 是无意义的占位字符串，没有对应的 MIRFunction → 正确实现 Lambda 表达式的 MIR 降级，包括捕获变量和函数体
+
+- [mir_lowering.py:386-394] **Pipe MIR 降级对未绑定函数名生成空 callee** → 管道的 stage 如果是命名函数，_lower_expr(HIRIdentifier("foo")) 因 foo 不在 self.env 中而返回 None，导致 callee = "" → 正确区分命名函数和 SSA 值，复用 HIRCallExpr 的处理逻辑
+
+- [lir_lowering.py:219-223] **LIR Branch 丢失 true/false 目标标签** → LIRBranch 有 true_label 和 false_label 字段，但降级时完全没有设置；条件分支指令不知道跳转到哪里 → 正确设置 true_label 和 false_label
+
+- [lir_lowering.py:231-241] **MIRSwitch 和 MIRMatchJump 降级为无判断的 LIRJump** → Switch 和 MatchJump 完全退化为无条件跳转到 default 目标，所有分支信息被丢弃 → 正确降级为多个条件分支或 switch 跳转表
+
+- [pass_manager.py:256-261] **Inlining pass 完全空壳** → 内联优化完全没有实现，直接 return False；但它被加入了默认优化管道，每次迭代都被调用一次，白白浪费性能
+  - 追问：如果 LLVM 的 opt 工具中有一个完全空壳的优化 pass，能被接受吗？→ **结论：不能。** 宣称有优化但实际无，具有欺骗性。
+
+- [pass_manager.py:104-107,114-117] **HIR 常量折叠使用 __class__ 突变——极端脆弱** → 直接修改对象的 __class__ 并手动删除属性，这是极其危险的 Python 反模式；dataclass 生成的 __dataclass_fields__ 不会更新，isinstance 检查可能行为异常 → 使用新对象替换旧对象，或使用 visitor 模式
+
+#### 中等问题（影响特定场景）
+
+- [pass_manager.py:713-744] **Pass 管理器无异常处理** → 虽然不是"静默吞掉"，但异常发生时没有上下文信息（哪个 pass、在哪个函数中失败），调试困难
+- [pass_manager.py:345] **DCE 不删除 LIRBinOp 死代码** → LIRBinOp 不在无副作用列表中
+- [hir_lowering.py:292-300] **HIRBlockExpr 混合声明和表达式——类型不一致**
+- [mir_lowering.py:159-162] **HIR 标识符未找到时静默返回 None**
+- [pass_manager.py:474-478] **MIR CSE 用 MIRLoad 替换但语义错误**
+- [mir_lowering.py:396-417] **For 循环迭代变量未绑定到环境**
+- [lir_lowering.py:141-147] **LIRCall 不传递参数位置**
+- [lir_lowering.py:157-183] **LIRBuildList/BuildTuple/BuildADT 不包含元素位置**
+- [hir_lowering.py:97-98] **AliasDef 降级丢失目标类型**
+- [hir_lowering.py:331-333] **PatternConstructor 降级丢失 type_name**
+
+#### 各 Pass 实现状态表
+| Pass 名称 | HIR 层 | MIR 层 | LIR 层 | 完整度 | 备注 |
+|-----------|--------|--------|--------|--------|------|
+| ConstantFolding | ⚠️ 部分实现 | ✅ 基本实现 | ✅ 基本实现 | 60% | HIR 层用 __class__ 突变反模式 |
+| Inlining | ❌ 空壳 | N/A | N/A | 0% | 直接 return False |
+| DeadCodeElimination | ❌ 空壳 | ❌ 空壳 | ✅ 基本实现 | 30% | LIR 层遗漏 LIRBinOp |
+| CommonSubexprElimination | N/A | ⚠️ 有缺陷 | ✅ 基本实现 | 50% | MIR 层用 MIRLoad 替代语义错误 |
+| LoopInvariantCodeMotion | N/A | ⚠️ 有缺陷 | ⚠️ 有缺陷 | 40% | MIR 层不识别条件分支循环 |
+
+#### 原创性分析
+
+**三层 IR 设计（HIR→MIR→LIR）**：借鉴 MLIR Dialect 和 Rust 编译器（HIR→MIR→LLVM IR）的分层思想，属于现代编译器的标准做法，不算原创但方向正确。
+
+**Pass 管理器**：固定点迭代 + 分层 pass 的设计是标准做法，与 LLVM PassManager 的简化版思路一致。
+
+**整体评价**：架构方向正确（三层 IR + SSA + CFG + 优化 pass 管道），但实现质量参差不齐——上层（HIR）相对完整，下层（MIR/LIR）有大量占位和退化实现。代码更像是一个"架构原型"而非生产级编译器。
+
+
+---
+
+## [2026-07-15] C 运行时 + 测试 + Tree-sitter 第十六轮审查报告
+
+### 总体评分
+| 维度 | C运行时 | 测试套件 | Tree-sitter语法 |
+|------|---------|---------|----------------|
+| 功能完整性 | ⭐⭐ | ⭐⭐⭐⭐ | ⭐⭐⭐ |
+| 内存安全 | ⭐⭐ | ⭐⭐⭐⭐⭐ | ⭐⭐⭐⭐ |
+| 错误处理 | ⭐⭐ | ⭐⭐⭐ | ⭐⭐⭐ |
+| 测试覆盖 | ⭐⭐ | ⭐⭐⭐ | ⭐⭐ |
+| 一致性 | ⭐⭐ | ⭐⭐ | ⭐⭐⭐ |
+| 可维护性 | ⭐⭐⭐ | ⭐⭐⭐⭐ | ⭐⭐⭐⭐ |
+| 生产就绪度 | ⭐ | ⭐⭐⭐ | ⭐⭐⭐ |
+
+### 发现的问题
+
+#### 严重问题（阻碍正常使用）
+
+- [nova_runtime.c:99-103] **GC 空壳实现：仅有引用计数，无循环引用回收** → nova_gc_collect() 仅返回净分配数，不做任何实际回收；任何循环引用结构（如闭包捕获自身、ADT 自引用）都将永远无法释放 → 实现标记-清除 GC 或至少提供循环引用检测机制
+  - 追问：如果 GHC 缺少核心语言特性（循环引用 GC）的测试，能被接受吗？→ **结论：绝对不能。** 对于以闭包和 ADT 为核心特性的函数式语言，这是不可接受的。
+
+- [nova_runtime.c:597-614] **nova_map_remove 不释放 value 引用——内存泄漏** → 从 map 中删除 entry 时，仅释放 key 和 entry 结构体，value 的引用计数从未递减 → 在 nova_free(entry) 前添加 nova_value_release((NovaValue*)entry->value)
+
+- [nova_runtime.c:651-668] **nova_map_release 不释放 entries 的 value——大规模内存泄漏** → 释放整个 map 时，只释放 key 和 entry 结构体，所有 value 的引用计数都未递减 → 遍历释放每个 entry 前，释放其 value 的引用计数
+
+- [nova_runtime.c:479-486] **nova_list_release 不释放元素——内存泄漏** → 释放 list 时仅 nova_free(l->items) 释放指针数组，但每个元素的引用计数从未递减 → 遍历列表元素，根据元素类型调用对应 release 函数
+
+- [nova_runtime.c:749-756] **nova_adt_release 不释放字段——内存泄漏** → 释放 ADT 时仅 nova_free(a->fields) 释放字段指针数组，但字段值（如果是堆分配对象）的引用计数从未递减 → 遍历 fields 数组，递减每个字段的引用计数
+
+- [nova_runtime.c:791-798] **nova_closure_release 不释放捕获变量——内存泄漏** → 释放闭包时仅 nova_free(c->captured) 释放捕获数组，但捕获的堆分配对象引用计数未递减 → 遍历 captured 数组释放每个值
+
+- [nova_runtime.c:536-538] **nova_map_put 类型双关——将非 NovaValue* 强制转换并调用 nova_value_release** → 当 map 的 value 不是 NovaValue* 类型时，通过 nova_value_release 读取 ref_count 偏移处的内存是未定义行为 → 引入统一的 value 标签类型，或在 map 中存储类型信息
+  - 追问：如果是 C 标准库，这种类型双关导致的未定义行为能被接受吗？→ **结论：不能。** 这是严重的类型安全违规。
+
+- [nova_runtime.c:1700-1708,1770-1778] **HTTP GET/POST 状态码恒为 200** → curl -w "%{http_code}" 输出被发送到 stdout 但从未被读取解析，代码直接硬编码 200；所有 HTTP 响应（包括 404、500、403 等）都被报告为 status_code = 200 → 使用 curl 的 -o body -w "%{http_code}" 并将状态码输出到单独文件
+
+- [nova_runtime.c:1664-1669,1723-1731] **HTTP 临时文件 TOCTOU 竞态条件** → 使用可预测的文件名 /tmp/nova_http_<pid>.tmp；攻击者可预先创建符号链接指向敏感文件 → 使用 mkstemp() 生成不可预测的临时文件名
+
+- [test_nova.py 全文] **无 Evaluator 与 VM 行为一致性测试** → Evaluator 和 Bytecode VM 是两条独立的执行路径，但没有任何测试验证同一程序在两条路径下产生相同结果 → 建立"黄金测试"框架，同一组测试用例同时运行两个后端，断言输出一致
+  - 追问：如果 GHC 缺少核心语言特性的跨后端一致性测试，能被接受吗？→ **结论：绝对不能。** 生产级编译器必须有跨后端回归测试套件。
+
+- [test_c_codegen.py:146-171] **C 后端无端到端编译+执行测试** → test_generate_valid_c 只是尝试用 gcc 检查语法（且不强制通过），从未实际编译运行并验证输出 → 添加端到端测试：编译 Nova 源码 → 生成 C → 编译为可执行文件 → 运行并验证输出
+
+#### 中等问题（影响特定场景）
+
+- [grammar.js 全文] **Tree-sitter 缺少 ? (try) 操作符** → parser.py 支持 TryExpr，但 grammar.js 中完全没有 try 表达式规则
+- [grammar.js:88-97] **Tree-sitter 缺少泛型类型参数定义** → parser.py 支持 type Option[T] { ... } 泛型参数，但 grammar.js 的 type_def 规则没有 [T, ...] 泛型参数部分
+- [nova_runtime.c:205-211] **nova_string_find 空 substr 返回 0（不符合常规语义）**
+- [nova_runtime.c:1165-1188] **JSON 解析器不验证 true/false/null 拼写** → 直接 p->pos += 4/5/4，不检查实际字符
+- [nova_runtime.c:959] **nova_abs_int 对 INT64_MIN 溢出** → -INT64_MIN 在补码表示中无法用 int64_t 表示，导致未定义行为
+- [runtime/test_runtime.c] **C 运行时测试不集成到主测试套件** → 417 行的 C 测试文件与 Python 测试套件完全独立
+- [test_type_system.py:242-254] **部分测试为"不崩溃"测试** → test_circular_alias_detected 只断言 assert True，验证"至少不崩溃"
+- [nova_runtime.c:79-87] **nova_realloc 不更新分配计数** → g_alloc_count 和 g_free_count 在 realloc 时不更新
+- [nova_runtime.c:39-43] **全局状态无线程安全保护** → g_alloc_count、g_free_count、g_argc、g_argv 均为全局变量，无任何锁保护
+- [nova_runtime.c:827-843] **nova_read_line 固定 4096 字节缓冲区——长行截断**
+
+#### 轻微问题（代码质量）
+
+- [nova_runtime.c:138] **nova_string_new_len 最小容量 16** → 对于小字符串浪费内存
+- [nova_runtime.c:337] **nova_list_new 最小容量 4** → 空列表也分配 4 个槽
+- [nova_runtime.c:1518-1521] **nova_exit 返回值永远不会执行** → 死代码
+- [nova_runtime.c:1712] **HTTP POST 的 headers 参数未使用** → (void)headers; 占位
+- [nova_runtime.c:193-196] **nova_string_char_at 返回字节而非字符** → 对 UTF-8 字符串可能返回不完整的多字节字符
+- [测试文件] **测试文件使用 unittest 和 pytest 混合** → 风格不统一
+- [tree-sitter-nova/test/corpus] **Tree-sitter corpus 测试极少（仅 6 个文件）**
+- [nova_runtime.c:1316-1321] **json_buf_grow 增长策略可能多次 realloc**
+
+#### 测试覆盖统计表
+| 测试文件 | 行数 | 测试函数数 | 主要覆盖领域 |
+|---------|------|-----------|-------------|
+| test_nova.py | ~2973 | ~312 | Lexer, Parser, TypeChecker, Evaluator, ADT, Pipe, Builtins, Loops, JSON, Math, BytecodeVM |
+| test_type_system.py | ~425 | ~43 | 泛型ADT、内置泛型、类型参数数量、类型别名 |
+| test_modules.py | ~825 | ~28 | 模块解析、导入导出、循环导入、标准库 |
+| test_errors.py | ~357 | ~36 | SourceSpan、ErrorCollector、ANSI颜色、多行高亮 |
+| test_ir.py | ~1354 | ~93 | IR类型、HIR/MIR/LIR降级、Pass管理器、优化Pass |
+| test_c_codegen.py | ~441 | ~52 | C代码生成、名称修饰、表达式 |
+| test_backends.py | ~517 | ~43 | Cranelift后端、WasmGC后端、编译管道 |
+| test_native_backend.py | ~1500 | ~88 | x86_64指令编码、线性扫描分配器、原生代码生成 |
+| **合计** | **~8392** | **~695** | |
+
+#### 执行路径测试分布
+| 执行路径 | 测试数量 | 占比 |
+|---------|---------|------|
+| Evaluator（解释器） | ~85 | ~12% |
+| Bytecode VM | ~93 | ~13% |
+| Evaluator + VM 一致性测试 | **0** | **0%** |
+| C 后端端到端（编译+运行） | **0** | **0%** |
+| 原生后端端到端（编译+运行） | **0** | **0%** |
+| IR / Pass 优化 | ~93 | ~13% |
+| 词法/语法/类型检查 | ~100 | ~14% |
+| 其他 | ~324 | ~48% |
+
+#### 原创性分析
+
+**C 运行时**：整体架构（引用计数 + FNV-1a 哈希 + 递归下降 JSON 解析）是标准且成熟的设计，非原创但实现完整。
+
+**测试套件**：测试组织合理，覆盖了多层。VM 测试（93个）数量可观，但整体缺乏跨层一致性测试和端到端集成测试。
+
+**Tree-sitter 语法**：结构清晰，规则命名规范。但缺少 ? 操作符和泛型类型参数两个重要特性，与 parser.py 存在不一致。
+
+---
+
+## 第十六轮架构级建议（优先级排序）
+
+### 🔴 P0 级（立即修复，安全/正确性基石）
+
+1. **修复类型检查器 TypeVar 万能兼容问题** → 类型系统基本失效，等于没有类型检查
+2. **修复模块系统路径遍历安全漏洞** → P0 安全漏洞，可读取系统任意文件
+3. **修复 MIR Match 完全退化问题** → 整个 IR 优化管道的 match 控制流完全错误
+4. **修复 LIR Phi 节点只取第一个 source** → SSA 语义彻底破坏，所有控制流汇合点值错误
+5. **修复嵌套模式匹配子模式顺序错位** → 函数式语言核心特性的 P0 缺陷
+6. **修复 CLOSURE 全量捕获（自由变量分析）** → 函数式语言核心语义的性能+正确性问题
+
+### 🟠 P1 级（高优先级，影响功能正确性）
+
+7. **修复 STORE_VAR 全局泄漏** → 违反静态作用域原则
+8. **修复算术运算 bool/int 不分** → 类型安全的基本防线
+9. **修复 MATCH_BIND 作用域污染** → 模式匹配的基本语义保证
+10. **修复管道操作符优先级错误** → 函数式语言核心运算符的解析错误
+11. **修复 TRY_UNWRAP 类型检查过松** → Option/Result 类型安全的核心价值
+12. **添加 Evaluator-VM 一致性测试框架** → 多后端语言的基本质量要求
+13. **修复错误信息缺少文件名** → 多文件项目调试几乎不可用
+14. **修复 AST 节点 span 信息不完整** → 错误报告和 IDE 功能的基础
+15. **修复 C 运行时嵌套容器释放不递归** → 大规模内存泄漏
+
+### 🟡 P2 级（中优先级，影响质量/可维护性）
+
+16. **统一闭包语义（引用 vs 值快照）** → 语言规范级别的分歧
+17. **修复 match guard 位置不一致（parser vs grammar.js）**
+18. **实现真正的 HM 类型推断（unification + let-polymorphism）**
+19. **修复 while 循环 CONTINUE 依赖启发式检测**
+20. **修复 BREAK 前向扫描脆弱设计**
+21. **接入 Native 后端到编译管道**
+22. **修复 Cranelift 后端 SSA 值传播**
+23. **重写 Wasm 后端控制流翻译**
+24. **实现 Parser 语法错误恢复**
+25. **添加 C 后端端到端测试**
+
+### 🟢 长期规划
+
+26. **实现真正的 GC（标记-清除或分代 GC）**
+27. **重写 IR 降级链，实现真正的 SSA + Phi 消除**
+28. **建立模块命名空间系统，摆脱 import * 模式**
+29. **实现 Tree-sitter 语法与 parser.py 的完全对齐**
+30. **添加 fuzz 测试、属性测试、边界值测试**
 
