@@ -561,6 +561,68 @@ class TestEvaluator(unittest.TestCase):
         ev = eval_source("let x = 10 % 3", check_types=False)
         self.assertEqual(ev.env.lookup("x"), 1)
 
+    # --- 算术运行时错误测试 ---
+
+    def test_arithmetic_div_zero_int(self):
+        """整数除法除零应抛出 RuntimeError_"""
+        with self.assertRaises(RuntimeError_) as ctx:
+            eval_source("let x = 10 / 0", check_types=False)
+        self.assertIn("除零错误", str(ctx.exception))
+
+    def test_arithmetic_div_zero_float(self):
+        """浮点除法除零应抛出 RuntimeError_"""
+        with self.assertRaises(RuntimeError_) as ctx:
+            eval_source("let x = 10.0 / 0.0", check_types=False)
+        self.assertIn("除零错误", str(ctx.exception))
+
+    def test_arithmetic_mod_zero_int(self):
+        """整数取模除零应抛出 RuntimeError_"""
+        with self.assertRaises(RuntimeError_) as ctx:
+            eval_source("let x = 10 % 0", check_types=False)
+        self.assertIn("除零错误", str(ctx.exception))
+
+    def test_arithmetic_mod_zero_float(self):
+        """浮点取模除零应抛出 RuntimeError_"""
+        with self.assertRaises(RuntimeError_) as ctx:
+            eval_source("let x = 10.0 % 0.0", check_types=False)
+        self.assertIn("除零错误", str(ctx.exception))
+
+    def test_arithmetic_add_type_mismatch(self):
+        """数字与字符串相加应抛出 RuntimeError_"""
+        with self.assertRaises(RuntimeError_) as ctx:
+            eval_source('let x = 1 + "hello"', check_types=False)
+        self.assertIn("必须是数字类型", str(ctx.exception))
+
+    def test_arithmetic_sub_type_mismatch(self):
+        """字符串与数字相减应抛出 RuntimeError_"""
+        with self.assertRaises(RuntimeError_) as ctx:
+            eval_source('let x = "hello" - 1', check_types=False)
+        self.assertIn("必须是数字类型", str(ctx.exception))
+
+    def test_arithmetic_mul_type_mismatch(self):
+        """字符串与数字相乘应抛出 RuntimeError_"""
+        with self.assertRaises(RuntimeError_) as ctx:
+            eval_source('let x = "hello" * 2', check_types=False)
+        self.assertIn("必须是数字类型", str(ctx.exception))
+
+    def test_arithmetic_div_type_mismatch(self):
+        """字符串与数字相除应抛出 RuntimeError_"""
+        with self.assertRaises(RuntimeError_) as ctx:
+            eval_source('let x = "hello" / 2', check_types=False)
+        self.assertIn("必须是数字类型", str(ctx.exception))
+
+    def test_arithmetic_mod_type_mismatch(self):
+        """字符串与数字取模应抛出 RuntimeError_"""
+        with self.assertRaises(RuntimeError_) as ctx:
+            eval_source('let x = "hello" % 2', check_types=False)
+        self.assertIn("必须是数字类型", str(ctx.exception))
+
+    def test_unary_minus_type_mismatch(self):
+        """对字符串取负应抛出 RuntimeError_"""
+        with self.assertRaises(RuntimeError_) as ctx:
+            eval_source('let x = -"hello"', check_types=False)
+        self.assertIn("必须是数字类型", str(ctx.exception))
+
     def test_string_concat(self):
         ev = eval_source('let x = "hello" ++ " " ++ "world"', check_types=False)
         self.assertEqual(ev.env.lookup("x"), "hello world")
@@ -1976,6 +2038,119 @@ class TestBytecodeVM(unittest.TestCase):
             }
         """)
         self.assertEqual(vm.get_global("result"), 129)  # (1+2)*10 + 99 = 129
+
+    def test_vm_while_break_stack_balance(self):
+        """while break 后栈应保持平衡（深度为 base_sp），验证 off-by-one 修复"""
+        vm = self._vm_run("""
+            mut i = 1
+            while i <= 10 {
+                if i == 5 then break
+                i = i + 1
+            }
+        """)
+        # 栈在 break 后应完全清理，最终栈深度应为 0
+        self.assertEqual(len(vm.stack), 0,
+                         f"while break 后栈未平衡，有 {len(vm.stack)} 个残留元素: {vm.stack}")
+        self.assertEqual(vm.get_global("i"), 5)
+
+    def test_vm_while_continue_stack_balance(self):
+        """while continue 后栈应保持平衡（深度为 base_sp），验证 off-by-one 修复"""
+        vm = self._vm_run("""
+            mut sum = 0
+            mut i = 0
+            while i < 5 {
+                i = i + 1
+                if i == 2 then continue
+                sum = sum + i
+            }
+        """)
+        # 栈在每次 continue 后应完全清理，最终栈深度应为 0
+        self.assertEqual(len(vm.stack), 0,
+                         f"while continue 后栈未平衡，有 {len(vm.stack)} 个残留元素: {vm.stack}")
+        self.assertEqual(vm.get_global("sum"), 13)
+        self.assertEqual(vm.get_global("i"), 5)
+
+    def test_vm_while_break_nested_stack_balance(self):
+        """嵌套 while 循环中 break 后栈应保持平衡（多层 off-by-one 会累积）"""
+        vm = self._vm_run("""
+            mut outer = 0
+            mut i = 1
+            while i <= 3 {
+                mut j = 1
+                while j <= 10 {
+                    if j == 4 then break
+                    j = j + 1
+                }
+                outer = outer + j
+                i = i + 1
+            }
+        """)
+        self.assertEqual(len(vm.stack), 0,
+                         f"嵌套 while break 后栈未平衡，有 {len(vm.stack)} 个残留元素: {vm.stack}")
+        self.assertEqual(vm.get_global("outer"), 12)  # 3 * 4 = 12
+
+    def test_vm_while_continue_nested_stack_balance(self):
+        """嵌套 while 循环中 continue 后栈应保持平衡"""
+        vm = self._vm_run("""
+            mut outer_sum = 0
+            mut i = 0
+            while i < 3 {
+                i = i + 1
+                mut inner_sum = 0
+                mut j = 0
+                while j < 5 {
+                    j = j + 1
+                    if j == 2 then continue
+                    inner_sum = inner_sum + j
+                }
+                outer_sum = outer_sum + inner_sum
+            }
+        """)
+        self.assertEqual(len(vm.stack), 0,
+                         f"嵌套 while continue 后栈未平衡，有 {len(vm.stack)} 个残留元素: {vm.stack}")
+        # 每次内层: 1+3+4+5 = 13 (跳过 2)
+        self.assertEqual(vm.get_global("outer_sum"), 39)  # 3 * 13 = 39
+
+    def test_vm_while_break_in_function_stack_balance(self):
+        """函数内 while break 后栈应平衡，函数返回值应正确"""
+        vm = self._vm_run("""
+            fn find_first_even(max: Int) -> Int {
+                mut i = 1
+                mut result = 0
+                while i <= max {
+                    if i % 2 == 0 then {
+                        result = i
+                        break
+                    }
+                    i = i + 1
+                }
+                result
+            }
+            let x = find_first_even(10)
+        """)
+        self.assertEqual(vm.get_global("x"), 2)
+        # 验证顶层栈平衡
+        self.assertEqual(len(vm.stack), 0,
+                         f"函数内 while break 后顶层栈未平衡: {len(vm.stack)} 个残留元素")
+
+    def test_vm_while_continue_in_function_stack_balance(self):
+        """函数内 while continue 后栈应平衡，函数返回值应正确"""
+        vm = self._vm_run("""
+            fn sum_odds(n: Int) -> Int {
+                mut i = 0
+                mut sum = 0
+                while i < n {
+                    i = i + 1
+                    if i % 2 == 0 then continue
+                    sum = sum + i
+                }
+                sum
+            }
+            let x = sum_odds(10)
+        """)
+        self.assertEqual(vm.get_global("x"), 25)  # 1+3+5+7+9 = 25
+        self.assertEqual(len(vm.stack), 0,
+                         f"函数内 while continue 后顶层栈未平衡: {len(vm.stack)} 个残留元素")
 
     def test_vm_adt(self):
         vm = self._vm_run("""

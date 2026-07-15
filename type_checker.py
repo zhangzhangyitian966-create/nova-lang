@@ -628,7 +628,9 @@ class TypeChecker:
             if ty is None:
                 self._report_error(f"未定义的标识符 '{expr.name}'", expr)
                 return ERROR_TYPE
-            return ty
+            # 实例化：每次在表达式中引用泛型值时，创建独立的类型变量副本
+            # 这避免了全局共享 TypeVar 导致的类型污染
+            return self._instantiate(ty)
 
         elif isinstance(expr, ListExpr):
             if not expr.elements:
@@ -1249,10 +1251,59 @@ class TypeChecker:
         self._report_error(f"未知的一元操作符 '{expr.op}'", expr)
         return ERROR_TYPE
 
-    def _substitute_type_vars(self, ty: NovaType, bindings: Dict[TypeVar, NovaType]) -> NovaType:
-        """替换类型中的类型变量"""
+    def _instantiate(self, ty: NovaType, mapping: Dict[int, TypeVar] = None) -> NovaType:
+        """实例化类型：将类型中的所有 TypeVar 替换为全新的 TypeVar。
+
+        这是 Algorithm W 的核心步骤之一，确保每次引用泛型值时
+        都得到独立的类型变量副本，避免类型污染。
+
+        mapping 使用 TypeVar 对象的 id 作为 key，确保同一个 TypeVar 对象
+        始终映射到同一个新的 TypeVar（即使 __eq__ 基于 name 也能正确处理）。
+        """
+        if mapping is None:
+            mapping = {}
+
         if isinstance(ty, TypeVar):
-            return bindings.get(ty, ty)
+            key = id(ty)
+            if key not in mapping:
+                # 保留原名称的语义，使用自动编号区分不同实例
+                mapping[key] = TypeVar(f"{ty.name}'")
+            return mapping[key]
+
+        if isinstance(ty, ListType):
+            return ListType(self._instantiate(ty.elem_type, mapping))
+
+        if isinstance(ty, MapType):
+            return MapType(
+                self._instantiate(ty.key_type, mapping),
+                self._instantiate(ty.value_type, mapping)
+            )
+
+        if isinstance(ty, TupleType):
+            return TupleType([self._instantiate(e, mapping) for e in ty.elements])
+
+        if isinstance(ty, FnType):
+            return FnType(
+                [self._instantiate(p, mapping) for p in ty.param_types],
+                self._instantiate(ty.return_type, mapping)
+            )
+
+        if isinstance(ty, ADTType):
+            return ADTType(ty.name, [self._instantiate(p, mapping) for p in ty.type_params])
+
+        return ty
+
+    def _substitute_type_vars(self, ty: NovaType, bindings: Dict[TypeVar, NovaType]) -> NovaType:
+        """替换类型中的类型变量（支持传递替换）
+
+        如果替换后的结果仍包含可替换的 TypeVar，则递归替换所有子结构。
+        """
+        if isinstance(ty, TypeVar):
+            if ty in bindings:
+                result = bindings[ty]
+                # 对替换结果递归替换（处理传递依赖：A→B, B→Int）
+                return self._substitute_type_vars(result, bindings)
+            return ty
         if isinstance(ty, ListType):
             return ListType(self._substitute_type_vars(ty.elem_type, bindings))
         if isinstance(ty, MapType):
@@ -1272,10 +1323,19 @@ class TypeChecker:
         return ty
 
     def _collect_type_bindings(self, actual: NovaType, expected: NovaType, bindings: Dict[TypeVar, NovaType]):
-        """从实际类型和期望类型中收集类型变量绑定"""
+        """从实际类型和期望类型中收集类型变量绑定
+
+        当 expected 中的 TypeVar 已经绑定时，递归尝试将 actual 与已绑定的类型
+        进一步匹配，收集更多的绑定（传递约束）。
+        """
         if isinstance(expected, TypeVar):
             if expected not in bindings:
                 bindings[expected] = actual
+            else:
+                # expected 已绑定，递归收集更多约束（传递性）
+                # 例如：A' 已绑定到 opt_t'，现在遇到 actual=Int，
+                # 则需要进一步将 opt_t' 绑定到 Int
+                self._collect_type_bindings(actual, bindings[expected], bindings)
         elif isinstance(expected, ListType) and isinstance(actual, ListType):
             self._collect_type_bindings(actual.elem_type, expected.elem_type, bindings)
         elif isinstance(expected, MapType) and isinstance(actual, MapType):

@@ -952,3 +952,81 @@ class TestPipeExpr:
         """
         checker = check_source(source)
         assert len(checker.error_collector.errors) == 0
+
+
+class TestTypeInstantiation:
+    """测试类型实例化（instantiate）—— Algorithm W 的核心步骤"""
+
+    def test_map_some_infers_option_int(self):
+        """map(Some, [1, 2, 3]) 应推断为 List[Option[Int]] 而非 List[Option[opt_t]]
+
+        这验证了 instantiate 机制：每次引用泛型构造器 Some 时，
+        其类型变量应被实例化为全新的副本，从而能从参数类型正确推导。
+        """
+        from nova.type_checker import ListType, ADTType, INT_T, TypeVar
+        source = "let result = map(Some, [1, 2, 3])"
+        checker = check_source(source, collect_errors=True)
+        result_ty = checker.env.lookup("result")
+        assert isinstance(result_ty, ListType), f"期望 ListType，得到 {result_ty}"
+        assert isinstance(result_ty.elem_type, ADTType), f"期望 ADTType，得到 {result_ty.elem_type}"
+        assert result_ty.elem_type.name == "Option", f"期望 Option，得到 {result_ty.elem_type.name}"
+        assert len(result_ty.elem_type.type_params) == 1
+        inner_ty = result_ty.elem_type.type_params[0]
+        # 关键断言：内部类型应该是 Int，而不是未解析的 TypeVar
+        assert inner_ty == INT_T, f"期望 Int，得到 {inner_ty}"
+        assert not isinstance(inner_ty, TypeVar), f"不应是 TypeVar，得到 {inner_ty}"
+
+    def test_some_multiple_uses_independent(self):
+        """多次使用 Some 构造器应各自独立，类型变量不共享
+
+        验证 instantiate 后，每次 Some 调用都有独立的类型变量，
+        不会因为第一次使用绑定了类型而影响第二次使用。
+        """
+        from nova.type_checker import ADTType, INT_T, STRING_T
+        source = """
+        let x = Some(42)
+        let y = Some("hello")
+        """
+        checker = check_source(source, collect_errors=True)
+        x_ty = checker.env.lookup("x")
+        y_ty = checker.env.lookup("y")
+        assert isinstance(x_ty, ADTType) and x_ty.name == "Option"
+        assert isinstance(y_ty, ADTType) and y_ty.name == "Option"
+        assert x_ty.type_params[0] == INT_T
+        assert y_ty.type_params[0] == STRING_T
+
+    def test_filter_with_generic_predicate(self):
+        """高阶函数 filter 与泛型函数组合时类型推断应正确"""
+        from nova.type_checker import ListType, INT_T, TypeVar
+        source = """
+        fn is_positive(n: Int) -> Bool { n > 0 }
+        let result = filter(is_positive, [1, -2, 3])
+        """
+        checker = check_source(source, collect_errors=True)
+        result_ty = checker.env.lookup("result")
+        assert isinstance(result_ty, ListType)
+        assert result_ty.elem_type == INT_T
+
+    def test_head_instantiates_type_var(self):
+        """head 函数每次调用都应实例化类型变量"""
+        from nova.type_checker import ADTType, INT_T, STRING_T
+        source = """
+        let x = head([1, 2, 3])
+        let y = head(["a", "b"])
+        """
+        checker = check_source(source, collect_errors=True)
+        x_ty = checker.env.lookup("x")
+        y_ty = checker.env.lookup("y")
+        assert isinstance(x_ty, ADTType) and x_ty.name == "Option"
+        assert isinstance(y_ty, ADTType) and y_ty.name == "Option"
+        assert x_ty.type_params[0] == INT_T
+        assert y_ty.type_params[0] == STRING_T
+
+    def test_none_multiple_types_compatible(self):
+        """None 构造器可用于不同类型的 Option（每次实例化独立的 TypeVar）"""
+        source = """
+        let x: Option[Int] = None
+        let y: Option[String] = None
+        """
+        checker = check_source(source)
+        assert len(checker.error_collector.errors) == 0

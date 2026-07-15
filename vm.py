@@ -919,8 +919,8 @@ class NovaVM:
                     raise RuntimeError_("'break' 不在循环中")
                 loop_info = self._while_loops.pop()
                 base_sp = loop_info["base_sp"]
-                if base_sp + 1 < len(self.stack):
-                    del self.stack[base_sp + 1:]
+                if base_sp < len(self.stack):
+                    del self.stack[base_sp:]
                 self.ip = instr.operands[0]
             elif self._for_iters:
                 loop_info = self._for_iters.pop()
@@ -949,9 +949,9 @@ class NovaVM:
                 loop_info = self._while_loops[-1]
                 base_sp = loop_info["base_sp"]
                 loop_start = instr.operands[0]
-                # 保留结果槽（base_sp 处），清理 body 产生的值
-                if base_sp + 1 < len(self.stack):
-                    del self.stack[base_sp + 1:]
+                # 保留 base_sp 处之前的栈，清理 body 产生的值
+                if base_sp < len(self.stack):
+                    del self.stack[base_sp:]
                 self.ip = loop_start
             elif self._for_iters:
                 # for loop continue: 清理 body 值并跳回 FOR_ITER

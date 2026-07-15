@@ -1,5 +1,73 @@
 # Nova 自动改进日志
 
+## 2026-07-16 自动改进（第二十五轮）
+
+基于 AUTO_REVIEW_LOG.md 第二十三轮审查日志的 P0/P1 级严重问题驱动改进（阶段一检查 + 阶段二开发 + 阶段三测试）。
+
+### 每日发现的问题
+
+#### vm.py
+- **while 循环 BREAK 栈深度 off-by-one（vm.py:920-924）**：`del self.stack[base_sp + 1:]` 保留了多余的 1 个元素，break 退出后栈上残留 body 的第一个值，栈不平衡
+  - 审查日志追问结论：绝对不能，栈式 VM 最基础的不变式（stack invariant）破坏
+  - 根因：base_sp 是 result 槽之后的深度，result 在 base_sp-1，截断应从 base_sp 开始而非 base_sp+1
+
+- **while 循环 CONTINUE 栈深度 off-by-one（vm.py:949-955）**：每次 continue 都会在栈上多残留一个元素，循环 N 次后泄漏 N 个元素
+  - 审查日志追问结论：绝对不能，典型的栈上溢 bug，会导致难以调试的内存安全问题
+
+#### evaluator.py
+- **取模运算除零未捕获 Python 异常（evaluator.py:950-953）**：`%` 操作缺少除零检查，right == 0 时 Python ZeroDivisionError 直接向上抛出
+  - 审查日志追问结论：绝对不能接受，任何生产级编译器必须将所有运行时错误统一包装
+  - 延伸发现：浮点除法 `10.0 / 0.0` 同样逃逸（只有 int/int 分支做了检查）
+
+- **二元运算类型错误未统一捕获，Python TypeError 直接逃逸（evaluator.py:930-977）**：`+`, `-`, `*`, `/`, `%` 只检查了 Bool 类型，完全没有检查操作数是否为数字类型
+  - 审查日志追问结论：不能接受，类型安全语言的运行时错误必须全部通过语言自身的错误系统报告
+  - 延伸发现：`3 * "hello"` 静默返回字符串重复，连异常都没有
+
+#### type_checker.py
+- **内置 Option/Result 的构造函数类型变量全局共享导致类型污染（type_checker.py:293-307）**：`_setup_builtins` 中创建的 TypeVar 是全局共享的单一对象，每次使用都是同一个，缺少 instantiate 机制
+  - 审查日志追问结论：不能，OCaml 中每个多态值的使用都会实例化新鲜的类型变量
+  - 影响：`map(Some, [1,2,3])` 推断为 `List[Option[opt_t]]` 而非 `List[Option[Int]]`
+
+### 本次修复内容（基于审查日志 Issue）
+
+1. **vm.py — while 循环 BREAK 栈深度修复（基于审查日志 vm.py:920-924 / 第二十三轮严重问题 #1）**
+   - BREAK 截断从 `del self.stack[base_sp + 1:]` 改为 `del self.stack[base_sp:]`
+   - 条件判断从 `base_sp + 1 < len(self.stack)` 改为 `base_sp < len(self.stack)`
+   - break 退出后栈深度 = base_sp，与正常退出一致，栈平衡
+
+2. **vm.py — while 循环 CONTINUE 栈深度修复（基于审查日志 vm.py:949-955 / 第二十三轮严重问题 #2）**
+   - CONTINUE 截断从 `del self.stack[base_sp + 1:]` 改为 `del self.stack[base_sp:]`
+   - 每次 continue 后栈深度 = base_sp，不会逐次泄漏
+   - 新增 6 个测试用例验证 break/continue 栈平衡（单层、嵌套、函数内）
+
+3. **evaluator.py — 算术运算全面类型检查 + 除零检查 + try/except 兜底（基于审查日志 evaluator.py:950-953 / 第二十三轮严重问题 #1）**
+   - 为 `+`, `-`, `*`, `/`, `%` 五个操作符统一添加数字类型检查（int/float）
+   - 为 `%` 添加完整除零检查（int 和 float）
+   - 为 `/` 的 float 分支补全除零检查
+   - 所有运算包裹在 try/except 中，ZeroDivisionError 和 TypeError 统一包装为 RuntimeError_
+   - 一元负号运算同步添加类型检查和兜底
+   - 新增 10 个测试用例（除零 4 个 + 类型不匹配 6 个）
+
+4. **type_checker.py — 类型变量 instantiate 机制（基于审查日志 type_checker.py:293-307 / 第二十三轮严重问题 #3）**
+   - 新增 `_instantiate(self, ty)` 方法：递归遍历类型，将 TypeVar 替换为全新的 TypeVar 副本
+   - 使用 `id(ty)` 作为 mapping 的 key，避免基于 name 的 `__eq__` 导致的混淆
+   - 在表达式的 Identifier 查找中调用 `_instantiate`，每次使用泛型值得到独立的类型变量
+   - 增强 `_collect_type_bindings`：TypeVar 已绑定时递归向下传递约束
+   - 增强 `_substitute_type_vars`：支持传递替换，递归替换所有子结构
+   - 新增 5 个测试用例：map+Some 组合推断、多次使用独立性、高阶函数谓词、head 实例化、None 多类型兼容
+
+### 测试结果
+
+- 全量测试: **823 passed** (1.74s)
+- Evaluator 示例: hello/fibonacci/pattern_match/pipe/loops 全部正常输出
+- VM 示例: hello/fibonacci/pattern_match 全部正常输出
+- while break/continue 栈平衡: 单层/嵌套/函数内全部栈平衡 ✅
+- 算术运算除零: int/float 的 `/` 和 `%` 全部正确抛出 RuntimeError_ ✅
+- 算术运算类型检查: 非数字操作数正确抛出 RuntimeError_ ✅
+- 类型变量实例化: `map(Some, [1,2,3])` 正确推断为 `List[Option[Int]]` ✅
+
+---
+
 ## 2026-07-16 自动改进（第二十四轮）
 
 基于 AUTO_REVIEW_LOG.md 第二十二轮审查日志的 P0/P1 级严重问题驱动改进（阶段一检查 + 阶段二开发 + 阶段三测试）。

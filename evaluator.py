@@ -930,27 +930,58 @@ class Evaluator:
         if expr.op == "+":
             if isinstance(left, bool) or isinstance(right, bool):
                 raise RuntimeError_("算术运算 '+' 的操作数不能是 Bool 类型")
-            return left + right
+            if not (isinstance(left, (int, float)) and isinstance(right, (int, float))):
+                raise RuntimeError_(f"算术运算 '+' 的操作数必须是数字类型，得到 {type(left).__name__} 和 {type(right).__name__}")
+            try:
+                return left + right
+            except Exception as e:
+                raise RuntimeError_(f"算术运算 '+' 失败: {e}")
         elif expr.op == "-":
             if isinstance(left, bool) or isinstance(right, bool):
                 raise RuntimeError_("算术运算 '-' 的操作数不能是 Bool 类型")
-            return left - right
+            if not (isinstance(left, (int, float)) and isinstance(right, (int, float))):
+                raise RuntimeError_(f"算术运算 '-' 的操作数必须是数字类型，得到 {type(left).__name__} 和 {type(right).__name__}")
+            try:
+                return left - right
+            except Exception as e:
+                raise RuntimeError_(f"算术运算 '-' 失败: {e}")
         elif expr.op == "*":
             if isinstance(left, bool) or isinstance(right, bool):
                 raise RuntimeError_("算术运算 '*' 的操作数不能是 Bool 类型")
-            return left * right
+            if not (isinstance(left, (int, float)) and isinstance(right, (int, float))):
+                raise RuntimeError_(f"算术运算 '*' 的操作数必须是数字类型，得到 {type(left).__name__} 和 {type(right).__name__}")
+            try:
+                return left * right
+            except Exception as e:
+                raise RuntimeError_(f"算术运算 '*' 失败: {e}")
         elif expr.op == "/":
             if isinstance(left, bool) or isinstance(right, bool):
                 raise RuntimeError_("算术运算 '/' 的操作数不能是 Bool 类型")
-            if isinstance(left, int) and isinstance(right, int):
-                if right == 0:
-                    raise RuntimeError_("除零错误")
-                return left // right  # 整数除法
-            return left / right
+            if not (isinstance(left, (int, float)) and isinstance(right, (int, float))):
+                raise RuntimeError_(f"算术运算 '/' 的操作数必须是数字类型，得到 {type(left).__name__} 和 {type(right).__name__}")
+            if right == 0:
+                raise RuntimeError_("除零错误")
+            try:
+                if isinstance(left, int) and isinstance(right, int):
+                    return left // right  # 整数除法
+                return left / right
+            except ZeroDivisionError:
+                raise RuntimeError_("除零错误")
+            except Exception as e:
+                raise RuntimeError_(f"算术运算 '/' 失败: {e}")
         elif expr.op == "%":
             if isinstance(left, bool) or isinstance(right, bool):
                 raise RuntimeError_("算术运算 '%' 的操作数不能是 Bool 类型")
-            return left % right
+            if not (isinstance(left, (int, float)) and isinstance(right, (int, float))):
+                raise RuntimeError_(f"算术运算 '%' 的操作数必须是数字类型，得到 {type(left).__name__} 和 {type(right).__name__}")
+            if right == 0:
+                raise RuntimeError_("除零错误")
+            try:
+                return left % right
+            except ZeroDivisionError:
+                raise RuntimeError_("除零错误")
+            except Exception as e:
+                raise RuntimeError_(f"算术运算 '%' 失败: {e}")
         elif expr.op == "++":
             if isinstance(left, str) and isinstance(right, str):
                 return left + right
@@ -984,7 +1015,12 @@ class Evaluator:
         if expr.op == "-":
             if isinstance(operand, bool):
                 raise RuntimeError_("算术运算 '-' 的操作数不能是 Bool 类型")
-            return -operand
+            if not isinstance(operand, (int, float)):
+                raise RuntimeError_(f"算术运算 '-' 的操作数必须是数字类型，得到 {type(operand).__name__}")
+            try:
+                return -operand
+            except Exception as e:
+                raise RuntimeError_(f"算术运算 '-' 失败: {e}")
         elif expr.op == "!":
             if not isinstance(operand, bool):
                 raise RuntimeError_(f"! 操作数必须是 Bool 类型，得到 {type(operand).__name__}")
