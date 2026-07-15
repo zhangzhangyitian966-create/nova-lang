@@ -21,7 +21,7 @@ from nova.ast_nodes import (
     LetBinding, MutBinding, Assignment,
     IfExpr, MatchArm, MatchExpr,
     ForExpr, WhileExpr, BreakExpr, ContinueExpr,
-    ListExpr, ListComprehension, TupleExpr, FieldAccess, MapExpr,
+    ListExpr, ListComprehension, TupleExpr, FieldAccess, IndexExpr, MapExpr,
     TypeDef, VariantDef, AliasDef,
     ImportDecl, ExportDecl,
     TypeInt, TypeFloat, TypeString, TypeBool, TypeChar, TypeUnit,
@@ -890,6 +890,37 @@ class TypeChecker:
                 return ERROR_TYPE
             self._report_error(f"无法对类型 {target_ty} 进行字段访问", expr)
             return ERROR_TYPE
+
+        elif isinstance(expr, IndexExpr):
+            target_ty = self.check_expr(expr.target)
+            idx_ty = self.check_expr(expr.index)
+            if isinstance(target_ty, ListType):
+                if not self._types_compatible(idx_ty, INT_T):
+                    self._report_error(
+                        f"列表索引必须是 Int 类型，得到 {idx_ty}",
+                        expr
+                    )
+                return target_ty.elem_type
+            elif isinstance(target_ty, MapType):
+                if not self._types_compatible(idx_ty, target_ty.key_type):
+                    self._report_error(
+                        f"Map 键类型不匹配：期望 {target_ty.key_type}，得到 {idx_ty}",
+                        expr
+                    )
+                return target_ty.value_type
+            elif target_ty == STRING_T:
+                if not self._types_compatible(idx_ty, INT_T):
+                    self._report_error(
+                        f"字符串索引必须是 Int 类型，得到 {idx_ty}",
+                        expr
+                    )
+                return CHAR_T
+            else:
+                self._report_error(
+                    f"类型错误: 无法对 {target_ty} 进行索引操作",
+                    expr
+                )
+                return ERROR_TYPE
 
         elif isinstance(expr, TryExpr):
             # ? 操作符：解包 Result[T, E] -> T 或 Option[T] -> T

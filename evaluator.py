@@ -29,7 +29,7 @@ from nova.ast_nodes import (
     LetBinding, MutBinding, Assignment,
     IfExpr, MatchArm, MatchExpr,
     ForExpr, WhileExpr, BreakExpr, ContinueExpr,
-    ListExpr, ListComprehension, TupleExpr, FieldAccess, MapExpr,
+    ListExpr, ListComprehension, TupleExpr, FieldAccess, IndexExpr, MapExpr,
     ImportDecl, ExportDecl, TypeDef, VariantDef, AliasDef,
     PatternWildcard, PatternInt, PatternFloat, PatternString,
     PatternBool, PatternChar, PatternIdentifier, PatternConstructor,
@@ -841,6 +841,22 @@ class Evaluator:
                         return target.fields[i]
                 raise RuntimeError_(f"ADT 值没有字段 '{field_name}'")
             raise RuntimeError_(f"无法对值进行字段访问")
+
+        # --- 索引访问 ---
+        elif isinstance(expr, IndexExpr):
+            target = self.eval_expr(expr.target)
+            idx = self.eval_expr(expr.index)
+            try:
+                if isinstance(target, dict):
+                    if idx not in target:
+                        raise RuntimeError_(f"键不存在: {idx}")
+                    return target[idx]
+                else:
+                    return target[idx]
+            except IndexError:
+                raise RuntimeError_(f"索引越界: {idx}")
+            except TypeError:
+                raise RuntimeError_(f"类型错误: 无法对 {type(target).__name__} 进行索引操作")
 
         else:
             raise RuntimeError_(f"未知的表达式类型: {type(expr).__name__}")

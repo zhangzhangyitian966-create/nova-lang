@@ -1,5 +1,59 @@
 # Nova 自动改进日志
 
+## 2026-07-15 自动改进（第十四轮）
+
+基于 AUTO_REVIEW_LOG.md 第十二轮审查日志的 P0 级严重问题驱动改进（阶段一检查 + 阶段二开发 + 阶段三测试）。
+
+### 每日发现的问题
+
+#### vm.py
+- **MOD 除零保护完全缺失（vm.py:605-609）**：`a % b` 未检查除零，抛出未包装的 Python ZeroDivisionError → 添加 try/except ZeroDivisionError **[已修复]**
+- **DIV 浮点除零未处理（vm.py:597-603）**：整数除零已检查，但浮点除法 `a / b` 浮点分支未检查 → 统一改为 try/except 模式 **[已修复]**
+- **INDEX 异常未包装为 Nova 运行时错误（vm.py:871-875）**：`obj[index]` 的 IndexError/KeyError/TypeError 直接泄漏 → 用 try/except 包装为 RuntimeError_ **[已修复]**
+
+#### compiler.py
+- **lambda 嵌套子函数丢失（compiler.py:650-671）**：`_compile_lambda` 只提取 code/constants，未将 fn_bytecode.functions 回写到外层 → 添加子函数收集和回写循环 **[已修复]**
+
+#### parser.py + ast_nodes.py + evaluator.py + type_checker.py + ir/hir_lowering.py
+- **索引访问 `expr[index]` 未实现（parser.py:733-763）**：`_parse_postfix_expr` 缺少 LBRACKET 处理，AST 节点未定义，Evaluator 未实现 → 完整实现6层（AST/Parser/Evaluator/Compiler/HIR/TypeChecker **[已修复]**
+
+### 本次修复内容（基于审查日志 Issue）
+
+1. **vm.py — MOD 除零保护（基于审查日志 vm.py:605-609 / 第十二轮严重问题 #1）**
+   - MOD 指令处理添加 `try/except ZeroDivisionError`，捕获后抛出 `RuntimeError_("除零错误")`
+   - 同时修复 DIV 浮点除零：将整数/浮点分支统一包裹在 try/except 中，不再依赖手动 `b == 0` 检查
+   - 确保 `0.0` 等浮点除零也能被正确捕获
+
+2. **vm.py — INDEX 异常包装（基于审查日志 vm.py:871-875 / 第十二轮严重问题 #2）**
+   - INDEX 指令用 try/except 包裹 `obj[index]`
+   - 分别捕获 IndexError（列表/元组越界）、KeyError（字典键不存在）、TypeError（类型不支持索引）
+   - 统一包装为 RuntimeError_
+
+3. **compiler.py — lambda 嵌套子函数丢失（基于审查日志 compiler.py:650-671 / 第十二轮严重问题 #4）**
+   - `_compile_lambda` 方法参照 `_compile_function` 的正确做法
+   - 新增 `fn_sub_functions = dict(fn_bytecode.functions)` 收集嵌套子函数
+   - 注册当前 lambda 后，遍历回写所有子函数到外层 bytecode.functions
+   - 修复 `|x| |y| x + y` 等嵌套 lambda 不再丢失内层函数
+
+4. **索引访问 `expr[index]` 完整实现（基于审查日志 parser.py:733-763 / 第十二轮严重问题 #8）**
+   - **ast_nodes.py**：新增 `IndexExpr` 数据类（target, index, span）
+   - **parser.py**：`_parse_postfix_expr` 新增 LBRACKET 分支，解析 `expr[index]`
+   - **evaluator.py**：`eval_expr` 新增 IndexExpr 分支，支持 list/tuple/str/dict 索引
+   - **compiler.py**：`_compile_expr` 新增 IndexExpr 编译，发射 Op.INDEX
+   - **ir/hir_lowering.py**：新增 AST IndexExpr → HIRIndexExpr 降级
+   - **type_checker.py**：新增 IndexExpr 类型检查，支持 List[T]/Map[K,V]/String 三种目标类型推导
+
+### 测试结果
+
+- 全量测试: **664 passed** (1.07s)
+- Evaluator 示例: hello/fibonacci/pattern_match/loops/math 全部正常输出
+- VM 示例: hello/fibonacci/pattern_match 全部正常输出
+- 嵌套 lambda: `|x| |y| x + y` 调用 `f(10)(5) = 15 ✅
+- MOD 除零: 正确抛出 RuntimeError_("除零错误") ✅
+- 索引访问: 列表/字符串/字典索引及越界错误均正确 ✅
+
+---
+
 ## 2026-07-15 自动改进（第十三轮）
 
 基于 AUTO_REVIEW_LOG.md 第九轮/第十轮审查日志的 P0 级严重问题驱动改进（阶段一检查 + 阶段二开发 + 阶段三测试）。

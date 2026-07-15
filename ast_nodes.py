@@ -8,6 +8,26 @@ AST 是源代码的结构化表示，是语法分析的输出，类型检查和�
 from dataclasses import dataclass, field
 from typing import List, Optional, Any, Union
 
+__all__ = [
+    "Span",
+    "IntLiteral", "FloatLiteral", "StringLiteral", "CharLiteral", "BoolLiteral", "UnitLiteral",
+    "Identifier", "BinaryOp", "UnaryOp", "PipeExpr", "TryExpr",
+    "Param", "Lambda", "FnDef", "FnCall",
+    "LetBinding", "MutBinding", "Assignment",
+    "IfExpr", "MatchArm", "MatchExpr",
+    "ForExpr", "WhileExpr", "BreakExpr", "ContinueExpr",
+    "PatternWildcard", "PatternInt", "PatternFloat", "PatternString",
+    "PatternBool", "PatternChar", "PatternIdentifier", "PatternConstructor",
+    "PatternTuple", "PatternList",
+    "ListExpr", "ListComprehension", "TupleExpr", "MapExpr",
+    "FieldAccess", "IndexExpr",
+    "Block", "ImportDecl", "ExportDecl",
+    "TypeDef", "VariantDef", "AliasDef",
+    "Program",
+    "TypeInt", "TypeFloat", "TypeString", "TypeBool", "TypeChar", "TypeUnit",
+    "TypeIdentifier", "TypeGeneric", "TypeTuple", "TypeFn",
+]
+
 
 # ============================================================
 # 位置信息
@@ -368,6 +388,14 @@ class FieldAccess:
     """字段访问：tuple.0, obj.field"""
     target: Any  # Expression
     field: str
+    span: Optional[Span] = None
+
+
+@dataclass
+class IndexExpr:
+    """索引访问：expr[index]"""
+    target: Any  # Expression
+    index: Any   # Expression
     span: Optional[Span] = None
 
 
