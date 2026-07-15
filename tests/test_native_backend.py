@@ -340,6 +340,365 @@ class TestLinearScanAllocator(unittest.TestCase):
         self.assertEqual(slots, 0)  # 无溢出
 
 
+class TestLiveIntervalAnalysis(unittest.TestCase):
+    """活跃区间分析测试"""
+
+    def test_analyze_simple_const(self):
+        """简单常量加载的活跃区间分析"""
+        codegen = NativeCodeGen()
+        fn = LIRFunction("test", [], INT_TYPE)
+        fn.body = [
+            LIRLoadConst(value=42, const_type="int"),
+            LIRReturn(),
+        ]
+        gpr_intervals, xmm_intervals = codegen._analyze_live_intervals(fn)
+        # 应有一个 GPR 区间（const_42）
+        self.assertEqual(len(gpr_intervals), 1)
+        self.assertEqual(len(xmm_intervals), 0)
+        self.assertEqual(gpr_intervals[0].vreg, "const_42")
+        # first_use = 0 (LIRLoadConst 定义), last_use = 0 (没有后续使用)
+        self.assertEqual(gpr_intervals[0].start, 0)
+        self.assertEqual(gpr_intervals[0].end, 0)
+
+    def test_analyze_binop_vregs(self):
+        """BinOp 操作数和目标的活跃区间"""
+        codegen = NativeCodeGen()
+        fn = LIRFunction("test", [], INT_TYPE)
+        add_op = LIRBinOp(op="+")
+        add_op.src_locs = [("a", INT_TYPE), ("b", INT_TYPE)]
+        add_op.dst_loc = ("c", INT_TYPE)
+        fn.body = [
+            LIRLoadConst(value=1, const_type="int"),  # idx 0: const_1 defined
+            LIRLoadConst(value=2, const_type="int"),  # idx 1: const_2 defined
+            add_op,                                    # idx 2: uses const_1, const_2, defines c
+            LIRReturn(),
+        ]
+        gpr_intervals, xmm_intervals = codegen._analyze_live_intervals(fn)
+        # 应该有 3 个 GPR 区间: const_1, const_2, c
+        vreg_names = {i.vreg for i in gpr_intervals}
+        self.assertIn("const_1", vreg_names)
+        self.assertIn("const_2", vreg_names)
+        self.assertIn("c", vreg_names)
+
+    def test_analyze_float_const(self):
+        """浮点常量应归类为 XMM 区间"""
+        codegen = NativeCodeGen()
+        fn = LIRFunction("test", [], FLOAT_TYPE)
+        fn.body = [
+            LIRLoadConst(value=3.14, const_type="float"),
+            LIRReturn(),
+        ]
+        gpr_intervals, xmm_intervals = codegen._analyze_live_intervals(fn)
+        self.assertEqual(len(gpr_intervals), 0)
+        self.assertEqual(len(xmm_intervals), 1)
+        self.assertEqual(xmm_intervals[0].vreg, "fconst_3.14")
+
+    def test_analyze_empty_body(self):
+        """空函数体应返回空区间"""
+        codegen = NativeCodeGen()
+        fn = LIRFunction("test", [], INT_TYPE)
+        fn.body = [
+            LIRReturn(),
+        ]
+        gpr_intervals, xmm_intervals = codegen._analyze_live_intervals(fn)
+        self.assertEqual(len(gpr_intervals), 0)
+        self.assertEqual(len(xmm_intervals), 0)
+
+    def test_analyze_loadreg_dst(self):
+        """LIRLoadReg 的 dst_loc 应被追踪为定义"""
+        codegen = NativeCodeGen()
+        fn = LIRFunction("test", [], INT_TYPE)
+        load_reg = LIRLoadReg()
+        load_reg.src_locs = [("const_42", INT_TYPE)]
+        load_reg.dst_loc = ("moved_val", INT_TYPE)
+        fn.body = [
+            LIRLoadConst(value=42, const_type="int"),
+            load_reg,
+            LIRReturn(),
+        ]
+        gpr_intervals, _ = codegen._analyze_live_intervals(fn)
+        vreg_names = {i.vreg for i in gpr_intervals}
+        self.assertIn("const_42", vreg_names)
+        self.assertIn("moved_val", vreg_names)
+
+    def test_analyze_branch_cond_reg(self):
+        """LIRBranch 的 cond_reg 应被追踪为使用"""
+        codegen = NativeCodeGen()
+        fn = LIRFunction("test", [], INT_TYPE)
+        fn.body = [
+            LIRLoadConst(value=1, const_type="int"),
+            LIRBranch(cond_reg="const_1", true_label="yes", false_label="no"),
+            LIRLabel(name="yes"),
+            LIRReturn(),
+            LIRLabel(name="no"),
+            LIRReturn(),
+        ]
+        gpr_intervals, _ = codegen._analyze_live_intervals(fn)
+        vreg_names = {i.vreg for i in gpr_intervals}
+        self.assertIn("const_1", vreg_names)
+        # const_1 的 last_use 应该在 branch 指令处
+        const_1_interval = next(i for i in gpr_intervals if i.vreg == "const_1")
+        self.assertEqual(const_1_interval.start, 0)
+        self.assertEqual(const_1_interval.end, 1)  # idx 1 = LIRBranch
+
+
+class TestLinearScanIntegration(unittest.TestCase):
+    """LinearScanAllocator 集成到编译流程的测试"""
+
+    def test_linear_scan_used_in_compilation(self):
+        """编译函数时应使用 LinearScanAllocator 分配寄存器
+
+        通过验证非重叠 vreg 复用同一物理寄存器来确认
+        LinearScanAllocator 确实在工作。
+        """
+        codegen = NativeCodeGen()
+        lir = LIRModule(name="test")
+        fn = LIRFunction("test_reuse", [], INT_TYPE)
+
+        # 构造两个不重叠的虚拟寄存器：
+        # const_10 在指令 0 定义，在指令 1 使用（然后不再使用）
+        # const_20 在指令 2 定义，在指令 3 使用
+        # LinearScanAllocator 应该能复用寄存器
+        load1 = LIRLoadConst(value=10, const_type="int")
+
+        # 用掉 const_10，使其生命周期结束
+        use1 = LIRUnaryOp(op="-")
+        use1.src_locs = [("const_10", INT_TYPE)]
+        use1.dst_loc = ("neg_10", INT_TYPE)
+
+        # 加载另一个常量（应该能复用 const_10 的寄存器）
+        load2 = LIRLoadConst(value=20, const_type="int")
+
+        use2 = LIRUnaryOp(op="-")
+        use2.src_locs = [("const_20", INT_TYPE)]
+        use2.dst_loc = ("neg_20", INT_TYPE)
+
+        fn.body = [load1, use1, load2, use2, LIRReturn()]
+        lir.functions["test_reuse"] = fn
+
+        # 运行活跃区间分析验证
+        gpr_intervals, _ = codegen._analyze_live_intervals(fn)
+        vreg_map = {i.vreg: i for i in gpr_intervals}
+
+        # const_10 的区间应该在 const_20 开始前结束
+        # （这样 LinearScanAllocator 才能复用寄存器）
+        const_10_end = vreg_map["const_10"].end
+        const_20_start = vreg_map["const_20"].start
+        self.assertLessEqual(const_10_end, const_20_start,
+            "const_10 should end before or at const_20 start for register reuse")
+
+        # 验证编译成功
+        code = codegen._compile_function(fn)
+        self.assertIsInstance(code, bytes)
+        self.assertTrue(len(code) > 0)
+
+    def test_run_linear_scan_success(self):
+        """_run_linear_scan_alloc 成功时返回 vreg 映射"""
+        codegen = NativeCodeGen()
+        fn = LIRFunction("test", [], INT_TYPE)
+        fn.body = [
+            LIRLoadConst(value=10, const_type="int"),
+            LIRLoadConst(value=20, const_type="int"),
+            LIRReturn(),
+        ]
+        result = codegen._run_linear_scan_alloc(fn)
+        self.assertIsNotNone(result)
+        self.assertIsInstance(result, dict)
+        # 应该有两个 vreg 的分配
+        self.assertIn("const_10", result)
+        self.assertIn("const_20", result)
+        # 两者都应分配到有效寄存器（非 None）
+        self.assertIsNotNone(result["const_10"])
+        self.assertIsNotNone(result["const_20"])
+
+    def test_run_linear_scan_empty_function(self):
+        """空函数的线性扫描分配应返回空映射"""
+        codegen = NativeCodeGen()
+        fn = LIRFunction("test", [], INT_TYPE)
+        fn.body = [
+            LIRReturn(),
+        ]
+        result = codegen._run_linear_scan_alloc(fn)
+        self.assertIsNotNone(result)
+        self.assertEqual(len(result), 0)
+
+    def test_multiple_vregs_register_reuse(self):
+        """多虚拟寄存器场景下寄存器正确复用
+
+        当多个虚拟寄存器的活跃区间不重叠时，
+        LinearScanAllocator 应复用物理寄存器，
+        从而减少实际使用的物理寄存器数量。
+        """
+        codegen = NativeCodeGen()
+        fn = LIRFunction("test_reuse", [], INT_TYPE)
+
+        # 构造一系列不重叠的 vreg，它们应能复用少量物理寄存器
+        instructions = []
+        vreg_names = []
+
+        for i in range(20):
+            # 每个 vreg 定义后立即被"消耗"（用于 unary op）
+            load = LIRLoadConst(value=i, const_type="int")
+            neg = LIRUnaryOp(op="-")
+            neg.src_locs = [(f"const_{i}", INT_TYPE)]
+            neg.dst_loc = (f"neg_{i}", INT_TYPE)
+            instructions.append(load)
+            instructions.append(neg)
+            vreg_names.append(f"const_{i}")
+            vreg_names.append(f"neg_{i}")
+
+        instructions.append(LIRReturn())
+        fn.body = instructions
+
+        # 运行线性扫描分配
+        result = codegen._run_linear_scan_alloc(fn)
+        self.assertIsNotNone(result,
+            "Allocation should succeed with 20 sequential vregs and 12 GPRs")
+
+        # 统计使用的不同物理寄存器数量
+        used_regs = set(result.values())
+        # 20 个顺序（不重叠）的 vreg 应该能用很少的物理寄存器
+        # （理论上最少只需要 2 个：const_i 和 neg_i 同时活跃）
+        self.assertLess(len(used_regs), 10,
+            f"Expected significant register reuse, but used {len(used_regs)} regs for 20 vregs")
+
+        # 验证编译成功
+        code = codegen._compile_function(fn)
+        self.assertIsInstance(code, bytes)
+        self.assertTrue(len(code) > 0)
+
+    def test_fallback_when_registers_insufficient(self):
+        """寄存器不足时 fallback 到按需分配策略
+
+        当活跃 vreg 数量超过可用寄存器时，
+        _run_linear_scan_alloc 应返回 None，
+        _compile_function 应 fallback 到按需分配，
+        确保编译仍然成功（不崩溃）。
+        """
+        codegen = NativeCodeGen()
+        fn = LIRFunction("test_fallback", [], INT_TYPE)
+
+        # 构造大量同时活跃的 vreg（超过可用 GPR 数量 12）
+        # 通过让它们都在最后一条指令中被使用来实现同时活跃
+        instructions = []
+        src_locs = []
+
+        for i in range(20):
+            load = LIRLoadConst(value=i, const_type="int")
+            instructions.append(load)
+            src_locs.append((f"const_{i}", INT_TYPE))
+
+        # 用一个 call 指令"使用"所有 vreg，使它们都同时活跃
+        # （call 使用所有 src_locs 的 vreg）
+        call = LIRCall(func_name="dummy", arg_count=20)
+        call.src_locs = src_locs
+        instructions.append(call)
+        instructions.append(LIRReturn())
+
+        fn.body = instructions
+
+        # 线性扫描分配应该失败（返回 None），因为 20 个 vreg 同时活跃
+        # 而可用 GPR 只有 12 个
+        result = codegen._run_linear_scan_alloc(fn)
+        self.assertIsNone(result,
+            "Linear scan should fail (return None) when 20 vregs are live simultaneously with 12 GPRs")
+
+        # 但编译应该仍然成功（fallback 到按需分配）
+        code = codegen._compile_function(fn)
+        self.assertIsInstance(code, bytes)
+        self.assertTrue(len(code) > 0)
+
+    def test_preallocated_vregs_used_in_body(self):
+        """_compile_body 应正确使用预分配的 vreg 映射"""
+        codegen = NativeCodeGen()
+        lir = LIRModule(name="test")
+        fn = LIRFunction("test_prealloc", [], INT_TYPE)
+
+        load = LIRLoadConst(value=42, const_type="int")
+        fn.body = [load, LIRReturn()]
+        lir.functions["test_prealloc"] = fn
+
+        # 手动构造预分配映射，强制 const_42 使用 R15
+        # （正常按需分配会使用 RAX）
+        preallocated = {"const_42": R15}
+
+        from nova.backend.x86_64 import X86_64Emitter
+        e = X86_64Emitter()
+        vregs = {}
+        free_gprs = [RAX, RCX, RDX, RBX, R8, R9, R10, R11, R12, R13, R14, R15]
+        free_xmms = []
+
+        # 使用预分配的映射调用 _alloc_vreg
+        reg = codegen._alloc_vreg("const_42", vregs, free_gprs, free_xmms,
+                                  preallocated=preallocated)
+        self.assertEqual(reg, R15,
+            "preallocated vreg should use the pre-assigned register")
+        # 验证 free_gprs 没有弹出 R15（因为是预分配的）
+        self.assertIn(R15, free_gprs)
+
+    def test_compile_with_preallocated_none(self):
+        """preallocated=None 时应使用按需分配（fallback 模式）"""
+        codegen = NativeCodeGen()
+        lir = LIRModule(name="test")
+        fn = LIRFunction("test_fallback_mode", [], INT_TYPE)
+
+        fn.body = [
+            LIRLoadConst(value=42, const_type="int"),
+            LIRReturn(),
+        ]
+        lir.functions["test_fallback_mode"] = fn
+
+        from nova.backend.x86_64 import X86_64Emitter
+        e = X86_64Emitter()
+
+        # 显式传入 preallocated=None
+        codegen._compile_body(e, fn, {}, [], [], [], preallocated=None)
+        code = bytes(e.code)
+        self.assertTrue(len(code) > 0)
+
+    def test_collect_vreg_info_loadconst(self):
+        """_collect_vreg_info 对 LIRLoadConst 返回正确的 defined vreg"""
+        codegen = NativeCodeGen()
+        instr = LIRLoadConst(value=42, const_type="int")
+        used, defined = codegen._collect_vreg_info(instr)
+        self.assertEqual(len(used), 0)
+        self.assertEqual(len(defined), 1)
+        self.assertEqual(defined[0][0], "const_42")
+        self.assertFalse(defined[0][1])  # is_float = False
+
+    def test_collect_vreg_info_float(self):
+        """_collect_vreg_info 对浮点常量标记 is_float=True"""
+        codegen = NativeCodeGen()
+        instr = LIRLoadConst(value=3.14, const_type="float")
+        used, defined = codegen._collect_vreg_info(instr)
+        self.assertEqual(len(defined), 1)
+        self.assertTrue(defined[0][1])  # is_float = True
+
+    def test_collect_vreg_info_binop(self):
+        """_collect_vreg_info 对 LIRBinOp 正确提取 src 和 dst"""
+        codegen = NativeCodeGen()
+        instr = LIRBinOp(op="+")
+        instr.src_locs = [("a", INT_TYPE), ("b", INT_TYPE)]
+        instr.dst_loc = ("c", INT_TYPE)
+        used, defined = codegen._collect_vreg_info(instr)
+        used_names = [u[0] for u in used]
+        def_names = [d[0] for d in defined]
+        self.assertIn("a", used_names)
+        self.assertIn("b", used_names)
+        self.assertIn("c", def_names)
+
+    def test_collect_vreg_info_label_jump(self):
+        """LIRLabel 和 LIRJump 不涉及 vreg"""
+        codegen = NativeCodeGen()
+        used1, def1 = codegen._collect_vreg_info(LIRLabel(name="test"))
+        self.assertEqual(len(used1), 0)
+        self.assertEqual(len(def1), 0)
+
+        used2, def2 = codegen._collect_vreg_info(LIRJump(target="test"))
+        self.assertEqual(len(used2), 0)
+        self.assertEqual(len(def2), 0)
+
+
 class TestNativeCodeGen(unittest.TestCase):
     """原生代码生成器测试"""
 
@@ -1500,38 +1859,54 @@ class TestBinOpDstLoc(unittest.TestCase):
     """LIRBinOp dst_loc 正确性测试"""
 
     def test_binop_dst_loc_different_from_left(self):
-        """BinOp 结果写入 dst_loc 指定的目标寄存器，而非 left_reg"""
+        """BinOp 结果写入 dst_loc 指定的目标寄存器，而非 left_reg
+
+        当左操作数在 BinOp 之后仍被使用时，
+        dst_loc 必须分配到不同的物理寄存器，
+        因此会产生 mov 指令将结果移到目标寄存器。
+        """
         codegen = NativeCodeGen()
         lir = LIRModule(name="test")
         fn = LIRFunction("test_binop_dst", [], INT_TYPE)
 
         # 加载两个常量到不同的虚拟寄存器
-        # const_10 -> vregs["const_10"] = RAX (first free)
-        # const_20 -> vregs["const_20"] = RCX (second free)
         load_a = LIRLoadConst(value=10, const_type="int")
         load_b = LIRLoadConst(value=20, const_type="int")
 
-        # BinOp: a + b，结果写入 result_vreg（应分配到第三个可用寄存器 RBX）
+        # BinOp: a + b，结果写入 result_sum
         add_op = LIRBinOp(op="+")
         add_op.src_locs = [("const_10", INT_TYPE), ("const_20", INT_TYPE)]
         add_op.dst_loc = ("result_sum", INT_TYPE)
 
-        fn.body = [load_a, load_b, add_op, LIRReturn()]
+        # 关键：在加法之后继续使用 const_10，使其活跃区间跨越加法指令
+        # 这样 const_10 和 result_sum 必须分配不同的物理寄存器
+        second_add = LIRBinOp(op="+")
+        second_add.src_locs = [("result_sum", INT_TYPE), ("const_10", INT_TYPE)]
+        second_add.dst_loc = ("final_result", INT_TYPE)
+
+        fn.body = [load_a, load_b, add_op, second_add, LIRReturn()]
         lir.functions["test_binop_dst"] = fn
 
         code = codegen._compile_function(fn)
         self.assertTrue(len(code) > 0)
 
-        # 验证：result_sum 被分配了独立的物理寄存器（不是 const_10 的寄存器）
-        # 由于有 dst_loc，代码应在加法后执行 mov 指令将结果从 left_reg 移到 dst_reg
-        # 统计 mov_reg_reg64 (48 89) 的数量
+        # 验证包含加法指令 (48 01 = add r/m64, r64)
+        found_add = False
+        for i in range(len(code) - 2):
+            if code[i] == 0x48 and code[i + 1] == 0x01:
+                found_add = True
+                break
+        self.assertTrue(found_add, "Expected add instruction in compiled code")
+
+        # 验证 result_sum 对应的 vreg 被正确追踪
+        # 由于 const_10 在加法后仍被使用，result_sum 必须在不同寄存器中
+        # 因此至少有一次 mov 用于将结果从左操作数寄存器移到目标寄存器
         mov_count = 0
         for i in range(len(code) - 2):
             if code[i] == 0x48 and code[i + 1] == 0x89:
                 mov_count += 1
-        # 至少有一个 mov 用于将结果从左操作数寄存器移到目标寄存器
         self.assertGreaterEqual(mov_count, 1,
-            "Expected at least one mov_reg_reg64 to move result to dst register")
+            "Expected at least one mov_reg_reg64 when src is still live")
 
     def test_multiple_binop_different_vregs(self):
         """连续多个 BinOp 操作不同虚拟寄存器时结果正确写入各自目标"""
@@ -1619,7 +1994,12 @@ class TestUnaryOpDstLoc(unittest.TestCase):
     """LIRUnaryOp dst_loc 正确性测试"""
 
     def test_unary_neg_dst_loc(self):
-        """一元取反结果写入 dst_loc 指定的目标寄存器，而非修改操作数"""
+        """一元取反结果写入 dst_loc 指定的目标寄存器，而非修改操作数
+
+        当源操作数在 UnaryOp 之后仍被使用时，
+        dst_loc 必须分配到不同的物理寄存器，
+        因此会产生 mov 指令将结果移到目标寄存器。
+        """
         codegen = NativeCodeGen()
         lir = LIRModule(name="test")
         fn = LIRFunction("test_neg_dst", [], INT_TYPE)
@@ -1630,7 +2010,13 @@ class TestUnaryOpDstLoc(unittest.TestCase):
         neg_op.src_locs = [("const_42", INT_TYPE)]
         neg_op.dst_loc = ("neg_result", INT_TYPE)
 
-        fn.body = [load_val, neg_op, LIRReturn()]
+        # 关键：在取反之后继续使用 const_42，使其活跃区间跨越取反指令
+        # 这样 const_42 和 neg_result 必须分配不同的物理寄存器
+        add_op = LIRBinOp(op="+")
+        add_op.src_locs = [("neg_result", INT_TYPE), ("const_42", INT_TYPE)]
+        add_op.dst_loc = ("final_result", INT_TYPE)
+
+        fn.body = [load_val, neg_op, add_op, LIRReturn()]
         lir.functions["test_neg_dst"] = fn
 
         code = codegen._compile_function(fn)
@@ -1645,12 +2031,13 @@ class TestUnaryOpDstLoc(unittest.TestCase):
         self.assertTrue(found_neg, "Expected neg instruction for unary -")
 
         # 验证有 mov 指令将结果移到目标寄存器
+        # 由于 const_42 在取反后仍被使用，neg_result 必须在不同寄存器中
         mov_count = 0
         for i in range(len(code) - 2):
             if code[i] == 0x48 and code[i + 1] == 0x89:
                 mov_count += 1
         self.assertGreaterEqual(mov_count, 1,
-            "Expected mov to move neg result to dst register")
+            "Expected mov to move neg result to dst register when src is still live")
 
     def test_unary_not_logical_dst_loc(self):
         """逻辑非运算结果写入 dst_loc 指定的目标寄存器"""

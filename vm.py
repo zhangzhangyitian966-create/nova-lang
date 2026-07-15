@@ -138,6 +138,9 @@ class Frame:
         self.constants = constants
         self.locals = locals_
         self.ip = ip
+        # 模式匹配快照栈：每个 match 开始时保存一份局部变量名集合
+        # 用于在 arm 切换和 match 结束时清理绑定变量，防止作用域污染
+        self.match_snapshots: List[set] = []
 
 
 # ============================================================
@@ -360,13 +363,23 @@ class NovaVM:
             if fn.arity > 0 and len(args) < fn.arity:
                 partial = NovaPartialBuiltin(fn, list(args))
                 return partial
+            # 超额参数检查
+            if fn.arity > 0 and len(args) > fn.arity:
+                raise RuntimeError_(
+                    f"函数 '{fn.name}' 期望 {fn.arity} 个参数，得到 {len(args)} 个"
+                )
             return fn.fn(*args)
 
         if isinstance(fn, NovaPartialBuiltin):
             all_args = fn.captured_args + list(args)
-            if fn.arity > 0 and len(all_args) < fn.builtin.arity:
+            if fn.builtin.arity > 0 and len(all_args) < fn.builtin.arity:
                 partial = NovaPartialBuiltin(fn.builtin, all_args)
                 return partial
+            # 超额参数检查
+            if fn.builtin.arity > 0 and len(all_args) > fn.builtin.arity:
+                raise RuntimeError_(
+                    f"函数 '{fn.builtin.name}' 期望 {fn.builtin.arity} 个参数，得到 {len(all_args)} 个"
+                )
             return fn.builtin.fn(*all_args)
 
         if isinstance(fn, NovaConstructor):
@@ -601,7 +614,12 @@ class NovaVM:
                     if not mutable:
                         raise RuntimeError_(f"Cannot assign to immutable variable '{name}'")
                     frame.locals[name] = val
-                    return
+                else:
+                    # 函数作用域中：总是写入局部变量，禁止隐式创建/修改全局变量
+                    # 这确保 let/mut 绑定在函数中创建局部变量，
+                    # 同时防止意外修改全局变量（违背静态作用域原则）
+                    frame.locals[name] = val
+                return
             self.globals[name] = val
 
         # === 运算 ===
@@ -1073,8 +1091,23 @@ class NovaVM:
         # === 模式匹配 ===
         elif opcode == Op.MATCH_START:
             # Stack: unchanged
-            # Marker for match expression start
-            pass
+            # Marker for match expression start — save locals snapshot
+            if self.call_stack:
+                frame = self.call_stack[-1]
+                frame.match_snapshots.append(set(frame.locals.keys()))
+            # 顶层（无函数帧）不需要快照，因为顶层本身就是全局作用域
+
+        elif opcode == Op.MATCH_ARM_START:
+            # Stack: unchanged
+            # Marker for match arm start — restore snapshot to clean previous arm's bindings
+            if self.call_stack:
+                frame = self.call_stack[-1]
+                if frame.match_snapshots:
+                    snapshot = frame.match_snapshots[-1]
+                    # 删除上一个 arm 新增的所有变量
+                    for key in list(frame.locals.keys()):
+                        if key not in snapshot:
+                            del frame.locals[key]
 
         elif opcode == Op.MATCH_TEST_INT:
             # Stack: [subject] -> [] (match success) or [subject] (match fail)
@@ -1210,8 +1243,15 @@ class NovaVM:
 
         elif opcode == Op.MATCH_END:
             # Stack: unchanged
-            # Marker for match expression end
-            pass
+            # Marker for match expression end — restore locals snapshot
+            if self.call_stack:
+                frame = self.call_stack[-1]
+                if frame.match_snapshots:
+                    snapshot = frame.match_snapshots.pop()
+                    # 删除 match 过程中新增的所有变量
+                    for key in list(frame.locals.keys()):
+                        if key not in snapshot:
+                            del frame.locals[key]
 
         # === 管道 ===
         elif opcode == Op.PIPE_CALL:

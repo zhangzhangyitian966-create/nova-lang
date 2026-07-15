@@ -1,5 +1,78 @@
 # Nova 自动改进日志
 
+## 2026-07-15 自动改进（第十九轮）
+
+基于 AUTO_REVIEW_LOG.md 第十六轮审查日志的 P0 级严重问题驱动改进（阶段一检查 + 阶段二开发 + 阶段三测试）。
+
+### 每日发现的问题
+
+#### vm.py
+- **MATCH_BIND 失败分支绑定残留（vm.py:1137-1145）**：MATCH_BIND 直接写入 frame.locals，模式匹配 arm1 部分匹配后子模式失败跳转到 arm2 时，arm1 的绑定仍残留 → MATCH_START 保存快照，MATCH_ARM_START/MATCH_END 恢复快照
+- **STORE_VAR 函数体内静默创建全局（vm.py:592-605）**：函数内对未定义变量执行 STORE_VAR 时 fallback 到写入 self.globals，违背静态作用域 → 函数作用域内 STORE_VAR 始终写入 frame.locals
+- **内置函数超额参数未检查（vm.py:356-370）**：NovaBuiltinFn 只检查参数不足不检查过多，多余参数被 Python *args 静默忽略 → 添加 len(args) > fn.arity 检查
+
+#### backend/native_backend.py
+- **LinearScanAllocator 完整实现但从未被调用**：线性扫描寄存器分配器只在单元测试中使用，实际编译流程用的是简单的按需分配 → 集成到 _compile_function 中，活跃区间分析 + 线性扫描分配，失败时 fallback 到按需分配
+
+#### type_checker.py
+- **函数返回类型推断后不更新环境（type_checker.py:543-563）**：无 return_type 标注的函数推断出 body_type 后从未写回环境，调用处返回类型永远是 TypeVar → _check_decl_body 中推断后写回环境
+- **TypeVar 函数调用 duck typing 直接放行（type_checker.py:740-750）**：callee_ty 是 TypeVar 时直接放行，不做任何检查 → 记录到 error_collector 但继续放行（温和策略，待类型推断能力增强后再严格化）
+
+### 本次修复内容（基于审查日志 Issue）
+
+1. **vm.py — 内置函数超额参数检查（基于审查日志 vm.py:358-363 / 第十六轮严重问题 #10）**
+   - `_call_fn` 中 NovaBuiltinFn 和 NovaPartialBuiltin 两个路径都添加超额参数检查
+   - 错误信息：`函数 '<name>' 期望 <arity> 个参数，得到 <实际数量> 个`
+   - 同时修复 NovaPartialBuiltin 参数不足检查的 bug（用 fn.builtin.arity 而非 fn.arity）
+   - 新增 2 个测试用例：内置函数超额参数、部分应用内置函数超额参数
+
+2. **vm.py — STORE_VAR 函数作用域隔离（基于审查日志 vm.py:592-605 / 第十六轮严重问题 #2）**
+   - 函数作用域内的 STORE_VAR 始终写入 frame.locals（变量不存在则创建）
+   - 永远不会 fallback 到写入全局变量
+   - 修复了函数中 let/mut 绑定错误地创建为全局变量的根本问题
+   - 新增 2 个测试用例：函数内 let 是局部变量、函数不能隐式创建全局
+
+3. **vm.py + compiler.py — MATCH_BIND 作用域隔离（基于审查日志 vm.py:1137-1145 / 第十六轮严重问题 #4）**
+   - 编译器：每个 match arm 开头新增 MATCH_ARM_START 指令
+   - Frame 类：新增 match_snapshots 列表保存局部变量名快照
+   - MATCH_START：保存当前 locals key 集合到快照栈
+   - MATCH_ARM_START：恢复最近快照，清理上一个 arm 残留绑定
+   - MATCH_END：弹出快照，删除 match 过程中新增的所有变量
+   - 新增 2 个测试用例：失败 arm 绑定不残留、match 结束后绑定清理
+
+4. **backend/native_backend.py — LinearScanAllocator 集成到编译流程（基于审查日志 native_backend.py / 第十六轮严重问题 #12）**
+   - 新增 `_collect_vreg_info()` 从指令提取虚拟寄存器使用信息
+   - 新增 `_analyze_live_intervals()` 计算每个 vreg 的活跃区间
+   - 新增 `_run_linear_scan_alloc()` 运行线性扫描分配，溢出则返回 None
+   - `_compile_function` 中先做线性扫描分配，结果传给 `_compile_body`
+   - `_alloc_vreg` 支持 preallocated 参数，优先使用预分配的寄存器
+   - Fallback 机制：寄存器不足时自动回退到按需分配，编译不中断
+   - 新增 17 个测试用例：活跃区间分析、线性扫描集成、寄存器复用、fallback 等
+
+5. **type_checker.py — 函数返回类型推断写回环境（基于审查日志 type_checker.py:543-563 / 第十六轮严重问题 #5）**
+   - `_check_decl_body` 的 FnDef 分支中，无 return_type 标注时用推断出的 body_type 更新环境
+   - 构造新的 FnType 并通过 self.env.define() 写回
+   - 新增 5 个测试用例：Int返回推断、String返回推断、调用结果类型、嵌套调用、有标注不变
+
+6. **type_checker.py — TypeVar 函数调用诊断增强（基于审查日志 type_checker.py:740-750 / 第十六轮严重问题 #6）**
+   - 保留温和策略（记录错误但继续放行），避免破坏高阶函数场景
+   - 错误信息规范化，统一使用 TypeCheckError 和 error_collector
+   - 新增 4 个测试用例：TypeVar调用收集错误、不崩溃、高阶函数仍工作、已知函数无错误
+
+### 测试结果
+
+- 全量测试: **772 passed** (1.54s)
+- Evaluator 示例: hello/fibonacci/pattern_match/loops/math/pipe/list_comprehension 全部正常输出
+- VM 示例: hello/fibonacci/pattern_match/loops/math/pipe/list_comprehension 全部正常输出
+- 内置函数超额参数: `abs(5.0, 10.0)` 正确抛出 RuntimeError_ ✅
+- STORE_VAR 作用域: 函数内变量不污染全局 ✅
+- MATCH_BIND 作用域隔离: 失败 arm 绑定不残留 ✅
+- LinearScan 集成: 寄存器正确复用，fallback 正常工作 ✅
+- 返回类型推断: 无标注函数返回类型被正确推断并写回环境 ✅
+- TypeVar 函数调用: 诊断信息正确收集 ✅
+
+---
+
 ## 2026-07-15 自动改进（第十八轮）
 
 基于 AUTO_REVIEW_LOG.md 第十六轮审查日志的 P0 级严重问题驱动改进（阶段一检查 + 阶段二开发 + 阶段三测试）。

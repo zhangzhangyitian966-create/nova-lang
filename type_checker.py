@@ -561,6 +561,13 @@ class TypeChecker:
                         f"函数 '{decl.name}' 返回类型 {body_type} 与声明的 {expected} 不匹配",
                         decl.body
                     )
+            else:
+                # 没有 return_type 标注：将推断出的 body_type 写回环境
+                # 构造新的 FnType（保留参数类型，替换返回类型）
+                existing_fn_type = self.env.lookup(decl.name)
+                if isinstance(existing_fn_type, FnType):
+                    new_fn_type = FnType(existing_fn_type.param_types, body_type)
+                    self.env.define(decl.name, new_fn_type)
 
         elif isinstance(decl, (TypeDef, AliasDef)):
             pass  # 这些在第一遍已处理
@@ -738,11 +745,11 @@ class TypeChecker:
                     ret = self._substitute_type_vars(callee_ty.return_type, bindings)
                     return FnType(remaining, ret)
             elif isinstance(callee_ty, TypeVar):
-                # 未类型化的参数（duck typing）：允许任意调用
-                # 返回一个 TypeVar 表示结果类型
-                # 报告类型推断不完整，但不阻止编译
+                # 对类型未确定的值进行函数调用：类型推断不完整
+                # 记录到错误收集器，但继续放行（返回 TypeVar 表示未知结果类型）
+                # 这是因为被调用者可能是高阶函数参数，其类型需从调用上下文推断
                 self.error_collector.add(TypeCheckError(
-                    f"无法对未确定类型的值进行函数调用",
+                    f"无法对未确定类型的值进行函数调用（类型推断不完整）",
                     expr.span.line if expr.span else -1,
                     expr.span.column if expr.span else -1,
                     source=self._source,

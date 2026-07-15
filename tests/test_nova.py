@@ -2936,6 +2936,218 @@ class TestBytecodeVM(unittest.TestCase):
             vm.run()
         self.assertIn("期望 1 个参数，但传入了 3 个", str(ctx.exception))
 
+    # ---- 问题1：内置函数超额参数检查 ----
+
+    def test_vm_builtin_excess_args(self):
+        """内置函数传入过多参数应报错"""
+        # 使用 pipe_call 路径测试，因为直接 call_builtin 也走 _call_fn
+        from nova.compiler import Bytecode, Instruction, Op
+        bytecode = Bytecode()
+        bytecode.constants = []
+        bytecode.emit_op(Op.CONST_INT, 42)
+        bytecode.emit_op(Op.CONST_INT, 43)
+        bytecode.emit_op(Op.CALL_BUILTIN, "abs", 2)  # abs 只接受 1 个参数，传 2 个应报错
+        bytecode.emit_op(Op.HALT)
+
+        from nova.vm import NovaVM
+        vm = NovaVM(bytecode)
+        with self.assertRaises(RuntimeError_) as ctx:
+            vm.run()
+        self.assertIn("期望 1 个参数，得到 2 个", str(ctx.exception))
+
+    def test_vm_partial_builtin_excess_args(self):
+        """部分应用的内置函数传入过多参数应报错"""
+        from nova.compiler import Bytecode, Instruction, Op
+        bytecode = Bytecode()
+        bytecode.constants = []
+        # pow 的 arity 是 2，先传 1 个得到部分应用，再传 2 个（总共 3 个）应报错
+        bytecode.emit_op(Op.CONST_FLOAT, 2.0)
+        bytecode.emit_op(Op.CALL_BUILTIN, "pow", 1)  # 部分应用：pow(2.0)
+        bytecode.emit_op(Op.CONST_FLOAT, 3.0)
+        bytecode.emit_op(Op.CONST_FLOAT, 4.0)
+        bytecode.emit_op(Op.CALL, 2)  # 再传 2 个参数，总共 3 个，应报错
+        bytecode.emit_op(Op.HALT)
+
+        from nova.vm import NovaVM
+        vm = NovaVM(bytecode)
+        with self.assertRaises(RuntimeError_) as ctx:
+            vm.run()
+        self.assertIn("期望 2 个参数，得到 3 个", str(ctx.exception))
+
+    # ---- 问题2：STORE_VAR 函数体内静默创建全局 ----
+
+    def test_vm_let_binding_is_local_in_function(self):
+        """函数中的 let 绑定应该是局部变量，不污染全局作用域"""
+        vm = self._vm_run("""
+            fn test() -> Int {
+                let x = 42
+                x
+            }
+            let result = test()
+        """)
+        self.assertEqual(vm.get_global("result"), 42)
+        # x 应该是函数局部变量，不应该出现在全局作用域中
+        self.assertIsNone(vm.get_global("x"))
+
+    def test_vm_function_cannot_modify_global_via_undefined(self):
+        """函数中不能通过 STORE_VAR 隐式创建全局变量"""
+        # 通过直接构造字节码测试：函数中对不存在的变量执行 STORE_VAR
+        # （在类型检查通过的代码中不会出现这种情况，但 VM 应该正确处理）
+        from nova.compiler import Bytecode, FunctionBlock, Instruction, Op
+        bytecode = Bytecode()
+        bytecode.constants = []
+
+        # 函数体：let x = 42（STORE_VAR x, False）
+        fn_code = [
+            Instruction(Op.CONST_INT, 42),
+            Instruction(Op.STORE_VAR, "x", False),
+            Instruction(Op.LOAD_VAR, "x"),
+            Instruction(Op.RETURN),
+        ]
+        fn_block = FunctionBlock("test_fn", 0, fn_code, [], ["x"])
+        bytecode.functions["test_fn"] = fn_block
+
+        # 主代码：调用函数
+        bytecode.emit_op(Op.CLOSURE, "test_fn", 0, "test_fn")
+        bytecode.emit_op(Op.CALL, 0)
+        bytecode.emit_op(Op.STORE_VAR, "result", False)
+        bytecode.emit_op(Op.HALT)
+
+        from nova.vm import NovaVM
+        vm = NovaVM(bytecode)
+        vm.run()
+
+        # result 是全局的（顶层 let）
+        self.assertEqual(vm.get_global("result"), 42)
+        # x 应该是函数局部的，不应该出现在全局
+        self.assertIsNone(vm.get_global("x"))
+
+    # ---- 问题3：MATCH_BIND 失败分支绑定残留 ----
+
+    def test_vm_match_bind_scope_isolation(self):
+        """模式匹配中失败分支的绑定变量不应残留到后续分支"""
+        # 通过构造字节码验证：第一个 arm 绑定变量后 guard 失败，
+        # 第二个 arm 中不应能读到第一个 arm 的绑定
+        from nova.compiler import Bytecode, FunctionBlock, Instruction, Op
+        bytecode = Bytecode()
+        bytecode.constants = []
+
+        # 构造一个 match 表达式，有两个 arm
+        # match 42 {
+        #   n if n > 100 -> n * 2  // arm1: 匹配但 guard 失败，绑定了 n
+        #   m -> m + 1             // arm2: 应该绑定 m，而不是读到 n
+        # }
+        # 结果应该是 43（42 + 1），而不是 84（42 * 2）
+
+        # 函数体中执行 match
+        fn_code = [
+            # subject = 42                            # 0
+            Instruction(Op.CONST_INT, 42),          # 0
+            Instruction(Op.MATCH_START, 2),         # 1
+
+            # --- Arm 1: n if n > 100 -> n * 2 ---
+            Instruction(Op.MATCH_ARM_START,),       # 2
+            Instruction(Op.DUP,),                   # 3
+            # 模式测试：标识符 n 总是匹配（无测试指令）
+            # 绑定 n
+            Instruction(Op.MATCH_BIND, "n"),        # 4
+            # guard: n > 100
+            Instruction(Op.LOAD_VAR, "n"),          # 5
+            Instruction(Op.CONST_INT, 100),         # 6
+            Instruction(Op.GT,),                    # 7
+            # guard 失败跳 arm2_start
+            Instruction(Op.JUMP_IF_FALSE, 14),      # 8  跳到 arm2 的 MATCH_ARM_START
+            # 弹出 subject
+            Instruction(Op.POP,),                   # 9
+            # body: n * 2
+            Instruction(Op.LOAD_VAR, "n"),          # 10
+            Instruction(Op.CONST_INT, 2),           # 11
+            Instruction(Op.MUL,),                   # 12
+            # 跳到 match_end
+            Instruction(Op.JUMP, 22),               # 13
+
+            # --- Arm 2: m -> m + 1 ---
+            Instruction(Op.MATCH_ARM_START,),       # 14
+            Instruction(Op.DUP,),                   # 15
+            # 模式测试：标识符 m 总是匹配
+            # 绑定 m
+            Instruction(Op.MATCH_BIND, "m"),        # 16
+            # 弹出 subject
+            Instruction(Op.POP,),                   # 17
+            # body: m + 1
+            Instruction(Op.LOAD_VAR, "m"),          # 18
+            Instruction(Op.CONST_INT, 1),           # 19
+            Instruction(Op.ADD,),                   # 20
+            # 跳到 match_end
+            Instruction(Op.JUMP, 22),               # 21
+
+            # match_end
+            Instruction(Op.MATCH_END,),             # 22
+            Instruction(Op.RETURN,),                # 23
+        ]
+        fn_block = FunctionBlock("test_match", 0, fn_code, [], [])
+        bytecode.functions["test_match"] = fn_block
+
+        # 主代码
+        bytecode.emit_op(Op.CLOSURE, "test_match", 0, "test_match")
+        bytecode.emit_op(Op.CALL, 0)
+        bytecode.emit_op(Op.STORE_VAR, "result", False)
+        bytecode.emit_op(Op.HALT)
+
+        from nova.vm import NovaVM
+        vm = NovaVM(bytecode)
+        vm.run()
+
+        # 应该是 42 + 1 = 43，而不是 42 * 2 = 84
+        self.assertEqual(vm.get_global("result"), 43)
+
+    def test_vm_match_end_cleans_bindings(self):
+        """match 结束后，绑定变量不应残留在函数局部作用域中"""
+        from nova.compiler import Bytecode, FunctionBlock, Instruction, Op
+        bytecode = Bytecode()
+        bytecode.constants = []
+
+        # 函数中执行 match，然后尝试访问 match 中绑定的变量
+        # match 42 { n -> n + 1 }
+        # 之后访问 n 应该报错（因为 n 是 match 局部的）
+        fn_code = [
+            # subject = 42
+            Instruction(Op.CONST_INT, 42),          # 0
+            Instruction(Op.MATCH_START, 1),         # 1
+
+            # Arm 1: n -> n + 1
+            Instruction(Op.MATCH_ARM_START,),       # 2
+            Instruction(Op.DUP,),                   # 3
+            Instruction(Op.MATCH_BIND, "n"),        # 4
+            Instruction(Op.POP,),                   # 5  弹出 subject
+            Instruction(Op.LOAD_VAR, "n"),          # 6
+            Instruction(Op.CONST_INT, 1),           # 7
+            Instruction(Op.ADD,),                   # 8
+            Instruction(Op.JUMP, 10),               # 9  跳到 MATCH_END
+
+            # match_end
+            Instruction(Op.MATCH_END,),             # 10
+            # 把结果存到 result
+            Instruction(Op.STORE_VAR, "result", False),  # 11
+            # 尝试访问 n：应该是未定义的（因为 match 结束后清理了）
+            Instruction(Op.LOAD_VAR, "n"),          # 12
+            Instruction(Op.RETURN,),                # 13
+        ]
+        fn_block = FunctionBlock("test_match_scope", 0, fn_code, [], [])
+        bytecode.functions["test_match_scope"] = fn_block
+
+        # 主代码
+        bytecode.emit_op(Op.CLOSURE, "test_match_scope", 0, "test_match_scope")
+        bytecode.emit_op(Op.CALL, 0)
+        bytecode.emit_op(Op.STORE_VAR, "final_result", False)
+        bytecode.emit_op(Op.HALT)
+
+        from nova.vm import NovaVM
+        vm = NovaVM(bytecode)
+        with self.assertRaises(RuntimeError_) as ctx:
+            vm.run()
+        self.assertIn("未定义的变量 'n'", str(ctx.exception))
+
 
 # ============================================================
 # 前向引用测试（P1 Bug #9）

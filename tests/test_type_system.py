@@ -545,3 +545,114 @@ class TestListComprehensionVariableTypeInference:
         '''
         checker = check_source(source)
         assert len(checker.error_collector.errors) == 0
+
+
+class TestFnReturnTypeInference:
+    """测试函数返回类型推断（Bug 修复：推断结果应写回环境）"""
+
+    def test_no_annotation_return_type_inferred(self):
+        """无 return_type 标注的函数，返回类型应从函数体推断并写回环境"""
+        from nova.type_checker import FnType, INT_T
+        source = """
+        fn add(a: Int, b: Int) { a + b }
+        """
+        checker = check_source(source)
+        fn_ty = checker.env.lookup("add")
+        assert isinstance(fn_ty, FnType)
+        assert fn_ty.return_type == INT_T
+
+    def test_no_annotation_string_return(self):
+        """返回字符串的函数，返回类型应推断为 String"""
+        from nova.type_checker import STRING_T, FnType
+        source = '''
+        fn greet(name: String) { "Hello, " ++ name }
+        '''
+        checker = check_source(source)
+        fn_ty = checker.env.lookup("greet")
+        assert isinstance(fn_ty, FnType)
+        assert fn_ty.return_type == STRING_T
+
+    def test_no_annotation_call_result_type(self):
+        """调用无返回类型标注的函数，结果类型应正确（不是 TypeVar）"""
+        from nova.type_checker import INT_T, TypeVar
+        source = """
+        fn double(x: Int) { x * 2 }
+        let result = double(21)
+        """
+        checker = check_source(source, collect_errors=True)
+        result_ty = checker.env.lookup("result")
+        # result 的类型应该是 Int，不是 TypeVar
+        assert result_ty == INT_T
+        assert not isinstance(result_ty, TypeVar)
+
+    def test_no_annotation_nested_call(self):
+        """嵌套调用无返回类型标注的函数，类型应正确传递"""
+        from nova.type_checker import INT_T
+        source = """
+        fn inc(x: Int) { x + 1 }
+        fn double(x: Int) { inc(x) + inc(x) }
+        let result = double(5)
+        """
+        checker = check_source(source)
+        result_ty = checker.env.lookup("result")
+        assert result_ty == INT_T
+
+    def test_with_annotation_unchanged(self):
+        """有 return_type 标注的函数，返回类型保持标注不变"""
+        from nova.type_checker import FnType, INT_T
+        source = """
+        fn add(a: Int, b: Int) -> Int { a + b }
+        """
+        checker = check_source(source)
+        fn_ty = checker.env.lookup("add")
+        assert isinstance(fn_ty, FnType)
+        assert fn_ty.return_type == INT_T
+
+
+class TestTypeVarFnCall:
+    """测试 TypeVar 函数调用检查（Bug 修复：duck typing 不应直接放行）"""
+
+    def test_typevar_call_collects_error(self):
+        """对类型未确定的值进行函数调用，应记录到错误收集器"""
+        source = """
+        fn apply(f, x: Int) -> Int { f(x) }
+        """
+        checker = check_source(source, collect_errors=True)
+        # 应该有一个关于 TypeVar 调用的错误
+        errors = [e for e in checker.error_collector.errors
+                  if "未确定类型" in e.message and "函数调用" in e.message]
+        assert len(errors) >= 1, f"期望找到 TypeVar 函数调用错误，实际错误: {checker.error_collector.errors}"
+
+    def test_typevar_call_does_not_crash(self):
+        """对类型未确定的值进行函数调用，不会导致崩溃（collect_errors 模式）"""
+        source = """
+        fn call_it(f) { f() }
+        """
+        # 不应抛出异常
+        checker = check_source(source, collect_errors=True)
+        assert checker is not None
+
+    def test_higher_order_still_works(self):
+        """高阶函数参数（无类型标注）仍可正常使用（温和策略：放行但记录）"""
+        source = """
+        fn apply(f, x: Int) -> Int { f(x) }
+        fn add_one(n: Int) -> Int { n + 1 }
+        let result = apply(add_one, 5)
+        """
+        checker = check_source(source, collect_errors=True)
+        # 函数体内 f(x) 调用会记录 TypeVar 调用错误
+        # 但整体不应崩溃，apply 函数仍可被调用
+        typevar_errors = [e for e in checker.error_collector.errors
+                          if "未确定类型" in e.message and "函数调用" in e.message]
+        assert len(typevar_errors) >= 1
+
+    def test_known_function_call_no_error(self):
+        """对已知类型的函数调用，不应产生 TypeVar 调用错误"""
+        source = """
+        fn add(a: Int, b: Int) -> Int { a + b }
+        let x = add(1, 2)
+        """
+        checker = check_source(source, collect_errors=True)
+        typevar_errors = [e for e in checker.error_collector.errors
+                          if "未确定类型" in e.message and "函数调用" in e.message]
+        assert len(typevar_errors) == 0

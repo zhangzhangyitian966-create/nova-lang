@@ -199,10 +199,17 @@ class NativeCodeGen:
                             self.string_constant_map[value] = offset
                             offset += len(value_bytes)
 
-    def _alloc_vreg(self, name, vregs, free_gprs, free_xmms, is_float=False):
-        """分配虚拟寄存器到物理寄存器"""
+    def _alloc_vreg(self, name, vregs, free_gprs, free_xmms, is_float=False,
+                    preallocated=None):
+        """分配虚拟寄存器到物理寄存器
+
+        如果提供了 preallocated 映射（来自 LinearScanAllocator），
+        则优先使用预分配结果；否则从 free_gprs/free_xmms 按需分配。
+        """
         if name not in vregs:
-            if is_float and free_xmms:
+            if preallocated is not None and name in preallocated:
+                vregs[name] = preallocated[name]
+            elif is_float and free_xmms:
                 vregs[name] = free_xmms.pop(0)
             elif not is_float and free_gprs:
                 vregs[name] = free_gprs.pop(0)
@@ -210,15 +217,235 @@ class NativeCodeGen:
                 vregs[name] = None
         return vregs[name]
 
+    # ============================================================
+    # 活跃区间分析与线性扫描寄存器分配
+    # ============================================================
+
+    def _collect_vreg_info(self, instr):
+        """从一条 LIR 指令中提取所有引用的虚拟寄存器名及其类型。
+
+        返回 (used_vregs, defined_vregs)，每个元素是 (name, is_float) 的列表。
+        used_vregs: 被读取的虚拟寄存器
+        defined_vregs: 被写入的虚拟寄存器
+        """
+        used = []
+        defined = []
+
+        if isinstance(instr, LIRLoadConst):
+            # 常量加载：定义一个虚拟寄存器
+            is_float = (instr.const_type == "float")
+            if instr.const_type == "float":
+                name = f"fconst_{instr.value}"
+            elif instr.const_type == "string":
+                name = f"sconst_{instr.value}"
+            elif instr.const_type == "bool":
+                name = f"bconst_{instr.value}"
+            else:
+                name = f"const_{instr.value}"
+            defined.append((name, is_float))
+
+        elif isinstance(instr, LIRBinOp):
+            # 二元运算：使用 src_locs，定义 dst_loc
+            if instr.src_locs:
+                for loc, typ in instr.src_locs:
+                    is_float = (typ == FLOAT_TYPE)
+                    used.append((loc, is_float))
+            if instr.dst_loc:
+                dst_name, dst_type = instr.dst_loc
+                is_float = (dst_type == FLOAT_TYPE)
+                defined.append((dst_name, is_float))
+
+        elif isinstance(instr, LIRUnaryOp):
+            # 一元运算：使用 src_locs，定义 dst_loc
+            if instr.src_locs:
+                for loc, typ in instr.src_locs:
+                    is_float = (typ == FLOAT_TYPE)
+                    used.append((loc, is_float))
+            if instr.dst_loc:
+                dst_name, dst_type = instr.dst_loc
+                is_float = (dst_type == FLOAT_TYPE)
+                defined.append((dst_name, is_float))
+
+        elif isinstance(instr, LIRCall):
+            # 函数调用：使用 src_locs 作为参数
+            if instr.src_locs:
+                for loc, typ in instr.src_locs:
+                    is_float = (typ == FLOAT_TYPE)
+                    used.append((loc, is_float))
+
+        elif isinstance(instr, LIRCallIndirect):
+            # 间接调用：使用 src_locs（第一个是函数指针，其余是参数）
+            if instr.src_locs:
+                for loc, typ in instr.src_locs:
+                    is_float = (typ == FLOAT_TYPE)
+                    used.append((loc, is_float))
+
+        elif isinstance(instr, LIRLoadGlobal):
+            # 加载全局变量：定义 global_<name>
+            name = f"global_{instr.global_name}"
+            defined.append((name, False))
+
+        elif isinstance(instr, LIRStoreGlobal):
+            # 存储全局变量：使用 global_<name>
+            name = f"global_{instr.global_name}"
+            used.append((name, False))
+
+        elif isinstance(instr, LIRLoadReg):
+            # 寄存器传送：使用 src_locs，定义 dst_loc
+            if instr.src_locs:
+                for loc, typ in instr.src_locs:
+                    is_float = (typ == FLOAT_TYPE)
+                    used.append((loc, is_float))
+            if instr.dst_loc:
+                dst_name, dst_type = instr.dst_loc
+                is_float = (dst_type == FLOAT_TYPE)
+                defined.append((dst_name, is_float))
+
+        elif isinstance(instr, LIRStoreReg):
+            # 存储到寄存器：使用 src_locs，定义 dst_loc
+            if instr.src_locs:
+                for loc, typ in instr.src_locs:
+                    is_float = (typ == FLOAT_TYPE)
+                    used.append((loc, is_float))
+            if instr.dst_loc:
+                dst_name, dst_type = instr.dst_loc
+                is_float = (dst_type == FLOAT_TYPE)
+                defined.append((dst_name, is_float))
+
+        elif isinstance(instr, LIRIndex):
+            # 索引操作：使用 src_locs，定义 dst_loc
+            if instr.src_locs:
+                for loc, typ in instr.src_locs:
+                    is_float = (typ == FLOAT_TYPE)
+                    used.append((loc, is_float))
+            if instr.dst_loc:
+                dst_name, dst_type = instr.dst_loc
+                is_float = (dst_type == FLOAT_TYPE)
+                defined.append((dst_name, is_float))
+
+        elif isinstance(instr, LIRFieldAccess):
+            # 字段访问：使用 src_locs，定义 dst_loc
+            if instr.src_locs:
+                for loc, typ in instr.src_locs:
+                    is_float = (typ == FLOAT_TYPE)
+                    used.append((loc, is_float))
+            if instr.dst_loc:
+                dst_name, dst_type = instr.dst_loc
+                is_float = (dst_type == FLOAT_TYPE)
+                defined.append((dst_name, is_float))
+
+        elif isinstance(instr, (LIRBuildList, LIRBuildTuple, LIRBuildADT)):
+            # 数据结构构建：使用 src_locs
+            if instr.src_locs:
+                for loc, typ in instr.src_locs:
+                    is_float = (typ == FLOAT_TYPE)
+                    used.append((loc, is_float))
+
+        elif isinstance(instr, LIRBranch):
+            # 条件分支：使用 cond_reg
+            if instr.cond_reg:
+                used.append((instr.cond_reg, False))
+
+        elif isinstance(instr, LIRReturn):
+            # 返回：使用 src_locs（返回值）
+            if instr.src_locs:
+                for loc, typ in instr.src_locs:
+                    is_float = (typ == FLOAT_TYPE)
+                    used.append((loc, is_float))
+
+        # LIRLabel, LIRJump, LIRPanic 不涉及虚拟寄存器
+
+        return used, defined
+
+    def _analyze_live_intervals(self, func: LIRFunction):
+        """分析函数中所有虚拟寄存器的活跃区间。
+
+        返回 (gpr_intervals, xmm_intervals)，分别是整型和浮点虚拟寄存器的
+        LiveInterval 列表。
+        """
+        # vreg_name -> (first_use, last_use, is_float)
+        vreg_info = {}
+
+        for idx, instr in enumerate(func.body):
+            used, defined = self._collect_vreg_info(instr)
+
+            # 处理使用的 vreg
+            for name, is_float in used:
+                if name not in vreg_info:
+                    vreg_info[name] = [idx, idx, is_float]
+                else:
+                    # 更新 last_use
+                    vreg_info[name][1] = idx
+
+            # 处理定义的 vreg
+            for name, is_float in defined:
+                if name not in vreg_info:
+                    vreg_info[name] = [idx, idx, is_float]
+                else:
+                    # 更新 last_use（定义也是活跃区间的一部分）
+                    vreg_info[name][1] = idx
+
+        # 构建 GPR 和 XMM 的活跃区间列表
+        gpr_intervals = []
+        xmm_intervals = []
+
+        for name, (first, last, is_float) in vreg_info.items():
+            interval = LiveInterval(name, first, last)
+            if is_float:
+                xmm_intervals.append(interval)
+            else:
+                gpr_intervals.append(interval)
+
+        return gpr_intervals, xmm_intervals
+
+    def _run_linear_scan_alloc(self, func: LIRFunction):
+        """运行线性扫描寄存器分配。
+
+        返回 vreg_map (Dict[str, int]) 表示成功，返回 None 表示分配失败
+        （寄存器不足，需要 fallback 到按需分配）。
+        """
+        gpr_intervals, xmm_intervals = self._analyze_live_intervals(func)
+
+        if not gpr_intervals and not xmm_intervals:
+            return {}  # 没有虚拟寄存器，返回空映射
+
+        # 可用寄存器（与 _compile_body 中使用的列表一致）
+        available_gprs = [RAX, RCX, RDX, RBX, R8, R9, R10, R11, R12, R13, R14, R15]
+        available_xmms = [XMM0, XMM1, XMM2, XMM3, XMM4, XMM5, XMM6, XMM7]
+
+        vreg_map = {}
+
+        # 分配 GPR
+        if gpr_intervals:
+            gpr_alloc = LinearScanAllocator(available_gprs)
+            gpr_result, gpr_slots = gpr_alloc.allocate(gpr_intervals)
+            if gpr_slots > 0:
+                # 有溢出，分配失败
+                return None
+            vreg_map.update(gpr_result)
+
+        # 分配 XMM
+        if xmm_intervals:
+            xmm_alloc = LinearScanAllocator(available_xmms)
+            xmm_result, xmm_slots = xmm_alloc.allocate(xmm_intervals)
+            if xmm_slots > 0:
+                # 有溢出，分配失败
+                return None
+            vreg_map.update(xmm_result)
+
+        return vreg_map
+
     def _get_vreg(self, vregs, name):
         """获取虚拟寄存器对应的物理寄存器，未分配时抛出错误"""
         if name not in vregs or vregs[name] is None:
             raise ValueError(f"Native 后端：虚拟寄存器 '{name}' 未分配")
         return vregs[name]
 
-    def _compile_const_float(self, e, instr, vregs, free_gprs, free_xmms, func_relocations):
+    def _compile_const_float(self, e, instr, vregs, free_gprs, free_xmms,
+                             func_relocations, preallocated=None):
         """编译浮点常量加载：通过 RIP-relative movsd 从数据段加载"""
-        reg = self._alloc_vreg(f"fconst_{instr.value}", vregs, free_gprs, free_xmms, is_float=True)
+        reg = self._alloc_vreg(f"fconst_{instr.value}", vregs, free_gprs, free_xmms,
+                               is_float=True, preallocated=preallocated)
         if reg is not None:
             value = float(instr.value)
             data_offset = self.float_constant_map.get(value)
@@ -226,9 +453,11 @@ class NativeCodeGen:
                 rip_offset = e.movsd_reg_imm(reg, 0)
                 func_relocations.append((rip_offset, data_offset))
 
-    def _compile_const_string(self, e, instr, vregs, free_gprs, free_xmms, func_relocations):
+    def _compile_const_string(self, e, instr, vregs, free_gprs, free_xmms,
+                              func_relocations, preallocated=None):
         """编译字符串常量加载：通过 RIP-relative lea 获取地址"""
-        reg = self._alloc_vreg(f"sconst_{instr.value}", vregs, free_gprs, free_xmms)
+        reg = self._alloc_vreg(f"sconst_{instr.value}", vregs, free_gprs, free_xmms,
+                               preallocated=preallocated)
         if reg is not None:
             value = instr.value
             data_offset = self.string_constant_map.get(value)
@@ -359,8 +588,14 @@ class NativeCodeGen:
             aligned = (func.stack_size + 15) & ~15
             e.sub_rsp_imm(aligned)
 
+        # 尝试使用 LinearScanAllocator 进行预分配
+        # 如果分配失败（寄存器不足），fallback 到按需分配
+        preallocated_vregs = self._run_linear_scan_alloc(func)
+
         # 编译函数体
-        self._compile_body(e, func, label_positions, pending_jumps, pending_branches, func_relocations)
+        self._compile_body(e, func, label_positions, pending_jumps,
+                           pending_branches, func_relocations,
+                           preallocated=preallocated_vregs)
 
         # 函数尾声：恢复栈帧 + 弹出 callee-saved + ret（复用统一方法）
         self._emit_epilogue(e, func)
@@ -388,8 +623,14 @@ class NativeCodeGen:
 
     def _compile_body(self, e: X86_64Emitter, func: LIRFunction,
                       label_positions: dict, pending_jumps: list,
-                      pending_branches: list, func_relocations: list):
-        """编译函数体指令"""
+                      pending_branches: list, func_relocations: list,
+                      preallocated: Optional[Dict[str, int]] = None):
+        """编译函数体指令
+
+        Args:
+            preallocated: 预分配的 vreg -> 物理寄存器映射（来自 LinearScanAllocator）。
+                         为 None 时使用按需分配策略（fallback）。
+        """
         vregs = {}
         free_gprs = [RAX, RCX, RDX, RBX, R8, R9, R10, R11, R12, R13, R14, R15]
         free_xmms = [XMM0, XMM1, XMM2, XMM3, XMM4, XMM5, XMM6, XMM7]
@@ -397,17 +638,21 @@ class NativeCodeGen:
         for instr in func.body:
             if isinstance(instr, LIRLoadConst):
                 if instr.const_type == "int":
-                    reg = self._alloc_vreg(f"const_{instr.value}", vregs, free_gprs, free_xmms)
+                    reg = self._alloc_vreg(f"const_{instr.value}", vregs, free_gprs, free_xmms,
+                                           preallocated=preallocated)
                     if reg is not None:
                         e.mov_reg_imm64(reg, int(instr.value))
                 elif instr.const_type == "float":
-                    self._compile_const_float(e, instr, vregs, free_gprs, free_xmms, func_relocations)
+                    self._compile_const_float(e, instr, vregs, free_gprs, free_xmms,
+                                              func_relocations, preallocated=preallocated)
                 elif instr.const_type == "bool":
-                    reg = self._alloc_vreg(f"bconst_{instr.value}", vregs, free_gprs, free_xmms)
+                    reg = self._alloc_vreg(f"bconst_{instr.value}", vregs, free_gprs, free_xmms,
+                                           preallocated=preallocated)
                     if reg is not None:
                         e.mov_reg_imm64(reg, 1 if instr.value else 0)
                 elif instr.const_type == "string":
-                    self._compile_const_string(e, instr, vregs, free_gprs, free_xmms, func_relocations)
+                    self._compile_const_string(e, instr, vregs, free_gprs, free_xmms,
+                                               func_relocations, preallocated=preallocated)
                 else:
                     raise NotImplementedError(
                         f"LIRLoadConst const_type '{instr.const_type}' is not yet implemented in native backend"
@@ -432,7 +677,8 @@ class NativeCodeGen:
                 if instr.dst_loc:
                     dst_name, dst_type = instr.dst_loc
                     is_float_dst = (dst_type == FLOAT_TYPE)
-                    dst_reg = self._alloc_vreg(dst_name, vregs, free_gprs, free_xmms, is_float=is_float_dst)
+                    dst_reg = self._alloc_vreg(dst_name, vregs, free_gprs, free_xmms,
+                                               is_float=is_float_dst, preallocated=preallocated)
                     if dst_reg is None:
                         raise ValueError(
                             f"Native 后端：无法为目标虚拟寄存器 '{dst_name}' 分配物理寄存器"
@@ -524,7 +770,8 @@ class NativeCodeGen:
                 if instr.dst_loc:
                     dst_name, dst_type = instr.dst_loc
                     is_float_dst = (dst_type == FLOAT_TYPE)
-                    dst_reg = self._alloc_vreg(dst_name, vregs, free_gprs, free_xmms, is_float=is_float_dst)
+                    dst_reg = self._alloc_vreg(dst_name, vregs, free_gprs, free_xmms,
+                                               is_float=is_float_dst, preallocated=preallocated)
                     if dst_reg is None:
                         raise ValueError(
                             f"Native 后端：无法为目标虚拟寄存器 '{dst_name}' 分配物理寄存器"
@@ -586,14 +833,16 @@ class NativeCodeGen:
 
             # === 全局变量访问 ===
             elif isinstance(instr, LIRLoadGlobal):
-                self._compile_load_global(e, instr, vregs, free_gprs, func_relocations)
+                self._compile_load_global(e, instr, vregs, free_gprs, func_relocations,
+                                          preallocated=preallocated)
 
             elif isinstance(instr, LIRStoreGlobal):
                 self._compile_store_global(e, instr, vregs, free_gprs, func_relocations)
 
             # === 寄存器/栈传送 ===
             elif isinstance(instr, LIRLoadReg):
-                self._compile_load_reg(e, instr, vregs, free_gprs, free_xmms)
+                self._compile_load_reg(e, instr, vregs, free_gprs, free_xmms,
+                                       preallocated=preallocated)
 
             elif isinstance(instr, LIRStoreReg):
                 self._compile_store_reg(e, instr, vregs, free_gprs, free_xmms)
@@ -630,7 +879,8 @@ class NativeCodeGen:
     # ============================================================
 
     def _compile_load_global(self, e: X86_64Emitter, instr: LIRLoadGlobal,
-                              vregs: dict, free_gprs: list, func_relocations: list):
+                              vregs: dict, free_gprs: list, func_relocations: list,
+                              preallocated=None):
         """编译全局变量加载：通过 RIP-relative 寻址从数据段加载"""
         global_name = instr.global_name
         data_offset = self.global_symbols.get(global_name)
@@ -642,10 +892,10 @@ class NativeCodeGen:
             self.global_data.append((global_name, b'\x00' * 8, data_offset))
 
         # 目标寄存器
-        dst_reg = RAX
-        if free_gprs:
-            dst_reg = free_gprs[0]
-            vregs[f"global_{global_name}"] = dst_reg
+        vreg_name = f"global_{global_name}"
+        dst_reg = self._alloc_vreg(vreg_name, vregs, free_gprs, [], preallocated=preallocated)
+        if dst_reg is None:
+            dst_reg = RAX
 
         # mov dst_reg, [rip + offset]
         rip_offset = e.lea_reg_rip(dst_reg, 0)
@@ -679,7 +929,8 @@ class NativeCodeGen:
     # ============================================================
 
     def _compile_load_reg(self, e: X86_64Emitter, instr: LIRLoadReg,
-                           vregs: dict, free_gprs: list, free_xmms: list):
+                           vregs: dict, free_gprs: list, free_xmms: list,
+                           preallocated=None):
         """编译寄存器间传送：从 src_loc 移动到 dst_loc"""
         # 如果有源和目标位置信息
         if instr.src_locs:
@@ -691,7 +942,8 @@ class NativeCodeGen:
         if instr.dst_loc:
             dst_name, dst_type = instr.dst_loc
             is_float = (dst_type == FLOAT_TYPE)
-            dst_reg = self._alloc_vreg(dst_name, vregs, free_gprs, free_xmms, is_float)
+            dst_reg = self._alloc_vreg(dst_name, vregs, free_gprs, free_xmms,
+                                       is_float, preallocated=preallocated)
             if dst_reg is not None and dst_reg != src_reg:
                 if is_float:
                     e.movsd_reg_reg(dst_reg, src_reg)

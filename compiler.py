@@ -94,6 +94,7 @@ class Op:
 
     # 模式匹配
     MATCH_START = "MATCH_START"      # operands: (arm_count,)
+    MATCH_ARM_START = "MATCH_ARM_START"  # 每个 arm 开始的标记，用于作用域清理
     MATCH_TEST_INT = "MATCH_TEST_INT"    # operands: (value, fail_ip,)
     MATCH_TEST_FLOAT = "MATCH_TEST_FLOAT"    # operands: (value, fail_ip,)
     MATCH_TEST_BOOL = "MATCH_TEST_BOOL"  # operands: (value, fail_ip,)
@@ -730,6 +731,8 @@ class BytecodeCompiler:
         jump_to_end_positions = []
 
         for i, arm in enumerate(expr.arms):
+            # 标记 arm 开始：用于 VM 中清理上一个 arm 的绑定变量
+            self.bytecode.emit_op(Op.MATCH_ARM_START)
             # 在每个 arm 开头 DUP subject，防止模式测试成功后 subject 被消耗，
             # 导致 guard 失败跳到下一个 arm 时栈上没有 subject
             self.bytecode.emit_op(Op.DUP)
