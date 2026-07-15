@@ -656,3 +656,141 @@ class TestTypeVarFnCall:
         typevar_errors = [e for e in checker.error_collector.errors
                           if "未确定类型" in e.message and "函数调用" in e.message]
         assert len(typevar_errors) == 0
+
+
+class TestAssignmentMutability:
+    """测试赋值的可变性检查（Assignment mutability check）"""
+
+    def test_let_binding_assignment_error(self):
+        """对 let 绑定赋值应报错：不能对不可变绑定赋值"""
+        source = """
+        {
+            let x = 10
+            x = 20
+        }
+        """
+        with pytest.raises(TypeCheckError) as exc_info:
+            check_source(source)
+        assert "不可变绑定" in str(exc_info.value)
+        assert "x" in str(exc_info.value)
+
+    def test_mut_binding_assignment_ok(self):
+        """对 mut 绑定赋值应通过"""
+        source = """
+        {
+            mut x = 10
+            x = 20
+        }
+        """
+        checker = check_source(source)
+        assert len(checker.error_collector.errors) == 0
+
+    def test_mut_binding_assignment_type_mismatch(self):
+        """mut 绑定赋值类型不匹配仍应报错"""
+        source = """
+        {
+            mut x = 10
+            x = "hello"
+        }
+        """
+        with pytest.raises(TypeCheckError) as exc_info:
+            check_source(source)
+        assert "不匹配" in str(exc_info.value)
+
+    def test_nested_scope_let_shadowed_by_mut(self):
+        """嵌套作用域中，内层 mut 遮蔽外层 let，内层可赋值"""
+        source = """
+        {
+            let x = 10
+            {
+                mut x = 20
+                x = 30
+            }
+        }
+        """
+        checker = check_source(source)
+        assert len(checker.error_collector.errors) == 0
+
+    def test_nested_scope_let_not_assignable(self):
+        """嵌套作用域中，外层 let 绑定在内层不可赋值"""
+        source = """
+        {
+            let x = 10
+            {
+                x = 20
+            }
+        }
+        """
+        with pytest.raises(TypeCheckError) as exc_info:
+            check_source(source)
+        assert "不可变绑定" in str(exc_info.value)
+
+    def test_nested_scope_mut_outer_assignable(self):
+        """嵌套作用域中，外层 mut 绑定在内层可赋值"""
+        source = """
+        {
+            mut x = 10
+            {
+                x = 20
+            }
+        }
+        """
+        checker = check_source(source)
+        assert len(checker.error_collector.errors) == 0
+
+    def test_let_with_type_annotation_assignment_error(self):
+        """带类型标注的 let 绑定赋值也应报错"""
+        source = """
+        {
+            let x: Int = 10
+            x = 20
+        }
+        """
+        with pytest.raises(TypeCheckError) as exc_info:
+            check_source(source)
+        assert "不可变绑定" in str(exc_info.value)
+
+    def test_mut_with_type_annotation_assignment_ok(self):
+        """带类型标注的 mut 绑定赋值应通过"""
+        source = """
+        {
+            mut x: Int = 10
+            x = 20
+        }
+        """
+        checker = check_source(source)
+        assert len(checker.error_collector.errors) == 0
+
+    def test_fn_param_not_assignable(self):
+        """函数参数是不可变绑定，赋值应报错"""
+        source = """
+        fn f(x: Int) {
+            x = 42
+        }
+        """
+        with pytest.raises(TypeCheckError) as exc_info:
+            check_source(source)
+        assert "不可变绑定" in str(exc_info.value)
+
+    def test_top_level_mut_assignment_in_fn(self):
+        """顶层 mut 绑定在函数中可被赋值（验证全局作用域可变性传递）"""
+        source = """
+        mut counter = 0
+        fn inc() {
+            counter = counter + 1
+        }
+        """
+        checker = check_source(source)
+        assert len(checker.error_collector.errors) == 0
+
+    def test_top_level_let_assignment_in_fn_error(self):
+        """顶层 let 绑定在函数中赋值应报错"""
+        source = """
+        let counter = 0
+        fn inc() {
+            counter = counter + 1
+        }
+        """
+        with pytest.raises(TypeCheckError) as exc_info:
+            check_source(source)
+        assert "不可变绑定" in str(exc_info.value)

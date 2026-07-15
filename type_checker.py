@@ -194,20 +194,34 @@ class TypeEnv:
 
     def __init__(self, parent: Optional['TypeEnv'] = None):
         self.parent = parent
-        self.types: Dict[str, NovaType] = {}
+        # 内部存储：{name: (NovaType, mutable)}
+        self._bindings: Dict[str, tuple] = {}
         self.adt_variants: Dict[str, List[tuple]] = {}  # adt_name -> [(variant_name, [(field_name, field_type), ...])]
         self.adt_type_params: Dict[str, List[str]] = {}  # adt_name -> [param_names]
         self.aliases: Dict[str, NovaType] = {}
 
-    def define(self, name: str, ty: NovaType):
-        self.types[name] = ty
+    @property
+    def types(self) -> Dict[str, NovaType]:
+        """向后兼容：返回名称到类型的映射视图（只读使用）"""
+        return {name: ty for name, (ty, _mut) in self._bindings.items()}
+
+    def define(self, name: str, ty: NovaType, mutable: bool = False):
+        self._bindings[name] = (ty, mutable)
 
     def lookup(self, name: str) -> Optional[NovaType]:
-        if name in self.types:
-            return self.types[name]
+        if name in self._bindings:
+            return self._bindings[name][0]
         if self.parent:
             return self.parent.lookup(name)
         return None
+
+    def is_mutable(self, name: str) -> bool:
+        """沿作用域链查找绑定的可变性。未找到时返回 False。"""
+        if name in self._bindings:
+            return self._bindings[name][1]
+        if self.parent:
+            return self.parent.is_mutable(name)
+        return False
 
     def get_all_adt_variants(self) -> Dict[str, List[tuple]]:
         """获取当前环境及所有父环境的 ADT 变体信息"""
@@ -412,7 +426,7 @@ class TypeChecker:
             self._user_defined_types.add(decl.name)
             type_params = [TypeVar(tp) for tp in decl.type_params]
             adt_ty = ADTType(decl.name, type_params)
-            self.env.types[decl.name] = adt_ty
+            self.env.define(decl.name, adt_ty)
             self.env.adt_type_params[decl.name] = decl.type_params
             # 为字段类型解析提供局部类型参数映射
             local_types = {tp: TypeVar(tp) for tp in decl.type_params}
@@ -436,18 +450,19 @@ class TypeChecker:
         elif isinstance(decl, AliasDef):
             target = self._from_ast_type(decl.target_type)
             self.env.aliases[decl.name] = target
-            self.env.types[decl.name] = target
+            self.env.define(decl.name, target)
 
         elif isinstance(decl, (LetBinding, MutBinding)):
             # 对于 let/mut 绑定，我们也需要在第一遍注册（支持前向引用绑定）
             # 但值的类型需要在第二遍检查
             # 这里先注册一个类型变量作为占位符
+            is_mut = isinstance(decl, MutBinding)
             if decl.type_annotation:
                 annotated = self._from_ast_type(decl.type_annotation)
-                self.env.define(decl.name, annotated)
+                self.env.define(decl.name, annotated, mutable=is_mut)
             else:
                 # 没有类型标注的 let/mut，使用类型变量占位
-                self.env.define(decl.name, TypeVar(f"let_{decl.name}"))
+                self.env.define(decl.name, TypeVar(f"let_{decl.name}"), mutable=is_mut)
 
         elif isinstance(decl, ImportDecl):
             # 导入声明：第一遍处理导入模块的类型
@@ -512,7 +527,7 @@ class TypeChecker:
         for alias_name, alias_ty in module_info.type_env.aliases.items():
             if alias_name in module_info.exported_names:
                 self.env.aliases[alias_name] = alias_ty
-                self.env.types[alias_name] = alias_ty
+                self.env.define(alias_name, alias_ty)
                 self._user_defined_types.add(alias_name)
 
     def _check_decl_body(self, decl):
@@ -527,7 +542,7 @@ class TypeChecker:
                         decl
                     )
             # 更新环境中的类型（用推断的实际类型替换占位符）
-            self.env.define(decl.name, ty)
+            self.env.define(decl.name, ty, mutable=False)
 
         elif isinstance(decl, MutBinding):
             ty = self.check_expr(decl.value)
@@ -538,7 +553,7 @@ class TypeChecker:
                         f"mut 绑定 '{decl.name}' 的推断类型 {ty} 与标注类型 {annotated} 不匹配",
                         decl
                     )
-            self.env.define(decl.name, ty)
+            self.env.define(decl.name, ty, mutable=True)
 
         elif isinstance(decl, FnDef):
             # 检查函数体（函数类型已在第一遍注册）
@@ -792,12 +807,12 @@ class TypeChecker:
                         f"let 绑定类型不匹配：推断为 {val_ty}，标注为 {annotated}",
                         expr
                     )
-            self.env.define(expr.name, val_ty)
+            self.env.define(expr.name, val_ty, mutable=False)
             return UNIT_T
 
         elif isinstance(expr, MutBinding):
             val_ty = self.check_expr(expr.value)
-            self.env.define(expr.name, val_ty)
+            self.env.define(expr.name, val_ty, mutable=True)
             return UNIT_T
 
         elif isinstance(expr, Assignment):
@@ -805,6 +820,12 @@ class TypeChecker:
             existing = self.env.lookup(expr.name)
             if existing is None:
                 self._report_error(f"赋值目标 '{expr.name}' 未定义", expr)
+                return UNIT_T
+            if not self.env.is_mutable(expr.name):
+                self._report_error(
+                    f"不能对不可变绑定 '{expr.name}' 赋值",
+                    expr
+                )
                 return UNIT_T
             if not self._types_compatible(val_ty, existing):
                 self._report_error(
@@ -1292,8 +1313,9 @@ class TypeChecker:
                     raise TypeCheckError(f"类型别名 '{name}' 存在循环定义")
                 _alias_stack = _alias_stack | {name}
                 return self._expand_alias(self.env.aliases[name], _alias_stack)
-            if name in self.env.types:
-                return self.env.types[name]
+            ty = self.env.lookup(name)
+            if ty is not None:
+                return ty
             self._report_error(f"未知类型名 '{name}'", type_node)
             return ERROR_TYPE
         elif isinstance(type_node, TypeGeneric):

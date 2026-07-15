@@ -737,7 +737,7 @@ class BytecodeCompiler:
             # 导致 guard 失败跳到下一个 arm 时栈上没有 subject
             self.bytecode.emit_op(Op.DUP)
 
-            # 模式测试：匹配失败时跳到该 arm 的清理代码（POP DUP 副本）
+            # 模式测试：匹配失败时由 VM 统一恢复栈并跳到下一个 arm
             fail_ip_positions = self._compile_pattern_test_with_fail(arm.pattern)
 
             # 匹配成功 -> subject 在栈上
@@ -765,19 +765,11 @@ class BytecodeCompiler:
             # 回填失败跳转
             next_arm_start = self.bytecode.current_pos()
             if fail_ip_positions:
-                # 模式测试失败：栈上有 [subject, dup_copy]，需要 POP dup_copy
-                # 先 emit POP 清理 dup 副本，再跳到下一个 arm
-                # fail_ip 跳到这里，然后 POP，然后继续到下一个 arm
-                # 但 guard 失败也跳到 next_arm_start，此时栈上只有 [subject]，不需要 POP
-                # 所以模式测试失败需要一个额外的清理点
-                fail_cleanup_pos = next_arm_start
-                # 先在 fail_cleanup 处 emit POP
-                self.bytecode.emit_op(Op.POP)  # POP dup 副本
-                # 遍历所有 fail 位置统一回填
+                # 模式测试失败：由 VM 的 _pattern_fail_cleanup 统一截断栈到 base_sp+1
+                # （只保留 original subject），然后直接跳到 next_arm_start
+                # 无需编译器生成 POP 清理代码，VM 已处理栈恢复
                 for fail_ip_pos in fail_ip_positions:
-                    self.bytecode.patch_match_fail(fail_ip_pos, fail_cleanup_pos)
-                # POP 之后继续执行到下一个 arm（或者到 match 结束的 fallback）
-                next_arm_start = self.bytecode.current_pos()
+                    self.bytecode.patch_match_fail(fail_ip_pos, next_arm_start)
             if arm.guard is not None:
                 # guard 失败：extract_and_bind 后栈上只有 [subject]，直接跳到下一个 arm
                 self.bytecode.patch_jump(guard_fail_pos, next_arm_start)

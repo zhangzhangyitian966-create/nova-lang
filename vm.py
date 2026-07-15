@@ -141,6 +141,9 @@ class Frame:
         # 模式匹配快照栈：每个 match 开始时保存一份局部变量名集合
         # 用于在 arm 切换和 match 结束时清理绑定变量，防止作用域污染
         self.match_snapshots: List[set] = []
+        # 模式匹配栈基指针栈：每个 match 开始时保存 subject 在栈中的索引
+        # 用于在模式匹配失败时统一恢复栈，防止嵌套模式匹配导致的栈泄漏
+        self.match_stack_bases: List[int] = []
 
 
 # ============================================================
@@ -162,6 +165,9 @@ class NovaVM:
         self.functions: Dict[str, FunctionBlock] = dict(bytecode.functions)
         self.ip = 0
         self.output: List[str] = []
+
+        # 顶层模式匹配栈基指针：顶层代码无帧，用此保存
+        self._top_level_match_bases: List[int] = []
 
         # 循环控制：用于 for 循环的迭代状态
         self._for_iters: List[Dict] = []
@@ -550,6 +556,29 @@ class NovaVM:
         if n == 0:
             return []
         return [self.stack.pop() for _ in range(n)][::-1]
+
+    def _pattern_fail_cleanup(self, fail_ip: int):
+        """
+        模式匹配失败时的统一栈恢复逻辑。
+        将栈截断到当前 match 的 base_sp + 1（保留 original subject），
+        然后跳转到 fail_ip（下一个 arm 的 MATCH_ARM_START 或 match 结束 fallback）。
+        """
+        bases = self._current_match_bases()
+        if not bases:
+            raise RuntimeError_("VM 错误: 模式匹配失败时没有对应的 match 栈基指针")
+        base_sp = bases[-1]
+        # 截断栈：保留 original subject（位于 base_sp 位置）及其下方的所有内容
+        # 即保留 stack[0..base_sp]，共 base_sp + 1 个元素
+        del self.stack[base_sp + 1:]
+        # fail_ip 指向 next_arm_start（下一个 arm 的 MATCH_ARM_START）
+        # 编译器已不再生成 POP 清理指令，由 VM 统一负责栈恢复
+        self.ip = fail_ip
+
+    def _current_match_bases(self) -> List[int]:
+        """获取当前作用域的 match_stack_bases 列表（函数帧或顶层）"""
+        if self.call_stack:
+            return self.call_stack[-1].match_stack_bases
+        return self._top_level_match_bases
 
     def _execute_instruction(self, instr: Instruction) -> bool:
         """执行单条指令，返回 True 表示需要提前返回"""
@@ -1091,11 +1120,17 @@ class NovaVM:
         # === 模式匹配 ===
         elif opcode == Op.MATCH_START:
             # Stack: unchanged
-            # Marker for match expression start — save locals snapshot
+            # Marker for match expression start — save locals snapshot and stack base
             if self.call_stack:
                 frame = self.call_stack[-1]
                 frame.match_snapshots.append(set(frame.locals.keys()))
             # 顶层（无函数帧）不需要快照，因为顶层本身就是全局作用域
+
+            # 记录当前 match 的栈基指针（original subject 在栈中的位置）
+            # 用于模式匹配失败时统一恢复栈，防止嵌套模式导致的栈泄漏
+            if not self.stack:
+                raise RuntimeError_("VM stack underflow: MATCH_START requires subject on stack")
+            self._current_match_bases().append(len(self.stack) - 1)
 
         elif opcode == Op.MATCH_ARM_START:
             # Stack: unchanged
@@ -1120,7 +1155,7 @@ class NovaVM:
             if isinstance(subject, int) and not isinstance(subject, bool) and subject == test_val:
                 self._pop()
             else:
-                self.ip = fail_ip
+                self._pattern_fail_cleanup(fail_ip)
 
         elif opcode == Op.MATCH_TEST_BOOL:
             # Stack: [subject] -> [] (match success) or [subject] (match fail)
@@ -1133,7 +1168,7 @@ class NovaVM:
             if isinstance(subject, bool) and subject == test_val:
                 self._pop()
             else:
-                self.ip = fail_ip
+                self._pattern_fail_cleanup(fail_ip)
 
         elif opcode == Op.MATCH_TEST_STRING:
             # Stack: [subject] -> [] (match success) or [subject] (match fail)
@@ -1146,7 +1181,7 @@ class NovaVM:
             if isinstance(subject, str) and subject == test_val:
                 self._pop()
             else:
-                self.ip = fail_ip
+                self._pattern_fail_cleanup(fail_ip)
 
         elif opcode == Op.MATCH_TEST_FLOAT:
             # Stack: [subject] -> [] (match success) or [subject] (match fail)
@@ -1159,7 +1194,7 @@ class NovaVM:
             if isinstance(subject, float) and subject == test_val:
                 self._pop()
             else:
-                self.ip = fail_ip
+                self._pattern_fail_cleanup(fail_ip)
 
         elif opcode == Op.MATCH_TEST_CHAR:
             # Stack: [subject] -> [] (match success) or [subject] (match fail)
@@ -1172,7 +1207,7 @@ class NovaVM:
             if isinstance(subject, str) and len(subject) == 1 and subject == test_val:
                 self._pop()
             else:
-                self.ip = fail_ip
+                self._pattern_fail_cleanup(fail_ip)
 
         elif opcode == Op.MATCH_WILDCARD:
             # Stack: [subject] -> []
@@ -1207,7 +1242,7 @@ class NovaVM:
                 for field_val in reversed(subject.fields):
                     self.stack.append(field_val)
             else:
-                self.ip = fail_ip
+                self._pattern_fail_cleanup(fail_ip)
 
         elif opcode == Op.MATCH_TEST_TUPLE:
             # Stack: [subject] -> [elem1, ..., elemN] (match success)
@@ -1223,7 +1258,7 @@ class NovaVM:
                 for elem in reversed(subject):
                     self.stack.append(elem)
             else:
-                self.ip = fail_ip
+                self._pattern_fail_cleanup(fail_ip)
 
         elif opcode == Op.MATCH_TEST_LIST:
             # Stack: [subject] -> [elem1, ..., elemN] (match success)
@@ -1239,7 +1274,7 @@ class NovaVM:
                 for elem in reversed(subject):
                     self.stack.append(elem)
             else:
-                self.ip = fail_ip
+                self._pattern_fail_cleanup(fail_ip)
 
         elif opcode == Op.MATCH_END:
             # Stack: unchanged
@@ -1252,6 +1287,10 @@ class NovaVM:
                     for key in list(frame.locals.keys()):
                         if key not in snapshot:
                             del frame.locals[key]
+            # 清理当前 match 的栈基指针
+            bases = self._current_match_bases()
+            if bases:
+                bases.pop()
 
         # === 管道 ===
         elif opcode == Op.PIPE_CALL:

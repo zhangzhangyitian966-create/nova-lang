@@ -1,5 +1,63 @@
 # Nova 自动改进日志
 
+## 2026-07-15 自动改进（第二十轮）
+
+基于 AUTO_REVIEW_LOG.md 第十八轮审查日志的 P0 级严重问题驱动改进（阶段一检查 + 阶段二开发 + 阶段三测试）。
+
+### 每日发现的问题
+
+#### vm.py
+- **嵌套模式匹配失败路径栈泄漏（vm.py:1159-1209）**：嵌套子模式测试失败时，栈上残留已解构的中间值；虽然 MATCH_TEST_* 失败时不 pop，但外层解构已替换栈顶，fail_cleanup 的单次 POP 不足以恢复 → 在 MATCH_START 记录 match_base_sp，失败时由 VM 统一恢复栈
+  - 复现：`match [1,2,3] { [4,2,3] -> 100 | _ -> 200 }` 失败后栈泄漏 2 个值
+  - 审查日志追问结论：绝对不能接受。模式匹配是函数式语言核心控制流。
+
+#### compiler.py
+- **嵌套模式匹配失败时栈不平衡（compiler.py:836-861）**：`_compile_match` 的失败清理只 emit 一个 POP，假设失败时栈上只有 dup 副本；但 PatternConstructor/PatternTuple/PatternList 的主测试成功后会展开 N 个字段/元素，子模式失败时栈上残留 N-k 个值，单个 POP 无法清理干净 → VM 端在 MATCH_START 记录 match_base_sp，失败时截断栈到 base_sp+1
+  - 与 vm.py 问题配套，两端协同修复
+  - 测试状态：原 772 passed（栈泄漏不影响结果正确性，现有测试未覆盖栈平衡检查）
+
+#### type_checker.py
+- **Assignment 完全不检查目标是否为可变绑定（type_checker.py:803-814）**：Assignment 分支只检查变量是否存在和类型兼容，不区分 let/mut，对不可变 let 绑定赋值不会触发类型错误
+  - 根本原因：`TypeEnv`（type_checker.py:192-229）的 `define()`/`lookup()` 只存储类型，**完全没有可变性信息**，LetBinding 和 MutBinding 在类型环境中无区别
+  - 对比：运行时 `Environment`（environment.py:50-61）的 `assign()` 方法正确检查了 `binding.mutable`，VM 的 STORE_VAR 也有检查，但类型检查层缺失
+  - 审查日志追问结论：绝对不能。不可变性是函数式语言的核心原则。
+
+### 本次修复内容（基于审查日志 Issue）
+
+1. **vm.py — 嵌套模式匹配失败统一栈恢复（基于审查日志 vm.py:1159-1209 / 第十八轮严重问题 #1）**
+   - Frame 类新增 `match_stack_bases` 列表保存每个 match 块的栈底指针
+   - 新增 `_pattern_fail_cleanup(fail_ip)` 方法：将栈截断到 `base_sp + 1`（保留 original subject）后跳转
+   - MATCH_START 记录当前栈顶（original subject 位置）到 match_stack_bases
+   - 所有 MATCH_TEST_* / MATCH_CONSTRUCTOR 失败路径改为调用 `_pattern_fail_cleanup`
+   - MATCH_END 弹出 match_stack_bases 栈顶
+   - 同时修复 `_pattern_fail_cleanup` 的跳转偏移：从 `fail_ip + 1` 改为 `fail_ip`（VM 统一恢复栈，无需跳过编译器 POP）
+
+2. **compiler.py — 移除模式匹配失败路径的 POP 清理指令（基于审查日志 compiler.py:836-861 / 第十八轮严重问题 #1）**
+   - `_compile_match` 中移除 `fail_cleanup_pos` 的 POP 指令生成
+   - `fail_ip` 直接指向下一 arm 的 `MATCH_ARM_START`，不再经过 POP 清理
+   - 栈恢复完全由 VM 端的 `_pattern_fail_cleanup` 统一负责
+   - 简化了编译逻辑，不再需要为每个失败点计算需要弹出的值数量
+
+3. **type_checker.py — Assignment 可变性检查 + TypeEnv 可变性跟踪（基于审查日志 type_checker.py:796-807 / 第十八轮严重问题 #2）**
+   - TypeEnv 内部存储从 `types: Dict[str, NovaType]` 改为 `_bindings: Dict[str, tuple]`，每个值为 `(type, mutable)` 元组
+   - 保留 `types` 作为只读 property，向后兼容
+   - `define(name, ty, mutable=False)` 增加 mutable 参数（默认 False）
+   - 新增 `is_mutable(name)` 方法沿作用域链查找绑定可变性
+   - LetBinding 调用 `define(..., mutable=False)`，MutBinding 调用 `define(..., mutable=True)`
+   - Assignment 分支增加可变性检查，不可变则报错：`不能对不可变绑定 '<name>' 赋值`
+   - 新增 11 个测试用例覆盖各种场景
+
+### 测试结果
+
+- 全量测试: **783 passed** (2.19s)
+- Evaluator 示例: hello/functions/pattern_match/adt/loops 全部正常输出
+- VM 示例: hello/functions/pattern_match 全部正常输出
+- 嵌套模式匹配栈恢复: 失败后栈平衡，只保留 original subject ✅
+- Assignment 可变性检查: let 绑定赋值正确报错，mut 绑定正常通过 ✅
+- 模式匹配回归: 所有 47 个模式匹配测试全部通过 ✅
+
+---
+
 ## 2026-07-15 自动改进（第十九轮）
 
 基于 AUTO_REVIEW_LOG.md 第十六轮审查日志的 P0 级严重问题驱动改进（阶段一检查 + 阶段二开发 + 阶段三测试）。
