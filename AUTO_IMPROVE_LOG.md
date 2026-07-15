@@ -1,5 +1,65 @@
 # Nova 自动改进日志
 
+## 2026-07-16 自动改进（第二十六轮）
+
+基于 AUTO_REVIEW_LOG.md 第二十四轮审查日志的 P0/P1 级严重问题驱动改进（阶段一检查 + 阶段二开发 + 阶段三测试）。
+
+### 每日发现的问题
+
+#### vm.py
+- **局部变量可变性检查完全失效（vm.py:672-675）**：STORE_VAR 使用指令的 `mutable` 标志而非变量自身属性判断可变性，编译器赋值总是生成 `mutable=True`，导致不可变局部变量可被随意修改
+  - 审查日志追问结论：绝对不能，不可变性是函数式语言最核心的语义保证之一
+  - 根因：Frame 类只有 locals 存值，没有 local_mutable 跟踪可变性；编译器赋值恒传 True 绕过检查
+
+#### evaluator.py
+- **`_call_depth` / `_eval_depth` 递增在 try 块外，清理逻辑重复（evaluator.py:450-465 / 680-687）**：深度递增和超限检查在 try 外，超限路径需要手动回退，finally 又回退一次，结构脆弱易引入双重递减 bug
+  - 审查日志追问结论：不能接受，典型的资源管理错误，会导致运行时状态不一致
+  - 当前功能正确但结构有缺陷，未来重构极易引入 bug
+
+#### type_checker.py
+- **TryExpr 类型检查不完整，`?` 操作符不检查函数返回类型兼容性（type_checker.py:974-986）**：完全没有检查 `?` 所在函数的返回类型是否与错误类型兼容，相当于完全破坏了 `?` 操作符的类型安全性
+  - 审查日志追问结论：不能接受，这相当于完全破坏了 `?` 操作符的类型安全性
+  - 根因：TypeChecker 没有跟踪当前函数返回类型的状态
+
+### 本次修复内容（基于审查日志 Issue）
+
+1. **vm.py — 局部变量可变性检查修复（基于审查日志 vm.py:672-675 / 第二十四轮严重问题 #1）**
+   - Frame 类新增 `local_mutable: set` 字段，跟踪哪些局部变量是可变的
+   - STORE_VAR 赋值路径从 `if not mutable:` 改为 `if name not in frame.local_mutable:`
+   - STORE_VAR 绑定路径在创建变量时，若 mutable=True 则将变量名加入 local_mutable 集合
+   - NovaClosure 新增 `captured_mutable` 字段，闭包创建时同时捕获可变性信息
+   - `_call_closure` 创建 Frame 时传入 captured_mutable 作为初始 local_mutable
+   - MATCH_BIND 绑定的变量默认不可变（不加入集合）
+   - MATCH_END 清理局部变量时同步清理 local_mutable
+   - 新增 5 个测试用例：let 不可变赋值报错、mut 赋值正常、参数赋值报错、闭包捕获可变变量、闭包捕获不可变变量
+
+2. **evaluator.py — 深度计数结构重构（基于审查日志 evaluator.py:450-465 / 第二十四轮严重问题 #2）**
+   - `_call_fn` 方法：将 `_call_depth += 1` 和超限检查从 try 外移入 try 内
+   - 移除超限路径中的手动回退代码（`_call_depth -= 1` 和 `env = old_env`）
+   - `eval_expr` 方法：将 `_eval_depth += 1` 和超限检查同样移入 try 内
+   - 由 `finally` 块统一处理所有清理路径，消除重复清理逻辑
+   - 新增 8 个测试用例：call_depth 超限归零、正常归零、嵌套归零、环境恢复、eval_depth 超限归零、正常求值归零、深层嵌套归零、溢出时同步归零
+
+3. **type_checker.py — TryExpr 类型检查完善（基于审查日志 type_checker.py:974-986 / 第二十四轮严重问题 #5）**
+   - TypeChecker 新增 `_current_fn_return_type` 状态字段，跟踪当前函数返回类型
+   - `_check_decl_body` 中 FnDef 处理：检查函数体前后保存/恢复当前返回类型
+   - 重写 TryExpr 类型检查逻辑：
+     - Option `?`：若函数返回类型已知且不是 Option 则报错
+     - Result `?`：若函数返回类型是 Result 则检查错误类型兼容，若是其他类型则报错
+     - TypeVar（待推断）暂不报错
+   - 新增 6 个测试用例：Option 在 Option 函数中、Result 在 Result 函数中、Option 在 Int 函数中报错、Result 错误类型不兼容报错、Option 在 Result 函数中报错、非 ADT 使用 ? 报错
+
+### 测试结果
+
+- 全量测试: **842 passed** (1.02s)
+- Evaluator 示例: hello/fibonacci/pattern_match/loops/math/list_comprehension/pipe/file_io 全部正常输出
+- VM 示例: hello/fibonacci/pattern_match 全部正常输出
+- 局部可变性检查: let 不可变赋值报错 ✅ / mut 赋值正常 ✅ / 参数赋值报错 ✅ / 闭包捕获可变性正确传递 ✅
+- 深度计数重构: 超限后归零 ✅ / 正常调用归零 ✅ / 嵌套正确 ✅ / 环境恢复正确 ✅
+- TryExpr 类型检查: Option/Result 正向用例通过 ✅ / 错误传播类型不兼容报错 ✅ / 跨类型传播报错 ✅
+
+---
+
 ## 2026-07-16 自动改进（第二十五轮）
 
 基于 AUTO_REVIEW_LOG.md 第二十三轮审查日志的 P0/P1 级严重问题驱动改进（阶段一检查 + 阶段二开发 + 阶段三测试）。

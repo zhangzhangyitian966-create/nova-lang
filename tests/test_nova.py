@@ -3374,6 +3374,178 @@ class TestBytecodeVM(unittest.TestCase):
             vm.run()
         self.assertIn("未定义的变量 'n'", str(ctx.exception))
 
+    # ---- 局部变量可变性检查 ----
+
+    def test_vm_let_binding_immutable_assign_error(self):
+        """函数内 let 绑定的不可变变量，再次赋值应报错"""
+        # 使用字节码直接构造，绕过类型检查（因为类型检查可能已阻止此操作）
+        from nova.compiler import Bytecode, FunctionBlock, Instruction, Op
+        bytecode = Bytecode()
+        bytecode.constants = []
+
+        # 函数体：let x = 10; x = 20; return x
+        fn_code = [
+            Instruction(Op.CONST_INT, 10),
+            Instruction(Op.STORE_VAR, "x", False),   # let x = 10 (不可变)
+            Instruction(Op.CONST_INT, 20),
+            Instruction(Op.STORE_VAR, "x", True, True),  # x = 20 (赋值操作)
+            Instruction(Op.LOAD_VAR, "x"),
+            Instruction(Op.RETURN),
+        ]
+        fn_block = FunctionBlock("test_fn", 0, fn_code, [], ["x"])
+        bytecode.functions["test_fn"] = fn_block
+
+        # 主代码：调用函数
+        bytecode.emit_op(Op.CLOSURE, "test_fn", 0, "test_fn")
+        bytecode.emit_op(Op.CALL, 0)
+        bytecode.emit_op(Op.STORE_VAR, "result", False)
+        bytecode.emit_op(Op.HALT)
+
+        from nova.vm import NovaVM
+        vm = NovaVM(bytecode)
+        with self.assertRaises(RuntimeError_) as ctx:
+            vm.run()
+        self.assertIn("Cannot assign to immutable variable 'x'", str(ctx.exception))
+
+    def test_vm_mut_binding_assign_works(self):
+        """函数内 mut 绑定的可变变量，再次赋值应正常工作"""
+        from nova.compiler import Bytecode, FunctionBlock, Instruction, Op
+        bytecode = Bytecode()
+        bytecode.constants = []
+
+        # 函数体：mut x = 10; x = 20; return x
+        fn_code = [
+            Instruction(Op.CONST_INT, 10),
+            Instruction(Op.STORE_VAR, "x", True),    # mut x = 10 (可变)
+            Instruction(Op.CONST_INT, 20),
+            Instruction(Op.STORE_VAR, "x", True, True),  # x = 20 (赋值操作)
+            Instruction(Op.LOAD_VAR, "x"),
+            Instruction(Op.RETURN),
+        ]
+        fn_block = FunctionBlock("test_fn", 0, fn_code, [], ["x"])
+        bytecode.functions["test_fn"] = fn_block
+
+        bytecode.emit_op(Op.CLOSURE, "test_fn", 0, "test_fn")
+        bytecode.emit_op(Op.CALL, 0)
+        bytecode.emit_op(Op.STORE_VAR, "result", False)
+        bytecode.emit_op(Op.HALT)
+
+        from nova.vm import NovaVM
+        vm = NovaVM(bytecode)
+        vm.run()
+        self.assertEqual(vm.get_global("result"), 20)
+
+    def test_vm_function_param_immutable_assign_error(self):
+        """函数参数默认不可变，对参数赋值应报错"""
+        from nova.compiler import Bytecode, FunctionBlock, Instruction, Op
+        bytecode = Bytecode()
+        bytecode.constants = []
+
+        # 函数体：x = x + 1 (尝试修改参数 x)
+        fn_code = [
+            Instruction(Op.LOAD_VAR, "x"),
+            Instruction(Op.CONST_INT, 1),
+            Instruction(Op.ADD),
+            Instruction(Op.STORE_VAR, "x", True, True),  # x = x + 1 (赋值操作)
+            Instruction(Op.LOAD_VAR, "x"),
+            Instruction(Op.RETURN),
+        ]
+        fn_block = FunctionBlock("test_fn", 1, fn_code, [], ["x"])
+        bytecode.functions["test_fn"] = fn_block
+
+        bytecode.emit_op(Op.CLOSURE, "test_fn", 1, "test_fn")
+        bytecode.emit_op(Op.CONST_INT, 5)
+        bytecode.emit_op(Op.CALL, 1)
+        bytecode.emit_op(Op.STORE_VAR, "result", False)
+        bytecode.emit_op(Op.HALT)
+
+        from nova.vm import NovaVM
+        vm = NovaVM(bytecode)
+        with self.assertRaises(RuntimeError_) as ctx:
+            vm.run()
+        self.assertIn("Cannot assign to immutable variable 'x'", str(ctx.exception))
+
+    def test_vm_closure_captured_mutable_assign_works(self):
+        """闭包捕获的可变变量，在闭包内赋值应正常工作"""
+        from nova.compiler import Bytecode, FunctionBlock, Instruction, Op
+        bytecode = Bytecode()
+        bytecode.constants = []
+
+        # 内层函数（闭包）：counter = counter + 1; return counter
+        inner_code = [
+            Instruction(Op.LOAD_VAR, "counter"),
+            Instruction(Op.CONST_INT, 1),
+            Instruction(Op.ADD),
+            Instruction(Op.STORE_VAR, "counter", True, True),  # counter = counter + 1
+            Instruction(Op.LOAD_VAR, "counter"),
+            Instruction(Op.RETURN),
+        ]
+        inner_block = FunctionBlock("increment", 0, inner_code, [], ["counter"])
+        bytecode.functions["increment"] = inner_block
+
+        # 外层函数：mut counter = 0; let f = fn() { counter = counter + 1; counter }; f()
+        outer_code = [
+            Instruction(Op.CONST_INT, 0),
+            Instruction(Op.STORE_VAR, "counter", True),   # mut counter = 0
+            Instruction(Op.CLOSURE, "increment", 0, "increment"),
+            Instruction(Op.STORE_VAR, "f", False),        # let f = closure
+            Instruction(Op.LOAD_VAR, "f"),
+            Instruction(Op.CALL, 0),
+            Instruction(Op.RETURN),
+        ]
+        outer_block = FunctionBlock("outer", 0, outer_code, [], ["counter", "f"])
+        bytecode.functions["outer"] = outer_block
+
+        bytecode.emit_op(Op.CLOSURE, "outer", 0, "outer")
+        bytecode.emit_op(Op.CALL, 0)
+        bytecode.emit_op(Op.STORE_VAR, "result", False)
+        bytecode.emit_op(Op.HALT)
+
+        from nova.vm import NovaVM
+        vm = NovaVM(bytecode)
+        vm.run()
+        self.assertEqual(vm.get_global("result"), 1)
+
+    def test_vm_closure_captured_immutable_assign_error(self):
+        """闭包捕获的不可变变量，在闭包内赋值应报错"""
+        from nova.compiler import Bytecode, FunctionBlock, Instruction, Op
+        bytecode = Bytecode()
+        bytecode.constants = []
+
+        # 内层函数（闭包）：尝试修改捕获的不可变变量 x
+        inner_code = [
+            Instruction(Op.CONST_INT, 99),
+            Instruction(Op.STORE_VAR, "x", True, True),  # x = 99 (赋值操作)
+            Instruction(Op.LOAD_VAR, "x"),
+            Instruction(Op.RETURN),
+        ]
+        inner_block = FunctionBlock("inner_fn", 0, inner_code, [], ["x"])
+        bytecode.functions["inner_fn"] = inner_block
+
+        # 外层函数：let x = 10; let f = closure; f()
+        outer_code = [
+            Instruction(Op.CONST_INT, 10),
+            Instruction(Op.STORE_VAR, "x", False),       # let x = 10 (不可变)
+            Instruction(Op.CLOSURE, "inner_fn", 0, "inner_fn"),
+            Instruction(Op.STORE_VAR, "f", False),
+            Instruction(Op.LOAD_VAR, "f"),
+            Instruction(Op.CALL, 0),
+            Instruction(Op.RETURN),
+        ]
+        outer_block = FunctionBlock("outer", 0, outer_code, [], ["x", "f"])
+        bytecode.functions["outer"] = outer_block
+
+        bytecode.emit_op(Op.CLOSURE, "outer", 0, "outer")
+        bytecode.emit_op(Op.CALL, 0)
+        bytecode.emit_op(Op.STORE_VAR, "result", False)
+        bytecode.emit_op(Op.HALT)
+
+        from nova.vm import NovaVM
+        vm = NovaVM(bytecode)
+        with self.assertRaises(RuntimeError_) as ctx:
+            vm.run()
+        self.assertIn("Cannot assign to immutable variable 'x'", str(ctx.exception))
+
 
 # ============================================================
 # 前向引用测试（P1 Bug #9）

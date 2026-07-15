@@ -1030,3 +1030,77 @@ class TestTypeInstantiation:
         """
         checker = check_source(source)
         assert len(checker.error_collector.errors) == 0
+
+
+class TestTryExpr:
+    """测试 ? 操作符（TryExpr）的类型检查"""
+
+    def test_try_option_in_option_fn(self):
+        """Option[Int]? 在返回 Option[Int] 的函数中正确使用，不报错"""
+        source = """
+        fn unwrap_twice(x: Option[Int]) -> Option[Int] {
+            let v = x?
+            Some(v + 1)
+        }
+        """
+        checker = check_source(source)
+        assert len(checker.error_collector.errors) == 0
+
+    def test_try_result_in_result_fn(self):
+        """Result[Int, String]? 在返回 Result[Int, String] 的函数中正确使用，不报错"""
+        source = """
+        fn add_one(x: Result[Int, String]) -> Result[Int, String] {
+            let v = x?
+            Ok(v + 1)
+        }
+        """
+        checker = check_source(source)
+        assert len(checker.error_collector.errors) == 0
+
+    def test_try_option_in_int_fn_error(self):
+        """Option[Int]? 在返回 Int 的函数中使用应报错"""
+        source = """
+        fn bad(x: Option[Int]) -> Int {
+            x?
+        }
+        """
+        with pytest.raises(TypeCheckError) as exc_info:
+            check_source(source)
+        assert "Option" in str(exc_info.value)
+        assert "不是 Option" in str(exc_info.value)
+
+    def test_try_result_err_type_mismatch(self):
+        """Result[Int, String]? 在返回 Result[Int, Int] 的函数中使用，错误类型不兼容，应报错"""
+        source = """
+        fn bad(x: Result[Int, String]) -> Result[Int, Int] {
+            let v = x?
+            Ok(v)
+        }
+        """
+        with pytest.raises(TypeCheckError) as exc_info:
+            check_source(source)
+        assert "不兼容" in str(exc_info.value)
+
+    def test_try_option_in_result_fn_error(self):
+        """Option[Int]? 在返回 Result[Int, String] 的函数中使用应报错"""
+        source = """
+        fn bad(x: Option[Int]) -> Result[Int, String] {
+            let v = x?
+            Ok(v)
+        }
+        """
+        with pytest.raises(TypeCheckError) as exc_info:
+            check_source(source)
+        assert "Option" in str(exc_info.value)
+        assert "不是 Option" in str(exc_info.value)
+
+    def test_try_non_adt_error(self):
+        """在非 ADT 类型上使用 ? 应报错"""
+        source = """
+        fn bad(x: Int) -> Int {
+            x?
+        }
+        """
+        with pytest.raises(TypeCheckError) as exc_info:
+            check_source(source)
+        assert "只能在 Option 或 Result 类型上使用" in str(exc_info.value)

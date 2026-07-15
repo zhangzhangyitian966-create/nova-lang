@@ -268,6 +268,7 @@ class TypeChecker:
         self._module_manager = module_manager  # ModuleManager 实例
         self._current_file = current_file      # 当前文件路径
         self._exported_names: set = set()      # 本模块导出的名称
+        self._current_fn_return_type = None    # 当前正在检查的函数的返回类型
         self._setup_builtins()
 
     def _report_error(self, message: str, node=None):
@@ -566,7 +567,18 @@ class TypeChecker:
                 child_env.define(param.name, ptype)
             old_env = self.env
             self.env = child_env
+
+            # 保存旧状态并设置当前函数返回类型（用于 ? 操作符检查）
+            old_return_type = self._current_fn_return_type
+            if decl.return_type:
+                self._current_fn_return_type = self._from_ast_type(decl.return_type)
+            else:
+                self._current_fn_return_type = None  # 待推断
+
             body_type = self.check_expr(decl.body)
+
+            # 恢复
+            self._current_fn_return_type = old_return_type
             self.env = old_env
 
             if decl.return_type:
@@ -972,18 +984,68 @@ class TypeChecker:
                 return ERROR_TYPE
 
         elif isinstance(expr, TryExpr):
-            # ? 操作符：解包 Result[T, E] -> T 或 Option[T] -> T
             inner_ty = self.check_expr(expr.expr)
-            if isinstance(inner_ty, ADTType):
-                if inner_ty.name == "Result" and len(inner_ty.type_params) >= 1:
-                    return inner_ty.type_params[0]
-                elif inner_ty.name == "Option" and len(inner_ty.type_params) >= 1:
-                    return inner_ty.type_params[0]
-            self._report_error(
-                f"? 操作符只能在 Option 或 Result 类型上使用，得到 {inner_ty}",
-                expr
-            )
-            return ERROR_TYPE
+            if not isinstance(inner_ty, ADTType):
+                self._report_error(
+                    f"? 操作符只能在 Option 或 Result 类型上使用，得到 {inner_ty}",
+                    expr
+                )
+                return ERROR_TYPE
+
+            if inner_ty.name == "Option":
+                ok_ty = inner_ty.type_params[0]
+                # 检查函数返回类型兼容性
+                if self._current_fn_return_type is not None:
+                    ret_ty = self._current_fn_return_type
+                    if isinstance(ret_ty, ADTType):
+                        if ret_ty.name != "Option":
+                            self._report_error(
+                                f"? 操作符传播 Option，但函数返回类型是 {ret_ty}，不是 Option",
+                                expr
+                            )
+                    elif not isinstance(ret_ty, TypeVar):
+                        # 非 ADT 且非类型变量（如 Int、String、List 等），肯定不兼容
+                        self._report_error(
+                            f"? 操作符传播 Option，但函数返回类型是 {ret_ty}，不是 Option",
+                            expr
+                        )
+                    # 如果是 TypeVar（待推断），暂不报错
+                return ok_ty
+
+            elif inner_ty.name == "Result":
+                ok_ty = inner_ty.type_params[0]
+                err_ty = inner_ty.type_params[1] if len(inner_ty.type_params) >= 2 else ERROR_TYPE
+                # 检查函数返回类型兼容性
+                if self._current_fn_return_type is not None:
+                    ret_ty = self._current_fn_return_type
+                    if isinstance(ret_ty, ADTType):
+                        if ret_ty.name == "Result":
+                            ret_err_ty = ret_ty.type_params[1] if len(ret_ty.type_params) >= 2 else ERROR_TYPE
+                            if not self._types_compatible(err_ty, ret_err_ty):
+                                self._report_error(
+                                    f"? 操作符传播的错误类型 {err_ty} 与函数返回的错误类型 {ret_err_ty} 不兼容",
+                                    expr
+                                )
+                        else:
+                            self._report_error(
+                                f"? 操作符传播 Result，但函数返回类型是 {ret_ty}，不是 Result",
+                                expr
+                            )
+                    elif not isinstance(ret_ty, TypeVar):
+                        # 非 ADT 且非类型变量（如 Int、String、List 等），肯定不兼容
+                        self._report_error(
+                            f"? 操作符传播 Result，但函数返回类型是 {ret_ty}，不是 Result",
+                            expr
+                        )
+                    # 如果是 TypeVar（待推断），暂不报错
+                return ok_ty
+
+            else:
+                self._report_error(
+                    f"? 操作符只能在 Option 或 Result 类型上使用，得到 {inner_ty.name}",
+                    expr
+                )
+                return ERROR_TYPE
 
         elif isinstance(expr, ForExpr):
             # for 循环：返回 List[元素类型]

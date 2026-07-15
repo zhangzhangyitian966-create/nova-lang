@@ -447,12 +447,10 @@ class Evaluator:
 
             old_env = self.env
             self.env = child_env
-            self._call_depth += 1
-            if self._call_depth > self.MAX_CALL_DEPTH:
-                self._call_depth -= 1
-                self.env = old_env
-                raise RuntimeError_("栈溢出：调用深度超过限制")
             try:
+                self._call_depth += 1
+                if self._call_depth > self.MAX_CALL_DEPTH:
+                    raise RuntimeError_("栈溢出：调用深度超过限制")
                 result = self.eval_expr(fn.body)
             except ReturnSignal as ret:
                 result = ret.value
@@ -677,11 +675,10 @@ class Evaluator:
 
     def eval_expr(self, expr) -> Any:
         """求值表达式并返回运行时值"""
-        self._eval_depth += 1
-        if self._eval_depth > self.MAX_EVAL_DEPTH:
-            self._eval_depth -= 1
-            raise RuntimeError_("表达式嵌套过深")
         try:
+            self._eval_depth += 1
+            if self._eval_depth > self.MAX_EVAL_DEPTH:
+                raise RuntimeError_("表达式嵌套过深")
             return self._eval_expr_inner(expr)
         finally:
             self._eval_depth -= 1

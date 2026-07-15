@@ -75,10 +75,12 @@ class NovaADTValue:
 class NovaClosure:
     """Nova 函数闭包值（VM 版）"""
 
-    def __init__(self, func_name: str, param_count: int, captured_vars: Dict[str, Any]):
+    def __init__(self, func_name: str, param_count: int, captured_vars: Dict[str, Any],
+                 captured_mutable: set = None):
         self.func_name = func_name
         self.param_count = param_count
         self.captured_vars = captured_vars  # 闭包捕获的变量
+        self.captured_mutable = captured_mutable if captured_mutable is not None else set()  # 捕获的可变变量名集合
 
     def __repr__(self):
         return f"<fn {self.func_name}>"
@@ -131,13 +133,15 @@ class Frame:
     """调用帧"""
 
     def __init__(self, return_ip: int, base_sp: int, code: List[Instruction],
-                 constants: List[Any], locals_: Dict[str, Any], ip: int = 0):
+                 constants: List[Any], locals_: Dict[str, Any], ip: int = 0,
+                 local_mutable: set = None):
         self.return_ip = return_ip
         self.base_sp = base_sp
         self.code = code
         self.constants = constants
         self.locals = locals_
         self.ip = ip
+        self.local_mutable = local_mutable if local_mutable is not None else set()  # 跟踪哪些局部变量是可变的
         # 模式匹配快照栈：每个 match 开始时保存一份局部变量名集合
         # 用于在 arm 切换和 match 结束时清理绑定变量，防止作用域污染
         self.match_snapshots: List[set] = []
@@ -400,6 +404,7 @@ class NovaVM:
             # 部分应用支持：参数不足时返回捕获已提供参数的闭包
             if len(args) < fn.param_count:
                 captured = dict(fn.captured_vars)
+                captured_mutable = set(fn.captured_mutable)
                 # 获取函数参数名用于绑定已捕获参数
                 func_block = self.functions.get(fn.func_name)
                 if func_block is None:
@@ -417,6 +422,7 @@ class NovaVM:
                     func_name=fn.func_name,
                     param_count=remaining_count,
                     captured_vars=captured,
+                    captured_mutable=captured_mutable,
                 )
             return self._call_closure(fn, args)
 
@@ -446,6 +452,9 @@ class NovaVM:
             param_idx = already_bound + i
             locals_[func_block.param_names[param_idx]] = arg
 
+        # 捕获的可变变量集合（函数参数默认不可变，不加入 local_mutable）
+        local_mutable = set(closure.captured_mutable)
+
         # 保存当前帧
         frame = Frame(
             return_ip=self.ip,
@@ -454,6 +463,7 @@ class NovaVM:
             constants=self.constants,
             locals_=locals_,
             ip=self.ip,
+            local_mutable=local_mutable,
         )
         self.call_stack.append(frame)
 
@@ -670,7 +680,7 @@ class NovaVM:
             if self.call_stack:
                 frame = self.call_stack[-1]
                 if name in frame.locals:
-                    if not mutable:
+                    if name not in frame.local_mutable:
                         raise RuntimeError_(f"Cannot assign to immutable variable '{name}'")
                     frame.locals[name] = val
                 else:
@@ -690,6 +700,8 @@ class NovaVM:
                     else:
                         # 绑定操作：总是在局部创建新变量（shadow 全局）
                         frame.locals[name] = val
+                        if mutable:
+                            frame.local_mutable.add(name)
                 return
             # 顶层代码
             if is_assignment:
@@ -970,9 +982,11 @@ class NovaVM:
             func_name = instr.operands[0]
             param_count = instr.operands[1]
             captured = {}
+            captured_mutable = set()
             if self.call_stack:
                 captured = dict(self.call_stack[-1].locals)
-            closure = NovaClosure(func_name, param_count, captured)
+                captured_mutable = set(self.call_stack[-1].local_mutable)
+            closure = NovaClosure(func_name, param_count, captured, captured_mutable)
             self.stack.append(closure)
 
         elif opcode == Op.CALL:
@@ -1192,6 +1206,10 @@ class NovaVM:
                     for key in list(frame.locals.keys()):
                         if key not in snapshot:
                             del frame.locals[key]
+                    # 同步清理 local_mutable 中对应变量
+                    for key in list(frame.local_mutable):
+                        if key not in snapshot:
+                            frame.local_mutable.discard(key)
 
         elif opcode == Op.MATCH_TEST_INT:
             # Stack: [subject] -> [] (match success) or [subject] (match fail)
@@ -1336,6 +1354,10 @@ class NovaVM:
                     for key in list(frame.locals.keys()):
                         if key not in snapshot:
                             del frame.locals[key]
+                    # 同步清理 local_mutable 中对应变量
+                    for key in list(frame.local_mutable):
+                        if key not in snapshot:
+                            frame.local_mutable.discard(key)
             # 清理当前 match 的栈基指针
             bases = self._current_match_bases()
             if bases:
