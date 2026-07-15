@@ -890,14 +890,17 @@ class Evaluator:
             if isinstance(left, bool) != isinstance(right, bool):
                 return True
             return left != right
-        elif expr.op == "<":
-            return left < right
-        elif expr.op == ">":
-            return left > right
-        elif expr.op == "<=":
-            return left <= right
-        elif expr.op == ">=":
-            return left >= right
+        elif expr.op in ("<", ">", "<=", ">="):
+            if isinstance(left, bool) != isinstance(right, bool):
+                raise RuntimeError_("类型错误：Bool 类型只能与 Bool 类型进行比较")
+            if expr.op == "<":
+                return left < right
+            elif expr.op == ">":
+                return left > right
+            elif expr.op == "<=":
+                return left <= right
+            elif expr.op == ">=":
+                return left >= right
 
         raise RuntimeError_(f"未知的操作符 '{expr.op}'")
 

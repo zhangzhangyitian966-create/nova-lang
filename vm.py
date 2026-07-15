@@ -1109,6 +1109,8 @@ class NovaVM:
             # Peek subject; if tuple with matching length, pop subject and push elements; else jump to fail_ip
             elem_count = instr.operands[0]
             fail_ip = instr.operands[1]
+            if not self.stack:
+                raise RuntimeError_("VM stack underflow: MATCH_TEST_TUPLE")
             subject = self.stack[-1]
             if isinstance(subject, tuple) and len(subject) == elem_count:
                 self._pop()
@@ -1123,6 +1125,8 @@ class NovaVM:
             # Peek subject; if list with matching length, pop subject and push elements; else jump to fail_ip
             elem_count = instr.operands[0]
             fail_ip = instr.operands[1]
+            if not self.stack:
+                raise RuntimeError_("VM stack underflow: MATCH_TEST_LIST")
             subject = self.stack[-1]
             if isinstance(subject, list) and len(subject) == elem_count:
                 self._pop()
@@ -1205,6 +1209,8 @@ class NovaVM:
             # Stack: [val] -> [val] or early return
             # If Some/Ok, unwrap (pop and push inner value)
             # If None/Err, trigger early return with the error value
+            if not self.stack:
+                raise RuntimeError_("VM stack underflow: TRY_UNWRAP")
             val = self.stack[-1]
             if isinstance(val, NovaADTValue) and val.variant_name in ("None", "Err"):
                 return True

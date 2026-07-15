@@ -856,3 +856,47 @@
 - 全量测试: **664 passed** (1.04s)
 - Evaluator 示例: hello/fibonacci/pattern_match/math/loops 全部正常输出
 - VM 示例: hello/fibonacci/pattern_match 全部正常输出
+
+---
+
+## 2026-07-15 自动改进（第十三轮）
+
+基于 AUTO_REVIEW_LOG.md 第十一轮审查日志的严重/中等问题驱动改进（阶段一检查 + 阶段二开发 + 阶段三测试）。
+
+### 每日发现的问题
+
+#### vm.py
+- **MATCH_TEST_TUPLE 无栈空检查（vm.py:1112）**：直接 `self.stack[-1]`，空栈时抛 Python IndexError → 添加空栈检查 **[已修复]**
+- **MATCH_TEST_LIST 无栈空检查（vm.py:1126）**：同上 → 添加空栈检查 **[已修复]**
+- **TRY_UNWRAP 无栈空检查（vm.py:1208）**：同上 → 添加空栈检查 **[已修复]**
+
+#### compiler.py
+- **嵌套模式匹配不生成子模式测试（compiler.py:869-878）**：`match x { (1, "hello") -> ... }` 只检查元组长度，不测试内部值 → 递归生成子模式测试指令 **[已修复]**
+
+#### evaluator.py
+- **比较运算 bool 类型安全缺失（evaluator.py:893-900）**：`<`/`>`/`<=`/`>=` 未隔离 bool 与 int，导致 `True < 2` 可通过 → 添加 bool 混用检查 **[已修复]**
+
+### 本次修复内容（基于审查日志 Issue）
+
+1. **vm.py — MATCH_TEST_TUPLE/MATCH_TEST_LIST/TRY_UNWRAP 栈空检查（基于审查日志 vm.py:1112/1126/1208）**
+   - MATCH_TEST_TUPLE: 添加 `if not self.stack: raise RuntimeError_("VM stack underflow: MATCH_TEST_TUPLE")`
+   - MATCH_TEST_LIST: 同上，消息为 `MATCH_TEST_LIST`
+   - TRY_UNWRAP: 同上，消息为 `TRY_UNWRAP`
+   - 风格与 DUP、MATCH_TEST_INT 等已修复指令完全一致
+
+2. **compiler.py — 嵌套模式匹配子模式测试生成（基于审查日志 compiler.py:869-878 / 第十一轮严重问题）**
+   - `_compile_pattern_test_with_fail` 返回类型由 `Optional[int]` 改为 `List[int]`
+   - PatternTuple/PatternList 分支：发射主测试指令后，遍历每个子模式递归调用 `_compile_pattern_test_with_fail`，收集所有 fail 位置统一返回
+   - `_compile_match` 回填逻辑改为遍历列表，统一回填到 `fail_cleanup_pos`
+   - 单变量绑定模式（如 `(a, b)`）语义不变（PatternIdentifier 返回空列表，不额外生成测试）
+
+3. **evaluator.py — 比较运算 bool 类型隔离（基于审查日志 evaluator.py:893-900）**
+   - `<`/`>`/`<=`/`>=` 合并为统一分支，添加 `isinstance(left, bool) != isinstance(right, bool)` 检查
+   - bool 与非 bool 混用时抛出 `RuntimeError_("类型错误：Bool 类型只能与 Bool 类型进行比较")`
+   - 与 `==`/`!=` 及 VM 第九轮修复行为一致
+
+### 测试结果
+
+- 全量测试: **664 passed** (0.90s–1.16s)
+- Evaluator 示例: hello/math/pattern_match/list_comprehension/loops 全部正常输出
+- VM 示例: hello/fibonacci/pattern_match 全部正常输出

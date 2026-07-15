@@ -724,7 +724,7 @@ class BytecodeCompiler:
             self.bytecode.emit_op(Op.DUP)
 
             # 模式测试：匹配失败时跳到该 arm 的清理代码（POP DUP 副本）
-            fail_ip_pos = self._compile_pattern_test_with_fail(arm.pattern)
+            fail_ip_positions = self._compile_pattern_test_with_fail(arm.pattern)
 
             # 匹配成功 -> subject 在栈上
             # 编译匹配体的绑定（从 subject 中提取值）
@@ -750,7 +750,7 @@ class BytecodeCompiler:
 
             # 回填失败跳转
             next_arm_start = self.bytecode.current_pos()
-            if fail_ip_pos is not None:
+            if fail_ip_positions:
                 # 模式测试失败：栈上有 [subject, dup_copy]，需要 POP dup_copy
                 # 先 emit POP 清理 dup 副本，再跳到下一个 arm
                 # fail_ip 跳到这里，然后 POP，然后继续到下一个 arm
@@ -759,8 +759,9 @@ class BytecodeCompiler:
                 fail_cleanup_pos = next_arm_start
                 # 先在 fail_cleanup 处 emit POP
                 self.bytecode.emit_op(Op.POP)  # POP dup 副本
-                # fail_ip 跳到 fail_cleanup_pos（POP 指令的位置）
-                self.bytecode.patch_match_fail(fail_ip_pos, fail_cleanup_pos)
+                # 遍历所有 fail 位置统一回填
+                for fail_ip_pos in fail_ip_positions:
+                    self.bytecode.patch_match_fail(fail_ip_pos, fail_cleanup_pos)
                 # POP 之后继续执行到下一个 arm（或者到 match 结束的 fallback）
                 next_arm_start = self.bytecode.current_pos()
             if arm.guard is not None:
@@ -776,39 +777,39 @@ class BytecodeCompiler:
         for jpos in jump_to_end_positions:
             self.bytecode.patch_jump(jpos, end_pos)
 
-    def _compile_pattern_test_with_fail(self, pattern):
+    def _compile_pattern_test_with_fail(self, pattern) -> List[int]:
         """
         编译模式测试。匹配失败时跳到下一个 arm。
-        返回 fail_ip 的占位位置，或 None（如果总是匹配）。
+        返回所有需要回填的 fail_ip 占位位置列表。
         subject 在栈顶，匹配成功时保留在栈上。
         """
         if isinstance(pattern, PatternWildcard):
-            return None  # 总是匹配
+            return []  # 总是匹配
 
         elif isinstance(pattern, PatternInt):
             fail_pos = self.bytecode.current_pos()
             self.bytecode.emit_op(Op.MATCH_TEST_INT, pattern.value, 0)
-            return fail_pos
+            return [fail_pos]
 
         elif isinstance(pattern, PatternFloat):
             fail_pos = self.bytecode.current_pos()
             self.bytecode.emit_op(Op.MATCH_TEST_FLOAT, pattern.value, 0)
-            return fail_pos
+            return [fail_pos]
 
         elif isinstance(pattern, PatternBool):
             fail_pos = self.bytecode.current_pos()
             self.bytecode.emit_op(Op.MATCH_TEST_BOOL, pattern.value, 0)
-            return fail_pos
+            return [fail_pos]
 
         elif isinstance(pattern, PatternString):
             fail_pos = self.bytecode.current_pos()
             self.bytecode.emit_op(Op.MATCH_TEST_STRING, pattern.value, 0)
-            return fail_pos
+            return [fail_pos]
 
         elif isinstance(pattern, PatternChar):
             fail_pos = self.bytecode.current_pos()
             self.bytecode.emit_op(Op.MATCH_TEST_CHAR, pattern.value, 0)
-            return fail_pos
+            return [fail_pos]
 
         elif isinstance(pattern, PatternIdentifier):
             # 检查是否是已知的零字段 ADT 构造器（如 None, Red 等）
@@ -818,26 +819,34 @@ class BytecodeCompiler:
                     # 零字段构造器：作为构造器模式编译
                     fail_pos = self.bytecode.current_pos()
                     self.bytecode.emit_op(Op.MATCH_CONSTRUCTOR, pattern.name, 0, 0)
-                    return fail_pos
-            return None  # 变量绑定总是匹配
+                    return [fail_pos]
+            return []  # 变量绑定总是匹配
 
         elif isinstance(pattern, PatternConstructor):
             fail_pos = self.bytecode.current_pos()
             self.bytecode.emit_op(Op.MATCH_CONSTRUCTOR, pattern.name, len(pattern.fields), 0)
-            return fail_pos
+            return [fail_pos]
 
         elif isinstance(pattern, PatternTuple):
+            fail_positions = []
             fail_pos = self.bytecode.current_pos()
             self.bytecode.emit_op(Op.MATCH_TEST_TUPLE, len(pattern.elements), 0)
-            return fail_pos
+            fail_positions.append(fail_pos)
+            for elem in pattern.elements:
+                fail_positions.extend(self._compile_pattern_test_with_fail(elem))
+            return fail_positions
 
         elif isinstance(pattern, PatternList):
+            fail_positions = []
             fail_pos = self.bytecode.current_pos()
             self.bytecode.emit_op(Op.MATCH_TEST_LIST, len(pattern.elements), 0)
-            return fail_pos
+            fail_positions.append(fail_pos)
+            for elem in pattern.elements:
+                fail_positions.extend(self._compile_pattern_test_with_fail(elem))
+            return fail_positions
 
         else:
-            return None
+            return []
 
     def _compile_pattern_extract_and_bind(self, pattern):
         """
