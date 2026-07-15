@@ -696,11 +696,17 @@ class BytecodeCompiler:
 
             self._compile_expr(expr.then_branch)
 
+            jump_past_unit = self.bytecode.current_pos()
+            self.bytecode.emit_op(Op.JUMP, 0)
+
             end_pos = self.bytecode.current_pos()
             self.bytecode.patch_jump(jump_to_end, end_pos)
 
             # 无 else 时，false 路径推入 Unit
             self.bytecode.emit_op(Op.CONST_UNIT)
+
+            unit_end_pos = self.bytecode.current_pos()
+            self.bytecode.patch_jump(jump_past_unit, unit_end_pos)
 
     def _compile_match(self, expr: MatchExpr):
         """编译模式匹配"""

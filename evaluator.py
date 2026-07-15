@@ -451,7 +451,7 @@ class Evaluator:
                 raise RuntimeError_("continue 不能出现在函数体内")
             finally:
                 self._call_depth -= 1
-            self.env = old_env
+                self.env = old_env
             return result
 
         raise RuntimeError_(f"无法调用非函数值: {fn}")
@@ -875,7 +875,9 @@ class Evaluator:
         elif expr.op == "%":
             return left % right
         elif expr.op == "++":
-            return left + right  # 字符串拼接
+            if isinstance(left, str) and isinstance(right, str):
+                return left + right
+            raise RuntimeError_("类型错误：操作符 '++' 只能用于 String 类型")
         elif expr.op == "==":
             # Nova 中 Bool 和 Int 是不同类型：bool 与非 bool 比较永远不相等
             if isinstance(left, bool) != isinstance(right, bool):
@@ -992,8 +994,10 @@ class Evaluator:
                         child_env.define(name, val)
                     old_env = self.env
                     self.env = child_env
-                    guard_val = self.eval_expr(arm.guard)
-                    self.env = old_env
+                    try:
+                        guard_val = self.eval_expr(arm.guard)
+                    finally:
+                        self.env = old_env
                     if not guard_val:
                         continue
                 # 在新作用域中绑定模式变量并求值分支
@@ -1002,8 +1006,10 @@ class Evaluator:
                     child_env.define(name, val)
                 old_env = self.env
                 self.env = child_env
-                result = self.eval_expr(arm.body)
-                self.env = old_env
+                try:
+                    result = self.eval_expr(arm.body)
+                finally:
+                    self.env = old_env
                 return result
 
         raise RuntimeError_("模式匹配失败：没有匹配的分支（考虑添加 _ 通配符）")

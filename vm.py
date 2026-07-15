@@ -615,10 +615,12 @@ class NovaVM:
 
         elif opcode == Op.CONCAT:
             # Stack: [a, b] -> [a++b]
-            # Pop two values, concatenate, push result
-            # Python 原生 + 按类型分发：list+list→拼接, str+str→拼接, int+int→加法
+            # 仅允许 str 类型拼接
             a, b = self._pop(2)
-            self.stack.append(a + b)
+            if isinstance(a, str) and isinstance(b, str):
+                self.stack.append(a + b)
+            else:
+                raise RuntimeError_("类型错误：操作符 '++' 只能用于 String 类型")
 
         elif opcode == Op.EQ:
             # Stack: [a, b] -> [a==b]

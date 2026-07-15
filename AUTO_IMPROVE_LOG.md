@@ -710,3 +710,45 @@
 - 全量测试: **664 passed** (0.94s)
 - Evaluator 示例: hello/fibonacci/pattern_match/list_comprehension/loops 全部正常输出
 - VM 示例: hello/fibonacci/pattern_match 全部正常输出
+
+---
+
+## 2026-07-15 自动改进（第十二轮）
+
+基于 AUTO_REVIEW_LOG.md 第八轮审查日志的 P0 级严重问题驱动改进（阶段一检查 + 阶段二开发 + 阶段三测试）。
+
+### 每日发现的问题
+
+#### vm.py
+- **CONCAT（++）语义错误（vm.py:616-621）**：`a + b` 允许 int/float/bool/list 参与 ++，与类型检查器语义不一致。→ 限制为仅 str 类型可拼接 **[已修复]**
+
+#### compiler.py
+- **无 else 的 if 表达式栈泄漏（compiler.py:693-703）**：then_branch 后缺少 JUMP 跳过 CONST_UNIT，导致 true 路径栈上同时留下 then 值和 Unit。→ 插入 JUMP 跳过 CONST_UNIT **[已修复]**
+
+#### evaluator.py
+- **_call_fn 环境恢复不在 finally（evaluator.py:433-455）**：非 Return/Break/Continue 异常后 env 不恢复。→ 移入 finally **[已修复]**
+- **match guard/body 环境恢复不在 finally（evaluator.py:989-1006）**：guard 或 body 异常后 env 不恢复。→ 改为 try/finally **[已修复]**
+
+### 本次修复内容（基于审查日志 Issue）
+
+1. **vm.py + evaluator.py — CONCAT 运行时类型守卫（基于审查日志 vm.py:616-621 / P0 #5）**
+   - vm.py: CONCAT 指令处理增加 `isinstance(a, str) and isinstance(b, str)` 检查，非字符串抛 RuntimeError_
+   - evaluator.py: `++` 二元操作同样增加类型检查
+   - 消除 int/float/bool 误用 ++ 的歧义，与类型检查器语义一致
+
+2. **compiler.py — 无 else if 表达式 JUMP 跳过 CONST_UNIT（基于审查日志 compiler.py:693-703 / P0 #3）**
+   - `_compile_if` 无 else 分支时，在 then_branch 后 emit `JUMP` 跳过 `CONST_UNIT`
+   - 修复前：`if true then 1` 执行后栈上同时有 `1` 和 `Unit`
+   - 修复后：true 路径直接跳转到 CONST_UNIT 之后，栈上只保留 then 的值
+
+3. **evaluator.py — _call_fn + match 环境恢复 try/finally（基于审查日志 evaluator.py:433-455,989-1006 / P0 #5）**
+   - `_call_fn` 将 `self.env = old_env` 从 finally 外部移入 finally 内部
+   - `_eval_match` guard 处理用 try/finally 包裹 `eval_expr(arm.guard)`
+   - `_eval_match` body 处理用 try/finally 包裹 `eval_expr(arm.body)`
+   - 消除异常导致的环境泄漏风险
+
+### 测试结果
+
+- 全量测试: **664 passed** (1.04s)
+- Evaluator 示例: hello/fibonacci/pattern_match/math/loops 全部正常输出
+- VM 示例: hello/fibonacci/pattern_match 全部正常输出
