@@ -21,7 +21,7 @@ from nova.ast_nodes import (
     PatternWildcard, PatternInt, PatternFloat, PatternString,
     PatternBool, PatternChar, PatternIdentifier, PatternConstructor,
     PatternTuple, PatternList,
-    ListExpr, ListComprehension, TupleExpr, MapExpr, FieldAccess,
+    ListExpr, ListComprehension, TupleExpr, MapExpr, FieldAccess, IndexExpr,
     ImportDecl, ExportDecl, TypeDef, VariantDef, AliasDef,
     TypeInt, TypeFloat, TypeString, TypeBool, TypeChar, TypeUnit,
     TypeIdentifier, TypeGeneric, TypeTuple, TypeFn,
@@ -752,6 +752,12 @@ class Parser:
                 else:
                     field_tok = self._expect(TokenType.IDENT)
                 expr = FieldAccess(target=expr, field=field_tok.value, span=self._span(field_tok))
+            # 索引访问 expr[index]
+            elif self._peek_type() == TokenType.LBRACKET:
+                self._advance()
+                idx = self._parse_expression()
+                tok = self._expect(TokenType.RBRACKET)
+                expr = IndexExpr(target=expr, index=idx, span=self._span(tok))
             else:
                 break
 

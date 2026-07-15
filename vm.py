@@ -595,18 +595,22 @@ class NovaVM:
             # Stack: [a, b] -> [a/b]
             # Pop two values, divide them, push result
             a, b = self._pop(2)
-            if isinstance(a, int) and isinstance(b, int):
-                if b == 0:
-                    raise RuntimeError_("除零错误")
-                self.stack.append(a // b)
-            else:
-                self.stack.append(a / b)
+            try:
+                if isinstance(a, int) and isinstance(b, int):
+                    self.stack.append(a // b)
+                else:
+                    self.stack.append(a / b)
+            except ZeroDivisionError:
+                raise RuntimeError_("除零错误")
 
         elif opcode == Op.MOD:
             # Stack: [a, b] -> [a%b]
             # Pop two values, compute modulo, push result
             a, b = self._pop(2)
-            self.stack.append(a % b)
+            try:
+                self.stack.append(a % b)
+            except ZeroDivisionError:
+                raise RuntimeError_("除零错误")
 
         elif opcode == Op.NEG:
             # Stack: [a] -> [-a]
@@ -872,7 +876,14 @@ class NovaVM:
             # Stack: [obj, index] -> [obj[index]]
             # Pop object and index, push indexed value
             obj, index = self._pop(2)
-            self.stack.append(obj[index])
+            try:
+                self.stack.append(obj[index])
+            except IndexError:
+                raise RuntimeError_("索引越界")
+            except KeyError:
+                raise RuntimeError_(f"键不存在: {index}")
+            except TypeError as e:
+                raise RuntimeError_(f"索引操作类型错误: {e}")
 
         elif opcode == Op.FIELD_ACCESS:
             # Stack: [obj] -> [obj.field]

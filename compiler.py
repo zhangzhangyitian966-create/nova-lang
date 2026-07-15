@@ -24,7 +24,7 @@ from nova.ast_nodes import (
     LetBinding, MutBinding, Assignment,
     IfExpr, MatchArm, MatchExpr,
     ForExpr, WhileExpr, BreakExpr, ContinueExpr,
-    ListExpr, ListComprehension, TupleExpr, MapExpr, FieldAccess,
+    ListExpr, ListComprehension, TupleExpr, MapExpr, FieldAccess, IndexExpr,
     TypeDef, VariantDef, AliasDef,
     ImportDecl, ExportDecl,
     PatternWildcard, PatternInt, PatternFloat, PatternString,
@@ -520,6 +520,11 @@ class BytecodeCompiler:
             self._compile_expr(expr.target)
             self.bytecode.emit_op(Op.FIELD_ACCESS, expr.field)
 
+        elif isinstance(expr, IndexExpr):
+            self._compile_expr(expr.target)
+            self._compile_expr(expr.index)
+            self.bytecode.emit_op(Op.INDEX)
+
         else:
             raise RuntimeError(f"编译器错误: 未知的表达式类型 {type(expr).__name__}")
 
@@ -661,12 +666,18 @@ class BytecodeCompiler:
 
         fn_code = fn_bytecode.code
         fn_consts = fn_bytecode.constants
+        # 收集 lambda 内嵌定义的所有子函数/lambdas
+        fn_sub_functions = dict(fn_bytecode.functions)
 
         self.bytecode = old_bytecode
 
         lambda_name = f"<lambda_{len(self.bytecode.functions)}_{id(fn_code)}>"
         func_block = FunctionBlock(lambda_name, param_count, fn_code, fn_consts, param_names)
         self.bytecode.functions[lambda_name] = func_block
+
+        # 将子函数/lambdas 也注册到主 bytecode 的 functions 中
+        for sub_name, sub_block in fn_sub_functions.items():
+            self.bytecode.functions[sub_name] = sub_block
 
         self.bytecode.emit_op(Op.CLOSURE, lambda_name, param_count)
 

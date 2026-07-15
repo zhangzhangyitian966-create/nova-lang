@@ -16,7 +16,7 @@ from nova.ast_nodes import (
     PatternWildcard, PatternInt, PatternFloat, PatternString,
     PatternBool, PatternChar, PatternIdentifier, PatternConstructor,
     PatternTuple, PatternList,
-    ListExpr, ListComprehension, TupleExpr, MapExpr, FieldAccess,
+    ListExpr, ListComprehension, TupleExpr, MapExpr, FieldAccess, IndexExpr,
     ImportDecl, ExportDecl, TypeDef, VariantDef, AliasDef,
 )
 from nova.ir.ir_nodes import (
@@ -243,6 +243,9 @@ class HIRLowering:
 
         elif isinstance(expr, FieldAccess):
             return HIRFieldExpr(self._lower_expr(expr.target), expr.field)
+
+        elif isinstance(expr, IndexExpr):
+            return HIRIndexExpr(self._lower_expr(expr.target), self._lower_expr(expr.index))
 
         elif isinstance(expr, Block):
             stmts = [self._lower_expr(s) for s in expr.statements]
