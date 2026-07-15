@@ -516,8 +516,9 @@ class TestPassManager(unittest.TestCase):
         # 不应抛出异常
 
     def test_hir_pass_exception_propagates(self):
-        """HIR pass 抛出异常时应向上传播，而非被静默吞掉"""
+        """HIR pass 抛出异常时应包装为 PassError 向上传播，附加上下文"""
         from nova.ir.pass_manager import Pass
+        from nova.errors import PassError
 
         class FailingHIRPass(Pass):
             name = "failing_hir"
@@ -528,13 +529,22 @@ class TestPassManager(unittest.TestCase):
         hir = compile_to_hir("let x = 1 + 2")
         pm = PassManager()
         pm.add_hir_pass(FailingHIRPass())
-        with self.assertRaises(RuntimeError) as ctx:
+        with self.assertRaises(PassError) as ctx:
             pm.run_hir_passes(hir)
-        self.assertIn("intentional HIR pass failure", str(ctx.exception))
+        err = ctx.exception
+        self.assertIn("intentional HIR pass failure", str(err))
+        self.assertEqual(err.pass_name, "FailingHIRPass")
+        self.assertEqual(err.pass_type, "HIR")
+        self.assertEqual(err.iteration, 1)
+        self.assertIsInstance(err.original_error, RuntimeError)
+        self.assertIn("intentional HIR pass failure", str(err.original_error))
+        # 异常链应保留原始异常
+        self.assertIsInstance(err.__cause__, RuntimeError)
 
     def test_mir_pass_exception_propagates(self):
-        """MIR pass 抛出异常时应向上传播，而非被静默吞掉"""
+        """MIR pass 抛出异常时应包装为 PassError 向上传播，附加上下文"""
         from nova.ir.pass_manager import Pass
+        from nova.errors import PassError
 
         class FailingMIRPass(Pass):
             name = "failing_mir"
@@ -545,13 +555,20 @@ class TestPassManager(unittest.TestCase):
         mir = compile_to_mir("fn test(x) { x + 1 }")
         pm = PassManager()
         pm.add_mir_pass(FailingMIRPass())
-        with self.assertRaises(ValueError) as ctx:
+        with self.assertRaises(PassError) as ctx:
             pm.run_mir_passes(mir)
-        self.assertIn("intentional MIR pass failure", str(ctx.exception))
+        err = ctx.exception
+        self.assertIn("intentional MIR pass failure", str(err))
+        self.assertEqual(err.pass_name, "FailingMIRPass")
+        self.assertEqual(err.pass_type, "MIR")
+        self.assertEqual(err.iteration, 1)
+        self.assertIsInstance(err.original_error, ValueError)
+        self.assertIsInstance(err.__cause__, ValueError)
 
     def test_lir_pass_exception_propagates(self):
-        """LIR pass 抛出异常时应向上传播，而非被静默吞掉"""
+        """LIR pass 抛出异常时应包装为 PassError 向上传播，附加上下文"""
         from nova.ir.pass_manager import Pass
+        from nova.errors import PassError
 
         class FailingLIRPass(Pass):
             name = "failing_lir"
@@ -567,9 +584,44 @@ class TestPassManager(unittest.TestCase):
         mod = _make_lir_module({"test": fn})
         pm = PassManager()
         pm.add_lir_pass(FailingLIRPass())
-        with self.assertRaises(TypeError) as ctx:
+        with self.assertRaises(PassError) as ctx:
             pm.run_lir_passes(mod)
-        self.assertIn("intentional LIR pass failure", str(ctx.exception))
+        err = ctx.exception
+        self.assertIn("intentional LIR pass failure", str(err))
+        self.assertEqual(err.pass_name, "FailingLIRPass")
+        self.assertEqual(err.pass_type, "LIR")
+        self.assertEqual(err.iteration, 1)
+        self.assertIsInstance(err.original_error, TypeError)
+        self.assertIsInstance(err.__cause__, TypeError)
+
+    def test_pass_error_iteration_count(self):
+        """PassError 应正确报告失败时的迭代轮次"""
+        from nova.ir.pass_manager import Pass
+        from nova.errors import PassError
+
+        # 第一轮返回 True（触发下一轮迭代），第二轮抛出异常
+        call_count = 0
+
+        class FailingOnSecondIterPass(Pass):
+            name = "failing_second"
+
+            def run(self, module):
+                nonlocal call_count
+                call_count += 1
+                if call_count < 2:
+                    return True  # 表示有变化，继续迭代
+                raise RuntimeError("failed on second iteration")
+
+        hir = compile_to_hir("let x = 1 + 2")
+        pm = PassManager()
+        pm.add_hir_pass(FailingOnSecondIterPass())
+        with self.assertRaises(PassError) as ctx:
+            pm.run_hir_passes(hir)
+        err = ctx.exception
+        self.assertEqual(err.iteration, 2)
+        self.assertEqual(err.pass_name, "FailingOnSecondIterPass")
+        self.assertEqual(err.pass_type, "HIR")
+        self.assertIn("第 2 轮迭代失败", str(err))
 
 
 # ============================================================

@@ -895,6 +895,64 @@ class TestADT(unittest.TestCase):
         """, check_types=False)
         self.assertEqual(ev.env.lookup("x"), 0)
 
+    def test_adt_same_variant_name_different_type(self):
+        """不同 ADT 类型有同名 variant 时，模式匹配不应跨类型误匹配（evaluator 级别）"""
+        from nova.evaluator import NovaADTValue, Evaluator
+        from nova.ast_nodes import PatternConstructor, PatternIdentifier
+
+        ev = Evaluator(check_types=False)
+        # 注册两个 ADT 类型（模拟 type Color { Red } 和 type Fruit { Red }）
+        ev._adt_constructors["Red"] = "Fruit"  # 最后注册的是 Fruit
+
+        # 创建一个 Color.Red 值
+        color_red = NovaADTValue("Color", "Red", [], [])
+
+        # 创建一个 Red 构造器模式（编译时期望是 Fruit.Red）
+        pattern = PatternConstructor(name="Red", fields=[])
+
+        # 模式匹配应该失败：值是 Color.Red，但模式期望 Fruit.Red
+        bindings = {}
+        result = ev._match_pattern(pattern, color_red, bindings)
+        self.assertFalse(result, "Color.Red 不应匹配 Fruit.Red 模式")
+
+        # 创建一个 Fruit.Red 值
+        fruit_red = NovaADTValue("Fruit", "Red", [], [])
+
+        # 模式匹配应该成功
+        bindings = {}
+        result = ev._match_pattern(pattern, fruit_red, bindings)
+        self.assertTrue(result, "Fruit.Red 应该匹配 Fruit.Red 模式")
+
+    def test_adt_same_variant_with_fields_different_type(self):
+        """不同 ADT 类型有同名带字段 variant 时，模式匹配不应跨类型误匹配（evaluator 级别）"""
+        from nova.evaluator import NovaADTValue, Evaluator
+        from nova.ast_nodes import PatternConstructor, PatternIdentifier
+
+        ev = Evaluator(check_types=False)
+        # 注册两个 ADT 类型，最后注册的是 Wheel
+        ev._adt_constructors["Circle"] = "Wheel"
+
+        # 创建 Shape.Circle(5.0) 值
+        shape_circle = NovaADTValue("Shape", "Circle", [5.0], ["radius"])
+
+        # 创建 Circle(r) 构造器模式（编译时期望是 Wheel.Circle）
+        r_pattern = PatternIdentifier(name="r")
+        pattern = PatternConstructor(name="Circle", fields=[r_pattern])
+
+        # 模式匹配应该失败：值是 Shape.Circle，但模式期望 Wheel.Circle
+        bindings = {}
+        result = ev._match_pattern(pattern, shape_circle, bindings)
+        self.assertFalse(result, "Shape.Circle 不应匹配 Wheel.Circle 模式")
+
+        # 创建 Wheel.Circle(10.0) 值
+        wheel_circle = NovaADTValue("Wheel", "Circle", [10.0], ["diameter"])
+
+        # 模式匹配应该成功
+        bindings = {}
+        result = ev._match_pattern(pattern, wheel_circle, bindings)
+        self.assertTrue(result, "Wheel.Circle 应该匹配 Wheel.Circle 模式")
+        self.assertEqual(bindings["r"], 10.0)
+
 
 # ============================================================
 # 管道操作测试
@@ -2335,6 +2393,119 @@ class TestBytecodeVM(unittest.TestCase):
         """)
         self.assertEqual(vm.get_global("d"), "point")
 
+    def test_vm_match_same_variant_name_different_type(self):
+        """不同 ADT 类型有同名 variant 时，MATCH_CONSTRUCTOR 应检查 type_name"""
+        from nova.compiler import Bytecode, Op, Instruction
+        from nova.vm import NovaVM
+
+        # 手动构造字节码来测试 type_name 检查
+        bc = Bytecode()
+        # 创建 Color.Red (零字段)
+        bc.emit_op(Op.MAKE_ADT, "Color", "Red", 0, ())
+        # MATCH_START: arm_count=1
+        bc.emit_op(Op.MATCH_START, 1)
+        # MATCH_ARM_START
+        bc.emit_op(Op.MATCH_ARM_START)
+        # MATCH_CONSTRUCTOR: 期望 Fruit.Red，应匹配失败跳转到 fail_ip
+        fail_pos = len(bc.code)
+        bc.emit_op(Op.MATCH_CONSTRUCTOR, "Fruit", "Red", 0, 0)
+        # 匹配成功：返回 "matched"
+        idx_matched = bc.add_const("matched")
+        bc.emit_op(Op.LOAD_CONST, idx_matched)
+        bc.emit_op(Op.MATCH_END)
+        bc.emit_op(Op.HALT)
+        # 失败分支（第二个 arm / fallback）
+        fail_ip = len(bc.code)
+        bc.emit_op(Op.MATCH_ARM_START)
+        bc.emit_op(Op.MATCH_WILDCARD)
+        idx_not_matched = bc.add_const("not-matched")
+        bc.emit_op(Op.LOAD_CONST, idx_not_matched)
+        bc.emit_op(Op.MATCH_END)
+        bc.emit_op(Op.HALT)
+
+        # 回填 fail_ip
+        bc.patch_match_fail(fail_pos, fail_ip)
+
+        vm = NovaVM(bc)
+        vm.run()
+        # Color.Red 不应匹配 Fruit.Red 模式，应落到通配符分支
+        result = vm.stack[-1] if vm.stack else None
+        self.assertEqual(result, "not-matched")
+
+    def test_vm_match_same_variant_same_type(self):
+        """同类型同名 variant 应正确匹配"""
+        from nova.compiler import Bytecode, Op
+        from nova.vm import NovaVM
+
+        bc = Bytecode()
+        # 创建 Color.Red
+        bc.emit_op(Op.MAKE_ADT, "Color", "Red", 0, ())
+        # MATCH_START: arm_count=1
+        bc.emit_op(Op.MATCH_START, 1)
+        # MATCH_ARM_START
+        bc.emit_op(Op.MATCH_ARM_START)
+        # MATCH_CONSTRUCTOR: 期望 Color.Red，应匹配成功
+        fail_pos = len(bc.code)
+        bc.emit_op(Op.MATCH_CONSTRUCTOR, "Color", "Red", 0, 0)
+        # 匹配成功
+        idx_matched = bc.add_const("matched")
+        bc.emit_op(Op.LOAD_CONST, idx_matched)
+        bc.emit_op(Op.MATCH_END)
+        bc.emit_op(Op.HALT)
+        # 失败分支
+        fail_ip = len(bc.code)
+        bc.emit_op(Op.MATCH_ARM_START)
+        bc.emit_op(Op.MATCH_WILDCARD)
+        idx_not_matched = bc.add_const("not-matched")
+        bc.emit_op(Op.LOAD_CONST, idx_not_matched)
+        bc.emit_op(Op.MATCH_END)
+        bc.emit_op(Op.HALT)
+
+        bc.patch_match_fail(fail_pos, fail_ip)
+
+        vm = NovaVM(bc)
+        vm.run()
+        result = vm.stack[-1] if vm.stack else None
+        self.assertEqual(result, "matched")
+
+    def test_vm_match_same_variant_with_fields_different_type(self):
+        """不同类型同名字段 variant 应检查 type_name"""
+        from nova.compiler import Bytecode, Op
+        from nova.vm import NovaVM
+
+        bc = Bytecode()
+        # 压入字段值 5.0
+        idx_5 = bc.add_const(5.0)
+        bc.emit_op(Op.LOAD_CONST, idx_5)
+        # 创建 Shape.Circle(5.0)
+        bc.emit_op(Op.MAKE_ADT, "Shape", "Circle", 1, ("radius",))
+        # MATCH_START
+        bc.emit_op(Op.MATCH_START, 1)
+        bc.emit_op(Op.MATCH_ARM_START)
+        # MATCH_CONSTRUCTOR: 期望 Wheel.Circle(1)，应匹配失败
+        fail_pos = len(bc.code)
+        bc.emit_op(Op.MATCH_CONSTRUCTOR, "Wheel", "Circle", 1, 0)
+        # 匹配成功
+        idx_matched = bc.add_const("matched")
+        bc.emit_op(Op.LOAD_CONST, idx_matched)
+        bc.emit_op(Op.MATCH_END)
+        bc.emit_op(Op.HALT)
+        # 失败分支
+        fail_ip = len(bc.code)
+        bc.emit_op(Op.MATCH_ARM_START)
+        bc.emit_op(Op.MATCH_WILDCARD)
+        idx_not_matched = bc.add_const("not-matched")
+        bc.emit_op(Op.LOAD_CONST, idx_not_matched)
+        bc.emit_op(Op.MATCH_END)
+        bc.emit_op(Op.HALT)
+
+        bc.patch_match_fail(fail_pos, fail_ip)
+
+        vm = NovaVM(bc)
+        vm.run()
+        result = vm.stack[-1] if vm.stack else None
+        self.assertEqual(result, "not-matched")
+
     # ---- P1 Bug #8: for 循环 + break 栈布局 ----
 
     def test_vm_for_break_returns_correct_list(self):
@@ -3081,7 +3252,7 @@ class TestBytecodeVM(unittest.TestCase):
         from nova.compiler import Bytecode, Op
         from nova.vm import NovaVM
         bytecode = Bytecode()
-        bytecode.emit_op(Op.MATCH_CONSTRUCTOR, "Circle", 1, 2)
+        bytecode.emit_op(Op.MATCH_CONSTRUCTOR, "Shape", "Circle", 1, 2)
         bytecode.emit_op(Op.HALT)
         vm = NovaVM(bytecode)
         with self.assertRaises(RuntimeError_):

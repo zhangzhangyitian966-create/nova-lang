@@ -176,10 +176,10 @@ class TypeVar(NovaType):
             self.name = name
 
     def __eq__(self, other):
-        return isinstance(other, TypeVar) and self.name == other.name
+        return self is other
 
     def __hash__(self):
-        return hash(("TypeVar", self.name))
+        return id(self)
 
     def __repr__(self):
         return self.name
@@ -430,7 +430,8 @@ class TypeChecker:
             self.env.define(decl.name, adt_ty)
             self.env.adt_type_params[decl.name] = decl.type_params
             # 为字段类型解析提供局部类型参数映射
-            local_types = {tp: TypeVar(tp) for tp in decl.type_params}
+            # 使用与 adt_ty.type_params 相同的 TypeVar 实例，确保 identity 比较能正确匹配
+            local_types = {tp: type_params[i] for i, tp in enumerate(decl.type_params)}
             variants = []
             for variant in decl.variants:
                 field_info = []
@@ -891,7 +892,7 @@ class TypeChecker:
                     common_type = None
                     all_have_idx = True
                     type_param_map = dict(zip(
-                        [TypeVar(tp) for tp in self.env.get_all_adt_type_params().get(target_ty.name, [])],
+                        self.env.get_all_adt_type_params().get(target_ty.name, []),
                         target_ty.type_params
                     ))
                     for _vname, field_info in variants:
@@ -920,7 +921,7 @@ class TypeChecker:
                 common_type = None
                 all_have_field = True
                 type_param_map = dict(zip(
-                    [TypeVar(tp) for tp in self.env.get_all_adt_type_params().get(target_ty.name, [])],
+                    self.env.get_all_adt_type_params().get(target_ty.name, []),
                     target_ty.type_params
                 ))
                 for _vname, field_info in variants:
@@ -1204,7 +1205,7 @@ class TypeChecker:
             # 如果 subject_type 是带类型参数的 ADTType，替换 field_types 中的类型变量
             if isinstance(subject_type, ADTType) and subject_type.type_params:
                 type_param_map = dict(zip(
-                    [TypeVar(tp) for tp in self.env.get_all_adt_type_params().get(adt_name, [])],
+                    self.env.get_all_adt_type_params().get(adt_name, []),
                     subject_type.type_params
                 ))
                 field_types = [self._substitute_type_vars(ft, type_param_map) for ft in field_types]
@@ -1355,16 +1356,29 @@ class TypeChecker:
 
         return ty
 
-    def _substitute_type_vars(self, ty: NovaType, bindings: Dict[TypeVar, NovaType]) -> NovaType:
+    def _substitute_type_vars(self, ty: NovaType, bindings: Dict) -> NovaType:
         """替换类型中的类型变量（支持传递替换）
+
+        支持两种 bindings 格式：
+        - Dict[TypeVar, NovaType]: 以 TypeVar 对象为 key（identity 比较）
+        - Dict[str, NovaType]: 以类型变量名字符串为 key
 
         如果替换后的结果仍包含可替换的 TypeVar，则递归替换所有子结构。
         """
         if isinstance(ty, TypeVar):
-            if ty in bindings:
-                result = bindings[ty]
-                # 对替换结果递归替换（处理传递依赖：A→B, B→Int）
-                return self._substitute_type_vars(result, bindings)
+            # 检测 bindings 的 key 类型，选择合适的查找方式
+            if bindings and isinstance(next(iter(bindings.keys())), str):
+                # 字符串 key 格式：用 name 查找
+                if ty.name in bindings:
+                    result = bindings[ty.name]
+                    # 对替换结果递归替换（处理传递依赖：A→B, B→Int）
+                    return self._substitute_type_vars(result, bindings)
+            else:
+                # TypeVar key 格式：identity 比较
+                if ty in bindings:
+                    result = bindings[ty]
+                    # 对替换结果递归替换（处理传递依赖：A→B, B→Int）
+                    return self._substitute_type_vars(result, bindings)
             return ty
         if isinstance(ty, ListType):
             return ListType(self._substitute_type_vars(ty.elem_type, bindings))

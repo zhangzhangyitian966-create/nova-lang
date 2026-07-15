@@ -1294,15 +1294,17 @@ class NovaVM:
         elif opcode == Op.MATCH_CONSTRUCTOR:
             # Stack: [subject] -> [field1, ..., fieldN] (match success)
             #      or [subject] (match fail)
-            # Peek subject; if ADT with matching constructor and field count,
+            # Peek subject; if ADT with matching type_name, constructor and field count,
             # pop subject and push fields; else jump to fail_ip
-            ctor_name = instr.operands[0]
-            field_count = instr.operands[1]
-            fail_ip = instr.operands[2]
+            type_name = instr.operands[0]
+            ctor_name = instr.operands[1]
+            field_count = instr.operands[2]
+            fail_ip = instr.operands[3]
             if not self.stack:
                 raise RuntimeError_("VM 错误: MATCH_CONSTRUCTOR 需要栈顶有匹配对象")
             subject = self.stack[-1]
             if (isinstance(subject, NovaADTValue) and
+                    subject.type_name == type_name and
                     subject.variant_name == ctor_name and
                     len(subject.fields) == field_count):
                 self._pop()

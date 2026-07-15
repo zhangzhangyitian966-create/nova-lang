@@ -102,7 +102,7 @@ class Op:
     MATCH_TEST_CHAR = "MATCH_TEST_CHAR"  # operands: (value, fail_ip,)
     MATCH_BIND = "MATCH_BIND"        # operands: (name,)
     MATCH_WILDCARD = "MATCH_WILDCARD"
-    MATCH_CONSTRUCTOR = "MATCH_CONSTRUCTOR"  # operands: (name, field_count, fail_ip,)
+    MATCH_CONSTRUCTOR = "MATCH_CONSTRUCTOR"  # operands: (type_name, variant_name, field_count, fail_ip,)
     MATCH_TEST_TUPLE = "MATCH_TEST_TUPLE"  # operands: (element_count, fail_ip,)
     MATCH_TEST_LIST = "MATCH_TEST_LIST"    # operands: (element_count, fail_ip,)
     MATCH_END = "MATCH_END"
@@ -196,11 +196,14 @@ class Bytecode:
         self.code[pos] = Instruction(instr.opcode, target_ip)
 
     def patch_match_fail(self, pos: int, fail_ip: int):
-        """回填 match 模式测试的失败跳转（保留前两个操作数）"""
+        """回填 match 模式测试的失败跳转（保留前几个操作数）"""
         instr = self.code[pos]
         # 格式: MATCH_TEST_* (value, fail_ip_placeholder) 或
-        #        MATCH_CONSTRUCTOR (name, field_count, fail_ip_placeholder)
-        if len(instr.operands) == 3:
+        #        MATCH_CONSTRUCTOR (type_name, variant_name, field_count, fail_ip_placeholder) 或
+        #        MATCH_CONSTRUCTOR 旧格式 (name, field_count, fail_ip_placeholder)
+        if len(instr.operands) == 4:
+            self.code[pos] = Instruction(instr.opcode, instr.operands[0], instr.operands[1], instr.operands[2], fail_ip)
+        elif len(instr.operands) == 3:
             self.code[pos] = Instruction(instr.opcode, instr.operands[0], instr.operands[1], fail_ip)
         elif len(instr.operands) == 2:
             self.code[pos] = Instruction(instr.opcode, instr.operands[0], fail_ip)
@@ -824,14 +827,15 @@ class BytecodeCompiler:
                 if field_count == 0:
                     # 零字段构造器：作为构造器模式编译
                     fail_pos = self.bytecode.current_pos()
-                    self.bytecode.emit_op(Op.MATCH_CONSTRUCTOR, pattern.name, 0, 0)
+                    self.bytecode.emit_op(Op.MATCH_CONSTRUCTOR, type_name, pattern.name, 0, 0)
                     return [fail_pos]
             return []  # 变量绑定总是匹配
 
         elif isinstance(pattern, PatternConstructor):
             fail_positions = []
             fail_pos = self.bytecode.current_pos()
-            self.bytecode.emit_op(Op.MATCH_CONSTRUCTOR, pattern.name, len(pattern.fields), 0)
+            type_name, _ = self._adt_constructors.get(pattern.name, (None, None))
+            self.bytecode.emit_op(Op.MATCH_CONSTRUCTOR, type_name, pattern.name, len(pattern.fields), 0)
             fail_positions.append(fail_pos)
             for field_pattern in pattern.fields:
                 fail_positions.extend(self._compile_pattern_test_with_fail(field_pattern))
@@ -935,7 +939,8 @@ class BytecodeCompiler:
 
         elif isinstance(pattern, PatternConstructor):
             fail_pos = self.bytecode.current_pos()
-            self.bytecode.emit_op(Op.MATCH_CONSTRUCTOR, pattern.name, len(pattern.fields), 0)
+            type_name, _ = self._adt_constructors.get(pattern.name, (None, None))
+            self.bytecode.emit_op(Op.MATCH_CONSTRUCTOR, type_name, pattern.name, len(pattern.fields), 0)
             return fail_pos
 
         elif isinstance(pattern, PatternTuple):

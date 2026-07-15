@@ -121,6 +121,7 @@ class Evaluator:
         self.MAX_CALL_DEPTH = 1000             # 最大递归调用深度（与 VM 一致）
         self._eval_depth = 0                   # 当前表达式求值递归深度
         self.MAX_EVAL_DEPTH = 1000             # 最大表达式求值递归深度
+        self._adt_constructors: Dict[str, str] = {}  # variant_name -> type_name
         self._setup_builtins()
 
     def _setup_builtins(self):
@@ -170,6 +171,11 @@ class Evaluator:
         self.env.define("None", NovaADTValue("Option", "None", [], []))
         self.env.define("Ok", BuiltinFn("Ok", lambda *args: NovaADTValue("Result", "Ok", list(args), ["value"]), 1))
         self.env.define("Err", BuiltinFn("Err", lambda *args: NovaADTValue("Result", "Err", list(args), ["error"]), 1))
+        # 注册内置 ADT 构造器映射（用于模式匹配的类型检查）
+        self._adt_constructors["Some"] = "Option"
+        self._adt_constructors["None"] = "Option"
+        self._adt_constructors["Ok"] = "Result"
+        self._adt_constructors["Err"] = "Result"
 
     # ----------------------------------------------------------
     # 内置函数实现
@@ -535,6 +541,8 @@ class Evaluator:
                     ctor = NovaADTValue(decl.name, variant.name, [], [])
 
                 self.env.define(variant.name, ctor)
+                # 注册 variant_name -> type_name 映射（用于模式匹配的类型检查）
+                self._adt_constructors[variant.name] = decl.name
 
         elif isinstance(decl, AliasDef):
             # 类型别名在运行时不产生值，跳过
@@ -615,6 +623,8 @@ class Evaluator:
                     ctor = NovaADTValue(decl.name, variant.name, [])
 
                 self.env.define(variant.name, ctor)
+                # 注册 variant_name -> type_name 映射（用于模式匹配的类型检查）
+                self._adt_constructors[variant.name] = decl.name
 
         elif isinstance(decl, AliasDef):
             # 类型别名在运行时不产生值，跳过
@@ -1181,6 +1191,10 @@ class Evaluator:
             if not isinstance(value, NovaADTValue):
                 return False
             if value.variant_name != pattern.name:
+                return False
+            # 检查 type_name：如果构造器在已知的 ADT 中，则必须类型匹配
+            expected_type = self._adt_constructors.get(pattern.name)
+            if expected_type is not None and value.type_name != expected_type:
                 return False
             if len(pattern.fields) != len(value.fields):
                 return False

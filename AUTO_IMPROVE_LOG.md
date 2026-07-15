@@ -1,5 +1,61 @@
 # Nova 自动改进日志
 
+## 2026-07-16 自动改进（第二十七轮）
+
+基于 AUTO_REVIEW_LOG.md 第二十四轮审查日志的 P0/P1 级严重问题驱动改进（阶段一检查 + 阶段二开发 + 阶段三测试）。
+
+### 每日发现的问题
+
+#### vm.py + compiler.py
+- **MATCH_CONSTRUCTOR 不检查 type_name，跨类型构造器可错误匹配（vm.py:1294-1312 / compiler.py:827,834）**：仅检查 `variant_name` 和字段数量，完全不检查 `type_name`，两个不同 ADT 类型的同名同参变体会混淆
+  - 审查日志追问结论：绝对不能，构造器在类型系统中是由类型+变体名共同唯一标识的
+  - 根因：编译器生成 MATCH_CONSTRUCTOR 时只传了 variant_name 和 field_count，没有传 type_name；VM 端也没有 type_name 检查逻辑
+  - evaluator 端同样有此问题（evaluator.py:1180-1190）
+
+#### ir/pass_manager.py
+- **Pass 管理器完全没有异常处理机制（pass_manager.py:713-744）**：三个入口函数（run_hir_passes/run_mir_passes/run_lir_passes）中 pass_.run() 调用完全裸露，任何一个 Pass 抛出异常都会直接中断整个管道，无错误上下文（哪个 pass、第几轮迭代）
+  - 审查日志追问结论：绝对不能接受，生产级编译器要么正确报告错误并终止，要么优雅降级并记录
+  - 根因：Pass 执行循环未用 try/except 包裹，缺少 PassError 包装类
+
+#### type_checker.py
+- **TypeVar.__eq__ 基于 name 而非 identity，作为 dict key 时同名变量被混淆（type_checker.py:178-179）**：两个同名不同实例的 TypeVar 会被视为同一个 key，在复杂嵌套泛型场景中可能导致类型推断错误
+  - 审查日志追问结论：不能接受，OCaml 的类型变量每个都有唯一的 identity，绝不会因为名字相同而混淆
+  - 根因：__eq__ 和 __hash__ 基于 name 字符串；3 处 type_param_map 用 TypeVar(tp) 新建对象作 key，依赖 name 匹配才能工作
+
+### 本次修复内容（基于审查日志 Issue）
+
+1. **vm.py + compiler.py — MATCH_CONSTRUCTOR 增加 type_name 检查（基于审查日志 vm.py:1286-1289 / 第二十四轮严重问题 #2）**
+   - 编译器：MATCH_CONSTRUCTOR 操作数从 3 个增加为 4 个（增加 type_name）
+   - 编译器：从 _adt_constructors 表中获取 type_name 传入指令
+   - VM：MATCH_CONSTRUCTOR 实现增加 type_name 检查
+   - evaluator：同步增加 type_name 检查（如果 PatternConstructor 有类型信息）
+   - 补充测试：不同类型同名 variant 不会误匹配
+
+2. **ir/pass_manager.py — Pass 执行异常包装（基于审查日志 pass_manager.py:713-744 / 第二十四轮严重问题 #5）**
+   - errors.py 新增 PassError 错误类（继承 NovaError）
+   - 三个入口函数用 try/except 包裹 pass_.run()
+   - 捕获异常后包装为 PassError，附加上下文（pass 名称、迭代轮次、pass 类型）
+   - 保持"异常向上传播"的默认语义，不破坏现有测试
+
+3. **type_checker.py — TypeVar 改用 identity 比较（基于审查日志 type_checker.py:178-179 / 第二十四轮严重问题 #1）**
+   - TypeVar.__eq__ 改为 identity 比较（self is other）
+   - TypeVar.__hash__ 改为基于 id(self)
+   - 重构 3 处 type_param_map：从 Dict[TypeVar, NovaType] 改为 Dict[str, NovaType]（用类型参数名作 key）
+   - ADT 定义的 local_types 修复：复用 adt_ty 的 type_params 实例而非新建 TypeVar
+   - _substitute_type_vars 支持两种 bindings 格式（str key 和 TypeVar key）
+   - 确保现有 100 个测试全部通过
+
+### 测试结果
+
+- 全量测试: **848 passed** (1.19s)
+- Evaluator 示例: hello/fibonacci/pattern_match/math/loops/pipe/list_comprehension/file_io 全部正常输出
+- VM 示例: hello/fibonacci/pattern_match 全部正常输出
+- MATCH_CONSTRUCTOR type_name 检查: 不同类型同名 variant 不会误匹配 ✅ / 同类型同 variant 正确匹配 ✅ / 带字段 variant 正确检查 ✅
+- Pass 异常包装: PassError 包含 pass_name/pass_type/iteration/original_error ✅ / 异常链保留 (__cause__) ✅
+- TypeVar identity 比较: 泛型推断正常 ✅ / ADT 字段类型替换正常 ✅ / 模式匹配类型替换正常 ✅ / _instantiate 正常 ✅
+
+---
+
 ## 2026-07-16 自动改进（第二十六轮）
 
 基于 AUTO_REVIEW_LOG.md 第二十四轮审查日志的 P0/P1 级严重问题驱动改进（阶段一检查 + 阶段二开发 + 阶段三测试）。

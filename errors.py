@@ -327,6 +327,29 @@ class RuntimeError_(NovaError):
                          source=source, span=span)
 
 
+class PassError(NovaError):
+    """Pass 执行错误：某个优化 Pass 在运行时抛出异常
+
+    包含失败 Pass 的名称、类型（HIR/MIR/LIR）、迭代轮次和原始异常，
+    用于提供更丰富的错误上下文，便于定位问题。
+    """
+
+    def __init__(self, pass_name: str, pass_type: str, iteration: int,
+                 original_error: Exception):
+        self.pass_name = pass_name
+        self.pass_type = pass_type
+        self.iteration = iteration
+        self.original_error = original_error
+        message = (
+            f"{pass_type} Pass '{pass_name}' 在第 {iteration} 轮迭代失败: "
+            f"{original_error}"
+        )
+        super().__init__(message)
+
+    def __str__(self) -> str:
+        return self.message
+
+
 # ============================================================
 # 控制流信号
 # ============================================================
