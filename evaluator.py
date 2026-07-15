@@ -74,9 +74,9 @@ class NovaADTValue:
 
     def __eq__(self, other):
         return (isinstance(other, NovaADTValue)
+                and self.type_name == other.type_name
                 and self.variant_name == other.variant_name
                 and self.fields == other.fields)
-
 
 class BuiltinFn:
     """内置函数包装"""

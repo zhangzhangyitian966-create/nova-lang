@@ -719,8 +719,11 @@ class BytecodeCompiler:
         jump_to_end_positions = []
 
         for i, arm in enumerate(expr.arms):
-            # 模式测试：匹配失败时跳到下一个 arm 的测试开始
-            # 记录当前指令位置
+            # 在每个 arm 开头 DUP subject，防止模式测试成功后 subject 被消耗，
+            # 导致 guard 失败跳到下一个 arm 时栈上没有 subject
+            self.bytecode.emit_op(Op.DUP)
+
+            # 模式测试：匹配失败时跳到该 arm 的清理代码（POP DUP 副本）
             fail_ip_pos = self._compile_pattern_test_with_fail(arm.pattern)
 
             # 匹配成功 -> subject 在栈上
@@ -733,6 +736,10 @@ class BytecodeCompiler:
                 guard_fail_pos = self.bytecode.current_pos()
                 self.bytecode.emit_op(Op.JUMP_IF_FALSE, 0)
 
+            # 此时栈上只有原始 subject（DUP 的副本已在模式测试/绑定中被消耗）
+            # guard 失败时跳到下一个 arm 需要这个 subject，所以必须在 guard 之后、body 之前弹出
+            self.bytecode.emit_op(Op.POP)  # 弹出原始 subject
+
             # 编译匹配体
             self._compile_expr(arm.body)
 
@@ -741,11 +748,23 @@ class BytecodeCompiler:
             self.bytecode.emit_op(Op.JUMP, 0)
             jump_to_end_positions.append(jump_end)
 
-            # 回填模式测试和 guard 的失败跳转到下一个 arm 的开始
+            # 回填失败跳转
             next_arm_start = self.bytecode.current_pos()
             if fail_ip_pos is not None:
-                self.bytecode.patch_match_fail(fail_ip_pos, next_arm_start)
+                # 模式测试失败：栈上有 [subject, dup_copy]，需要 POP dup_copy
+                # 先 emit POP 清理 dup 副本，再跳到下一个 arm
+                # fail_ip 跳到这里，然后 POP，然后继续到下一个 arm
+                # 但 guard 失败也跳到 next_arm_start，此时栈上只有 [subject]，不需要 POP
+                # 所以模式测试失败需要一个额外的清理点
+                fail_cleanup_pos = next_arm_start
+                # 先在 fail_cleanup 处 emit POP
+                self.bytecode.emit_op(Op.POP)  # POP dup 副本
+                # fail_ip 跳到 fail_cleanup_pos（POP 指令的位置）
+                self.bytecode.patch_match_fail(fail_ip_pos, fail_cleanup_pos)
+                # POP 之后继续执行到下一个 arm（或者到 match 结束的 fallback）
+                next_arm_start = self.bytecode.current_pos()
             if arm.guard is not None:
+                # guard 失败：extract_and_bind 后栈上只有 [subject]，直接跳到下一个 arm
                 self.bytecode.patch_jump(guard_fail_pos, next_arm_start)
 
         # 所有 arm 都匹配失败
