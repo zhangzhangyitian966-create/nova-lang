@@ -716,6 +716,8 @@ class Evaluator:
         elif isinstance(expr, TryExpr):
             val = self.eval_expr(expr.expr)
             if isinstance(val, NovaADTValue):
+                if val.type_name not in ("Option", "Result"):
+                    raise RuntimeError_(f"? 操作符只能在 Option 或 Result 类型上使用，得到 {val.type_name}")
                 if val.variant_name in ("None", "Err"):
                     # 提前退出当前函数，将 Err/None 值传播上去
                     raise ReturnSignal(val)
@@ -871,32 +873,52 @@ class Evaluator:
         # 短路求值
         if expr.op == "&&":
             left = self.eval_expr(expr.left)
+            if not isinstance(left, bool):
+                raise RuntimeError_("逻辑运算 '&&' 的操作数必须是 Bool 类型")
             if not left:
                 return left
-            return self.eval_expr(expr.right)
+            right = self.eval_expr(expr.right)
+            if not isinstance(right, bool):
+                raise RuntimeError_("逻辑运算 '&&' 的操作数必须是 Bool 类型")
+            return right
 
         if expr.op == "||":
             left = self.eval_expr(expr.left)
+            if not isinstance(left, bool):
+                raise RuntimeError_("逻辑运算 '||' 的操作数必须是 Bool 类型")
             if left:
                 return left
-            return self.eval_expr(expr.right)
+            right = self.eval_expr(expr.right)
+            if not isinstance(right, bool):
+                raise RuntimeError_("逻辑运算 '||' 的操作数必须是 Bool 类型")
+            return right
 
         left = self.eval_expr(expr.left)
         right = self.eval_expr(expr.right)
 
         if expr.op == "+":
+            if isinstance(left, bool) or isinstance(right, bool):
+                raise RuntimeError_("算术运算 '+' 的操作数不能是 Bool 类型")
             return left + right
         elif expr.op == "-":
+            if isinstance(left, bool) or isinstance(right, bool):
+                raise RuntimeError_("算术运算 '-' 的操作数不能是 Bool 类型")
             return left - right
         elif expr.op == "*":
+            if isinstance(left, bool) or isinstance(right, bool):
+                raise RuntimeError_("算术运算 '*' 的操作数不能是 Bool 类型")
             return left * right
         elif expr.op == "/":
+            if isinstance(left, bool) or isinstance(right, bool):
+                raise RuntimeError_("算术运算 '/' 的操作数不能是 Bool 类型")
             if isinstance(left, int) and isinstance(right, int):
                 if right == 0:
                     raise RuntimeError_("除零错误")
                 return left // right  # 整数除法
             return left / right
         elif expr.op == "%":
+            if isinstance(left, bool) or isinstance(right, bool):
+                raise RuntimeError_("算术运算 '%' 的操作数不能是 Bool 类型")
             return left % right
         elif expr.op == "++":
             if isinstance(left, str) and isinstance(right, str):
@@ -929,6 +951,8 @@ class Evaluator:
         """求值一元操作"""
         operand = self.eval_expr(expr.operand)
         if expr.op == "-":
+            if isinstance(operand, bool):
+                raise RuntimeError_("算术运算 '-' 的操作数不能是 Bool 类型")
             return -operand
         elif expr.op == "!":
             if not isinstance(operand, bool):

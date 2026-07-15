@@ -1076,6 +1076,125 @@ class TestErrors(unittest.TestCase):
             """, check_types=False)
         self.assertIn("? 操作符只能在 Option 或 Result 类型上使用", str(ctx.exception))
 
+    # === TRY_UNWRAP type_name 检查 ===
+
+    def test_try_expr_custom_adt_some_variant_error(self):
+        """自定义 ADT 有 Some variant，用 ? 操作符时报错"""
+        with self.assertRaises(RuntimeError_) as ctx:
+            eval_source("""
+                type MyOption { Some(Int) | Nothing }
+                let x = Some(42)?
+            """, check_types=False)
+        self.assertIn("? 操作符只能在 Option 或 Result 类型上使用", str(ctx.exception))
+
+    def test_try_expr_custom_adt_err_variant_error(self):
+        """自定义 ADT 有 Err variant，用 ? 操作符时报错"""
+        with self.assertRaises(RuntimeError_) as ctx:
+            eval_source("""
+                type MyResult { Ok(Int) | Err(String) }
+                let x = Err("oops")?
+            """, check_types=False)
+        self.assertIn("? 操作符只能在 Option 或 Result 类型上使用", str(ctx.exception))
+
+    def test_try_expr_option_some_unwrap_ok(self):
+        """Option.Some 正常解包（回归测试）"""
+        ev = eval_source("""
+            fn unwrap_it() -> Int {
+                let x = Some(42)?
+                x
+            }
+            let result = unwrap_it()
+        """, check_types=False)
+        self.assertEqual(ev.env.lookup("result"), 42)
+
+    def test_try_expr_result_ok_unwrap_ok(self):
+        """Result.Ok 正常解包（回归测试）"""
+        ev = eval_source("""
+            type Result[T, E] { Ok(T) Err(E) }
+            fn unwrap_it() -> Int {
+                let x = Ok(99)?
+                x
+            }
+            let result = unwrap_it()
+        """, check_types=False)
+        self.assertEqual(ev.env.lookup("result"), 99)
+
+    # === 算术运算 bool 检查 ===
+
+    def test_arithmetic_bool_add_error(self):
+        """True + 1 应报错"""
+        with self.assertRaises(RuntimeError_) as ctx:
+            eval_source("let x = true + 1", check_types=False)
+        self.assertIn("算术运算 '+' 的操作数不能是 Bool 类型", str(ctx.exception))
+
+    def test_arithmetic_bool_mul_error(self):
+        """false * 5 应报错"""
+        with self.assertRaises(RuntimeError_) as ctx:
+            eval_source("let x = false * 5", check_types=False)
+        self.assertIn("算术运算 '*' 的操作数不能是 Bool 类型", str(ctx.exception))
+
+    def test_arithmetic_bool_div_error(self):
+        """true / 2 应报错"""
+        with self.assertRaises(RuntimeError_) as ctx:
+            eval_source("let x = true / 2", check_types=False)
+        self.assertIn("算术运算 '/' 的操作数不能是 Bool 类型", str(ctx.exception))
+
+    def test_arithmetic_bool_neg_error(self):
+        """-true（一元负）应报错"""
+        with self.assertRaises(RuntimeError_) as ctx:
+            eval_source("let x = -true", check_types=False)
+        self.assertIn("算术运算 '-' 的操作数不能是 Bool 类型", str(ctx.exception))
+
+    def test_arithmetic_int_still_works(self):
+        """正常 Int 运算仍然正确（回归测试）"""
+        ev = eval_source("""
+            let a = 10 + 5
+            let b = 10 - 3
+            let c = 4 * 3
+            let d = 20 / 4
+            let e = 10 % 3
+            let f = -7
+        """, check_types=False)
+        self.assertEqual(ev.env.lookup("a"), 15)
+        self.assertEqual(ev.env.lookup("b"), 7)
+        self.assertEqual(ev.env.lookup("c"), 12)
+        self.assertEqual(ev.env.lookup("d"), 5)
+        self.assertEqual(ev.env.lookup("e"), 1)
+        self.assertEqual(ev.env.lookup("f"), -7)
+
+    # === 短路逻辑运算类型检查 ===
+
+    def test_short_circuit_and_left_non_bool_error(self):
+        """42 && true 应报错"""
+        with self.assertRaises(RuntimeError_) as ctx:
+            eval_source("let x = 42 && true", check_types=False)
+        self.assertIn("逻辑运算 '&&' 的操作数必须是 Bool 类型", str(ctx.exception))
+
+    def test_short_circuit_or_left_non_bool_error(self):
+        '"" || false 应报错'
+        with self.assertRaises(RuntimeError_) as ctx:
+            eval_source('let x = "" || false', check_types=False)
+        self.assertIn("逻辑运算 '||' 的操作数必须是 Bool 类型", str(ctx.exception))
+
+    def test_short_circuit_and_right_non_bool_error(self):
+        """true && 42 应报错（右操作数类型检查）"""
+        with self.assertRaises(RuntimeError_) as ctx:
+            eval_source("let x = true && 42", check_types=False)
+        self.assertIn("逻辑运算 '&&' 的操作数必须是 Bool 类型", str(ctx.exception))
+
+    def test_short_circuit_bool_ops_still_work(self):
+        """正常 Bool 运算仍然正确（回归测试）"""
+        ev = eval_source("""
+            let a = true && true
+            let b = true && false
+            let c = false || true
+            let d = false || false
+        """, check_types=False)
+        self.assertTrue(ev.env.lookup("a"))
+        self.assertFalse(ev.env.lookup("b"))
+        self.assertTrue(ev.env.lookup("c"))
+        self.assertFalse(ev.env.lookup("d"))
+
 
 if __name__ == "__main__":
     unittest.main()
@@ -2595,6 +2714,126 @@ class TestBytecodeVM(unittest.TestCase):
             print(count(100))
         """, use_vm=True, capture_output=True)
         self.assertEqual(output, ["100"])
+
+    # ============================================================
+    # 类型安全测试
+    # ============================================================
+
+    def _vm_run_no_check(self, source):
+        """用 VM 模式运行源码（不进行类型检查）"""
+        tokens = Lexer(source).tokenize()
+        ast = Parser(tokens).parse()
+        from nova.compiler import BytecodeCompiler
+        from nova.vm import NovaVM
+        compiler = BytecodeCompiler()
+        bytecode = compiler.compile(ast)
+        vm = NovaVM(bytecode)
+        vm.run()
+        return vm
+
+    # --- TRY_UNWRAP type_name 检查 ---
+
+    def test_vm_try_unwrap_custom_adt_some_variant_error(self):
+        """VM: 自定义 ADT 有 Some variant 但 type_name 不是 Option，用 ? 操作符应报错"""
+        from nova.compiler import Bytecode, Op
+        from nova.vm import NovaVM, NovaADTValue
+        bytecode = Bytecode()
+        # 压入一个自定义 ADT 值（type_name="MyOption", variant_name="Some"）
+        custom_some = NovaADTValue("MyOption", "Some", [42], ["value"])
+        bytecode.constants.append(custom_some)
+        bytecode.emit_op(Op.LOAD_CONST, 0)
+        bytecode.emit_op(Op.TRY_UNWRAP)
+        bytecode.emit_op(Op.HALT)
+        vm = NovaVM(bytecode)
+        with self.assertRaises(RuntimeError_) as ctx:
+            vm.run()
+        self.assertIn("? 操作符只能在 Option 或 Result 类型上使用", str(ctx.exception))
+
+    def test_vm_try_unwrap_custom_adt_err_variant_error(self):
+        """VM: 自定义 ADT 有 Err variant 但 type_name 不是 Result，用 ? 操作符应报错"""
+        from nova.compiler import Bytecode, Op
+        from nova.vm import NovaVM, NovaADTValue
+        bytecode = Bytecode()
+        # 压入一个自定义 ADT 值（type_name="MyResult", variant_name="Err"）
+        custom_err = NovaADTValue("MyResult", "Err", ["oops"], ["error"])
+        bytecode.constants.append(custom_err)
+        bytecode.emit_op(Op.LOAD_CONST, 0)
+        bytecode.emit_op(Op.TRY_UNWRAP)
+        bytecode.emit_op(Op.HALT)
+        vm = NovaVM(bytecode)
+        with self.assertRaises(RuntimeError_) as ctx:
+            vm.run()
+        self.assertIn("? 操作符只能在 Option 或 Result 类型上使用", str(ctx.exception))
+
+    def test_vm_try_unwrap_option_some_ok(self):
+        """VM: Option.Some 正常解包（回归测试）"""
+        vm = self._vm_run_no_check("""
+            fn f() -> Int {
+                let x = Some(42)?
+                x
+            }
+            let result = f()
+        """)
+        self.assertEqual(vm.get_global("result"), 42)
+
+    def test_vm_try_unwrap_result_ok_ok(self):
+        """VM: Result.Ok 正常解包（回归测试）"""
+        vm = self._vm_run_no_check("""
+            type Result[T, E] { Ok(T) Err(E) }
+            fn f() -> Int {
+                let x = Ok(99)?
+                x
+            }
+            let result = f()
+        """)
+        self.assertEqual(vm.get_global("result"), 99)
+
+    # --- 算术运算 bool 检查 ---
+
+    def test_vm_arithmetic_bool_add_error(self):
+        """VM: true + 1 应报错"""
+        from nova.errors import RuntimeError_
+        with self.assertRaises(RuntimeError_) as ctx:
+            self._vm_run_no_check("let x = true + 1")
+        self.assertIn("算术运算 '+' 的操作数不能是 Bool 类型", str(ctx.exception))
+
+    def test_vm_arithmetic_bool_mul_error(self):
+        """VM: false * 5 应报错"""
+        from nova.errors import RuntimeError_
+        with self.assertRaises(RuntimeError_) as ctx:
+            self._vm_run_no_check("let x = false * 5")
+        self.assertIn("算术运算 '*' 的操作数不能是 Bool 类型", str(ctx.exception))
+
+    def test_vm_arithmetic_bool_div_error(self):
+        """VM: true / 2 应报错"""
+        from nova.errors import RuntimeError_
+        with self.assertRaises(RuntimeError_) as ctx:
+            self._vm_run_no_check("let x = true / 2")
+        self.assertIn("算术运算 '/' 的操作数不能是 Bool 类型", str(ctx.exception))
+
+    def test_vm_arithmetic_bool_neg_error(self):
+        """VM: -true（一元负）应报错"""
+        from nova.errors import RuntimeError_
+        with self.assertRaises(RuntimeError_) as ctx:
+            self._vm_run_no_check("let x = -true")
+        self.assertIn("算术运算 '-' 的操作数不能是 Bool 类型", str(ctx.exception))
+
+    def test_vm_arithmetic_int_still_works(self):
+        """VM: 正常 Int 运算仍然正确（回归测试）"""
+        vm = self._vm_run_no_check("""
+            let a = 10 + 5
+            let b = 10 - 3
+            let c = 4 * 3
+            let d = 20 / 4
+            let e = 10 % 3
+            let f = -7
+        """)
+        self.assertEqual(vm.get_global("a"), 15)
+        self.assertEqual(vm.get_global("b"), 7)
+        self.assertEqual(vm.get_global("c"), 12)
+        self.assertEqual(vm.get_global("d"), 5)
+        self.assertEqual(vm.get_global("e"), 1)
+        self.assertEqual(vm.get_global("f"), -7)
 
     # ============================================================
     # 边界情况（曾导致崩溃）

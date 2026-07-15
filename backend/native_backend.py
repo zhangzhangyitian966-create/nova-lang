@@ -210,6 +210,12 @@ class NativeCodeGen:
                 vregs[name] = None
         return vregs[name]
 
+    def _get_vreg(self, vregs, name):
+        """获取虚拟寄存器对应的物理寄存器，未分配时抛出错误"""
+        if name not in vregs or vregs[name] is None:
+            raise ValueError(f"Native 后端：虚拟寄存器 '{name}' 未分配")
+        return vregs[name]
+
     def _compile_const_float(self, e, instr, vregs, free_gprs, free_xmms, func_relocations):
         """编译浮点常量加载：通过 RIP-relative movsd 从数据段加载"""
         reg = self._alloc_vreg(f"fconst_{instr.value}", vregs, free_gprs, free_xmms, is_float=True)
@@ -409,14 +415,28 @@ class NativeCodeGen:
 
             elif isinstance(instr, LIRBinOp):
                 op = instr.op
-                # 从 vregs 中查找操作数寄存器，回退到 RAX/RCX
+                # 从 vregs 中查找操作数寄存器
                 left_reg = RAX
                 right_reg = RCX
                 if instr.src_locs:
                     if len(instr.src_locs) >= 1:
-                        left_reg = vregs.get(instr.src_locs[0][0], RAX)
+                        left_name = instr.src_locs[0][0]
+                        left_reg = self._get_vreg(vregs, left_name)
                     if len(instr.src_locs) >= 2:
-                        right_reg = vregs.get(instr.src_locs[1][0], RCX)
+                        right_name = instr.src_locs[1][0]
+                        right_reg = self._get_vreg(vregs, right_name)
+
+                # 确定目标寄存器：默认结果留在左操作数寄存器中
+                dst_reg = left_reg
+                is_float_dst = False
+                if instr.dst_loc:
+                    dst_name, dst_type = instr.dst_loc
+                    is_float_dst = (dst_type == FLOAT_TYPE)
+                    dst_reg = self._alloc_vreg(dst_name, vregs, free_gprs, free_xmms, is_float=is_float_dst)
+                    if dst_reg is None:
+                        raise ValueError(
+                            f"Native 后端：无法为目标虚拟寄存器 '{dst_name}' 分配物理寄存器"
+                        )
 
                 if op in ("+", "-", "*", "/", "%"):
                     dst = left_reg
@@ -484,11 +504,31 @@ class NativeCodeGen:
                         f"LIRBinOp operator '{op}' is not yet implemented in native backend"
                     )
 
+                # 如果目标寄存器与左操作数寄存器不同，将结果移动到目标寄存器
+                if instr.dst_loc and dst_reg != left_reg:
+                    if is_float_dst:
+                        e.movsd_reg_reg(dst_reg, left_reg)
+                    else:
+                        e.mov_reg_reg64(dst_reg, left_reg)
+
             elif isinstance(instr, LIRUnaryOp):
                 # 从 vregs 中查找操作数寄存器
                 operand_reg = RAX
                 if instr.src_locs:
-                    operand_reg = vregs.get(instr.src_locs[0][0], RAX)
+                    operand_name = instr.src_locs[0][0]
+                    operand_reg = self._get_vreg(vregs, operand_name)
+
+                # 确定目标寄存器：默认结果留在操作数寄存器中
+                dst_reg = operand_reg
+                is_float_dst = False
+                if instr.dst_loc:
+                    dst_name, dst_type = instr.dst_loc
+                    is_float_dst = (dst_type == FLOAT_TYPE)
+                    dst_reg = self._alloc_vreg(dst_name, vregs, free_gprs, free_xmms, is_float=is_float_dst)
+                    if dst_reg is None:
+                        raise ValueError(
+                            f"Native 后端：无法为目标虚拟寄存器 '{dst_name}' 分配物理寄存器"
+                        )
 
                 if instr.op == "-":
                     e.neg_reg(operand_reg)
@@ -511,6 +551,13 @@ class NativeCodeGen:
                     raise NotImplementedError(
                         f"LIRUnaryOp operator '{instr.op}' is not yet implemented in native backend"
                     )
+
+                # 如果目标寄存器与操作数寄存器不同，将结果移动到目标寄存器
+                if instr.dst_loc and dst_reg != operand_reg:
+                    if is_float_dst:
+                        e.movsd_reg_reg(dst_reg, operand_reg)
+                    else:
+                        e.mov_reg_reg64(dst_reg, operand_reg)
 
             elif isinstance(instr, LIRCall):
                 self._compile_call(e, instr, vregs, free_gprs, free_xmms, func.name)

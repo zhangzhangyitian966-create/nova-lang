@@ -944,13 +944,20 @@ class TypeChecker:
                 end_ty = self.check_expr(expr.iterable[2])
                 if expr.iterable[3]:
                     self.check_expr(expr.iterable[3])  # step
+                elem_ty = INT_T
             else:
                 # 列表遍历
                 iter_ty = self.check_expr(expr.iterable)
+                if isinstance(iter_ty, ListType):
+                    elem_ty = iter_ty.elem_type
+                elif isinstance(iter_ty, TupleType):
+                    elem_ty = iter_ty.elements[0] if iter_ty.elements else TypeVar("for_elem")
+                else:
+                    elem_ty = TypeVar("for_elem")
 
             # 检查循环体类型
             child_env = self.env.child()
-            child_env.define(expr.var_name, TypeVar("for_elem"))
+            child_env.define(expr.var_name, elem_ty)
             old_env = self.env
             self.env = child_env
             body_ty = self.check_expr(expr.body)
@@ -974,11 +981,18 @@ class TypeChecker:
             if isinstance(expr.iterable, tuple) and expr.iterable[0] == "range":
                 self.check_expr(expr.iterable[1])
                 self.check_expr(expr.iterable[2])
+                elem_ty = INT_T
             else:
-                self.check_expr(expr.iterable)
+                iter_ty = self.check_expr(expr.iterable)
+                if isinstance(iter_ty, ListType):
+                    elem_ty = iter_ty.elem_type
+                elif isinstance(iter_ty, TupleType):
+                    elem_ty = iter_ty.elements[0] if iter_ty.elements else TypeVar("lc_elem")
+                else:
+                    elem_ty = TypeVar("lc_elem")
 
             child_env = self.env.child()
-            child_env.define(expr.var_name, TypeVar("lc_elem"))
+            child_env.define(expr.var_name, elem_ty)
             if expr.filter_cond:
                 old_env = self.env
                 self.env = child_env
@@ -1057,6 +1071,20 @@ class TypeChecker:
 
             adt_name, field_info = variants_info
             field_types = [ft for _fn, ft in field_info]
+
+            # 校验主题类型是否为对应 ADT
+            if not isinstance(subject_type, ADTType):
+                self._report_error(
+                    f"构造器 '{pattern.name}' 与类型 {subject_type} 不匹配",
+                    pattern
+                )
+                return
+            if subject_type.name != adt_name:
+                self._report_error(
+                    f"构造器 '{pattern.name}' 与类型 {subject_type} 不匹配",
+                    pattern
+                )
+                return
 
             # 如果 subject_type 是带类型参数的 ADTType，替换 field_types 中的类型变量
             if isinstance(subject_type, ADTType) and subject_type.type_params:

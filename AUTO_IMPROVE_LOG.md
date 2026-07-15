@@ -1,5 +1,87 @@
 # Nova 自动改进日志
 
+## 2026-07-15 自动改进（第十八轮）
+
+基于 AUTO_REVIEW_LOG.md 第十六轮审查日志的 P0 级严重问题驱动改进（阶段一检查 + 阶段二开发 + 阶段三测试）。
+
+### 每日发现的问题
+
+#### vm.py
+- **TRY_UNWRAP 仅检查 variant_name 不检查 type_name（vm.py:1276-1280）**：`val.variant_name in ("None", "Err")` 只匹配 variant 名称，自定义 ADT 只要 variant 叫 Some/None/Ok/Err 就会被误当作 Option/Result → 同时检查 `val.type_name in ("Option", "Result")`
+- **算术运算完全不区分 bool 和 int（vm.py:608-651）**：ADD/SUB/MUL/DIV/MOD/NEG 均无 `isinstance(val, bool)` 检查，Python 中 bool 是 int 子类，True+1=2 等会静默通过 → 所有算术运算前排除 bool 操作数（对比 EQ/LT 等比较运算已有 bool 检查）
+- **内置函数无超额参数检查（vm.py:358-363）**：所有 arity > 0 的内置函数可传入任意多参数，多余参数被 Python *args 静默忽略 → 添加 if fn.arity > 0 and len(args) > fn.arity 检查
+
+#### evaluator.py
+- **TryExpr `?` 运算符仅检查 variant_name 不检查 type_name（evaluator.py:718-724）**：`val.variant_name in ("None", "Err")` 等判断只看 variant，自定义 ADT 的 Some/Err 会被错误传播或解包 → 增加 `val.type_name in ("Option", "Result")` 前置检查
+- **算术运算不区分 bool 和 int（evaluator.py:887-900）**：`+`/`-`/`*`/`/`/`%` 均无 bool 类型检查，与比较运算（==/!=/</> 已有 bool 检查）不一致 → 算术运算前排除 bool 操作数，抛类型错误
+- **短路逻辑运算 &&/|| 不做类型检查（evaluator.py:872-882）**：直接用 if not left 判断，没有检查 left 是否为 bool 类型 → 在短路求值前添加 isinstance(left, bool) 检查
+
+#### backend/native_backend.py
+- **LIRBinOp 完全忽略 dst_loc，结果总是写入 left_reg（native_backend.py:410-485）**：整个 LIRBinOp 处理分支零引用 instr.dst_loc，二元运算结果始终写入第一个操作数寄存器（left_reg），破坏操作数原值且结果永远到不了正确的目标虚拟寄存器 → 应为 dst_loc 分配寄存器，结果写入目标寄存器
+- **LIRUnaryOp 同样忽略 dst_loc（native_backend.py:487-513）**：与 LIRBinOp 相同问题，一元运算结果直接修改 operand_reg，未写入 dst_loc 指定的目标位置 → 同上
+- **src_locs 操作数查找失败时静默回退到 RAX/RCX（native_backend.py:412-419）**：vregs.get(key, RAX) 在虚拟寄存器未分配时静默使用 RAX/RCX，可能导致操作数读取错误位置的值且无任何报错 → 寄存器未找到时应显式报错或正确分配
+
+#### type_checker.py
+- **PatternConstructor 不校验主题类型是否为对应 ADT（type_checker.py:1043-1076）**：构造器模式只查找构造器定义和检查字段数量，完全不检查 subject_type 是否为 ADT 以及是否为对应 ADT 类型，`match 42 { Some(x) => ... }` 不会被类型检查器捕获 → 添加 isinstance(subject_type, ADTType) 和名称匹配检查
+- **for 循环/列表推导循环变量类型不推断（type_checker.py:953, 981）**：ForExpr 和 ListComprehension 的循环变量硬编码为 TypeVar("for_elem"/"lc_elem")，不从可迭代对象推断元素类型，range 循环变量也不是 Int → 列表遍历取 ListType.elem_type，range 循环设为 INT_T
+
+### 本次修复内容（基于审查日志 Issue）
+
+1. **vm.py + evaluator.py — TRY_UNWRAP/`?` 运算符 type_name 类型安全修复（基于审查日志 vm.py:1269-1283 / 第十六轮严重问题 #5）**
+   - **vm.py TRY_UNWRAP**：先检查 `val.type_name in ("Option", "Result")`，不满足则抛 RuntimeError_
+   - **evaluator.py TryExpr**：同样增加 type_name 前置检查
+   - 错误信息统一：`? 操作符只能在 Option 或 Result 类型上使用，得到 <type_name>`
+   - 新增 4 个测试用例：自定义ADT Some报错、自定义ADT Err报错、Option.Some回归、Result.Ok回归（Evaluator+VM 两端）
+
+2. **vm.py + evaluator.py — 算术运算 bool/int 强类型区分（基于审查日志 vm.py:608-651 / 第十六轮严重问题 #3）**
+   - **vm.py**：ADD/SUB/MUL/DIV/MOD/NEG 所有算术指令添加 `isinstance(val, bool)` 检查
+   - **evaluator.py**：`+`/`-`/`*`/`/`/`%` 二元运算 + 一元 `-` 添加 bool 类型排除
+   - 错误信息：`算术运算 '+' 的操作数不能是 Bool 类型`
+   - 与比较运算（EQ/LT 等）已有 bool 检查形成一致的类型安全防线
+   - 新增 8 个测试用例：True+1、False*5、True/2、-True 报错 + 正常 Int 运算回归（Evaluator+VM 两端）
+
+3. **evaluator.py — 短路逻辑运算 &&/|| 类型检查（基于审查日志 evaluator.py:872-882 / 第十六轮严重问题 #2）**
+   - `&&` 操作：左操作数求值后检查 `isinstance(left, bool)`，右操作数同理
+   - `||` 操作：同上
+   - 错误信息：`逻辑运算 '&&' 的操作数必须是 Bool 类型`
+   - 与 if/while 条件的 Bool 检查保持一致
+   - 新增 4 个测试用例：42&&true报错、""||false报错、true&&42报错 + 正常 Bool 运算回归
+
+4. **backend/native_backend.py — LIRBinOp/LIRUnaryOp dst_loc 结果目标修复（基于审查日志 native_backend.py:410-485 / 第十六轮严重问题 #2）**
+   - 新增 `_get_vreg()` 辅助方法，虚拟寄存器未分配时抛明确错误而非静默回退
+   - **LIRBinOp**：从 `instr.dst_loc` 获取目标寄存器名，用 `_alloc_vreg` 分配，运算后 mov 到目标
+   - **LIRUnaryOp**：同样修复，结果从 operand_reg 移动到 dst_reg
+   - 修复 src_locs 查找：改用 `_get_vreg()`，未分配时抛 `ValueError("Native 后端：虚拟寄存器 '{name}' 未分配")`
+   - 新增 11 个测试用例：BinOp dst_loc、多 vreg 连续运算、比较运算 dst_loc、UnaryOp dst_loc、vreg 未分配报错等
+
+5. **type_checker.py — PatternConstructor 主题类型校验（基于审查日志 type_checker.py:1043-1076 / 第十六轮严重问题 #7）**
+   - 在 `_check_pattern` 的 PatternConstructor 分支添加两层校验：
+     - `isinstance(subject_type, ADTType)` — 主题必须是 ADT 类型
+     - `subject_type.name == adt_name` — 主题 ADT 名称必须匹配
+   - 错误信息：`构造器 'Some' 与类型 Int 不匹配`
+   - 与 PatternInt/PatternFloat/PatternTuple 等其他 Pattern 类型的校验风格一致
+   - 新增 4 个测试用例：Int匹配Some报错、String匹配Ok报错、Some正确使用通过、同一ADT不同构造器通过
+
+6. **type_checker.py — for 循环/列表推导循环变量类型推断（基于审查日志 type_checker.py:953,981 / 第十六轮严重问题 #8）**
+   - **ForExpr range 分支**：循环变量类型从 `TypeVar("for_elem")` 改为 `INT_T`
+   - **ForExpr 列表分支**：从 `iter_ty` 推断元素类型——ListType 用 elem_type，TupleType 用第一个元素类型
+   - **ListComprehension**：同理修复 range 分支和列表分支
+   - 新增 8 个测试用例：for列表Int加法通过、for列表Int拼接报错、for range通过、列表推导同理（4个）
+
+### 测试结果
+
+- 全量测试: **740 passed** (1.31s)
+- Evaluator 示例: hello/functions/pattern_match/adt/loops/math/pipe/list_comprehension/file_io 全部正常输出
+- VM 示例: hello/functions/pattern_match/loops/math/list_comprehension/pipe 全部正常输出
+- TRY_UNWRAP type_name: 自定义 ADT 的 Some/Err 被 `?` 正确拒绝 ✅
+- 算术 bool 检查: `True + 1` 正确抛出 RuntimeError_ ✅
+- 短路逻辑类型检查: `42 && true` 正确抛出 RuntimeError_ ✅
+- Native 后端 dst_loc: BinOp/UnaryOp 结果正确写入目标寄存器 ✅
+- PatternConstructor 主题校验: `match 42 { Some(x) => ... }` 被类型检查器正确捕获 ✅
+- 循环变量类型推断: for/list_comprehension 正确从可迭代对象推断元素类型 ✅
+
+---
+
 ## 2026-07-15 自动改进（第十七轮）
 
 基于 AUTO_REVIEW_LOG.md 第十五轮审查日志的 P0 级严重问题驱动改进（阶段一检查 + 阶段二开发 + 阶段三测试）。

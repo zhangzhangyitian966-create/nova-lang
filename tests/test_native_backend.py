@@ -1496,5 +1496,286 @@ class TestELFWithNewFeatures(unittest.TestCase):
         self.assertTrue(len(elf) > 128)
 
 
+class TestBinOpDstLoc(unittest.TestCase):
+    """LIRBinOp dst_loc 正确性测试"""
+
+    def test_binop_dst_loc_different_from_left(self):
+        """BinOp 结果写入 dst_loc 指定的目标寄存器，而非 left_reg"""
+        codegen = NativeCodeGen()
+        lir = LIRModule(name="test")
+        fn = LIRFunction("test_binop_dst", [], INT_TYPE)
+
+        # 加载两个常量到不同的虚拟寄存器
+        # const_10 -> vregs["const_10"] = RAX (first free)
+        # const_20 -> vregs["const_20"] = RCX (second free)
+        load_a = LIRLoadConst(value=10, const_type="int")
+        load_b = LIRLoadConst(value=20, const_type="int")
+
+        # BinOp: a + b，结果写入 result_vreg（应分配到第三个可用寄存器 RBX）
+        add_op = LIRBinOp(op="+")
+        add_op.src_locs = [("const_10", INT_TYPE), ("const_20", INT_TYPE)]
+        add_op.dst_loc = ("result_sum", INT_TYPE)
+
+        fn.body = [load_a, load_b, add_op, LIRReturn()]
+        lir.functions["test_binop_dst"] = fn
+
+        code = codegen._compile_function(fn)
+        self.assertTrue(len(code) > 0)
+
+        # 验证：result_sum 被分配了独立的物理寄存器（不是 const_10 的寄存器）
+        # 由于有 dst_loc，代码应在加法后执行 mov 指令将结果从 left_reg 移到 dst_reg
+        # 统计 mov_reg_reg64 (48 89) 的数量
+        mov_count = 0
+        for i in range(len(code) - 2):
+            if code[i] == 0x48 and code[i + 1] == 0x89:
+                mov_count += 1
+        # 至少有一个 mov 用于将结果从左操作数寄存器移到目标寄存器
+        self.assertGreaterEqual(mov_count, 1,
+            "Expected at least one mov_reg_reg64 to move result to dst register")
+
+    def test_multiple_binop_different_vregs(self):
+        """连续多个 BinOp 操作不同虚拟寄存器时结果正确写入各自目标"""
+        codegen = NativeCodeGen()
+        lir = LIRModule(name="test")
+        fn = LIRFunction("test_multi_binop", [], INT_TYPE)
+
+        # 加载三个常量
+        load_a = LIRLoadConst(value=10, const_type="int")
+        load_b = LIRLoadConst(value=20, const_type="int")
+        load_c = LIRLoadConst(value=5, const_type="int")
+
+        # add1: a + b -> sum_ab
+        add1 = LIRBinOp(op="+")
+        add1.src_locs = [("const_10", INT_TYPE), ("const_20", INT_TYPE)]
+        add1.dst_loc = ("sum_ab", INT_TYPE)
+
+        # add2: sum_ab + c -> total  (使用前一步的结果)
+        add2 = LIRBinOp(op="+")
+        add2.src_locs = [("sum_ab", INT_TYPE), ("const_5", INT_TYPE)]
+        add2.dst_loc = ("total", INT_TYPE)
+
+        fn.body = [load_a, load_b, load_c, add1, add2, LIRReturn()]
+        lir.functions["test_multi_binop"] = fn
+
+        code = codegen._compile_function(fn)
+        self.assertTrue(len(code) > 0)
+
+        # 验证编译成功且包含加法指令 (48 01 = add r/m64, r64)
+        found_add = False
+        for i in range(len(code) - 2):
+            if code[i] == 0x48 and code[i + 1] == 0x01:
+                found_add = True
+                break
+        self.assertTrue(found_add, "Expected add instruction in compiled code")
+
+    def test_binop_comparison_dst_loc(self):
+        """比较运算结果写入 dst_loc 指定的目标寄存器"""
+        codegen = NativeCodeGen()
+        lir = LIRModule(name="test")
+        fn = LIRFunction("test_cmp_dst", [], INT_TYPE)
+
+        load_a = LIRLoadConst(value=10, const_type="int")
+        load_b = LIRLoadConst(value=20, const_type="int")
+
+        cmp_op = LIRBinOp(op="<")
+        cmp_op.src_locs = [("const_10", INT_TYPE), ("const_20", INT_TYPE)]
+        cmp_op.dst_loc = ("cmp_result", INT_TYPE)
+
+        fn.body = [load_a, load_b, cmp_op, LIRReturn()]
+        lir.functions["test_cmp_dst"] = fn
+
+        code = codegen._compile_function(fn)
+        self.assertTrue(len(code) > 0)
+
+        # 验证包含 setl 指令 (0F 9C)
+        found_setl = False
+        for i in range(len(code) - 1):
+            if code[i] == 0x0F and code[i + 1] == 0x9C:
+                found_setl = True
+                break
+        self.assertTrue(found_setl, "Expected setl instruction for < comparison")
+
+    def test_binop_logical_and_dst_loc(self):
+        """逻辑与运算结果写入 dst_loc 指定的目标寄存器"""
+        codegen = NativeCodeGen()
+        lir = LIRModule(name="test")
+        fn = LIRFunction("test_and_dst", [], INT_TYPE)
+
+        load_a = LIRLoadConst(value=1, const_type="int")
+        load_b = LIRLoadConst(value=1, const_type="int")
+
+        and_op = LIRBinOp(op="&&")
+        and_op.src_locs = [("const_1", INT_TYPE), ("const_1", INT_TYPE)]
+        and_op.dst_loc = ("and_result", INT_TYPE)
+
+        fn.body = [load_a, load_b, and_op, LIRReturn()]
+        lir.functions["test_and_dst"] = fn
+
+        code = codegen._compile_function(fn)
+        self.assertTrue(len(code) > 0)
+
+
+class TestUnaryOpDstLoc(unittest.TestCase):
+    """LIRUnaryOp dst_loc 正确性测试"""
+
+    def test_unary_neg_dst_loc(self):
+        """一元取反结果写入 dst_loc 指定的目标寄存器，而非修改操作数"""
+        codegen = NativeCodeGen()
+        lir = LIRModule(name="test")
+        fn = LIRFunction("test_neg_dst", [], INT_TYPE)
+
+        load_val = LIRLoadConst(value=42, const_type="int")
+
+        neg_op = LIRUnaryOp(op="-")
+        neg_op.src_locs = [("const_42", INT_TYPE)]
+        neg_op.dst_loc = ("neg_result", INT_TYPE)
+
+        fn.body = [load_val, neg_op, LIRReturn()]
+        lir.functions["test_neg_dst"] = fn
+
+        code = codegen._compile_function(fn)
+        self.assertTrue(len(code) > 0)
+
+        # 验证包含 neg 指令 (48 F7 /3)
+        found_neg = False
+        for i in range(len(code) - 2):
+            if code[i] == 0x48 and code[i + 1] == 0xF7:
+                found_neg = True
+                break
+        self.assertTrue(found_neg, "Expected neg instruction for unary -")
+
+        # 验证有 mov 指令将结果移到目标寄存器
+        mov_count = 0
+        for i in range(len(code) - 2):
+            if code[i] == 0x48 and code[i + 1] == 0x89:
+                mov_count += 1
+        self.assertGreaterEqual(mov_count, 1,
+            "Expected mov to move neg result to dst register")
+
+    def test_unary_not_logical_dst_loc(self):
+        """逻辑非运算结果写入 dst_loc 指定的目标寄存器"""
+        codegen = NativeCodeGen()
+        lir = LIRModule(name="test")
+        fn = LIRFunction("test_not_dst", [], INT_TYPE)
+
+        load_val = LIRLoadConst(value=0, const_type="int")
+
+        not_op = LIRUnaryOp(op="!")
+        not_op.src_locs = [("const_0", INT_TYPE)]
+        not_op.dst_loc = ("not_result", INT_TYPE)
+
+        fn.body = [load_val, not_op, LIRReturn()]
+        lir.functions["test_not_dst"] = fn
+
+        code = codegen._compile_function(fn)
+        self.assertTrue(len(code) > 0)
+
+        # 验证包含 cmp 指令 (48 83)
+        found_cmp = False
+        for i in range(len(code) - 2):
+            if code[i] == 0x48 and code[i + 1] == 0x83:
+                found_cmp = True
+                break
+        self.assertTrue(found_cmp, "Expected cmp instruction for ! unary op")
+
+    def test_unary_bitwise_not_dst_loc(self):
+        """按位取反结果写入 dst_loc 指定的目标寄存器"""
+        codegen = NativeCodeGen()
+        lir = LIRModule(name="test")
+        fn = LIRFunction("test_bnot_dst", [], INT_TYPE)
+
+        load_val = LIRLoadConst(value=42, const_type="int")
+
+        bnot_op = LIRUnaryOp(op="NOT")
+        bnot_op.src_locs = [("const_42", INT_TYPE)]
+        bnot_op.dst_loc = ("bnot_result", INT_TYPE)
+
+        fn.body = [load_val, bnot_op, LIRReturn()]
+        lir.functions["test_bnot_dst"] = fn
+
+        code = codegen._compile_function(fn)
+        self.assertTrue(len(code) > 0)
+
+        # 验证包含 not 指令 (48 F7 /2)
+        found_not = False
+        for i in range(len(code) - 2):
+            if code[i] == 0x48 and code[i + 1] == 0xF7:
+                modrm = code[i + 2]
+                if (modrm >> 3) & 7 == 2:
+                    found_not = True
+                    break
+        self.assertTrue(found_not, "Expected not instruction (48 F7 /2) for NOT unary op")
+
+
+class TestVRegNotAllocatedError(unittest.TestCase):
+    """虚拟寄存器未分配时应报错而非静默回退"""
+
+    def test_binop_left_vreg_not_allocated_raises(self):
+        """LIRBinOp 左操作数虚拟寄存器未分配时应抛出 ValueError"""
+        codegen = NativeCodeGen()
+        lir = LIRModule(name="test")
+        fn = LIRFunction("test_err", [], INT_TYPE)
+
+        # 只加载一个常量，但 BinOp 引用了不存在的 vreg
+        load_a = LIRLoadConst(value=10, const_type="int")
+        add_op = LIRBinOp(op="+")
+        add_op.src_locs = [("nonexistent_vreg", INT_TYPE), ("const_10", INT_TYPE)]
+        add_op.dst_loc = ("result", INT_TYPE)
+
+        fn.body = [load_a, add_op, LIRReturn()]
+        lir.functions["test_err"] = fn
+
+        with self.assertRaises(ValueError) as ctx:
+            codegen._compile_function(fn)
+        self.assertIn("未分配", str(ctx.exception))
+        self.assertIn("nonexistent_vreg", str(ctx.exception))
+
+    def test_binop_right_vreg_not_allocated_raises(self):
+        """LIRBinOp 右操作数虚拟寄存器未分配时应抛出 ValueError"""
+        codegen = NativeCodeGen()
+        lir = LIRModule(name="test")
+        fn = LIRFunction("test_err", [], INT_TYPE)
+
+        load_a = LIRLoadConst(value=10, const_type="int")
+        add_op = LIRBinOp(op="+")
+        add_op.src_locs = [("const_10", INT_TYPE), ("missing_vreg", INT_TYPE)]
+        add_op.dst_loc = ("result", INT_TYPE)
+
+        fn.body = [load_a, add_op, LIRReturn()]
+        lir.functions["test_err"] = fn
+
+        with self.assertRaises(ValueError) as ctx:
+            codegen._compile_function(fn)
+        self.assertIn("未分配", str(ctx.exception))
+        self.assertIn("missing_vreg", str(ctx.exception))
+
+    def test_unary_op_vreg_not_allocated_raises(self):
+        """LIRUnaryOp 操作数虚拟寄存器未分配时应抛出 ValueError"""
+        codegen = NativeCodeGen()
+        lir = LIRModule(name="test")
+        fn = LIRFunction("test_err", [], INT_TYPE)
+
+        neg_op = LIRUnaryOp(op="-")
+        neg_op.src_locs = [("unknown_vreg", INT_TYPE)]
+        neg_op.dst_loc = ("result", INT_TYPE)
+
+        fn.body = [neg_op, LIRReturn()]
+        lir.functions["test_err"] = fn
+
+        with self.assertRaises(ValueError) as ctx:
+            codegen._compile_function(fn)
+        self.assertIn("未分配", str(ctx.exception))
+        self.assertIn("unknown_vreg", str(ctx.exception))
+
+    def test_get_vreg_helper_none_raises(self):
+        """_get_vreg 辅助函数对 None 值也应报错"""
+        codegen = NativeCodeGen()
+        vregs = {"v1": None}  # 存在但值为 None（分配失败的情况）
+        with self.assertRaises(ValueError) as ctx:
+            codegen._get_vreg(vregs, "v1")
+        self.assertIn("未分配", str(ctx.exception))
+        self.assertIn("v1", str(ctx.exception))
+
+
 if __name__ == '__main__':
     unittest.main()

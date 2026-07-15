@@ -609,24 +609,32 @@ class NovaVM:
             # Stack: [a, b] -> [a+b]
             # Pop two values, add them, push result
             a, b = self._pop(2)
+            if isinstance(a, bool) or isinstance(b, bool):
+                raise RuntimeError_("算术运算 '+' 的操作数不能是 Bool 类型")
             self.stack.append(a + b)
 
         elif opcode == Op.SUB:
             # Stack: [a, b] -> [a-b]
             # Pop two values, subtract them, push result
             a, b = self._pop(2)
+            if isinstance(a, bool) or isinstance(b, bool):
+                raise RuntimeError_("算术运算 '-' 的操作数不能是 Bool 类型")
             self.stack.append(a - b)
 
         elif opcode == Op.MUL:
             # Stack: [a, b] -> [a*b]
             # Pop two values, multiply them, push result
             a, b = self._pop(2)
+            if isinstance(a, bool) or isinstance(b, bool):
+                raise RuntimeError_("算术运算 '*' 的操作数不能是 Bool 类型")
             self.stack.append(a * b)
 
         elif opcode == Op.DIV:
             # Stack: [a, b] -> [a/b]
             # Pop two values, divide them, push result
             a, b = self._pop(2)
+            if isinstance(a, bool) or isinstance(b, bool):
+                raise RuntimeError_("算术运算 '/' 的操作数不能是 Bool 类型")
             try:
                 if isinstance(a, int) and isinstance(b, int):
                     self.stack.append(a // b)
@@ -639,6 +647,8 @@ class NovaVM:
             # Stack: [a, b] -> [a%b]
             # Pop two values, compute modulo, push result
             a, b = self._pop(2)
+            if isinstance(a, bool) or isinstance(b, bool):
+                raise RuntimeError_("算术运算 '%' 的操作数不能是 Bool 类型")
             try:
                 self.stack.append(a % b)
             except ZeroDivisionError:
@@ -648,6 +658,8 @@ class NovaVM:
             # Stack: [a] -> [-a]
             # Pop value, negate it, push result
             a = self._pop()[0]
+            if isinstance(a, bool):
+                raise RuntimeError_("算术运算 '-' 的操作数不能是 Bool 类型")
             self.stack.append(-a)
 
         elif opcode == Op.CONCAT:
@@ -1273,13 +1285,18 @@ class NovaVM:
             if not self.stack:
                 raise RuntimeError_("VM stack underflow: TRY_UNWRAP")
             val = self.stack[-1]
-            if isinstance(val, NovaADTValue) and val.variant_name in ("None", "Err"):
-                return True
-            elif isinstance(val, NovaADTValue) and val.variant_name in ("Some", "Ok"):
-                self._pop()
-                self.stack.append(val.fields[0])
+            if isinstance(val, NovaADTValue):
+                if val.type_name not in ("Option", "Result"):
+                    raise RuntimeError_(f"? 操作符只能在 Option 或 Result 类型上使用，得到 {val.type_name}")
+                if val.variant_name in ("None", "Err"):
+                    return True
+                elif val.variant_name in ("Some", "Ok"):
+                    self._pop()
+                    self.stack.append(val.fields[0])
+                else:
+                    raise RuntimeError_(f"? 操作符只能在 Option 或 Result 类型上使用，得到 {val.type_name}")
             else:
-                raise RuntimeError_(f"TRY_UNWRAP: 期望 Option 或 Result 类型，得到 {type(val).__name__}")
+                raise RuntimeError_(f"? 操作符只能在 Option 或 Result 类型上使用，得到 {type(val).__name__}")
             return False
 
         elif opcode == Op.LOOP:

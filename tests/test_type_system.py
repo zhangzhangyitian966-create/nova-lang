@@ -423,3 +423,125 @@ class TestEqualityTypeCheck:
         with pytest.raises(TypeCheckError) as exc_info:
             check_source(source)
         assert "不兼容" in str(exc_info.value)
+
+
+class TestPatternConstructorSubjectType:
+    """测试构造器模式的主题类型校验（Bug 修复）"""
+
+    def test_constructor_pattern_on_int_error(self):
+        """match 42 { Some(x) => x } 应报类型错误（Int 不能匹配 Some）"""
+        source = """
+        match 42 {
+            Some(x) -> x
+        }
+        """
+        with pytest.raises(TypeCheckError) as exc_info:
+            check_source(source)
+        assert "不匹配" in str(exc_info.value)
+
+    def test_constructor_pattern_on_string_error(self):
+        """match "hello" { Ok(x) => x } 应报类型错误"""
+        source = '''
+        match "hello" {
+            Ok(x) -> x
+        }
+        '''
+        with pytest.raises(TypeCheckError) as exc_info:
+            check_source(source)
+        assert "不匹配" in str(exc_info.value)
+
+    def test_constructor_pattern_correct_usage(self):
+        """match Some(42) { Some(x) => x } 应通过（回归测试）"""
+        source = """
+        match Some(42) {
+            Some(x) -> x,
+            None -> 0
+        }
+        """
+        checker = check_source(source)
+        assert len(checker.error_collector.errors) == 0
+
+    def test_constructor_pattern_wrong_variant_same_adt(self):
+        """match Ok("x") { Err(x) => x } 同一 ADT 不同构造器，应通过类型检查
+        （同一 ADT 的不同构造器是合法的 match 模式，只是不会匹配到而已）"""
+        source = '''
+        match Ok("x") {
+            Err(x) -> x,
+            Ok(v) -> v
+        }
+        '''
+        checker = check_source(source)
+        # 同一 ADT 的不同构造器是合法的模式
+        assert len(checker.error_collector.errors) == 0
+
+
+class TestForLoopVariableTypeInference:
+    """测试 for 循环变量类型推断（Bug 修复）"""
+
+    def test_for_list_int_add_ok(self):
+        """for x in [1, 2, 3] { x + 1 } 应通过（x 推断为 Int）"""
+        source = """
+        for x in [1, 2, 3] { x + 1 }
+        """
+        checker = check_source(source)
+        assert len(checker.error_collector.errors) == 0
+
+    def test_for_list_int_concat_error(self):
+        """for x in [1, 2, 3] { x ++ "hello" } 应报类型错误（x 是 Int，不能 ++）"""
+        source = '''
+        for x in [1, 2, 3] { x ++ "hello" }
+        '''
+        with pytest.raises(TypeCheckError):
+            check_source(source)
+
+    def test_for_range_int_add_ok(self):
+        """for i <- 0..10 { i + 1 } 应通过（i 推断为 Int）"""
+        source = """
+        for i <- 0..10 { i + 1 }
+        """
+        checker = check_source(source)
+        assert len(checker.error_collector.errors) == 0
+
+    def test_for_list_string_concat_ok(self):
+        """for s in ["a", "b"] { s ++ "!" } 应通过（s 推断为 String）"""
+        source = '''
+        for s in ["a", "b"] { s ++ "!" }
+        '''
+        checker = check_source(source)
+        assert len(checker.error_collector.errors) == 0
+
+
+class TestListComprehensionVariableTypeInference:
+    """测试列表推导循环变量类型推断（Bug 修复）"""
+
+    def test_lc_list_int_add_ok(self):
+        """[x + 1 for x in [1, 2, 3]] 应通过（x 推断为 Int）"""
+        source = """
+        let result = [x + 1 for x in [1, 2, 3]]
+        """
+        checker = check_source(source)
+        assert len(checker.error_collector.errors) == 0
+
+    def test_lc_list_int_concat_error(self):
+        """[x ++ "hello" for x in [1, 2, 3]] 应报类型错误（x 是 Int，不能 ++）"""
+        source = '''
+        let result = [x ++ "hello" for x in [1, 2, 3]]
+        '''
+        with pytest.raises(TypeCheckError):
+            check_source(source)
+
+    def test_lc_range_int_add_ok(self):
+        """[i + 1 for i <- 0..10] 应通过（i 推断为 Int）"""
+        source = """
+        let result = [i + 1 for i <- 0..10]
+        """
+        checker = check_source(source)
+        assert len(checker.error_collector.errors) == 0
+
+    def test_lc_list_string_concat_ok(self):
+        """[s ++ "!" for s in ["a", "b"]] 应通过（s 推断为 String）"""
+        source = '''
+        let result = [s ++ "!" for s in ["a", "b"]]
+        '''
+        checker = check_source(source)
+        assert len(checker.error_collector.errors) == 0
