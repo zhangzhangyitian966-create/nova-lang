@@ -269,6 +269,7 @@ class TypeChecker:
         self._current_file = current_file      # 当前文件路径
         self._exported_names: set = set()      # 本模块导出的名称
         self._current_fn_return_type = None    # 当前正在检查的函数的返回类型
+        self._in_function = False              # 当前是否在函数内部（用于区分顶层和待推断函数）
         self._setup_builtins()
 
     def _report_error(self, message: str, node=None):
@@ -571,6 +572,8 @@ class TypeChecker:
 
             # 保存旧状态并设置当前函数返回类型（用于 ? 操作符检查）
             old_return_type = self._current_fn_return_type
+            old_in_function = self._in_function
+            self._in_function = True
             if decl.return_type:
                 self._current_fn_return_type = self._from_ast_type(decl.return_type)
             else:
@@ -580,6 +583,7 @@ class TypeChecker:
 
             # 恢复
             self._current_fn_return_type = old_return_type
+            self._in_function = old_in_function
             self.env = old_env
 
             if decl.return_type:
@@ -997,6 +1001,13 @@ class TypeChecker:
 
             if inner_ty.name == "Option":
                 ok_ty = inner_ty.type_params[0]
+                # 顶层代码不允许使用 ? 操作符
+                if not self._in_function:
+                    self._report_error(
+                        "? 操作符只能在函数内部使用",
+                        expr
+                    )
+                    return ok_ty
                 # 检查函数返回类型兼容性
                 if self._current_fn_return_type is not None:
                     ret_ty = self._current_fn_return_type
@@ -1018,6 +1029,13 @@ class TypeChecker:
             elif inner_ty.name == "Result":
                 ok_ty = inner_ty.type_params[0]
                 err_ty = inner_ty.type_params[1] if len(inner_ty.type_params) >= 2 else ERROR_TYPE
+                # 顶层代码不允许使用 ? 操作符
+                if not self._in_function:
+                    self._report_error(
+                        "? 操作符只能在函数内部使用",
+                        expr
+                    )
+                    return ok_ty
                 # 检查函数返回类型兼容性
                 if self._current_fn_return_type is not None:
                     ret_ty = self._current_fn_return_type
@@ -1067,8 +1085,15 @@ class TypeChecker:
                 elif isinstance(iter_ty, TupleType):
                     self._report_error("元组不可迭代", expr.iterable)
                     return ERROR_TYPE
-                else:
+                elif isinstance(iter_ty, TypeVar):
+                    # 类型变量，可能后续被推断为 ListType，暂时不报错
                     elem_ty = TypeVar("for_elem")
+                else:
+                    self._report_error(
+                        f"for 循环的迭代对象必须是列表类型，而非 {iter_ty} 类型",
+                        expr.iterable
+                    )
+                    return ERROR_TYPE
 
             # 检查循环体类型
             child_env = self.env.child()
@@ -1104,8 +1129,15 @@ class TypeChecker:
                 elif isinstance(iter_ty, TupleType):
                     self._report_error("元组不可迭代", expr.iterable)
                     return ERROR_TYPE
-                else:
+                elif isinstance(iter_ty, TypeVar):
+                    # 类型变量，可能后续被推断为 ListType，暂时不报错
                     elem_ty = TypeVar("lc_elem")
+                else:
+                    self._report_error(
+                        f"列表推导式的迭代对象必须是列表类型，而非 {iter_ty} 类型",
+                        expr.iterable
+                    )
+                    return ERROR_TYPE
 
             child_env = self.env.child()
             child_env.define(expr.var_name, elem_ty)
@@ -1560,6 +1592,11 @@ class TypeChecker:
         # 递归检查 ListType
         if isinstance(a, ListType) and isinstance(b, ListType):
             return self._types_compatible(a.elem_type, b.elem_type)
+        # 递归检查 TupleType
+        if isinstance(a, TupleType) and isinstance(b, TupleType):
+            if len(a.elements) != len(b.elements):
+                return False
+            return all(self._types_compatible(ae, be) for ae, be in zip(a.elements, b.elements))
         # 递归检查 MapType
         if isinstance(a, MapType) and isinstance(b, MapType):
             return (self._types_compatible(a.key_type, b.key_type)

@@ -834,11 +834,11 @@ class TestImportConflictDetection:
     """测试编译器在导入时检测命名冲突的能力"""
 
     def _compile_with_import(self, main_source: str, module_source: str,
-                              module_name: str = "mod") -> tuple:
-        """辅助函数：编译带有导入的代码，返回 (bytecode, stderr_output)
+                              module_name: str = "mod"):
+        """辅助函数：编译带有导入的代码，测试冲突检测。
         使用 BytecodeCompiler 直接测试冲突检测。
+        冲突时抛出 RuntimeError_，无冲突时返回 bytecode。
         """
-        import io
         import tempfile
         import os
 
@@ -868,26 +868,19 @@ class TestImportConflictDetection:
             parser = Parser(tokens)
             program = parser.parse()
 
-            # 编译并捕获 stderr 警告
+            # 编译
             manager = ModuleManager(search_paths=[tmpdir])
             compiler = BytecodeCompiler(module_manager=manager, current_file=main_path)
-
-            # 捕获 stderr
-            old_stderr = sys.stderr
-            sys.stderr = io.StringIO()
-            try:
-                bytecode = compiler.compile(program)
-                stderr_output = sys.stderr.getvalue()
-            finally:
-                sys.stderr = old_stderr
-
-            return bytecode, stderr_output
+            bytecode = compiler.compile(program)
+            return bytecode
         finally:
             import shutil
             shutil.rmtree(tmpdir, ignore_errors=True)
 
     def test_import_let_binding_conflict(self):
-        """主文件与导入模块有同名 let 绑定时应发出警告"""
+        """主文件与导入模块有同名 let 绑定时应抛出错误"""
+        import pytest
+        from nova.errors import RuntimeError_
         main_source = """
 let x = 5
 import "./mod"
@@ -897,12 +890,15 @@ export x
 
 let x = 10
 """
-        _, stderr = self._compile_with_import(main_source, mod_source)
-        assert "shadows existing binding" in stderr
-        assert "x" in stderr
+        with pytest.raises(RuntimeError_) as excinfo:
+            self._compile_with_import(main_source, mod_source)
+        assert "冲突" in str(excinfo.value)
+        assert "x" in str(excinfo.value)
 
     def test_import_mut_binding_conflict(self):
-        """主文件与导入模块有同名 mut 绑定时应发出警告"""
+        """主文件与导入模块有同名 mut 绑定时应抛出错误"""
+        import pytest
+        from nova.errors import RuntimeError_
         main_source = """
 mut counter = 0
 import "./mod"
@@ -912,12 +908,15 @@ export counter
 
 let counter = 100
 """
-        _, stderr = self._compile_with_import(main_source, mod_source)
-        assert "shadows existing binding" in stderr
-        assert "counter" in stderr
+        with pytest.raises(RuntimeError_) as excinfo:
+            self._compile_with_import(main_source, mod_source)
+        assert "冲突" in str(excinfo.value)
+        assert "counter" in str(excinfo.value)
 
     def test_import_type_def_conflict(self):
-        """主文件与导入模块有同名 type 定义时应发出警告"""
+        """主文件与导入模块有同名 type 定义时应抛出错误"""
+        import pytest
+        from nova.errors import RuntimeError_
         main_source = """
 type Color { Red | Green | Blue }
 import "./mod"
@@ -927,12 +926,15 @@ export Color
 
 type Color { Cyan | Magenta | Yellow }
 """
-        _, stderr = self._compile_with_import(main_source, mod_source)
-        assert "shadows existing binding" in stderr
-        assert "Color" in stderr
+        with pytest.raises(RuntimeError_) as excinfo:
+            self._compile_with_import(main_source, mod_source)
+        assert "冲突" in str(excinfo.value)
+        assert "Color" in str(excinfo.value)
 
     def test_import_type_constructor_conflict(self):
-        """导入模块的变体构造器与主文件绑定时应发出警告"""
+        """导入模块的变体构造器与主文件绑定时应抛出错误"""
+        import pytest
+        from nova.errors import RuntimeError_
         main_source = """
 let Red = "red_value"
 import "./mod"
@@ -942,12 +944,13 @@ export Color
 
 type Color { Red | Green | Blue }
 """
-        _, stderr = self._compile_with_import(main_source, mod_source)
-        assert "shadows existing binding" in stderr
-        assert "Red" in stderr
+        with pytest.raises(RuntimeError_) as excinfo:
+            self._compile_with_import(main_source, mod_source)
+        assert "冲突" in str(excinfo.value)
+        assert "Red" in str(excinfo.value)
 
     def test_import_no_conflict_let(self):
-        """无冲突的 let 绑定导入应该正常工作且无警告"""
+        """无冲突的 let 绑定导入应该正常工作"""
         main_source = """
 let x = 5
 import "./mod"
@@ -957,11 +960,11 @@ export y
 
 let y = 10
 """
-        _, stderr = self._compile_with_import(main_source, mod_source)
-        assert "shadows existing binding" not in stderr
+        bytecode = self._compile_with_import(main_source, mod_source)
+        assert bytecode is not None
 
     def test_import_no_conflict_type(self):
-        """无冲突的 type 定义导入应该正常工作且无警告"""
+        """无冲突的 type 定义导入应该正常工作"""
         main_source = """
 type Color { Red | Green | Blue }
 import "./mod"
@@ -971,11 +974,13 @@ export Shape
 
 type Shape { Circle | Square }
 """
-        _, stderr = self._compile_with_import(main_source, mod_source)
-        assert "shadows existing binding" not in stderr
+        bytecode = self._compile_with_import(main_source, mod_source)
+        assert bytecode is not None
 
     def test_import_function_conflict_still_works(self):
         """函数名冲突检测仍然正常工作（回归测试）"""
+        import pytest
+        from nova.errors import RuntimeError_
         main_source = """
 fn foo() -> Int { 42 }
 import "./mod"
@@ -985,9 +990,10 @@ export foo
 
 fn foo() -> Int { 99 }
 """
-        _, stderr = self._compile_with_import(main_source, mod_source)
-        assert "shadows existing binding" in stderr
-        assert "foo" in stderr
+        with pytest.raises(RuntimeError_) as excinfo:
+            self._compile_with_import(main_source, mod_source)
+        assert "冲突" in str(excinfo.value)
+        assert "foo" in str(excinfo.value)
 
     def test_import_before_binding_no_conflict(self):
         """导入在绑定之前时不应报错（导入先定义，后被绑定覆盖是另一个方向）"""
@@ -1002,7 +1008,7 @@ let x = 10
 """
         # 导入先于本地绑定，导入的值会被本地绑定覆盖
         # 这不是导入冲突检测的范畴（导入时还没有 x）
-        _, stderr = self._compile_with_import(main_source, mod_source)
-        # 导入时 x 还未定义，所以不应该有警告
+        bytecode = self._compile_with_import(main_source, mod_source)
+        # 导入时 x 还未定义，所以不应该报错
         # （注意：这是当前设计，未来可能需要双向检测）
-        assert "shadows existing binding" not in stderr
+        assert bytecode is not None

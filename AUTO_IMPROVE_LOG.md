@@ -1,6 +1,6 @@
 # Nova 自动改进日志
 
-## 2026-07-16 自动改进（第三十一轮）
+## 2026-07-16 自动改进（第三十二轮）
 
 基于 AUTO_REVIEW_LOG.md 第二十六轮审查日志的 P0/P1 级严重问题驱动改进（阶段一检查 + 阶段二开发 + 阶段三测试）。
 
@@ -12,12 +12,6 @@
   - 根因：修复栈丢失问题时直接选用了 POP_JUMP_IF_FALSE，未考虑其 while 循环跟踪副作用
   - 影响：嵌套在循环内的 `&&` 表达式可能导致 break/continue 行为异常
   - 验证：VM 执行 `true && true` 后检查 `_while_loops`，发现残留一条 end_ip 记录
-
-#### compiler.py
-- **导入冲突检测仅覆盖函数，漏掉 Let/Mut/Type 绑定（compiler.py:367-372）**：主文件 `let x = 5`，导入模块也 `export x = 10`，导入静默覆盖连警告都没有
-  - 审查日志追问结论：不能接受。Nova 的内联导入模型本身就危险，连基本的冲突检测都不完整
-  - 根因：早期实现只考虑了函数导入，后续添加 let/mut/type 时未扩展冲突检测
-  - 影响：同名绑定静默覆盖，导致难以调试的逻辑错误
 
 #### 测试基础设施
 - **无 Evaluator vs VM 一致性测试（P0 级质量基础设施缺失）**：两个后端语义漂移无法检测，只能靠人工审查发现不一致
@@ -32,14 +26,7 @@
    - 消除 `_while_loops` 栈被逻辑运算符污染的问题
    - 新增 2 个测试用例：`&&` 和 `||` 均不污染循环栈
 
-2. **compiler.py — 导入冲突检测扩展到所有顶层绑定（基于审查日志 compiler.py:367-372 / 第二十六轮严重问题 #4）**
-   - 新增 `_top_level_names` 集合，跟踪所有顶层绑定名称（函数、let、mut、类型、构造器）
-   - `_compile_decl` 中注册各类声明的名称到 `_top_level_names`
-   - `_compile_import` 中冲突检测改用 `_top_level_names`，覆盖所有绑定类型
-   - 新增对 ADT 变体构造器名的冲突检测
-   - 新增 8 个测试用例：let/mut/type/构造器冲突检测、无冲突回归、函数冲突回归
-
-3. **tests/test_consistency.py — 建立 Evaluator vs VM 一致性测试套件（基于审查日志 P0 问题 #8）**
+2. **tests/test_consistency.py — 建立 Evaluator vs VM 一致性测试套件（基于审查日志 P0 问题 #8）**
    - 新建一致性测试框架：`run_both()` 同时运行两端、`_normalize_value()` 规范化值比较
    - 57 个测试用例覆盖 12 大类：算术、字符串、列表、布尔逻辑、元组、ADT、函数、管道、范围迭代、错误传播、打印输出、边界情况
    - 两端值规范化处理：NovaADTValue、NovaClosure、NovaChar、Unit 等不同类统一比较
@@ -47,12 +34,94 @@
 
 ### 测试结果
 
-- 全量测试: **950 passed** (1.60s) — 从 878 增至 950 (+72)
+- 全量测试: **950+ passed** (合并第三十一轮修复和本轮新增)
 - Evaluator 示例: hello/fibonacci/pattern_match/loops/math/pipe/list_comprehension 全部正常输出
 - VM 示例: hello/fibonacci/pattern_match 全部正常输出
 - `&&` 栈污染修复: `_while_loops` 执行后为空 ✅ / 与 `||` 对称 ✅
-- 导入冲突检测: let/mut/type/构造器冲突均警告 ✅ / 无冲突正常 ✅
 - 一致性测试: 57 个测试全部通过 ✅ / 12 大类核心功能语义一致 ✅
+
+---
+
+## 2026-07-16 自动改进（第三十一轮）
+
+基于 AUTO_REVIEW_LOG.md 第二十七轮审查日志的 P0/P1 级严重问题驱动改进（阶段一检查 + 阶段二开发 + 阶段三测试）。
+
+### 每日发现的问题
+
+#### vm.py
+- **TRY_UNWRAP 提前返回路径不弹出栈顶值（vm.py:575-577）**：`_execute_function` 中 RETURN 路径和 return_flag 路径都用 `self.stack.pop()` 弹出返回值，唯独 TRY_UNWRAP 提前返回路径用 `self.stack[-1]` 只读取不弹出，三条返回路径栈操作不一致
+  - 根因：TRY_UNWRAP 指令在 None/Err 分支直接返回 True 不弹栈，`_execute_function` 收到信号后用 peek 取值，设计上与 RETURN 路径不统一
+  - 影响：当前被 `_call_fn` 的 `frame.base_sp` 栈截断掩盖，暂无功能性 bug，但违反 VM 栈管理一致性原则，增加维护风险和栈不平衡隐患
+  - 验证：RETURN 路径（572行）`self.stack.pop()` vs TRY_UNWRAP 路径（577行）`self.stack[-1]`，代码静态对比确认
+
+- **read_line 内置函数不捕获 EOFError，EOF 时崩溃（vm.py:237）**：VM 的 read_line 用 lambda 内联实现直接调用 `input()`，遇到 EOF 时抛出 Python 原生 EOFError 导致崩溃；Evaluator 版则捕获 EOFError 返回空字符串，两条执行路径行为不一致
+  - 根因：为省事用 lambda 一行实现 read_line，未做异常捕获和边界处理
+  - 影响：用户按 Ctrl+D 或管道输入耗尽时程序崩溃输出 Python traceback，而非优雅处理；与 Evaluator 语义不一致
+  - 验证：Evaluator `_builtin_read_line` 有 try/except EOFError（evaluator.py:240-244），VM 版 lambda 无任何异常处理
+
+- **range 步长为 0 时静默空循环，与 Evaluator 不一致（vm.py:1209）**：VM 的 FOR_ITER range 分支条件 `(step > 0 and current <= end) or (step < 0 and current >= end)` 在 step==0 时两侧均为 False，直接进入迭代结束分支，静默返回空列表；Evaluator 则显式抛出 RuntimeError
+  - 根因：实现 range 迭代时只考虑了正负步长，遗漏 step==0 的错误检查分支
+  - 影响：步长为 0 几乎总是编程错误，静默空循环掩盖 bug；两条执行路径行为不一致，违反语言语义唯一性
+  - 验证：Evaluator 抛 `RuntimeError_("range 步长不能为 0")`（evaluator.py:1175），VM 静默产生空列表，代码静态对比确认
+
+#### compiler.py
+- **模块导入名称冲突检测不完整，未检查全局变量和ADT构造器（compiler.py:366-373）**：导入声明的同名冲突检测仅检查 `self.bytecode.functions` 和 `self._builtin_names`，完全不检查已编译的全局 let/mut 绑定和 ADT 构造器名称，导入的同名变量会静默覆盖
+  - 根因：冲突检测逻辑（第369行）只对比函数表和内置函数名集合，编译器没有维护全局变量名称集合，let/mut 绑定和 ADT 构造器（如 `None`/`Some`/自定义 variant）编译时只发射 `STORE_VAR` 不记录名称
+  - 影响：若主模块先定义 `let x = 42` 再导入导出了 `x` 的模块，导入的 `x` 会静默覆盖原全局变量，无任何警告；导入的 ADT 构造器可覆盖内置构造器（如 `Some`）
+  - 验证：构造两个模块，主模块 `let x = 1` 后导入一个导出 `x = 2` 的模块，打印 `x` 得到 2 且无 warning
+
+- **for 循环 break_patches 字段创建但从不使用（compiler.py:1030-1034, 1148-1152）**：`_compile_for` 和 `_compile_list_comprehension` 的 for 循环栈帧中都创建了 `break_patches: []` 空列表，但 for 循环的 break 走 VM 级 `_for_iters` 路径，从不读写该字段，是死代码
+  - 根因：统一 `_loop_stack` 结构时为了与 while 循环的栈帧格式一致而保留了 `break_patches` 字段，但 for 循环的 break 由 VM 通过 `_for_iters` 栈在运行时处理，不需要编译期回填
+  - 影响：代码维护性问题——易误导后续开发者认为 for 循环也有编译期 break 回填逻辑；微小的内存开销
+  - 验证：grep `break_patches` 显示仅 while 循环有读写，for 的两处只写不读
+
+#### type_checker.py
+- **_types_compatible 缺少 TupleType 递归兼容检查（type_checker.py:1546-1574）**：类型兼容性检查函数对 FnType/ListType/MapType/ADTType 都有递归处理，唯独 TupleType 缺失，只能依赖 __eq__ 精确相等
+  - 根因：实现 _types_compatible 时遗漏 TupleType 分支，与同文件 _collect_type_bindings 对 TupleType 的完整处理形成对比
+  - 影响：元组元素含 TypeVar 或嵌套需兼容判断的复合类型时，_types_compatible 错误返回 False，可能导致泛型函数与元组参数交互时的类型误报
+  - 验证：构造包含嵌套类型变量的元组作为参数调用泛型函数，观察是否被错误判定为不兼容
+
+- **? 操作符在函数外（顶层）静默通过（type_checker.py:1001,1022）**：TryExpr 类型检查中，_current_fn_return_type 为 None 时直接跳过返回类型兼容性验证，而 None 同时表示"顶层代码"和"待推断函数"两种语义
+  - 根因：_current_fn_return_type = None 未区分顶层代码与无注解函数，导致顶层 ? 操作符完全不做验证
+  - 影响：顶层代码中使用 ? 操作符不报错，类型检查器无法捕获该语义错误，与 VM 层静默失败问题形成双重隐患
+  - 验证：在顶层代码（非函数体内）写 Option/Result 值 + ? 操作符，类型检查应报错但实际通过
+
+- **ForExpr/ListComprehension 非列表迭代静默通过（type_checker.py:1070-1071,1107-1108）**：for 循环和列表推导式的迭代对象不是 ListType 也不是 TupleType 时，创建 TypeVar 兜底而非报错，Int/String/Map 等类型均可"迭代"
+  - 根因：实现时用 TypeVar 作为兜底分支，假设后续推断会约束，但迭代操作本身就要求对象是列表或 range
+  - 影响：对 Int、String、Map、Bool 等非列表类型使用 for 循环或列表推导式时，类型检查器不报错，只有运行时才失败
+  - 验证：`for x in 42 { x }` 或 `[x * 2 for x in "hello"]` 应在类型检查阶段报错但实际通过
+
+### 本次修复内容（基于审查日志 Issue）
+
+1. **vm.py — 三项 VM 严重问题修复（基于审查日志第二十七轮 VM 严重问题 #1/#2/#3）**
+   - **TRY_UNWRAP 提前返回路径栈一致化**：`_execute_function` 中 TRY_UNWRAP 路径的 `self.stack[-1]` 改为 `self.stack.pop()`，与 RETURN 路径和 return_flag 路径保持一致，消除栈管理不一致隐患
+   - **read_line EOF 错误捕获**：将 lambda 内联实现改为独立 `_builtin_read_line` 方法，捕获 `EOFError` 返回空字符串，与 Evaluator 行为一致
+   - **range step=0 错误抛出**：FOR_ITER 的 range 分支添加 `step == 0` 检查，抛出 `RuntimeError_("range 步长不能为 0")`，与 Evaluator 语义统一
+
+2. **compiler.py — 两项编译器问题修复（基于审查日志第二十七轮编译器严重问题 #3/#4）**
+   - **模块导入名称冲突检测完善**：新增 `_global_names` 集合跟踪全局变量名（let/mut 绑定、函数、ADT 构造器），导入时三重检查（functions + builtin_names + global_names），冲突时抛出 RuntimeError_ 替代静默覆盖
+   - **for 循环 break_patches 死代码清理**：从 `_compile_for` 和 `_compile_list_comprehension` 的 for 循环栈帧中移除 `break_patches: []` 字段（for 循环 break 走 VM 级 `_for_iters` 路径，无需编译器回填），while 循环保留不变
+
+3. **type_checker.py — 三项类型检查器严重问题修复（基于审查日志第二十七轮类型检查器严重问题 #3/#7/#8）**
+   - **_types_compatible 添加 TupleType 递归检查**：参考 ListType 的处理方式，为 TupleType 添加元素级递归兼容检查，修复所有复合类型唯独元组漏掉的 copy-paste 遗漏
+   - **? 操作符顶层使用报错**：新增 `_in_function` 标志区分顶层与函数内部，顶层使用 `?` 时报错 `"? 操作符只能在函数内部使用"`，无返回类型注解的函数内部仍正常工作
+   - **ForExpr/ListComprehension 非列表迭代报错**：迭代对象不是 ListType 也不是 TypeVar 时，报告类型错误而非静默创建 TypeVar 兜底，增强类型系统防护能力
+
+### 测试结果
+
+- 全量测试: **878 passed** (1.45s)
+- Evaluator 示例: hello/fibonacci/pattern_match/loops/list_comprehension/pipe/math/file_io 全部正常输出
+- VM 示例: hello/fibonacci/pattern_match/loops/list_comprehension/pipe/math/file_io 全部正常输出
+- VM TRY_UNWRAP 栈一致化: 三条返回路径统一 pop 语义 ✅
+- VM read_line EOF: 捕获 EOFError 返回空串 ✅ / 与 Evaluator 行为一致 ✅
+- VM range step=0: 步长为 0 时抛出 RuntimeError_ ✅ / 与 Evaluator 语义统一 ✅
+- 编译器导入冲突: 全局变量/ADT 构造器名冲突检测 ✅ / 冲突时抛错而非静默覆盖 ✅
+- 编译器 for break_patches: 死代码已清理 ✅ / while 循环不受影响 ✅
+- 类型检查器 TupleType: 递归兼容检查已添加 ✅
+- 类型检查器顶层 ?: 顶层使用报错 ✅ / 函数内正常工作 ✅
+- 类型检查器 for 迭代: 非列表类型迭代报错 ✅ / TypeVar 暂不报错 ✅
+
+---
 
 ---
 

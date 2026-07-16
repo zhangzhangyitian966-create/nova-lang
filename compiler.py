@@ -31,6 +31,7 @@ from nova.ast_nodes import (
     PatternBool, PatternChar, PatternIdentifier, PatternConstructor,
     PatternTuple, PatternList,
 )
+from nova.errors import RuntimeError_
 
 
 # ============================================================
@@ -221,17 +222,18 @@ class BytecodeCompiler:
         self.bytecode = Bytecode()
         self._builtin_names: set = set()
         self._init_builtin_names()
+        # 全局变量名集合：跟踪已编译的顶层 let/mut 绑定、函数和 ADT 构造器、类型名称
+        self._global_names: set = set()
         # ADT 构造器注册表: {variant_name: (type_name, field_count)}
         # 用于在模式匹配中区分零字段构造器与变量绑定
         self._adt_constructors: Dict[str, Tuple[str, int]] = {}
         self._init_builtin_adt_constructors()
         self._module_manager = module_manager  # ModuleManager 实例
         self._current_file = current_file      # 当前文件路径
-        # 顶层绑定名称集合：跟踪所有已定义的顶层名称（函数、let、mut、类型构造器等）
-        # 用于导入冲突检测
-        self._top_level_names: set = set()
         # 统一循环栈：跟踪所有类型的循环（while/for），用于正确编译 break/continue
-        # 每个元素为 dict: {"type": "while"|"for", "break_patches": List[int], "continue_target": int}
+        # while 循环元素: {"type": "while", "break_patches": List[int], "continue_target": int}
+        # for 循环元素: {"type": "for", "continue_target": int}
+        #   (for 循环的 break 走 VM 级 _for_iters 路径，不需要 break_patches)
         self._loop_stack: List[Dict[str, Any]] = []
 
     def _init_builtin_adt_constructors(self):
@@ -278,14 +280,15 @@ class BytecodeCompiler:
             return
 
         if isinstance(decl, TypeDef):
-            # 注册类型名和所有变体构造器名到顶层绑定集合（用于冲突检测）
-            self._top_level_names.add(decl.name)
+            # 注册类型名和所有变体构造器名到全局名称集合（用于冲突检测）
+            self._global_names.add(decl.name)
             for variant in decl.variants:
                 field_count = len(variant.fields)
                 field_names = tuple(f[0] for f in variant.fields)
                 # 注册构造器到编译器的 ADT 构造器表（用于模式匹配识别）
                 self._adt_constructors[variant.name] = (decl.name, field_count)
-                self._top_level_names.add(variant.name)
+                # 记录全局名称
+                self._global_names.add(variant.name)
                 if variant.fields:
                     # 带字段的构造器 -> 注册构造函数
                     self.bytecode.emit_op(
@@ -299,21 +302,21 @@ class BytecodeCompiler:
                     self.bytecode.emit_op(Op.STORE_VAR, variant.name, False)
 
         elif isinstance(decl, AliasDef):
-            self._top_level_names.add(decl.name)
+            self._global_names.add(decl.name)
 
         elif isinstance(decl, FnDef):
-            self._top_level_names.add(decl.name)
             self._compile_fn_def(decl)
+            self._global_names.add(decl.name)
 
         elif isinstance(decl, LetBinding):
-            self._top_level_names.add(decl.name)
             self._compile_expr(decl.value)
             self.bytecode.emit_op(Op.STORE_VAR, decl.name, False)
+            self._global_names.add(decl.name)
 
         elif isinstance(decl, MutBinding):
-            self._top_level_names.add(decl.name)
             self._compile_expr(decl.value)
             self.bytecode.emit_op(Op.STORE_VAR, decl.name, True)
+            self._global_names.add(decl.name)
 
         else:
             # 顶层表达式
@@ -372,23 +375,33 @@ class BytecodeCompiler:
                 continue
             if isinstance(imp_decl, AliasDef) and imp_decl.name not in module_info.exported_names:
                 continue
-            # 检测同名冲突：如果声明名称已存在于当前编译上下文中，发出警告
-            decl_name = self._get_decl_name(imp_decl)
-            if decl_name is not None:
-                if (decl_name in self._top_level_names
-                        or decl_name in self._builtin_names):
-                    print(
-                        f"warning: import '{decl_name}' shadows existing binding",
-                        file=sys.stderr,
-                    )
-            # 对于 TypeDef，还需要检查每个变体构造器名是否冲突
+            # 检测同名冲突：如果声明名称已存在于当前编译上下文中，报错
             if isinstance(imp_decl, TypeDef):
+                # 先检查类型名本身是否冲突
+                tname = imp_decl.name
+                if (tname in self.bytecode.functions or
+                    tname in self._builtin_names or
+                    tname in self._global_names):
+                    raise RuntimeError_(
+                        f"导入名称 '{tname}' 与已存在的绑定冲突"
+                    )
+                # TypeDef 引入多个变体构造器名称，需逐一检查
                 for variant in imp_decl.variants:
-                    if (variant.name in self._top_level_names
-                            or variant.name in self._builtin_names):
-                        print(
-                            f"warning: import '{variant.name}' (constructor of {decl_name}) shadows existing binding",
-                            file=sys.stderr,
+                    vname = variant.name
+                    if (vname in self.bytecode.functions or
+                        vname in self._builtin_names or
+                        vname in self._global_names):
+                        raise RuntimeError_(
+                            f"导入名称 '{vname}' 与已存在的绑定冲突"
+                        )
+            else:
+                decl_name = self._get_decl_name(imp_decl)
+                if decl_name is not None:
+                    if (decl_name in self.bytecode.functions or
+                        decl_name in self._builtin_names or
+                        decl_name in self._global_names):
+                        raise RuntimeError_(
+                            f"导入名称 '{decl_name}' 与已存在的绑定冲突"
                         )
             # 内联编译
             self._compile_decl(imp_decl)
@@ -1048,7 +1061,6 @@ class BytecodeCompiler:
         # 推入 for 循环栈帧，使 break/continue 能正确识别最内层循环类型
         self._loop_stack.append({
             "type": "for",
-            "break_patches": [],
             "continue_target": loop_start,
         })
 
@@ -1166,7 +1178,6 @@ class BytecodeCompiler:
         # 推入 for 循环栈帧，使 break/continue 能正确识别最内层循环类型
         self._loop_stack.append({
             "type": "for",
-            "break_patches": [],
             "continue_target": loop_start,
         })
 
