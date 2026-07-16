@@ -1,5 +1,74 @@
 # Nova 自动改进日志
 
+## 2026-07-16 自动改进（第三十轮）
+
+基于 AUTO_REVIEW_LOG.md 第二十六轮审查日志的 P0/P1 级严重问题驱动改进（阶段一检查 + 阶段二开发 + 阶段三测试）。
+
+### 每日发现的问题
+
+#### evaluator.py
+- **闭包捕获是引用语义，与 VM 的值语义根本不一致（evaluator.py:46-53, 450-469）**：Evaluator 中闭包修改 mut 捕获变量会影响外部，VM 中则不会，同一程序在两个后端产生不同结果
+  - 审查日志追问结论：不能接受。同一语言的不同执行路径必须语义一致，这是最基本的正确性要求
+  - 根因：Evaluator 的 NovaClosure 持有 Environment 引用，赋值沿作用域链向上修改外部环境；VM 的 NovaClosure 持有 captured_vars 值副本，赋值只修改本地帧
+  - 影响：所有包含闭包 + mut 捕获变量 + 赋值的程序，在两个后端结果不同
+  - 验证：`make_counter` 函数中闭包递增 mut 变量，Evaluator 返回递增后的值，VM 返回初始值
+
+#### compiler.py + vm.py
+- **CharLiteral 被编译为 CONST_STRING，字符类型完全缺失（compiler.py:424-425）**：'a' 与 "a" 在运行时无法区分，都用 Python str 表示，类型系统根基被破坏
+  - 审查日志追问结论：完全不能接受。Char 是独立的基本类型，与 String 明确区分
+  - 根因：compiler.py 将 CharLiteral 编译为 CONST_STRING 指令，运行时 Char 与 String 共用 Python str 类型
+  - 影响：`'a' == "a"` 返回 True、Char 可参与字符串拼接、Char 模式匹配用 `len(str)==1` hack
+  - 验证：类型检查器层面 Char 与 String 是不同类型，但运行时完全无法区分
+
+#### type_checker.py
+- **PatternList 仅检查元素类型，不验证模式长度（type_checker.py:1239-1244）**：列表模式匹配时只检查主题类型是否为 ListType 及元素类型兼容性，完全不检查模式元素数量与列表长度是否匹配
+  - 审查日志追问结论：中等问题。当前 PatternList 无 rest 模式，应为固定长度匹配，应当检查长度
+  - 根因：实现时参考了列表同质特性忽略了长度检查，与同文件 PatternTuple 的严谨实现不一致
+
+- **逻辑操作符错误消息硬编码为 '&&'，|| 时消息错误（type_checker.py:1296,1299）**：逻辑操作符类型检查中，左右操作数非 Bool 时的错误消息永远显示 `'&&'`，即使实际操作符是 `||`
+  - 审查日志追问结论：轻微问题。功能正确但错误消息误导用户
+  - 根因：复制粘贴错误，消息中硬编码了 `'&&'` 字符串，未使用 `expr.op` 变量
+
+- **ForExpr/ListComprehension 中 Tuple 遍历取第一个元素类型（type_checker.py:1072-1073, 1108-1109）**：类型检查器允许对元组进行 for 遍历，且取第一个元素类型作为循环变量类型
+  - 审查日志追问结论：中等问题。元组本不应支持 for 遍历，VM 运行时会抛出 RuntimeError_
+  - 根因：类型检查器错误假设元组可迭代且元素类型一致，与 VM 的 FOR_ITER 语义不一致
+
+- **FnCall 中绕过 _report_error 直接调用 error_collector.add（type_checker.py:781-786）**：对 TypeVar 类型值进行函数调用时，直接手动构造 TypeCheckError，而不是使用统一的 _report_error 方法
+  - 审查日志追问结论：轻微问题。错误报告路径不一致，可能导致收集模式行为差异
+  - 根因：早期实现遗留，统一错误报告路径时遗漏了这一处
+
+### 本次修复内容（基于审查日志 Issue）
+
+1. **evaluator.py — 闭包语义统一为值语义（基于审查日志 evaluator.py:46-53 / 第二十六轮严重问题 #1）**
+   - 闭包创建时复制捕获变量的值，而非保存环境引用
+   - 闭包内赋值只修改本地副本，不影响外部环境，与 VM 行为一致
+   - 新增测试：闭包 mut 变量捕获语义一致性
+
+2. **compiler.py + vm.py — Char 类型独立支持（基于审查日志 compiler.py:424-425 / 第二十六轮严重问题 #2）**
+   - 新增 Op.CONST_CHAR 指令
+   - compiler.py 中 CharLiteral 改为发射 CONST_CHAR
+   - vm.py 中新增 NovaChar 运行时值类，实现 CONST_CHAR 指令
+   - 修改比较/拼接等操作区分 Char 与 String
+   - 新增测试：Char 与 String 类型区分、Char 模式匹配
+
+3. **type_checker.py — 四项问题修复（基于审查日志第二十六轮中等/轻微问题）**
+   - PatternList 添加模式长度检查
+   - 逻辑操作符错误消息使用实际操作符
+   - ForExpr/ListComprehension 中元组遍历改为报错
+   - FnCall 错误报告统一使用 _report_error
+   - 新增对应测试用例
+
+### 测试结果
+
+- 全量测试: **878 passed** (1.06s)
+- Evaluator 示例: hello/fibonacci/pattern_match/loops/pipe/math/list_comprehension 全部正常输出
+- VM 示例: hello/fibonacci/pattern_match 全部正常输出
+- 闭包语义统一: 闭包内 mut 变量修改不影响外部 ✅ / 与 VM 行为一致 ✅
+- Char 类型独立: Char 与 String `==` 返回 False ✅ / Char 比较正常 ✅ / Char 拼接报错 ✅
+- 类型检查器修复: 逻辑操作符消息正确 ✅ / Tuple 遍历报错 ✅ / FnCall 错误路径统一 ✅
+
+---
+
 ## 2026-07-16 自动改进（第二十九轮）
 
 基于 AUTO_REVIEW_LOG.md 第二十六轮审查日志的 P0/P1 级严重问题驱动改进（阶段一检查 + 阶段二开发 + 阶段三测试）。

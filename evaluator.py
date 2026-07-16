@@ -44,13 +44,21 @@ from nova.errors import RuntimeError_, BreakSignal, ContinueSignal, ReturnSignal
 # ============================================================
 
 class NovaClosure:
-    """Nova 函数闭包值"""
+    """Nova 函数闭包值（值语义/快照语义）
 
-    def __init__(self, name: str, params: List[Param], body, env: Environment):
+    闭包创建时快照所有可变变量的值，调用时在子环境中创建本地副本。
+    闭包内对 mut 变量的赋值只修改本地副本，不影响外部环境。
+    同一闭包多次调用之间，mut 变量状态也不共享（每次调用都从快照开始）。
+    不可变变量和函数名通过环境链查找（引用语义无副作用）。
+    """
+
+    def __init__(self, name: str, params: List[Param], body, env: Environment,
+                 captured_mut_vars: Dict[str, Any] = None):
         self.name = name
         self.params = params
         self.body = body
-        self.env = env  # 闭包捕获的环境
+        self.env = env  # 闭包捕获的环境（用于查找链，函数名等不可变绑定）
+        self.captured_mut_vars = captured_mut_vars if captured_mut_vars is not None else {}  # mut 变量快照 {name: value}
 
     def __repr__(self):
         return f"<fn {self.name}>"
@@ -80,6 +88,48 @@ class NovaADTValue:
 
     def __hash__(self):
         return hash((self.type_name, self.variant_name, tuple(self.fields)))
+
+
+class NovaChar:
+    """字符类型值：包装单个 Unicode 字符，与 String 明确区分"""
+
+    def __init__(self, value: str):
+        assert isinstance(value, str) and len(value) == 1, "NovaChar 必须包装单个字符"
+        self.value = value
+
+    def __repr__(self):
+        return f"'{self.value}'"
+
+    def __eq__(self, other):
+        if isinstance(other, NovaChar):
+            return self.value == other.value
+        return False
+
+    def __ne__(self, other):
+        return not self.__eq__(other)
+
+    def __lt__(self, other):
+        if isinstance(other, NovaChar):
+            return ord(self.value) < ord(other.value)
+        return NotImplemented
+
+    def __le__(self, other):
+        if isinstance(other, NovaChar):
+            return ord(self.value) <= ord(other.value)
+        return NotImplemented
+
+    def __gt__(self, other):
+        if isinstance(other, NovaChar):
+            return ord(self.value) > ord(other.value)
+        return NotImplemented
+
+    def __ge__(self, other):
+        if isinstance(other, NovaChar):
+            return ord(self.value) >= ord(other.value)
+        return NotImplemented
+
+    def __hash__(self):
+        return hash(('char', self.value))
 
 class BuiltinFn:
     """内置函数包装"""
@@ -311,6 +361,8 @@ class Evaluator:
             return None
         if val is None:
             return None
+        if isinstance(val, NovaChar):
+            return val.value
         if isinstance(val, NovaADTValue):
             if val.variant_name == "None":
                 return None
@@ -397,6 +449,8 @@ class Evaluator:
             return "null"
         if isinstance(val, bool):
             return "true" if val else "false"
+        if isinstance(val, NovaChar):
+            return f"'{val.value}'"
         if isinstance(val, NovaADTValue):
             return repr(val)
         if isinstance(val, list):
@@ -410,6 +464,22 @@ class Evaluator:
         if isinstance(val, BuiltinFn):
             return f"<builtin {val.name}>"
         return str(val)
+
+    def _capture_mut_vars(self, env: Environment) -> Dict[str, Any]:
+        """捕获环境中所有可变变量的值快照
+
+        沿作用域链向上收集所有 mut 绑定的当前值。
+        闭包调用时将这些值作为本地副本，赋值只影响本地副本，不影响外部。
+        不可变变量不需要快照（因为无法修改，引用语义和值语义无区别）。
+        """
+        captured: Dict[str, Any] = {}
+        current = env
+        while current is not None:
+            for name, binding in current.bindings.items():
+                if binding.mutable and name not in captured:
+                    captured[name] = binding.value
+            current = current.parent
+        return captured
 
     def _call_fn(self, fn, args: List[Any]) -> Any:
         """调用函数（支持闭包和内置函数，支持部分应用/柯里化）"""
@@ -428,26 +498,37 @@ class Evaluator:
 
         if isinstance(fn, NovaClosure):
             if len(args) < len(fn.params):
-                # 部分应用：返回捕获已提供参数的闭包
+                # 部分应用：返回捕获已提供参数的闭包（值语义：mut 变量快照）
                 captured_params = fn.params[:len(args)]
                 remaining_params = fn.params[len(args):]
 
-                # 创建捕获环境：在原始 env 基础上绑定已捕获的参数
+                # 在原始 env 基础上创建子环境，绑定已捕获的参数
                 captured_env = fn.env.child()
                 for param, arg in zip(captured_params, args):
                     captured_env.define(param.name, arg)
+
+                # 部分应用时重新快照 mut 变量（包括新绑定的参数如果是 mut 的话）
+                # 注意：参数默认不可变，所以 captured_mut_vars 基本不变
+                captured_mut = dict(fn.captured_mut_vars)
 
                 return NovaClosure(
                     name=f"<partial {fn.name}>",
                     params=remaining_params,
                     body=fn.body,
                     env=captured_env,
+                    captured_mut_vars=captured_mut,
                 )
             if len(args) > len(fn.params):
                 raise RuntimeError_(
                     f"函数 '{fn.name}' 期望 {len(fn.params)} 个参数，但传入了 {len(args)} 个"
                 )
+            # 值语义：在闭包环境的子环境中执行，但先将所有捕获的 mut 变量
+            # 在子环境中定义为本地副本，这样赋值只影响本地，不向上传播
             child_env = fn.env.child()
+            # 先填入所有捕获的 mut 变量快照（作为本地可变绑定，shadow 外层）
+            for name, value in fn.captured_mut_vars.items():
+                child_env.define(name, value, mutable=True)
+            # 再填入参数（参数默认不可变）
             for param, arg in zip(fn.params, args):
                 child_env.define(param.name, arg)
 
@@ -517,12 +598,14 @@ class Evaluator:
     def _collect_decl(self, decl):
         """第一遍：注册函数和类型声明（不求值函数体）"""
         if isinstance(decl, FnDef):
-            # 创建闭包（捕获当前环境，即顶层环境）
+            # 创建闭包（捕获当前环境和 mut 变量快照）
+            captured_mut = self._capture_mut_vars(self.env)
             closure = NovaClosure(
                 name=decl.name,
                 params=decl.params,
                 body=decl.body,
                 env=self.env,
+                captured_mut_vars=captured_mut,
             )
             self.env.define(decl.name, closure)
 
@@ -610,12 +693,14 @@ class Evaluator:
             self.env.define(decl.name, val, mutable=True)
 
         elif isinstance(decl, FnDef):
-            # 创建闭包
+            # 创建闭包（捕获当前环境和 mut 变量快照）
+            captured_mut = self._capture_mut_vars(self.env)
             closure = NovaClosure(
                 name=decl.name,
                 params=decl.params,
                 body=decl.body,
                 env=self.env,
+                captured_mut_vars=captured_mut,
             )
             self.env.define(decl.name, closure)
 
@@ -725,7 +810,7 @@ class Evaluator:
             return expr.value
 
         elif isinstance(expr, CharLiteral):
-            return expr.value
+            return NovaChar(expr.value)
 
         elif isinstance(expr, BoolLiteral):
             return expr.value
@@ -777,11 +862,13 @@ class Evaluator:
 
         # --- Lambda ---
         elif isinstance(expr, Lambda):
+            captured_mut = self._capture_mut_vars(self.env)
             return NovaClosure(
                 name="<lambda>",
                 params=expr.params,
                 body=expr.body,
                 env=self.env,
+                captured_mut_vars=captured_mut,
             )
 
         # --- if-then-else ---
@@ -1008,21 +1095,30 @@ class Evaluator:
             except Exception as e:
                 raise RuntimeError_(f"算术运算 '%' 失败: {e}")
         elif expr.op == "++":
+            if isinstance(left, NovaChar) or isinstance(right, NovaChar):
+                raise RuntimeError_("Char 不能参与字符串拼接")
             if isinstance(left, str) and isinstance(right, str):
                 return left + right
             raise RuntimeError_("类型错误：操作符 '++' 只能用于 String 类型")
         elif expr.op == "==":
             # Nova 中 Bool 和 Int 是不同类型：bool 与非 bool 比较永远不相等
+            # Char 与 String 是不同类型：比较永远不相等
             if isinstance(left, bool) != isinstance(right, bool):
+                return False
+            if isinstance(left, NovaChar) != isinstance(right, NovaChar):
                 return False
             return left == right
         elif expr.op == "!=":
             if isinstance(left, bool) != isinstance(right, bool):
                 return True
+            if isinstance(left, NovaChar) != isinstance(right, NovaChar):
+                return True
             return left != right
         elif expr.op in ("<", ">", "<=", ">="):
             if isinstance(left, bool) != isinstance(right, bool):
                 raise RuntimeError_("类型错误：Bool 类型只能与 Bool 类型进行比较")
+            if isinstance(left, NovaChar) != isinstance(right, NovaChar):
+                raise RuntimeError_("类型错误：Char 不能与非 Char 类型进行比较")
             if expr.op == "<":
                 return left < right
             elif expr.op == ">":
@@ -1210,7 +1306,7 @@ class Evaluator:
             return isinstance(value, bool) and value == pattern.value
 
         elif isinstance(pattern, PatternChar):
-            return isinstance(value, str) and len(value) == 1 and value == pattern.value
+            return isinstance(value, NovaChar) and value.value == pattern.value
 
         elif isinstance(pattern, PatternIdentifier):
             bindings[pattern.name] = value

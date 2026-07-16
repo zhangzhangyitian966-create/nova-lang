@@ -778,12 +778,7 @@ class TypeChecker:
                 # 对类型未确定的值进行函数调用：类型推断不完整
                 # 记录到错误收集器，但继续放行（返回 TypeVar 表示未知结果类型）
                 # 这是因为被调用者可能是高阶函数参数，其类型需从调用上下文推断
-                self.error_collector.add(TypeCheckError(
-                    f"无法对未确定类型的值进行函数调用（类型推断不完整）",
-                    expr.span.line if expr.span else -1,
-                    expr.span.column if expr.span else -1,
-                    source=self._source,
-                ))
+                self._report_error("无法对未确定类型的值进行函数调用（类型推断不完整）", expr)
                 return TypeVar(f"ret_{callee_ty.name}")
             else:
                 self._report_error(f"无法对非函数类型 {callee_ty} 进行调用", expr)
@@ -1070,7 +1065,8 @@ class TypeChecker:
                 if isinstance(iter_ty, ListType):
                     elem_ty = iter_ty.elem_type
                 elif isinstance(iter_ty, TupleType):
-                    elem_ty = iter_ty.elements[0] if iter_ty.elements else TypeVar("for_elem")
+                    self._report_error("元组不可迭代", expr.iterable)
+                    return ERROR_TYPE
                 else:
                     elem_ty = TypeVar("for_elem")
 
@@ -1106,7 +1102,8 @@ class TypeChecker:
                 if isinstance(iter_ty, ListType):
                     elem_ty = iter_ty.elem_type
                 elif isinstance(iter_ty, TupleType):
-                    elem_ty = iter_ty.elements[0] if iter_ty.elements else TypeVar("lc_elem")
+                    self._report_error("元组不可迭代", expr.iterable)
+                    return ERROR_TYPE
                 else:
                     elem_ty = TypeVar("lc_elem")
 
@@ -1293,10 +1290,10 @@ class TypeChecker:
         if expr.op in ("&&", "||"):
             has_error = False
             if not self._types_compatible(left_ty, BOOL_T):
-                self._report_error(f"'&&' 左侧必须是 Bool，得到 {left_ty}", expr.left)
+                self._report_error(f"'{expr.op}' 左侧必须是 Bool，得到 {left_ty}", expr.left)
                 has_error = True
             if not self._types_compatible(right_ty, BOOL_T):
-                self._report_error(f"'&&' 右侧必须是 Bool，得到 {right_ty}", expr.right)
+                self._report_error(f"'{expr.op}' 右侧必须是 Bool，得到 {right_ty}", expr.right)
                 has_error = True
             return ERROR_TYPE if has_error else BOOL_T
 
@@ -1539,6 +1536,11 @@ class TypeChecker:
             )
         if isinstance(ty, ADTType):
             return ADTType(ty.name, [self._expand_alias(p, _alias_stack) for p in ty.type_params])
+        if isinstance(ty, TypeVar):
+            # TypeVar 是叶子类型，不含别名引用，直接返回
+            # 泛型别名中的类型变量在展开时保持不变，由调用方负责实例化
+            return ty
+        # PrimType, ErrorType 等叶子类型直接返回
         return ty
 
     def _types_compatible(self, a: NovaType, b: NovaType) -> bool:

@@ -72,6 +72,48 @@ class NovaADTValue:
         return hash((self.type_name, self.variant_name, tuple(self.fields)))
 
 
+class NovaChar:
+    """字符类型值：包装单个 Unicode 字符，与 String 明确区分"""
+
+    def __init__(self, value: str):
+        assert isinstance(value, str) and len(value) == 1, "NovaChar 必须包装单个字符"
+        self.value = value
+
+    def __repr__(self):
+        return f"'{self.value}'"
+
+    def __eq__(self, other):
+        if isinstance(other, NovaChar):
+            return self.value == other.value
+        return False
+
+    def __ne__(self, other):
+        return not self.__eq__(other)
+
+    def __lt__(self, other):
+        if isinstance(other, NovaChar):
+            return ord(self.value) < ord(other.value)
+        return NotImplemented
+
+    def __le__(self, other):
+        if isinstance(other, NovaChar):
+            return ord(self.value) <= ord(other.value)
+        return NotImplemented
+
+    def __gt__(self, other):
+        if isinstance(other, NovaChar):
+            return ord(self.value) > ord(other.value)
+        return NotImplemented
+
+    def __ge__(self, other):
+        if isinstance(other, NovaChar):
+            return ord(self.value) >= ord(other.value)
+        return NotImplemented
+
+    def __hash__(self):
+        return hash(('char', self.value))
+
+
 class NovaClosure:
     """Nova 函数闭包值（VM 版）"""
 
@@ -333,6 +375,8 @@ class NovaVM:
     def _convert_nova_to_json(self, val):
         if val is UNIT:
             return None
+        if isinstance(val, NovaChar):
+            return val.value
         if isinstance(val, NovaADTValue):
             if val.variant_name == "None":
                 return None
@@ -357,6 +401,8 @@ class NovaVM:
             return "null"
         if isinstance(val, bool):
             return "true" if val else "false"
+        if isinstance(val, NovaChar):
+            return f"'{val.value}'"
         if isinstance(val, NovaADTValue):
             return repr(val)
         if isinstance(val, list):
@@ -646,6 +692,11 @@ class NovaVM:
             # Push string constant onto stack
             self.stack.append(instr.operands[0])
 
+        elif opcode == Op.CONST_CHAR:
+            # Stack: [] -> [NovaChar]
+            # Push char constant onto stack
+            self.stack.append(NovaChar(instr.operands[0]))
+
         elif opcode == Op.CONST_BOOL:
             # Stack: [] -> [value]
             # Push boolean constant onto stack
@@ -788,8 +839,10 @@ class NovaVM:
 
         elif opcode == Op.CONCAT:
             # Stack: [a, b] -> [a++b]
-            # 仅允许 str 类型拼接
+            # 仅允许 str 类型拼接，禁止 Char 参与
             a, b = self._pop(2)
+            if isinstance(a, NovaChar) or isinstance(b, NovaChar):
+                raise RuntimeError_("Char 不能参与字符串拼接")
             if isinstance(a, str) and isinstance(b, str):
                 self.stack.append(a + b)
             else:
@@ -799,8 +852,12 @@ class NovaVM:
             # Stack: [a, b] -> [a==b]
             # Pop two values, compare equality, push boolean result
             # Nova 中 Bool 和 Int 是不同类型：bool 与非 bool 比较永远不相等
+            # Char 与 String 是不同类型：比较永远不相等
             a, b = self._pop(2)
             if isinstance(a, bool) != isinstance(b, bool):
+                self.stack.append(False)
+            elif isinstance(a, NovaChar) != isinstance(b, NovaChar):
+                # Char 与非 Char 比较永远不相等
                 self.stack.append(False)
             else:
                 self.stack.append(a == b)
@@ -811,6 +868,9 @@ class NovaVM:
             a, b = self._pop(2)
             if isinstance(a, bool) != isinstance(b, bool):
                 self.stack.append(True)
+            elif isinstance(a, NovaChar) != isinstance(b, NovaChar):
+                # Char 与非 Char 比较永远不相等
+                self.stack.append(True)
             else:
                 self.stack.append(a != b)
 
@@ -820,6 +880,8 @@ class NovaVM:
             a, b = self._pop(2)
             if isinstance(a, bool) != isinstance(b, bool):
                 raise RuntimeError_("类型错误：Bool 不能与非 Bool 类型进行比较")
+            if isinstance(a, NovaChar) != isinstance(b, NovaChar):
+                raise RuntimeError_("类型错误：Char 不能与非 Char 类型进行比较")
             self.stack.append(a < b)
 
         elif opcode == Op.GT:
@@ -828,6 +890,8 @@ class NovaVM:
             a, b = self._pop(2)
             if isinstance(a, bool) != isinstance(b, bool):
                 raise RuntimeError_("类型错误：Bool 不能与非 Bool 类型进行比较")
+            if isinstance(a, NovaChar) != isinstance(b, NovaChar):
+                raise RuntimeError_("类型错误：Char 不能与非 Char 类型进行比较")
             self.stack.append(a > b)
 
         elif opcode == Op.LTE:
@@ -836,6 +900,8 @@ class NovaVM:
             a, b = self._pop(2)
             if isinstance(a, bool) != isinstance(b, bool):
                 raise RuntimeError_("类型错误：Bool 不能与非 Bool 类型进行比较")
+            if isinstance(a, NovaChar) != isinstance(b, NovaChar):
+                raise RuntimeError_("类型错误：Char 不能与非 Char 类型进行比较")
             self.stack.append(a <= b)
 
         elif opcode == Op.GTE:
@@ -844,6 +910,8 @@ class NovaVM:
             a, b = self._pop(2)
             if isinstance(a, bool) != isinstance(b, bool):
                 raise RuntimeError_("类型错误：Bool 不能与非 Bool 类型进行比较")
+            if isinstance(a, NovaChar) != isinstance(b, NovaChar):
+                raise RuntimeError_("类型错误：Char 不能与非 Char 类型进行比较")
             self.stack.append(a >= b)
 
         elif opcode == Op.AND:
@@ -1291,13 +1359,13 @@ class NovaVM:
 
         elif opcode == Op.MATCH_TEST_CHAR:
             # Stack: [subject] -> [] (match success) or [subject] (match fail)
-            # Peek subject; if string (char) and equals test_val, pop it; else jump to fail_ip
+            # Peek subject; if NovaChar and equals test_val, pop it; else jump to fail_ip
             test_val = instr.operands[0]
             fail_ip = instr.operands[1]
             if not self.stack:
                 raise RuntimeError_("VM stack underflow: MATCH_TEST_CHAR")
             subject = self.stack[-1]
-            if isinstance(subject, str) and len(subject) == 1 and subject == test_val:
+            if isinstance(subject, NovaChar) and subject.value == test_val:
                 self._pop()
             else:
                 self._pattern_fail_cleanup(fail_ip)

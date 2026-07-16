@@ -2315,7 +2315,7 @@ class TestBytecodeVM(unittest.TestCase):
 
     def test_vm_higher_order(self):
         vm = self._vm_run("""
-            fn apply(f, x) -> Int { f(x) }
+            fn apply(f: (Int) -> Int, x: Int) -> Int { f(x) }
             let x = apply(|n| n * n, 5)
         """)
         self.assertEqual(vm.get_global("x"), 25)

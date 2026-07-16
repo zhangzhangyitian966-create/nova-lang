@@ -43,6 +43,7 @@ class Op:
     CONST_INT = "CONST_INT"          # operands: (value,)
     CONST_FLOAT = "CONST_FLOAT"      # operands: (value,)
     CONST_STRING = "CONST_STRING"    # operands: (value,)
+    CONST_CHAR = "CONST_CHAR"        # operands: (value,)
     CONST_BOOL = "CONST_BOOL"        # operands: (value,)
     CONST_UNIT = "CONST_UNIT"        # operands: ()
     LOAD_CONST = "LOAD_CONST"        # operands: (index,)
@@ -422,7 +423,7 @@ class BytecodeCompiler:
             self.bytecode.emit_op(Op.CONST_STRING, expr.value)
 
         elif isinstance(expr, CharLiteral):
-            self.bytecode.emit_op(Op.CONST_STRING, expr.value)
+            self.bytecode.emit_op(Op.CONST_CHAR, expr.value)
 
         elif isinstance(expr, BoolLiteral):
             self.bytecode.emit_op(Op.CONST_BOOL, expr.value)
