@@ -318,7 +318,8 @@ class WasmGCBackend:
                 self._emit(f"(local.get ${instr.src_locs[0][0]})")
 
         elif isinstance(instr, LIRStoreReg):
-            pass
+            if instr.dst_loc:
+                self._emit(f"(local.set ${instr.dst_loc[0]})")
 
     def _emit_load_const(self, instr: LIRLoadConst):
         if instr.const_type == "int":

@@ -1,8 +1,31 @@
 {
-  "cycles": 0,
-  "completed_tasks": [],
+  "cycles": 1,
+  "completed_tasks": [
+    "dce_pass",
+    "wasmgc_storereg",
+    "fix_break_continue"
+  ],
   "failed_tasks": [],
-  "task_history": [],
+  "task_history": [
+    {
+      "cycle": 1,
+      "task_id": "dce_pass",
+      "status": "completed",
+      "details": "实现了完整的死代码消除 Pass，包括反向扫描、使用变量收集、副作用判断，支持 20+ 种 HIR 节点递归消除"
+    },
+    {
+      "cycle": 1,
+      "task_id": "wasmgc_storereg",
+      "status": "completed",
+      "details": "实现了 WasmGC 后端 LIRStoreReg → local.set 代码生成"
+    },
+    {
+      "cycle": 1,
+      "task_id": "fix_break_continue",
+      "status": "completed",
+      "details": "实现了 MIR 层循环栈追踪，break/continue 正确降级为 MIRJump 到 exit/header 块"
+    }
+  ],
   "current_cycle": null,
   "tasks": [
     {
@@ -13,7 +36,7 @@
       "priority": 90,
       "category": "optimization",
       "estimated": "1-2 小时",
-      "status": "pending"
+      "status": "completed"
     },
     {
       "id": "inlining_pass",
@@ -63,7 +86,7 @@
       "priority": 88,
       "category": "ir",
       "estimated": "1-2 天",
-      "status": "pending"
+      "status": "completed"
     },
     {
       "id": "fix_phi_lowering",
@@ -83,7 +106,7 @@
       "priority": 65,
       "category": "backend",
       "estimated": "1 小时",
-      "status": "pending"
+      "status": "completed"
     },
     {
       "id": "native_call_abi",

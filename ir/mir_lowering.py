@@ -83,6 +83,7 @@ class MIRLowering:
         self.env = {}
         self.functions = {}
         self.all_blocks = []
+        self.loop_stack = []  # 循环栈: [(header_label, exit_label), ...]
 
     def lower(self, hir_module):
         mir_module = MIRModule(name=hir_module.name)
@@ -291,11 +292,21 @@ class MIRLowering:
             return self._lower_while_expr(hir_expr, block)
 
         if isinstance(hir_expr, HIRBreakExpr):
-            block.terminator = MIRPanic("break")
+            if self.loop_stack:
+                _, exit_label = self.loop_stack[-1]
+                block.terminator = MIRJump(exit_label)
+            else:
+                # 不在循环内的 break → 降级为 panic
+                block.terminator = MIRPanic("break outside loop")
             return None
 
         if isinstance(hir_expr, HIRContinueExpr):
-            block.terminator = MIRPanic("continue")
+            if self.loop_stack:
+                header_label, _ = self.loop_stack[-1]
+                block.terminator = MIRJump(header_label)
+            else:
+                # 不在循环内的 continue → 降级为 panic
+                block.terminator = MIRPanic("continue outside loop")
             return None
 
         if isinstance(hir_expr, HIRAssignExpr):
@@ -432,9 +443,15 @@ class MIRLowering:
             iter_ssa or "", body_block.label, exit_block.label
         )
 
+        # 压入循环上下文（break → exit, continue → header）
+        self.loop_stack.append((header_block.label, exit_block.label))
+
         self._lower_expr(hir_expr.body, body_block)
         if body_block.terminator is None:
             body_block.terminator = MIRJump(header_block.label)
+
+        # 弹出循环上下文
+        self.loop_stack.pop()
 
         self.all_blocks.extend([header_block, body_block, exit_block])
         self.current_block = exit_block
@@ -451,9 +468,15 @@ class MIRLowering:
             cond_ssa or "", body_block.label, exit_block.label
         )
 
+        # 压入循环上下文（break → exit, continue → header）
+        self.loop_stack.append((header_block.label, exit_block.label))
+
         self._lower_expr(hir_expr.body, body_block)
         if body_block.terminator is None:
             body_block.terminator = MIRJump(header_block.label)
+
+        # 弹出循环上下文
+        self.loop_stack.pop()
 
         self.all_blocks.extend([header_block, body_block, exit_block])
         self.current_block = exit_block
