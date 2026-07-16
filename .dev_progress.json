@@ -5,7 +5,8 @@
     "inlining_pass"
   ],
   "failed": [
-    "fix_lir_mapbuild"
+    "fix_lir_mapbuild",
+    "wasmgc_storereg"
   ],
-  "last_update": "2026-07-16T09:55:16.597602"
+  "last_update": "2026-07-16T09:57:46.375325"
 }
