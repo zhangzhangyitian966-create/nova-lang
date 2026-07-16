@@ -1,0 +1,109 @@
+{
+  "cycles": 0,
+  "completed_tasks": [],
+  "failed_tasks": [],
+  "task_history": [],
+  "current_cycle": null,
+  "tasks": [
+    {
+      "id": "dce_pass",
+      "name": "实现死代码消除 Pass (DCE)",
+      "description": "在 HIR 层实现 DeadCodeElimination Pass，移除未使用的 let 绑定和无副作用表达式",
+      "difficulty": "easy",
+      "priority": 90,
+      "category": "optimization",
+      "estimated": "1-2 小时",
+      "status": "pending"
+    },
+    {
+      "id": "inlining_pass",
+      "name": "实现函数内联 Pass",
+      "description": "实现 Inlining Pass，内联小型单表达式函数",
+      "difficulty": "medium",
+      "priority": 80,
+      "category": "optimization",
+      "estimated": "2-4 小时",
+      "status": "pending"
+    },
+    {
+      "id": "fix_native_test",
+      "name": "修复原生后端测试导入",
+      "description": "修复 test_native_backend.py 的导入路径问题",
+      "difficulty": "easy",
+      "priority": 85,
+      "category": "test",
+      "estimated": "30 分钟",
+      "status": "pending"
+    },
+    {
+      "id": "cse_pass",
+      "name": "实现公共子表达式消除 Pass (CSE)",
+      "description": "在 MIR 层实现基于哈希的公共子表达式消除",
+      "difficulty": "medium",
+      "priority": 70,
+      "category": "optimization",
+      "estimated": "3-5 小时",
+      "status": "pending"
+    },
+    {
+      "id": "fix_list_comprehension",
+      "name": "修复列表推导式 MIR 降级",
+      "description": "列表推导式当前直接返回空列表，需展开为 for 循环+list_push",
+      "difficulty": "medium",
+      "priority": 85,
+      "category": "ir",
+      "estimated": "1-2 天",
+      "status": "pending"
+    },
+    {
+      "id": "fix_break_continue",
+      "name": "修复 break/continue 控制流",
+      "description": "break/continue 当前用 panic 代替，需实现正确的循环控制流",
+      "difficulty": "medium",
+      "priority": 88,
+      "category": "ir",
+      "estimated": "1-2 天",
+      "status": "pending"
+    },
+    {
+      "id": "fix_phi_lowering",
+      "name": "修复 Phi 节点降级",
+      "description": "Phi 节点当前只取第一个 source，需正确降级为前驱块 copy 指令",
+      "difficulty": "hard",
+      "priority": 75,
+      "category": "ir",
+      "estimated": "2-4 天",
+      "status": "pending"
+    },
+    {
+      "id": "wasmgc_storereg",
+      "name": "补充 WasmGC StoreReg 实现",
+      "description": "WasmGC 后端 LIRStoreReg 是空 pass，需实现为 local.set",
+      "difficulty": "easy",
+      "priority": 65,
+      "category": "backend",
+      "estimated": "1 小时",
+      "status": "pending"
+    },
+    {
+      "id": "native_call_abi",
+      "name": "实现原生后端函数调用 ABI",
+      "description": "实现 System V AMD64 ABI 参数传递和 call 地址回填",
+      "difficulty": "hard",
+      "priority": 72,
+      "category": "backend",
+      "estimated": "3-5 天",
+      "status": "pending"
+    },
+    {
+      "id": "licm_pass",
+      "name": "实现循环不变量外提 Pass (LICM)",
+      "description": "在 MIR 层识别循环，将不变运算外提到循环外",
+      "difficulty": "hard",
+      "priority": 60,
+      "category": "optimization",
+      "estimated": "1-2 周",
+      "status": "pending"
+    }
+  ]
+}
