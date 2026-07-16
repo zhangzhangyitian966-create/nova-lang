@@ -4,6 +4,103 @@
 
 ---
 
+## 2026-07-16 14:00 第7轮LLM智能开发
+
+### 本轮概览
+- **开发任务数**: 2
+- **成功**: 2
+- **失败**: 0
+- **测试结果**: 403/403 通过（无回归）
+- **开发前基线**: 403/403
+- **开发后状态**: 403/403
+
+### 任务选择依据
+严格执行第 6 轮评审的"下一步计划"，本轮聚焦 **MIR 正确性修复（一）**：
+1. 修复 MIR match 降级（最高优先级，评审明确指出"完全错误"）
+2. 修复 MIR 循环变量绑定（高优先级，影响所有循环程序）
+
+选择理由：
+- 第 6 轮评审明确规划第 7 轮做 match + 循环变量修复
+- 两个任务都是"能不能用"的基础正确性问题，而非优化问题
+- 难度适中（均为 medium），可在一轮内完成
+- 为后续 SSA 系统性修复打基础
+- 可立即通过 C 后端 LIR 路径验证效果
+
+### 已完成任务
+
+#### 1. ✅ 完善 MIR match 降级（真正的模式匹配）
+- **难度**: medium
+- **分类**: IR 降级 / 正确性修复
+- **文件**: `ir/mir_lowering.py`
+- **问题**: `_lower_match_expr` 是假实现——所有 arm 用 `MIRJump` 无条件串联，每个 arm 体都会被执行，完全没有模式匹配判定逻辑
+- **实现内容**:
+  - 重写 `_lower_match_expr`，采用**级联比较（if-elseif 链）**策略
+  - **支持的模式类型**:
+    - 常量模式（5 种）: `HIRIntPattern`、`HIRFloatPattern`、`HIRStringPattern`、`HIRBoolPattern`、`HIRCharPattern` → 生成 `==` 比较 + 条件分支
+    - 通配符模式 `HIRWildcardPattern` → 无条件匹配
+    - 绑定模式 `HIRBindPattern` → 无条件匹配 + 将 scrutinee 绑定到变量名
+  - **环境隔离**: 每个 arm 计算前保存/恢复环境快照，避免 arm 间变量泄漏
+  - **Guard 支持**: 有 guard 的 arm 增加一层条件检查，guard 为假时 fall-through 到下一个 arm
+  - **Phi 节点正确收集**: 从每个 arm 的结果块收集 Phi source，而非从 arm 块的最后一条指令猜
+  - 新增 `_emit_pattern_const()` 辅助方法：为常量模式生成 `MIRConst` 指令
+  - **控制流结构**:
+    ```
+    bb_check_0: cmp(scrutinee, pat0) → if arm0_body else check_1
+    bb_arm_0:   body0 → goto merge
+    bb_check_1: cmp(scrutinee, pat1) → if arm1_body else check_2
+    ...
+    bb_merge:   phi(arm0_result, arm1_result, ...)
+    ```
+- **代码量**: ~170 行新增/修改（重写 match 降级 + 辅助方法）
+
+#### 2. ✅ 修复 MIR 循环变量绑定
+- **难度**: medium
+- **分类**: IR 降级 / 正确性修复
+- **文件**: `ir/mir_lowering.py`
+- **问题**:
+  - for 循环：循环变量从未加入 `self.env`，循环体内引用返回 None；条件判断直接用 iterable 当布尔值
+  - 列表推导式：循环变量错误地绑定到整个 iterable，而非当前元素；Phi 节点 source 错误（来自 header 而非 body）
+- **实现内容**:
+  - **重写 `_lower_for_expr`**:
+    - 从"直接把 iterable 当布尔值"改为**索引迭代模式**：idx = 0, while idx < list_length(iter): elem = iter[idx], body, idx++
+    - 循环变量正确绑定到**当前元素**（`iter[idx]`）而非整个可迭代对象
+    - 循环头插入 idx 的 **Phi 节点**（初始值 0 + 循环回边的 idx+1），支持 SSA 更新
+    - 自动更新 header 和 body 中所有 idx 引用为 Phi 结果
+  - **重写 `_lower_list_comprehension`**:
+    - 同样改为索引迭代模式，修复循环变量绑定
+    - 修复 Phi 节点 source：从 `header_block.label` 改为**最后更新 list 的块**（body 或 filter_block）
+    - 新增 last_list_ssa / last_block_label 追踪机制
+    - 有 filter 时，filter 为假的分支 list 值不变，Phi 正确反映
+- **代码量**: ~150 行新增/修改
+
+### 质量验证
+- ✅ 语法验证：所有修改文件通过 AST parse
+- ✅ 测试验证：403 个测试全部通过（与基线一致）
+- ✅ 无回归：与开发前基线一致，无失败测试
+- ✅ Git 备份：`llm-dev-cycle-7-20260716-1359`
+- ✅ 任务备份：
+  - `llm-dev-fix_match_lowering-20260716-1400`
+  - `llm-dev-fix_mir_loop_vars-20260716-1402`
+
+### 参考的日志发现
+1. **第 6 轮评审报告**: 明确规划第 7 轮做 match + 循环变量修复，是"MIR 正确性修复（一）"
+2. **深度审计报告**: 指出 match 降级"完全错误"、循环变量"从未加入环境"，是最高优先级的正确性问题
+3. **第 5 轮开发日志**: C 后端已接入 IR 管线，MIR 层修复的效果可立即通过 C 后端验证
+4. **AUTO_REVIEW_LOG.md**: 指出 `_lower_expr` 圈复杂度 70，本次修复通过拆分为辅助方法（`_emit_pattern_const`）略有改善
+
+### 下一步计划（第 8 轮）
+1. **修复 MIR SSA 构建正确性** — 系统性修复 SSA：赋值生成新 SSA 名、循环头 Phi 完善、if-else 汇合点 Phi 构建
+2. **实现 MIR SSA 验证 Pass** — 为 SSA 修复提供正确性保障，防止回归
+3. 如果进度顺利，启动工程治理的准备工作（sys.path 重构评估）
+
+### 路线图进度
+- 总任务: 24
+- 已完成: 13 (54%)
+- 进行中: 0
+- 待开发: 11
+
+---
+
 ## 2026-07-16 13:46 第6轮评审（路线图评审）
 
 ### 评审概览

@@ -1,5 +1,5 @@
 {
-  "cycles": 6,
+  "cycles": 7,
   "completed_tasks": [
     "dce_pass",
     "wasmgc_storereg",
@@ -15,10 +15,24 @@
     "fix_phi_lowering",
     "cse_pass",
     "review_cycle_3",
-    "review_cycle_6"
+    "review_cycle_6",
+    "fix_match_lowering",
+    "fix_mir_loop_vars"
   ],
   "failed_tasks": [],
   "task_history": [
+    {
+      "cycle": 7,
+      "task_id": "fix_match_lowering",
+      "status": "completed",
+      "details": "完善 MIR match 降级：从'所有 arm 无条件顺序跳转'的假实现，改为级联比较（if-elseif 链）的真正模式匹配。支持 5 种常量模式（Int/Float/String/Bool/Char）、通配符模式（_）、绑定模式（x）；每个 arm 独立环境避免变量泄漏；支持 guard 条件的 fall-through 语义；新增 _emit_pattern_const 辅助方法"
+    },
+    {
+      "cycle": 7,
+      "task_id": "fix_mir_loop_vars",
+      "status": "completed",
+      "details": "修复 MIR 循环变量绑定：(1) for 循环：从'直接把 iterable 当布尔值判断'改为'索引迭代 + list_length + idx < len 条件'，循环变量正确绑定到当前元素（iter[idx]）而非整个 iterable；(2) 列表推导式：同样修复循环变量绑定，修复 Phi 节点来源错误（从 header_block 改为最后更新 list 的块）；两者均在循环头插入 idx 的 Phi 节点，支持循环变量 SSA 更新"
+    },
     {
       "cycle": 6,
       "task_id": "review_cycle_6",
@@ -110,7 +124,7 @@
       "details": "C 后端接入 IR 管线第一步：新建 backend/lir_c_backend.py 实现 LIRCBackend 类，支持 20+ 种 LIR 指令的 C 代码生成（常量加载、运算、控制流、函数调用、列表/映射/元组/ADT 构建、字段/索引访问、全局变量、panic）；同时完善 LIRBranch 指令结构（补充 true_target/false_target 字段），修复 wasm/cranelift 后端的硬编码分支目标问题"
     }
   ],
-  "current_cycle": 6,
+  "current_cycle": 7,
   "baseline_tests": 403,
   "current_tests": 403,
   "last_review_cycle": 6,
@@ -123,7 +137,7 @@
       "priority": 92,
       "category": "ir",
       "estimated": "4-6 小时",
-      "status": "pending",
+      "status": "completed",
       "depends_on": [],
       "reason": "深度审计发现 MIR match 降级完全错误——所有 arm 用 MIRJump 无条件串联，每个 arm 体都会被执行。match 是函数式语言核心特性，降级不正确意味着 ADT/模式匹配功能形同虚设，必须优先修复"
     },
@@ -135,7 +149,7 @@
       "priority": 90,
       "category": "ir",
       "estimated": "2-4 小时",
-      "status": "pending",
+      "status": "completed",
       "depends_on": [],
       "reason": "深度审计发现 MIR for 循环的循环变量从未加入 self.env，循环体内引用会返回 None，生成空 SSA 名；列表推导式循环变量绑定错误。这是影响所有循环程序的基础正确性问题"
     },
