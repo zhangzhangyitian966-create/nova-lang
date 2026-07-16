@@ -1,5 +1,61 @@
 # Nova 自动改进日志
 
+## 2026-07-16 自动改进（第二十八轮）
+
+基于 AUTO_REVIEW_LOG.md 第二十五轮审查日志的 P0/P1 级严重问题驱动改进（阶段一检查 + 阶段二开发 + 阶段三测试）。
+
+### 每日发现的问题
+
+#### compiler.py + vm.py
+- **多字段构造器/元组/列表模式中混合测试-绑定模式的栈错位（compiler.py:834-860）**：MATCH_CONSTRUCTOR/MATCH_TEST_TUPLE/MATCH_TEST_LIST 逆序压栈字段值，`_compile_pattern_test_with_fail` 正序递归测试，测试模式成功时弹出栈顶值，非测试模式（PatternIdentifier/PatternWildcard）不弹出，中间有标识符模式时后续字段测试读取错误的栈位置
+  - 审查日志追问结论：绝对不能，元组/构造器模式中混合字面量和变量绑定是最常见的用法之一，这种 bug 在生产级编译器中是 P0 级缺陷
+  - 根因：非测试模式在测试阶段不消耗栈值，导致后续字段测试读取错位的栈位置
+  - 影响：所有包含 2 个以上字段且中间存在标识符/通配符模式的构造器、元组、列表模式都会错误匹配
+
+#### evaluator.py
+- **TryExpr 在顶层代码中导致未捕获的 ReturnSignal 异常崩溃（evaluator.py:741-752）**：`?` 操作符通过抛出 ReturnSignal 实现提前返回，仅在 `_call_fn` 中被捕获；顶层使用时 ReturnSignal 一直向上抛出
+  - 审查日志追问结论：不能，语言构造在任何上下文中都应该有定义良好的行为或明确的错误
+  - 根因：顶层求值路径（eval_program → _eval_decl_body → eval_expr）不经过 _call_fn，没有 ReturnSignal 捕获
+  - 延伸发现：BreakSignal 和 ContinueSignal 同样存在顶层崩溃问题
+
+#### type_checker.py
+- **块表达式中 MutBinding 不检查类型标注（type_checker.py:847-850）**：在 check_expr 中处理 MutBinding 时，完全忽略了 expr.type_annotation，块内的 `mut x: Int = "hello"` 不会报类型错误
+  - 审查日志追问结论：绝对不能，类型标注是用户与编译器的契约，忽略标注等于破坏类型安全保证
+  - 根因：MutBinding 分支是 LetBinding 分支的简化复制，粘贴时遗漏了 type_annotation 检查逻辑
+
+### 本次修复内容（基于审查日志 Issue）
+
+1. **compiler.py — 模式匹配多字段混合模式栈错位修复（基于审查日志 compiler.py:834-860 / 第二十五轮严重问题 #1）**
+   - 采用"测试阶段统一弹栈"方案：_compile_pattern_test_with_fail 中每个字段模式都消耗一个栈值
+   - PatternWildcard：从空操作改为生成 Op.POP，弹出对应字段值
+   - PatternIdentifier（非构造器）：从空操作改为生成 Op.MATCH_BIND，弹出并绑定变量
+   - _compile_pattern_extract_and_bind 中对应简化：标识符/通配符/字面量均改为 pass（已在测试阶段处理）
+   - 新增 11 个测试用例：构造器先绑定后字面量、三字段混合、通配符混合、元组混合、列表混合、嵌套构造器混合等
+
+2. **evaluator.py — 顶层 TryExpr/Break/Continue 崩溃修复（基于审查日志 evaluator.py:741-752 / 第二十五轮严重问题 #3）**
+   - eval_program 第二遍循环：对 _eval_decl_body 调用包裹 try/except，捕获三种控制流信号
+   - ReturnSignal → RuntimeError_("? 操作符不能在顶层使用")
+   - BreakSignal → RuntimeError_("break 不能在顶层使用")
+   - ContinueSignal → RuntimeError_("continue 不能在顶层使用")
+   - eval_decl 方法：同样添加外层保护，重构为外层方法 + _eval_decl_inner 内部实现
+   - 新增 7 个测试用例：顶层 Err/None 的 ?、顶层表达式 ?、函数内 ? 回归、顶层 break、顶层 continue
+
+3. **type_checker.py — MutBinding 类型标注检查修复（基于审查日志 type_checker.py:847-850 / 第二十五轮严重问题 #5）**
+   - check_expr 中 MutBinding 分支补充与 LetBinding 对称的 type_annotation 检查逻辑
+   - 类型不匹配时通过 _report_error 报告错误
+   - 新增 3 个测试用例：块内 mut 类型不匹配报错、块内 mut 类型匹配通过、函数体内 mut 类型不匹配报错
+
+### 测试结果
+
+- 全量测试: **869 passed** (1.42~2.18s)
+- Evaluator 示例: hello/fibonacci/pattern_match/loops/math/pipe/list_comprehension/file_io 全部正常输出
+- VM 示例: hello/fibonacci/pattern_match/loops/math/pipe/list_comprehension/file_io 全部正常输出
+- 模式匹配栈错位: 先绑定后字面量 ✅ / 三字段混合 ✅ / 通配符混合 ✅ / 元组混合 ✅ / 列表混合 ✅ / 嵌套构造器 ✅
+- 顶层 TryExpr 修复: 顶层 Err/None 报错 ✅ / 函数内正常工作 ✅ / break/continue 顶层报错 ✅
+- MutBinding 类型标注: 块内不匹配报错 ✅ / 块内匹配通过 ✅ / 函数体内不匹配报错 ✅
+
+---
+
 ## 2026-07-16 自动改进（第二十七轮）
 
 基于 AUTO_REVIEW_LOG.md 第二十四轮审查日志的 P0/P1 级严重问题驱动改进（阶段一检查 + 阶段二开发 + 阶段三测试）。

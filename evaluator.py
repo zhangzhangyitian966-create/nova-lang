@@ -496,7 +496,14 @@ class Evaluator:
 
         # 第二遍：求值绑定值和顶层表达式
         for decl in program.declarations:
-            self._eval_decl_body(decl)
+            try:
+                self._eval_decl_body(decl)
+            except ReturnSignal:
+                raise RuntimeError_("? 操作符不能在顶层使用")
+            except BreakSignal:
+                raise RuntimeError_("break 不能在顶层使用")
+            except ContinueSignal:
+                raise RuntimeError_("continue 不能在顶层使用")
 
         # 自动调用 main() 函数
         try:
@@ -583,6 +590,17 @@ class Evaluator:
 
     def eval_decl(self, decl):
         """求值顶层声明"""
+        try:
+            self._eval_decl_inner(decl)
+        except ReturnSignal:
+            raise RuntimeError_("? 操作符不能在顶层使用")
+        except BreakSignal:
+            raise RuntimeError_("break 不能在顶层使用")
+        except ContinueSignal:
+            raise RuntimeError_("continue 不能在顶层使用")
+
+    def _eval_decl_inner(self, decl):
+        """eval_decl 的内部实现，不包含顶层信号保护"""
         if isinstance(decl, LetBinding):
             val = self.eval_expr(decl.value)
             self.env.define(decl.name, val, mutable=False)

@@ -846,6 +846,13 @@ class TypeChecker:
 
         elif isinstance(expr, MutBinding):
             val_ty = self.check_expr(expr.value)
+            if expr.type_annotation:
+                annotated = self._from_ast_type(expr.type_annotation)
+                if not self._types_compatible(val_ty, annotated):
+                    self._report_error(
+                        f"mut 绑定类型不匹配：推断为 {val_ty}，标注为 {annotated}",
+                        expr
+                    )
             self.env.define(expr.name, val_ty, mutable=True)
             return UNIT_T
 

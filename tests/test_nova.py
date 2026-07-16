@@ -1290,6 +1290,75 @@ class TestErrors(unittest.TestCase):
         """, check_types=False)
         self.assertEqual(ev.env.lookup("result"), 99)
 
+    # === 顶层 ? 操作符保护 ===
+
+    def test_try_expr_top_level_let_err_raises_runtime_error(self):
+        """顶层 let 绑定中使用 ? (Err) 应报 RuntimeError_ 而非崩溃"""
+        with self.assertRaises(RuntimeError_) as ctx:
+            eval_source("""
+                let x = Err("oops")?
+            """, check_types=False)
+        self.assertIn("? 操作符不能在顶层使用", str(ctx.exception))
+
+    def test_try_expr_top_level_let_none_raises_runtime_error(self):
+        """顶层 let 绑定中使用 ? (None) 应报 RuntimeError_ 而非崩溃"""
+        with self.assertRaises(RuntimeError_) as ctx:
+            eval_source("""
+                let x = None?
+            """, check_types=False)
+        self.assertIn("? 操作符不能在顶层使用", str(ctx.exception))
+
+    def test_try_expr_top_level_expr_err_raises_runtime_error(self):
+        """顶层表达式中使用 ? (Err) 应报 RuntimeError_ 而非崩溃"""
+        with self.assertRaises(RuntimeError_) as ctx:
+            eval_source("""
+                Err("fail")?
+            """, check_types=False)
+        self.assertIn("? 操作符不能在顶层使用", str(ctx.exception))
+
+    def test_try_expr_top_level_expr_none_raises_runtime_error(self):
+        """顶层表达式中使用 ? (None) 应报 RuntimeError_ 而非崩溃"""
+        with self.assertRaises(RuntimeError_) as ctx:
+            eval_source("""
+                None?
+            """, check_types=False)
+        self.assertIn("? 操作符不能在顶层使用", str(ctx.exception))
+
+    def test_try_expr_in_fn_still_works(self):
+        """函数内使用 ? 保持正常工作（回归测试）"""
+        ev = eval_source("""
+            fn div(a: Int, b: Int) -> Option[Int] {
+                if b == 0 then None else Some(a / b)
+            }
+            fn compute() -> Option[Int] {
+                let x = div(10, 2)?
+                let y = div(x, 2)?
+                Some(y)
+            }
+            let result = compute()
+        """, check_types=False)
+        from nova.evaluator import NovaADTValue
+        result = ev.env.lookup("result")
+        self.assertIsInstance(result, NovaADTValue)
+        self.assertEqual(result.variant_name, "Some")
+        self.assertEqual(result.fields[0], 2)
+
+    def test_break_top_level_raises_runtime_error(self):
+        """顶层使用 break 应报 RuntimeError_ 而非崩溃"""
+        with self.assertRaises(RuntimeError_) as ctx:
+            eval_source("""
+                break
+            """, check_types=False)
+        self.assertIn("break 不能在顶层使用", str(ctx.exception))
+
+    def test_continue_top_level_raises_runtime_error(self):
+        """顶层使用 continue 应报 RuntimeError_ 而非崩溃"""
+        with self.assertRaises(RuntimeError_) as ctx:
+            eval_source("""
+                continue
+            """, check_types=False)
+        self.assertIn("continue 不能在顶层使用", str(ctx.exception))
+
     # === 算术运算 bool 检查 ===
 
     def test_arithmetic_bool_add_error(self):
@@ -2816,6 +2885,138 @@ class TestBytecodeVM(unittest.TestCase):
             }
         """)
         self.assertEqual(vm.get_global("result"), "found")
+
+    # ============================================================
+    # 多字段混合模式测试（修复栈错位 Bug）
+    # ============================================================
+
+    def test_vm_match_constructor_bind_then_literal(self):
+        """构造器模式：先绑定后字面量（T(a, 20)），验证栈不错位"""
+        vm = self._vm_run("""
+            type Pair { P(Int, Int) }
+            let p = P(10, 20)
+            let result = match p {
+                P(a, 20) -> a * 2
+                _        -> 0
+            }
+        """)
+        self.assertEqual(vm.get_global("result"), 20)
+
+    def test_vm_match_constructor_literal_then_bind(self):
+        """构造器模式：先字面量后绑定（P(10, b)），验证正常工作"""
+        vm = self._vm_run("""
+            type Pair { P(Int, Int) }
+            let p = P(10, 20)
+            let result = match p {
+                P(10, b) -> b * 2
+                _        -> 0
+            }
+        """)
+        self.assertEqual(vm.get_global("result"), 40)
+
+    def test_vm_match_constructor_three_field_mixed(self):
+        """三字段构造器混合模式：T3(a, 20, c)，中间有字面量，验证栈不错位"""
+        vm = self._vm_run("""
+            type Triple { T3(Int, Int, Int) }
+            let t = T3(10, 20, 30)
+            let result = match t {
+                T3(a, 20, c) -> a + c
+                _             -> 0
+            }
+        """)
+        self.assertEqual(vm.get_global("result"), 40)
+
+    def test_vm_match_constructor_three_field_mixed_wildcard(self):
+        """三字段构造器混合模式：T3(_, 20, c)，包含通配符，验证栈不错位"""
+        vm = self._vm_run("""
+            type Triple { T3(Int, Int, Int) }
+            let t = T3(10, 20, 30)
+            let result = match t {
+                T3(_, 20, c) -> c * 2
+                _             -> 0
+            }
+        """)
+        self.assertEqual(vm.get_global("result"), 60)
+
+    def test_vm_match_constructor_mixed_first_literal_fails(self):
+        """构造器混合模式：第一个字段字面量不匹配，正确fallback"""
+        vm = self._vm_run("""
+            type Triple { T3(Int, Int, Int) }
+            let t = T3(10, 20, 30)
+            let result = match t {
+                T3(99, b, c) -> b + c
+                _             -> -1
+            }
+        """)
+        self.assertEqual(vm.get_global("result"), -1)
+
+    def test_vm_match_tuple_mixed_bind_literal(self):
+        """元组模式：混合绑定和字面量（(a, 20, c)），验证栈不错位"""
+        vm = self._vm_run("""
+            let t = (10, 20, 30)
+            let result = match t {
+                (a, 20, c) -> a + c
+                _          -> 0
+            }
+        """)
+        self.assertEqual(vm.get_global("result"), 40)
+
+    def test_vm_match_tuple_mixed_literal_bind(self):
+        """元组模式：先字面量后绑定（(10, b, 30)），验证正常"""
+        vm = self._vm_run("""
+            let t = (10, 20, 30)
+            let result = match t {
+                (10, b, 30) -> b * 2
+                _           -> 0
+            }
+        """)
+        self.assertEqual(vm.get_global("result"), 40)
+
+    def test_vm_match_tuple_mixed_wildcard(self):
+        """元组模式：混合通配符和字面量（(_, 20, c)），验证栈不错位"""
+        vm = self._vm_run("""
+            let t = (10, 20, 30)
+            let result = match t {
+                (_, 20, c) -> c * 2
+                _          -> 0
+            }
+        """)
+        self.assertEqual(vm.get_global("result"), 60)
+
+    def test_vm_match_list_mixed_bind_literal(self):
+        """列表模式：混合绑定和字面量（[a, 20, c]），验证栈不错位"""
+        vm = self._vm_run("""
+            let xs = [10, 20, 30]
+            let result = match xs {
+                [a, 20, c] -> a + c
+                _          -> 0
+            }
+        """)
+        self.assertEqual(vm.get_global("result"), 40)
+
+    def test_vm_match_list_mixed_wildcard_literal(self):
+        """列表模式：混合通配符、字面量和绑定（[_, 20, c]），验证栈不错位"""
+        vm = self._vm_run("""
+            let xs = [10, 20, 30]
+            let result = match xs {
+                [_, 20, c] -> c * 2
+                _          -> 0
+            }
+        """)
+        self.assertEqual(vm.get_global("result"), 60)
+
+    def test_vm_match_nested_constructor_mixed(self):
+        """嵌套构造器混合模式：外层字面量+绑定，内层绑定+字面量，验证栈不错位"""
+        vm = self._vm_run("""
+            type Triple { T3(Int, Int, Int) }
+            type Wrapper { W(Int, Triple) }
+            let w = W(1, T3(10, 20, 30))
+            let result = match w {
+                W(1, T3(a, 20, c)) -> a + c
+                _                   -> 0
+            }
+        """)
+        self.assertEqual(vm.get_global("result"), 40)
 
     # ============================================================
     # 空循环测试

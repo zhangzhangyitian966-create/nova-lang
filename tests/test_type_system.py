@@ -761,6 +761,38 @@ class TestAssignmentMutability:
         checker = check_source(source)
         assert len(checker.error_collector.errors) == 0
 
+    def test_mut_binding_type_annotation_mismatch_block(self):
+        """块内 mut 绑定类型标注与值类型不匹配应报错"""
+        source = """
+        {
+            mut x: Int = "hello"
+        }
+        """
+        with pytest.raises(TypeCheckError) as exc_info:
+            check_source(source)
+        assert "mut 绑定类型不匹配" in str(exc_info.value)
+
+    def test_mut_binding_type_annotation_match_block(self):
+        """块内 mut 绑定类型标注与值类型匹配应通过"""
+        source = """
+        {
+            mut x: Int = 42
+        }
+        """
+        checker = check_source(source)
+        assert len(checker.error_collector.errors) == 0
+
+    def test_mut_binding_type_annotation_mismatch_in_fn(self):
+        """函数体内 mut 绑定类型标注不匹配应报错"""
+        source = """
+        fn f() {
+            mut x: Int = "hello"
+        }
+        """
+        with pytest.raises(TypeCheckError) as exc_info:
+            check_source(source)
+        assert "mut 绑定类型不匹配" in str(exc_info.value)
+
     def test_fn_param_not_assignable(self):
         """函数参数是不可变绑定，赋值应报错"""
         source = """

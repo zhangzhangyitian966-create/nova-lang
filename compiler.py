@@ -793,7 +793,9 @@ class BytecodeCompiler:
         subject 在栈顶，匹配成功时保留在栈上。
         """
         if isinstance(pattern, PatternWildcard):
-            return []  # 总是匹配
+            # 通配符：弹出对应字段值，保持栈对齐
+            self.bytecode.emit_op(Op.POP)
+            return []
 
         elif isinstance(pattern, PatternInt):
             fail_pos = self.bytecode.current_pos()
@@ -829,7 +831,9 @@ class BytecodeCompiler:
                     fail_pos = self.bytecode.current_pos()
                     self.bytecode.emit_op(Op.MATCH_CONSTRUCTOR, type_name, pattern.name, 0, 0)
                     return [fail_pos]
-            return []  # 变量绑定总是匹配
+            # 变量绑定：弹出并绑定变量，保持栈对齐
+            self.bytecode.emit_op(Op.MATCH_BIND, pattern.name)
+            return []
 
         elif isinstance(pattern, PatternConstructor):
             fail_positions = []
@@ -866,8 +870,12 @@ class BytecodeCompiler:
         """
         从 subject 中提取值并绑定到变量。
         约定：所有 MATCH_TEST_* 操作码在匹配成功时已弹出 subject。
-        对于构造器模式，subject 已被 MATCH_CONSTRUCTOR 弹出并替换为字段。
-        对于没有测试操作码的模式（通配符、元组、列表等），在此处弹出。
+        对于构造器/元组/列表模式，subject 已被弹出并替换为字段值（reversed 压栈）。
+        测试阶段已处理所有叶子模式的弹栈/绑定：
+          - 字面量模式：已被 MATCH_TEST_* 弹出
+          - 变量绑定：已被 MATCH_BIND 弹出并绑定
+          - 通配符：已被 POP 弹出
+        本函数只需要递归处理复合模式的字段结构（叶子模式均为 pass）。
         """
         if isinstance(pattern, PatternIdentifier):
             # 检查是否是已知的零字段 ADT 构造器
@@ -877,10 +885,11 @@ class BytecodeCompiler:
                     # 零字段构造器：MATCH_CONSTRUCTOR 已经弹出 subject 且没有字段
                     # 不需要做任何额外操作（栈上没有剩余值）
                     return
-            self.bytecode.emit_op(Op.MATCH_BIND, pattern.name)
+            # 变量绑定：已在测试阶段通过 MATCH_BIND 完成
+            pass
         elif isinstance(pattern, PatternWildcard):
-            # 注意：通配符模式没有测试操作码，所以需要在这里弹出 subject
-            self.bytecode.emit_op(Op.POP)  # 弹出 subject
+            # 通配符：已在测试阶段通过 POP 弹出
+            pass
         elif isinstance(pattern, PatternConstructor):
             # 字段已由 MATCH_CONSTRUCTOR 压栈（subject 已被弹出）
             for field_pattern in pattern.fields:
