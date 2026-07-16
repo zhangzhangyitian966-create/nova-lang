@@ -408,11 +408,15 @@ class MIRLowering:
         if isinstance(hir_expr, HIRAssignExpr):
             val_ssa = self._lower_expr(hir_expr.value, block)
             if isinstance(hir_expr.target, HIRIdentifier):
-                self.env[hir_expr.target.name] = val_ssa
-                instr = MIRStore(UNIT_TYPE)
+                # SSA 语义：赋值产生变量的新版本，用 MIRStore 的 result_name 标识
+                # store 指令的结果就是存储后的值，类型与值的类型一致
+                instr = MIRStore(hir_expr.value.ir_type)
                 instr.name = hir_expr.target.name
                 instr.value = val_ssa or ""
-                return self._emit(instr)
+                store_ssa = self._emit(instr)
+                # 将变量绑定到新版本（store 的结果 SSA 名）
+                self.env[hir_expr.target.name] = store_ssa
+                return store_ssa
             return val_ssa
 
         if isinstance(hir_expr, HIRListComprehension):

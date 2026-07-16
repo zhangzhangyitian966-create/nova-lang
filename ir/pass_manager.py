@@ -1337,9 +1337,13 @@ class PassManager:
         self.hir_passes = []
         self.mir_passes = []
         self.lir_passes = []
+        # 验证 Pass（不修改 IR，只做正确性检查）
+        self.mir_verification_passes = []
         self._verbose = False
         # Pass 失败统计：{pass_name: 失败次数}
         self._pass_failures = {}
+        # 验证失败统计：{pass_name: [错误信息列表]}
+        self._verification_errors = {}
 
     def add_hir_pass(self, pass_):
         self.hir_passes.append(pass_)
@@ -1350,6 +1354,10 @@ class PassManager:
     def add_lir_pass(self, pass_):
         self.lir_passes.append(pass_)
 
+    def add_mir_verification_pass(self, pass_):
+        """添加 MIR 验证 Pass（不参与不动点迭代，优化完成后运行）"""
+        self.mir_verification_passes.append(pass_)
+
     def set_verbose(self, verbose: bool):
         """设置是否输出详细日志"""
         self._verbose = verbose
@@ -1357,6 +1365,10 @@ class PassManager:
     def get_failure_stats(self) -> dict:
         """获取 Pass 失败统计"""
         return dict(self._pass_failures)
+
+    def get_verification_errors(self) -> dict:
+        """获取验证 Pass 的错误信息"""
+        return dict(self._verification_errors)
 
     def _record_pass_failure(self, pass_name: str, exc: Exception):
         """记录 Pass 失败并输出警告"""
@@ -1399,6 +1411,28 @@ class PassManager:
             if not changed:
                 break
             total_changed = True
+
+        # 优化完成后运行验证 Pass
+        for pass_ in self.mir_verification_passes:
+            pass_name = pass_.__class__.__name__
+            try:
+                passed = pass_.run(mir_module)
+                if not passed:
+                    errors = getattr(pass_, "errors", [])
+                    self._verification_errors[pass_name] = errors
+                    if self._verbose:
+                        print(f"[Verification] {pass_name} 未通过:", file=sys.stderr)
+                        for err in errors:
+                            print(f"  {err}", file=sys.stderr)
+                    else:
+                        import warnings
+                        warnings.warn(
+                            f"{pass_name} verification failed: {len(errors)} errors",
+                            stacklevel=2,
+                        )
+            except Exception as e:
+                self._record_pass_failure(pass_name, e)
+
         return total_changed
 
     def run_lir_passes(self, lir_module, max_iterations=10):
@@ -1425,4 +1459,6 @@ def default_optimization_pipeline():
     pm.add_hir_pass(Inlining())
     pm.add_mir_pass(CommonSubexprElimination())
     pm.add_mir_pass(LoopInvariantCodeMotion())
+    # SSA 验证：优化完成后验证 MIR 的 SSA 性质
+    pm.add_mir_verification_pass(SSAVerifier())
     return pm

@@ -426,22 +426,22 @@ class LIRCBackend:
         self._emit(f"{dst} = {left} {c_op} {right};")
 
     def _compile_branch(self, instr: LIRBranch):
-        """编译条件跳转"""
+        """编译条件跳转
+
+        LIR 语义：条件为真走 true_target，条件为假走 false_target。
+        生成显式双向跳转，不依赖 fall-through，确保非顺序 CFG 也正确。
+        """
         if not instr.src_locs:
             return
 
         cond = self._loc_var_name(instr.src_locs[0][0])
         false_target = instr.false_target or "block_false"
-        true_target = instr.true_target
+        true_target = instr.true_target or "block_true"
 
-        # 条件为假跳转到 false_target，否则继续（即 true_target 是 fall-through）
-        # 但 LIR 的语义是：条件为真走 true_target，条件为假走 false_target
-        # 用 if-goto 实现：条件为假则跳 false_target
-        self._emit(f"if (!{cond}) goto {false_target};")
-
-        # 如果有明确的 true_target 且不是下一条指令，则跳过去
-        # （简化处理：假设 true_target 是 fall-through 或由后续 label 标记）
-        # 更完整的实现需要 CFG 分析，这里先保留简单模式
+        # 显式双向跳转：条件为真跳 true_target，否则跳 false_target
+        # 不依赖 fall-through 假设，确保任意基本块顺序下都正确
+        self._emit(f"if ({cond}) goto {true_target};")
+        self._emit(f"goto {false_target};")
 
     def _compile_call(self, instr: LIRCall, dst: str):
         """编译函数调用"""

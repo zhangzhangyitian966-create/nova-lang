@@ -1,5 +1,5 @@
 {
-  "cycles": 10,
+  "cycles": 11,
   "completed_tasks": [
     "dce_pass",
     "wasmgc_storereg",
@@ -21,10 +21,31 @@
     "fix_mir_ssa_branch_env",
     "review_cycle_9",
     "fix_while_ssa",
-    "mir_ssa_verifier"
+    "mir_ssa_verifier",
+    "fix_assign_ssa",
+    "fix_c_backend_branch",
+    "ssa_verifier_pipeline"
   ],
   "failed_tasks": [],
   "task_history": [
+    {
+      "cycle": 11,
+      "task_id": "fix_assign_ssa",
+      "status": "completed",
+      "details": "修复赋值表达式 SSA 语义：将 MIRStore 的 result_type 从 UNIT_TYPE 改为值的类型，env[name] 从指向 val_ssa 改为指向 store 指令的 result_name，使每次赋值都产生新的 SSA 版本，MIRStore 不再是死指令。这是 SSA 完整性的最后一块核心拼图。"
+    },
+    {
+      "cycle": 11,
+      "task_id": "fix_c_backend_branch",
+      "status": "completed",
+      "details": "修复 LIR C 后端条件分支：从单向跳转 if (!cond) goto false（依赖 true 分支 fall-through 假设）改为显式双向跳转 if (cond) goto true; goto false;，确保任意基本块顺序下控制流语义都正确。低成本高价值的正确性修复。"
+    },
+    {
+      "cycle": 11,
+      "task_id": "ssa_verifier_pipeline",
+      "status": "completed",
+      "details": "SSAVerifier 接入编译管道：在 PassManager 中新增验证 Pass 机制（mir_verification_passes 列表、add_mir_verification_pass 方法、get_verification_errors 方法），验证 Pass 在优化不动点迭代完成后运行，不参与迭代；在 default_optimization_pipeline 中添加 SSAVerifier，让 SSA 验证在每次编译时自动执行。"
+    },
     {
       "cycle": 10,
       "task_id": "fix_while_ssa",
@@ -152,7 +173,7 @@
       "details": "C 后端接入 IR 管线第一步：新建 backend/lir_c_backend.py 实现 LIRCBackend 类，支持 20+ 种 LIR 指令的 C 代码生成（常量加载、运算、控制流、函数调用、列表/映射/元组/ADT 构建、字段/索引访问、全局变量、panic）；同时完善 LIRBranch 指令结构（补充 true_target/false_target 字段），修复 wasm/cranelift 后端的硬编码分支目标问题"
     }
   ],
-  "current_cycle": 10,
+  "current_cycle": 11,
   "baseline_tests": 403,
   "current_tests": 403,
   "last_review_cycle": 9,
@@ -466,7 +487,7 @@
       "priority": 88,
       "category": "ir",
       "estimated": "3-5 小时",
-      "status": "pending",
+      "status": "completed",
       "depends_on": [
         "fix_while_phi"
       ],
@@ -480,7 +501,7 @@
       "priority": 72,
       "category": "backend",
       "estimated": "30 分钟",
-      "status": "pending",
+      "status": "completed",
       "depends_on": [],
       "reason": "深度审计发现 C 后端 LIR 路径的条件分支依赖 fall-through 假设，非顺序 CFG 下生成错误代码。高价值低成本修复"
     }
