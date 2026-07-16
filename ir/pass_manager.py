@@ -1426,6 +1426,7 @@ class PassManager:
                             print(f"  {err}", file=sys.stderr)
                     else:
                         import warnings
+
                         warnings.warn(
                             f"{pass_name} verification failed: {len(errors)} errors",
                             stacklevel=2,
