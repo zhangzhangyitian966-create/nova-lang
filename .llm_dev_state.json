@@ -1,5 +1,5 @@
 {
-  "cycles": 8,
+  "cycles": 9,
   "completed_tasks": [
     "dce_pass",
     "wasmgc_storereg",
@@ -18,10 +18,17 @@
     "review_cycle_6",
     "fix_match_lowering",
     "fix_mir_loop_vars",
-    "fix_mir_ssa_branch_env"
+    "fix_mir_ssa_branch_env",
+    "review_cycle_9"
   ],
   "failed_tasks": [],
   "task_history": [
+    {
+      "cycle": 9,
+      "task_id": "review_cycle_9",
+      "status": "completed",
+      "details": "第9轮路线图评审：完成第7-8轮回顾、四维评估、问题总结、下阶段方向规划（第10-12轮聚焦SSA修复→工程治理→后端整合）、任务池更新（新增3个任务、调整2个优先级、补充依赖关系）"
+    },
     {
       "cycle": 8,
       "task_id": "fix_mir_ssa_branch_env",
@@ -131,10 +138,10 @@
       "details": "C 后端接入 IR 管线第一步：新建 backend/lir_c_backend.py 实现 LIRCBackend 类，支持 20+ 种 LIR 指令的 C 代码生成（常量加载、运算、控制流、函数调用、列表/映射/元组/ADT 构建、字段/索引访问、全局变量、panic）；同时完善 LIRBranch 指令结构（补充 true_target/false_target 字段），修复 wasm/cranelift 后端的硬编码分支目标问题"
     }
   ],
-  "current_cycle": 7,
+  "current_cycle": 9,
   "baseline_tests": 403,
   "current_tests": 403,
-  "last_review_cycle": 6,
+  "last_review_cycle": 9,
   "tasks": [
     {
       "id": "fix_match_lowering",
@@ -165,24 +172,31 @@
       "name": "修复 MIR SSA 构建正确性",
       "description": "重写 MIR 降级中的 SSA 构建：正确处理循环变量 SSA 更新（循环头插入 Phi）、赋值生成新 SSA 名而非覆盖环境、if-else 汇合点 Phi 构建、支配边界计算",
       "difficulty": "hard",
-      "priority": 88,
+      "priority": 85,
       "category": "ir",
       "estimated": "2-4 天",
       "status": "pending",
-      "depends_on": ["fix_match_lowering", "fix_mir_loop_vars"],
-      "reason": "SSA 是所有经典优化的基础。当前 MIR SSA 有明显缺陷（赋值直接覆盖 env、循环头无 Phi），但先修 match 和循环变量这些更直观的正确性问题，再系统性修复 SSA"
+      "depends_on": [
+        "fix_match_lowering",
+        "fix_mir_loop_vars"
+      ],
+      "reason": "SSA 是所有经典优化的基础。当前 MIR SSA 有明显缺陷（赋值直接覆盖 env、循环头无 Phi），但先修 match 和循环变量这些更直观的正确性问题，再系统性修复 SSA [优先级调整: 88 → 85]"
     },
     {
       "id": "mir_ssa_verifier",
       "name": "实现 MIR SSA 验证 Pass",
       "description": "实现 SSA 验证 Pass，检查每个 SSA 名是否只定义一次、所有使用是否在支配范围内、Phi 节点是否在汇合点，确保 SSA 性质成立",
       "difficulty": "medium",
-      "priority": 80,
+      "priority": 86,
       "category": "ir",
       "estimated": "4-6 小时",
       "status": "pending",
-      "depends_on": ["fix_mir_ssa"],
-      "reason": "SSA 修复后需要验证机制来防止回归。验证 Pass 可以作为所有 MIR 优化的正确性保障，也能帮助发现潜在的 SSA 破坏问题"
+      "depends_on": [
+        "fix_mir_ssa",
+        "fix_while_phi",
+        "fix_assign_ssa"
+      ],
+      "reason": "SSA 修复后需要验证机制来防止回归。验证 Pass 可以作为所有 MIR 优化的正确性保障，也能帮助发现潜在的 SSA 破坏问题 [优先级调整: 80 → 86]"
     },
     {
       "id": "refactor_sys_path",
@@ -205,7 +219,9 @@
       "category": "engineering",
       "estimated": "1 天",
       "status": "pending",
-      "depends_on": ["refactor_sys_path"],
+      "depends_on": [
+        "refactor_sys_path"
+      ],
       "reason": "四层 IR 中函数调用命名换了三次，每次写跨层代码都要回忆'这层叫什么'，已导致多个 field name bug。命名统一后可大幅降低 bug 率"
     },
     {
@@ -217,7 +233,9 @@
       "category": "engineering",
       "estimated": "6-8 小时",
       "status": "pending",
-      "depends_on": ["unify_ir_naming"],
+      "depends_on": [
+        "unify_ir_naming"
+      ],
       "reason": "Pass 管理器中有 6 个方法重复实现了 HIR 表达式的递归匹配，约 500 行重复代码。引入 Visitor 模式后，每个 Pass 只需关注自身逻辑，大幅降低维护成本"
     },
     {
@@ -229,7 +247,10 @@
       "category": "architecture",
       "estimated": "2-3 天",
       "status": "pending",
-      "depends_on": ["fix_match_lowering", "fix_mir_ssa"],
+      "depends_on": [
+        "fix_match_lowering",
+        "fix_mir_ssa"
+      ],
       "reason": "目前有两套 C 代码生成路径（AST 路径功能完整，LIR 路径仅阶段一），功能重叠增加维护成本。MIR 层正确性修复后，统一到 LIR→C 路径可以让所有后端共享 IR 优化成果"
     },
     {
@@ -241,7 +262,10 @@
       "category": "backend",
       "estimated": "3-5 小时",
       "status": "pending",
-      "depends_on": ["fix_mir_ssa"],
+      "depends_on": [
+        "fix_mir_ssa",
+        "fix_while_phi"
+      ],
       "reason": "深度审计发现 Wasm 后端将 LIRLabel 实现为 Wasm block，但 block 只能向前跳出不能跳入，循环回跳完全失效。需要重构为结构化控制流"
     },
     {
@@ -253,7 +277,9 @@
       "category": "backend",
       "estimated": "3-5 天",
       "status": "pending",
-      "depends_on": ["fix_mir_ssa"],
+      "depends_on": [
+        "fix_mir_ssa"
+      ],
       "reason": "原生后端整体完成度低（代码生成器质量差、寄存器分配摆设、无跳转回填），项目已有 C 后端和 Cranelift 后端两个更可行路径，自研 x86_64 优先级进一步降低"
     },
     {
@@ -265,7 +291,11 @@
       "category": "optimization",
       "estimated": "1-2 周",
       "status": "pending",
-      "depends_on": ["fix_mir_ssa", "cse_pass", "mir_ssa_verifier"],
+      "depends_on": [
+        "fix_mir_ssa",
+        "cse_pass",
+        "mir_ssa_verifier"
+      ],
       "reason": "高级优化，依赖 SSA、循环分析和验证机制。当前阶段优先级低，先打好基础"
     },
     {
@@ -399,6 +429,46 @@
       "category": "backend",
       "estimated": "1 小时",
       "status": "completed"
+    },
+    {
+      "id": "fix_while_phi",
+      "name": "修复 while 循环 SSA Phi 插入",
+      "description": "为 while 循环的循环携带变量在循环头插入 Phi 节点，识别所有在循环体内被修改的变量，在 header 块开头创建 Phi，合并循环前初始值和循环回边值",
+      "difficulty": "medium",
+      "priority": 90,
+      "category": "ir",
+      "estimated": "4-6 小时",
+      "status": "pending",
+      "depends_on": [
+        "fix_mir_ssa_branch_env"
+      ],
+      "reason": "深度审计发现 while 循环完全没有 Phi 节点，是当前 SSA 最严重的缺陷。循环体内变量修改会直接污染 env，回跳后条件计算使用错误版本。修复后 MIR 基本符合 SSA 形式"
+    },
+    {
+      "id": "fix_assign_ssa",
+      "name": "修复赋值表达式 SSA 语义",
+      "description": "赋值表达式（HIRAssignExpr）当前直接覆盖 self.env 中的 SSA 名，违反\"每个变量只定义一次\"原则。修复为：赋值产生新的 SSA 版本，后续引用使用新版本",
+      "difficulty": "medium",
+      "priority": 88,
+      "category": "ir",
+      "estimated": "3-5 小时",
+      "status": "pending",
+      "depends_on": [
+        "fix_while_phi"
+      ],
+      "reason": "赋值直接覆盖 env 是 SSA 的基础性缺陷。在顺序代码中影响有限，但在循环和分支中会导致值意外覆盖。需要在 while 循环 Phi 之后修复，否则 Phi 的来源不正确"
+    },
+    {
+      "id": "fix_c_backend_branch",
+      "name": "修复 LIR C 后端条件分支",
+      "description": "修复 LIRCBackend._compile_branch 仅生成 if (!cond) goto false 而假设 true 分支 fall-through 的 bug，改为双向跳转 if (cond) goto true; goto false; 确保非顺序 CFG 的代码生成正确",
+      "difficulty": "easy",
+      "priority": 72,
+      "category": "backend",
+      "estimated": "30 分钟",
+      "status": "pending",
+      "depends_on": [],
+      "reason": "深度审计发现 C 后端 LIR 路径的条件分支依赖 fall-through 假设，非顺序 CFG 下生成错误代码。高价值低成本修复"
     }
   ]
 }
