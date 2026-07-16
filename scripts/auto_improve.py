@@ -2,7 +2,7 @@
 """
 Nova 自动改进引擎 v3.0 - 审查驱动的自动修复系统
 - 读取审查结果，针对性修复问题
-- 6 个专业修复器，按类型批量处理
+- 7 个专业修复器，按类型批量处理
 - 每类修复后自动运行测试验证
 - 失败自动回滚，保证代码质量
 """
@@ -31,7 +31,7 @@ SEVERITY_HIGH = "HIGH"
 SEVERITY_MEDIUM = "MEDIUM"
 SEVERITY_LOW = "LOW"
 
-# 要运行的测试文件列表（跳过导入有问题的）
+# 要运行的测试文件列表
 TEST_FILES = [
     "tests/test_nova.py",
     "tests/test_c_codegen.py",
@@ -287,6 +287,11 @@ class SilentExceptionFixer(BaseFixer):
             if 'except Exception:' in stripped and i + 1 < len(lines):
                 next_stripped = lines[i + 1].strip()
                 if next_stripped == 'pass':
+                    # 检查是否已经有 TODO 注释
+                    if i > 0 and 'TODO' in lines[i - 1]:
+                        new_lines.append(line)
+                        i += 1
+                        continue
                     new_lines.append(line)
                     new_lines.append(indent + '    # TODO: 缩小异常范围，记录错误日志')
                     new_lines.append(indent + '    pass')
@@ -313,7 +318,217 @@ class SilentExceptionFixer(BaseFixer):
 
 
 # ============================================================
-# 修复器 4: 模块文档字符串补充
+# 修复器 4: 未使用导入清理
+# ============================================================
+
+class UnusedImportFixer(BaseFixer):
+    name = "unused_import"
+    description = "移除未使用的导入"
+    
+    def can_fix(self, issue_type, severity):
+        return issue_type == 'unused_import'
+    
+    def _find_unused_imports(self, file_path):
+        """使用 pyflakes 检测未使用的导入，返回未使用的符号名集合"""
+        try:
+            from pyflakes.api import check
+            from pyflakes.reporter import Reporter
+            import io
+        except ImportError:
+            run_cmd([sys.executable, "-m", "pip", "install", "pyflakes", "--quiet"])
+            try:
+                from pyflakes.api import check
+                from pyflakes.reporter import Reporter
+                import io
+            except ImportError:
+                return set()
+        
+        source = read_file(file_path)
+        if not source:
+            return set()
+        
+        # __init__.py 中的导入通常是有意导出的，跳过
+        if os.path.basename(file_path) == '__init__.py':
+            return set()
+        
+        # 使用 pyflakes 检测
+        stderr = io.StringIO()
+        stdout = io.StringIO()
+        reporter = Reporter(stdout, stderr)
+        
+        try:
+            check(source, file_path, reporter)
+        except:
+            return set()
+        
+        output = stdout.getvalue() + stderr.getvalue()
+        unused = set()
+        
+        for line in output.split('\n'):
+            # 匹配: "file:line: 'X' imported but unused"
+            # X 可能是 "module.Name" 格式（from module import Name）
+            # 也可能是 "module" 格式（import module）
+            if 'imported but unused' in line:
+                match = re.search(r"'([^']+)' imported but unused", line)
+                if match:
+                    full_name = match.group(1)
+                    # 对于 from X import Y，pyflakes 报告 "X.Y"
+                    # 提取最后一部分作为符号名
+                    if '.' in full_name:
+                        symbol = full_name.split('.')[-1]
+                    else:
+                        symbol = full_name
+                    unused.add(symbol)
+        
+        return unused
+    
+    def fix(self, issue_type, file_path, details):
+        if not file_path or not os.path.exists(file_path):
+            return False, "文件不存在"
+        
+        source = read_file(file_path)
+        if not source:
+            return False, "文件为空"
+        
+        # __init__.py 跳过
+        if os.path.basename(file_path) == '__init__.py':
+            return False, "__init__.py 跳过"
+        
+        unused_names = self._find_unused_imports(file_path)
+        if not unused_names:
+            return False, "未发现未使用的导入"
+        
+        lines = source.split('\n')
+        new_lines = []
+        removed_count = 0
+        i = 0
+        
+        while i < len(lines):
+            line = lines[i]
+            stripped = line.strip()
+            
+            # 处理 "import X" 或 "import X, Y" 形式
+            if re.match(r'^import\s+[\w.]+(\s*,\s*[\w.]+)*\s*$', stripped):
+                modules = [m.strip() for m in re.findall(r'[\w.]+', stripped[7:])]
+                keep = [m for m in modules if m.split('.')[-1] not in unused_names]
+                if not keep:
+                    removed_count += len(modules)
+                    i += 1
+                    continue
+                elif len(keep) < len(modules):
+                    indent = line[:len(line) - len(line.lstrip())]
+                    new_lines.append(indent + 'import ' + ', '.join(keep))
+                    removed_count += len(modules) - len(keep)
+                    i += 1
+                    continue
+            
+            # 处理 "from X import Y, Z" 单行形式
+            from_match = re.match(r'^from\s+([\w.]+)\s+import\s+(.+)$', stripped)
+            if from_match and '(' not in stripped:
+                module = from_match.group(1)
+                imports_str = from_match.group(2)
+                
+                # 跳过带 as 的重命名导入
+                if ' as ' in imports_str:
+                    new_lines.append(line)
+                    i += 1
+                    continue
+                
+                imported_names = [n.strip() for n in imports_str.split(',') if n.strip()]
+                keep = [n for n in imported_names if n not in unused_names]
+                
+                if not keep:
+                    removed_count += len(imported_names)
+                    i += 1
+                    continue
+                elif len(keep) < len(imported_names):
+                    indent = line[:len(line) - len(line.lstrip())]
+                    new_lines.append(indent + f'from {module} import ' + ', '.join(sorted(keep)))
+                    removed_count += len(imported_names) - len(keep)
+                    i += 1
+                    continue
+            
+            # 处理 "from X import (\n    Y,\n    Z,\n)" 多行导入形式
+            from_multi_match = re.match(r'^from\s+([\w.]+)\s+import\s*\($', stripped)
+            if from_multi_match:
+                module = from_multi_match.group(1)
+                indent = line[:len(line) - len(line.lstrip())]
+                multi_imports = []
+                j = i + 1
+                
+                # 收集括号内的所有导入名
+                while j < len(lines):
+                    mline = lines[j]
+                    mstripped = mline.strip()
+                    
+                    if mstripped == ')':
+                        break
+                    
+                    # 提取符号名（去掉逗号和注释）
+                    name = mstripped.rstrip(',').strip()
+                    if name and not name.startswith('#'):
+                        # 处理 "Name as Alias" 形式
+                        if ' as ' in name:
+                            alias = name.split(' as ')[1].strip()
+                            multi_imports.append((name, alias))
+                        else:
+                            multi_imports.append((name, name))
+                    
+                    j += 1
+                
+                if j >= len(lines):
+                    # 没找到闭合括号，保守处理
+                    new_lines.append(line)
+                    i += 1
+                    continue
+                
+                # 过滤掉未使用的
+                keep_imports = [(orig_name, alias) for orig_name, alias in multi_imports 
+                               if alias not in unused_names]
+                removed = len(multi_imports) - len(keep_imports)
+                
+                if removed == 0:
+                    # 没有需要移除的，保持原样
+                    new_lines.append(line)
+                    i += 1
+                    continue
+                
+                if not keep_imports:
+                    # 全部移除，跳过整个导入块（含闭合括号）
+                    removed_count += removed
+                    i = j + 1
+                    continue
+                
+                # 部分保留，重写导入块
+                removed_count += removed
+                new_lines.append(indent + f'from {module} import (')
+                for orig_name, alias in keep_imports:
+                    new_lines.append(indent + '    ' + orig_name + ',')
+                new_lines.append(indent + ')')
+                i = j + 1
+                continue
+            
+            new_lines.append(line)
+            i += 1
+        
+        if removed_count == 0:
+            return False, "无可移除的导入"
+        
+        new_source = '\n'.join(new_lines)
+        
+        try:
+            ast.parse(new_source)
+        except SyntaxError as e:
+            return False, f"修复后语法错误: {e}"
+        
+        if write_file(file_path, new_source):
+            relpath = os.path.relpath(file_path, PROJECT_DIR)
+            return True, f"移除 {removed_count} 个未使用导入 ({relpath})"
+        return False, "写入失败"
+
+
+# ============================================================
+# 修复器 5: 模块文档字符串补充
 # ============================================================
 
 class DocstringFixer(BaseFixer):
@@ -383,17 +598,26 @@ class DocstringFixer(BaseFixer):
 
 
 # ============================================================
-# 修复器 5: 导入顺序整理
+# 修复器 6: 导入顺序整理（使用 isort）
 # ============================================================
 
 class ImportSortFixer(BaseFixer):
     name = "import_sort"
-    description = "整理导入顺序"
+    description = "整理导入顺序（isort）"
     
     def can_fix(self, issue_type, severity):
         return issue_type == 'import_order'
     
     def fix(self, issue_type, file_path, details):
+        try:
+            import isort
+        except ImportError:
+            run_cmd([sys.executable, "-m", "pip", "install", "isort", "--quiet"])
+            try:
+                import isort
+            except ImportError:
+                return False, "isort 不可用"
+        
         if not file_path or not os.path.exists(file_path):
             return False, "文件不存在"
         
@@ -401,107 +625,30 @@ class ImportSortFixer(BaseFixer):
         if not source:
             return False, "文件为空"
         
-        lines = source.split('\n')
-        for line in lines:
-            if 'import (' in line:
-                return False, "包含多行导入，跳过"
+        try:
+            sorted_source = isort.code(source)
+        except Exception as e:
+            return False, f"isort 处理失败: {e}"
         
-        import_start = -1
-        import_end = -1
-        in_imports = False
-        
-        for i, line in enumerate(lines):
-            stripped = line.strip()
-            is_import = (stripped.startswith('import ') or 
-                        stripped.startswith('from ')) and '(' not in stripped
-            
-            if is_import:
-                if not in_imports:
-                    import_start = i
-                    in_imports = True
-                import_end = i
-            elif stripped == '' and in_imports:
-                continue
-            elif in_imports and stripped:
-                break
-        
-        if import_start == -1 or import_end == -1:
-            return False, "未找到导入块"
-        
-        imports = []
-        for i in range(import_start, import_end + 1):
-            if lines[i].strip():
-                imports.append(lines[i])
-        
-        if len(imports) < 3:
-            return False, "导入太少，无需整理"
-        
-        std_modules = {'os', 'sys', 're', 'ast', 'json', 'time', 'datetime', 
-                      'collections', 'subprocess', 'pathlib', 'typing',
-                      'io', 'enum', 'struct', 'hashlib', 'copy', 'itertools',
-                      'math', 'random', 'functools', 'operator', 'abc',
-                      'dataclasses', 'decimal', 'fraction', 'logging',
-                      'argparse', 'shutil', 'tempfile', 'uuid', 'base64'}
-        
-        std_lib = []
-        third_party = []
-        local = []
-        
-        for imp in imports:
-            stripped = imp.strip()
-            parts = stripped.split()
-            if len(parts) < 2:
-                continue
-            if stripped.startswith('from '):
-                module = parts[1].split('.')[0]
-            else:
-                module = parts[1].split('.')[0]
-            
-            if module in std_modules:
-                std_lib.append(imp)
-            elif '.' in parts[1]:
-                local.append(imp)
-            else:
-                third_party.append(imp)
-        
-        std_lib.sort(key=lambda x: x.strip().lower())
-        third_party.sort(key=lambda x: x.strip().lower())
-        local.sort(key=lambda x: x.strip().lower())
-        
-        sorted_imports = []
-        if std_lib:
-            sorted_imports.extend(std_lib)
-        if third_party:
-            if sorted_imports:
-                sorted_imports.append('')
-            sorted_imports.extend(third_party)
-        if local:
-            if sorted_imports:
-                sorted_imports.append('')
-            sorted_imports.extend(local)
-        
-        original_clean = [l.strip() for l in imports if l.strip()]
-        new_clean = [l.strip() for l in sorted_imports if l.strip()]
-        
-        if original_clean == new_clean:
+        if sorted_source == source:
             return False, "导入顺序已经正确"
         
-        new_lines = lines[:import_start] + sorted_imports + lines[import_end + 1:]
-        new_source = '\n'.join(new_lines)
-        
         try:
-            ast.parse(new_source)
+            ast.parse(sorted_source)
         except SyntaxError as e:
             return False, f"修复后语法错误: {e}"
         
-        if write_file(file_path, new_source):
+        if write_file(file_path, sorted_source):
             relpath = os.path.relpath(file_path, PROJECT_DIR)
-            return True, f"整理 {len(imports)} 个导入 ({relpath})"
+            # 统计导入行数
+            import_count = sum(1 for l in source.split('\n') 
+                             if l.strip().startswith('import ') or l.strip().startswith('from '))
+            return True, f"整理 {import_count} 个导入 ({relpath})"
         return False, "写入失败"
 
 
 # ============================================================
-# 修复器 6: 代码格式化
+# 修复器 7: 代码格式化
 # ============================================================
 
 class FormatFixer(BaseFixer):
@@ -552,6 +699,7 @@ class FixerManager:
             ReplImportFixer(),
             BareExceptFixer(),
             SilentExceptionFixer(),
+            UnusedImportFixer(),
             DocstringFixer(),
             ImportSortFixer(),
             FormatFixer(),
@@ -607,6 +755,9 @@ class FixerManager:
             lines = source.split('\n')
             for i in range(len(lines) - 1):
                 if 'except Exception:' in lines[i] and lines[i + 1].strip() == 'pass':
+                    # 检查是否已经有 TODO 注释
+                    if i > 0 and 'TODO' in lines[i - 1]:
+                        continue
                     issues.append({
                         'type': 'too_broad_exception',
                         'severity': SEVERITY_HIGH,
@@ -643,13 +794,35 @@ class FixerManager:
                     'file': filepath,
                 })
         
-        # 5. 导入顺序
+        # 5. 未使用的导入
+        for filepath in get_python_files():
+            relpath = os.path.relpath(filepath, PROJECT_DIR)
+            if 'scripts/' in relpath or 'tests/' in relpath:
+                continue
+            if os.path.basename(filepath) == '__init__.py':
+                continue
+            source = read_file(filepath)
+            if not source:
+                continue
+            # 快速检查：至少有 import 语句才进一步检测
+            if 'import ' not in source:
+                continue
+            issues.append({
+                'type': 'unused_import',
+                'severity': SEVERITY_MEDIUM,
+                'file': filepath,
+            })
+        
+        # 6. 导入顺序
         for filepath in get_python_files():
             relpath = os.path.relpath(filepath, PROJECT_DIR)
             if 'scripts/' in relpath or 'tests/' in relpath:
                 continue
             source = read_file(filepath)
-            if not source or 'import (' in source:
+            if not source:
+                continue
+            # 快速检查：至少有 import 语句
+            if 'import ' not in source:
                 continue
             issues.append({
                 'type': 'import_order',
@@ -657,7 +830,7 @@ class FixerManager:
                 'file': filepath,
             })
         
-        # 6. 代码格式化
+        # 7. 代码格式化
         for filepath in get_python_files():
             relpath = os.path.relpath(filepath, PROJECT_DIR)
             if 'scripts/' in relpath or 'tests/' in relpath:
@@ -781,6 +954,7 @@ def generate_report(round_num, results, test_before, test_after):
         'repl_import': '🔧 REPL 导入修复',
         'bare_except': '🛡️  裸 except 修复',
         'silent_exception': '📝 静默异常标记',
+        'unused_import': '🗑️  未使用导入清理',
         'docstring': '📄 文档字符串补充',
         'import_sort': '📦 导入顺序整理',
         'format': '✨ 代码格式化',

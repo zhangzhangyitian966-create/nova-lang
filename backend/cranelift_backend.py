@@ -7,48 +7,39 @@ Cranelift 本身是 Rust 库，Python 无法直接调用。我们采用两种策
 2. 作为 fallback，保存 .clif 文件供后续使用
 """
 
-from typing import List, Dict, Optional, Tuple
 import os
+import platform
 import subprocess
 import sys
-
-import platform
 import tempfile
+from typing import Dict, List
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from ir.ir_nodes import (
-    LIRModule,
-    LIRFunction,
-    LIRGlobal,
-    LIRData,
-    LIRInstr,
-    LIRLoadConst,
-    LIRLoadGlobal,
-    LIRStoreGlobal,
-    LIRLoadReg,
-    LIRStoreReg,
+    IRType,
     LIRBinOp,
-    LIRUnaryOp,
-    LIRCall,
-    LIRCallIndirect,
-    LIRJump,
     LIRBranch,
-    LIRReturn,
-    LIRLabel,
-    LIRIndex,
-    LIRFieldAccess,
+    LIRBuildADT,
     LIRBuildList,
     LIRBuildTuple,
-    LIRBuildADT,
+    LIRCall,
+    LIRData,
+    LIRFieldAccess,
+    LIRFunction,
+    LIRIndex,
+    LIRInstr,
+    LIRJump,
+    LIRLabel,
+    LIRLoadConst,
+    LIRLoadGlobal,
+    LIRLoadReg,
+    LIRModule,
     LIRPanic,
-    IRType,
+    LIRReturn,
+    LIRStoreReg,
+    LIRUnaryOp,
     NovaType,
-    INT_TYPE,
-    FLOAT_TYPE,
-    STRING_TYPE,
-    BOOL_TYPE,
-    UNIT_TYPE,
 )
 
 # Cranelift IR 类型映射

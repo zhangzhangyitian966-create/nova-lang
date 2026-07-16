@@ -13,22 +13,22 @@ Nova 编译器 CLI
   nova help                  显示帮助
 """
 
-from typing import Optional
 import argparse
 import os
 import shutil
 import subprocess
 import sys
-import tempfile
+from typing import Optional
 
 # 确保导入路径正确
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from lexer import Lexer
 from parser import Parser
-from type_checker import TypeChecker
+
 from c_codegen import CCodeGen
 from errors import NovaError
+from lexer import Lexer
+from type_checker import TypeChecker
 
 NOVA_VERSION = "0.2.0"
 
@@ -246,7 +246,7 @@ class NovaCompiler:
 
     def compile_wasm(self, source_path: str, output_name: str = None):
         """编译为 WebAssembly (WasmGC)"""
-        from backend.compiler_pipeline import NovaCompilerPipeline, BACKEND_WASM
+        from backend.compiler_pipeline import BACKEND_WASM, NovaCompilerPipeline
 
         if not os.path.isfile(source_path):
             print(f"错误: 文件 '{source_path}' 不存在", file=sys.stderr)

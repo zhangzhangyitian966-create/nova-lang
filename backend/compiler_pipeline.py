@@ -3,19 +3,17 @@ Nova 统一编译管道
 Nova 源码 -> Tree-sitter 解析 -> HIR -> MIR -> LIR -> 目标代码
 """
 
-import sys
 import os
+import sys
 
 # 确保 ir/ 目录在路径上（ir 内的模块直接 import ir_nodes）
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "ir"))
 
-from typing import Optional
 
-from ir.ir_nodes import HIRModule, MIRModule, LIRModule
 from ir.hir_lowering import HIRLowering
-from ir.mir_lowering import MIRLowering
 from ir.lir_lowering import LIRLowering
+from ir.mir_lowering import MIRLowering
 from ir.pass_manager import default_optimization_pipeline
 
 # 编译目标常量
@@ -51,8 +49,9 @@ class NovaCompilerPipeline:
     def compile_source(self, source: str, output_path: str) -> bool:
         """完整的编译管道：源码 -> 目标代码"""
         # 1. 前端解析（复用现有 Parser）
-        from lexer import Lexer
         from parser import Parser
+
+        from lexer import Lexer
         from type_checker import TypeChecker
 
         tokens = Lexer(source).tokenize()
@@ -95,8 +94,9 @@ class NovaCompilerPipeline:
 
     def compile_to_ir_text(self, source: str, level: str = "lir") -> str:
         """编译到指定 IR 层的文本输出（调试用）"""
-        from lexer import Lexer
         from parser import Parser
+
+        from lexer import Lexer
 
         tokens = Lexer(source).tokenize()
         ast = Parser(tokens).parse()

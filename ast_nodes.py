@@ -5,8 +5,8 @@ Nova 编程语言 - AST 节点定义
 AST 是源代码的结构化表示，是语法分析的输出，类型检查和求值的输入。
 """
 
-from dataclasses import dataclass, field
-from typing import List, Optional, Any, Union
+from dataclasses import dataclass
+from typing import Any, List, Optional
 
 # ============================================================
 # 位置信息

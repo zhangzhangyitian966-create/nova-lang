@@ -6,7 +6,7 @@ Nova 编程语言 - 环境管理
 支持不可变绑定和可变绑定。
 """
 
-from typing import Dict, Optional, Any, List
+from typing import Any, Dict, Optional
 
 
 class BindingInfo:

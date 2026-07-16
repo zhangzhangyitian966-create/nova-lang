@@ -3,47 +3,37 @@ Nova WasmGC 后端
 将 LIR 转换为 WebAssembly 文本格式（WAT），支持 GC 提案。
 """
 
-from typing import List, Dict, Optional, Tuple
 import os
 import subprocess
 import sys
-
 import tempfile
+from typing import Dict, List
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from ir.ir_nodes import (
-    LIRModule,
-    LIRFunction,
-    LIRGlobal,
-    LIRData,
-    LIRInstr,
-    LIRLoadConst,
-    LIRLoadGlobal,
-    LIRStoreGlobal,
-    LIRLoadReg,
-    LIRStoreReg,
+    INT_TYPE,
+    IRType,
     LIRBinOp,
-    LIRUnaryOp,
-    LIRCall,
-    LIRCallIndirect,
-    LIRJump,
     LIRBranch,
-    LIRReturn,
-    LIRLabel,
-    LIRIndex,
-    LIRFieldAccess,
+    LIRBuildADT,
     LIRBuildList,
     LIRBuildTuple,
-    LIRBuildADT,
+    LIRCall,
+    LIRFieldAccess,
+    LIRFunction,
+    LIRIndex,
+    LIRInstr,
+    LIRJump,
+    LIRLabel,
+    LIRLoadConst,
+    LIRLoadReg,
+    LIRModule,
     LIRPanic,
-    IRType,
+    LIRReturn,
+    LIRStoreReg,
+    LIRUnaryOp,
     NovaType,
-    INT_TYPE,
-    FLOAT_TYPE,
-    STRING_TYPE,
-    BOOL_TYPE,
-    UNIT_TYPE,
 )
 
 # Wasm 类型映射

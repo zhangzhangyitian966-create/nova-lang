@@ -5,57 +5,31 @@ Nova 自研原生代码生成后端
 零外部依赖 —— 不需要 gcc、clang、Cranelift、LLVM
 """
 
-from typing import Dict, List, Tuple, Optional, Any
 import os
 import struct
 import sys
+from typing import Dict, List, Tuple
 
 # 确保 ir 节点可以被导入
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "ir"))
 from ir_nodes import (
-    LIRModule,
-    LIRFunction,
-    LIRGlobal,
-    LIRData,
-    LIRInstr,
-    LIRLoadConst,
-    LIRLoadGlobal,
-    LIRStoreGlobal,
-    LIRLoadReg,
-    LIRStoreReg,
-    LIRBinOp,
-    LIRUnaryOp,
-    LIRCall,
-    LIRCallIndirect,
-    LIRJump,
-    LIRBranch,
-    LIRReturn,
-    LIRLabel,
-    LIRIndex,
-    LIRFieldAccess,
-    LIRBuildList,
-    LIRBuildTuple,
-    LIRBuildADT,
-    LIRPanic,
-    IRType,
-    NovaType,
     INT_TYPE,
-    FLOAT_TYPE,
-    STRING_TYPE,
-    BOOL_TYPE,
     UNIT_TYPE,
+    LIRBinOp,
+    LIRBranch,
+    LIRCall,
+    LIRFunction,
+    LIRJump,
+    LIRLabel,
+    LIRLoadConst,
+    LIRModule,
+    LIRPanic,
+    LIRReturn,
+    LIRUnaryOp,
 )
 
 from nova.backend.x86_64 import (
-    X86_64Emitter,
-    RAX,
-    RCX,
-    RDX,
-    RBX,
-    RSP,
-    RBP,
-    RSI,
-    RDI,
+    CALLEE_SAVED,
     R8,
     R9,
     R10,
@@ -64,6 +38,12 @@ from nova.backend.x86_64 import (
     R13,
     R14,
     R15,
+    RAX,
+    RBX,
+    RCX,
+    RDI,
+    RDX,
+    RSP,
     XMM0,
     XMM1,
     XMM2,
@@ -72,11 +52,7 @@ from nova.backend.x86_64 import (
     XMM5,
     XMM6,
     XMM7,
-    CALLER_SAVED,
-    CALLEE_SAVED,
-    ARG_REGS,
-    RETURN_REG,
-    XMM_ARG_REGS,
+    X86_64Emitter,
 )
 
 # ============================================================
@@ -531,8 +507,9 @@ class SimpleNativeCompiler:
         """将 Nova 源码编译为 x86_64 ELF"""
         # 1. 前端解析（复用现有）
         sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-        from lexer import Lexer
         from parser import Parser
+
+        from lexer import Lexer
 
         tokens = Lexer(source).tokenize()
         ast = Parser(tokens).parse()

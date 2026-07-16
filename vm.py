@@ -14,10 +14,10 @@ VM 状态：
 - functions: 已编译函数的字节码块
 """
 
-from typing import Dict, List, Optional, Any, Callable
 import json
 import math
 import os
+from typing import Any, Callable, Dict, List
 
 from compiler import Bytecode, FunctionBlock, Instruction, Op
 from errors import RuntimeError_

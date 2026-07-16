@@ -288,3 +288,81 @@
 3. 消除代码重复（内置函数、运行时值）
 4. 实现空的优化 Pass（DeadCodeElimination, CSE 等）
 
+
+---
+
+## 2026-07-16 08:35 第9轮改进
+
+# 第 9 轮自动改进报告
+
+**改进时间**: 2026-07-16 08:35:07
+**改进引擎**: v3.0 (审查驱动的自动修复)
+
+## 改进概览
+
+- 发现问题: **48** 个
+- 成功修复: **48** 个 ✅
+- 回滚: **0** 个 ❌
+
+## 测试验证
+
+- 改进前: 365/365
+- 改进后: 365/365
+
+## 修复详情
+
+### 🗑️  未使用导入清理
+
+- 成功: 18/18
+
+  - ✅ [MEDIUM] ast_nodes.py: 移除 2 个未使用导入 (ast_nodes.py)
+  - ✅ [MEDIUM] compiler_pipeline.py: 移除 4 个未使用导入 (backend/compiler_pipeline.py)
+  - ✅ [MEDIUM] cranelift_backend.py: 移除 10 个未使用导入 (backend/cranelift_backend.py)
+  - ✅ [MEDIUM] native_backend.py: 移除 26 个未使用导入 (backend/native_backend.py)
+  - ✅ [MEDIUM] wasm_backend.py: 移除 11 个未使用导入 (backend/wasm_backend.py)
+  - ✅ [MEDIUM] c_codegen.py: 移除 4 个未使用导入 (c_codegen.py)
+  - ✅ [MEDIUM] compiler.py: 移除 5 个未使用导入 (compiler.py)
+  - ✅ [MEDIUM] compiler_cli.py: 移除 1 个未使用导入 (compiler_cli.py)
+  - ✅ [MEDIUM] environment.py: 移除 1 个未使用导入 (environment.py)
+  - ✅ [MEDIUM] evaluator.py: 移除 4 个未使用导入 (evaluator.py)
+  - ... 还有 8 个
+
+### 📦 导入顺序整理
+
+- 成功: 17/17
+
+  - ✅ [LOW] __init__.py: 整理 1 个导入 (__init__.py)
+  - ✅ [LOW] compiler_pipeline.py: 整理 14 个导入 (backend/compiler_pipeline.py)
+  - ✅ [LOW] cranelift_backend.py: 整理 7 个导入 (backend/cranelift_backend.py)
+  - ✅ [LOW] native_backend.py: 整理 8 个导入 (backend/native_backend.py)
+  - ✅ [LOW] wasm_backend.py: 整理 6 个导入 (backend/wasm_backend.py)
+  - ✅ [LOW] c_codegen.py: 整理 2 个导入 (c_codegen.py)
+  - ✅ [LOW] compiler.py: 整理 2 个导入 (compiler.py)
+  - ✅ [LOW] compiler_cli.py: 整理 13 个导入 (compiler_cli.py)
+  - ✅ [LOW] evaluator.py: 整理 7 个导入 (evaluator.py)
+  - ✅ [LOW] hir_lowering.py: 整理 4 个导入 (ir/hir_lowering.py)
+  - ... 还有 7 个
+
+### ✨ 代码格式化
+
+- 成功: 13/13
+
+  - ✅ [LOW] cranelift_backend.py: 格式化代码 (backend/cranelift_backend.py)
+  - ✅ [LOW] native_backend.py: 格式化代码 (backend/native_backend.py)
+  - ✅ [LOW] wasm_backend.py: 格式化代码 (backend/wasm_backend.py)
+  - ✅ [LOW] c_codegen.py: 格式化代码 (c_codegen.py)
+  - ✅ [LOW] compiler.py: 格式化代码 (compiler.py)
+  - ✅ [LOW] compiler_cli.py: 格式化代码 (compiler_cli.py)
+  - ✅ [LOW] evaluator.py: 格式化代码 (evaluator.py)
+  - ✅ [LOW] hir_lowering.py: 格式化代码 (ir/hir_lowering.py)
+  - ✅ [LOW] lir_lowering.py: 格式化代码 (ir/lir_lowering.py)
+  - ✅ [LOW] mir_lowering.py: 格式化代码 (ir/mir_lowering.py)
+  - ... 还有 3 个
+
+## 下一步计划
+
+1. 修复 sys.path hack，重构为标准 Python 包结构
+2. 补充单元测试，提高测试覆盖率
+3. 消除代码重复（内置函数、运行时值）
+4. 实现空的优化 Pass（DeadCodeElimination, CSE 等）
+

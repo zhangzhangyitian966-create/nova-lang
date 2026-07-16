@@ -13,7 +13,7 @@ LIR (Low-Level IR):   接近机器码，用于代码生成
 
 from dataclasses import dataclass, field
 from enum import Enum, auto
-from typing import List, Optional, Dict, Any, Union, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 # ============================================================
 # 通用类型系统（三层共享）

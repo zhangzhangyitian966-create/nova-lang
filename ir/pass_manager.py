@@ -5,28 +5,14 @@ Nova Pass 管理器
 Pass 管理器负责按序运行各层 Pass，并在达到不动点（无新变化）时停止。
 """
 
-from typing import List
 from ir_nodes import (
-    IRType,
-    NovaType,
-    INT_TYPE,
     FLOAT_TYPE,
-    BOOL_TYPE,
-    HIRModule,
-    HIRFnDecl,
-    HIRLetDecl,
-    HIRExpr,
-    HIRIntLiteral,
-    HIRFloatLiteral,
-    HIRBoolLiteral,
-    HIRStringLiteral,
+    INT_TYPE,
     HIRBinaryOp,
-    HIRBlockExpr,
-    HIRCallExpr,
-    HIRIfExpr,
-    HIRUnitLiteral,
-    MIRModule,
-    LIRModule,
+    HIRFloatLiteral,
+    HIRFnDecl,
+    HIRIntLiteral,
+    HIRLetDecl,
 )
 
 
