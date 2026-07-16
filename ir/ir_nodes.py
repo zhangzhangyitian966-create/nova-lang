@@ -952,7 +952,8 @@ class LIRJump(LIRInstr):
 class LIRBranch(LIRInstr):
     """LIR 条件跳转"""
 
-    pass
+    true_target: str = ""
+    false_target: str = ""
 
 
 @dataclass
@@ -995,6 +996,13 @@ class LIRListAppend(LIRInstr):
     """LIR 列表追加元素"""
 
     pass
+
+
+@dataclass
+class LIRBuildMap(LIRInstr):
+    """LIR 构建映射（Map）"""
+
+    entry_count: int = 0
 
 
 @dataclass

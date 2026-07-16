@@ -14,6 +14,7 @@ from ir_nodes import (
     LIRBuildADT,
     LIRBuildList,
     LIRListAppend,
+    LIRBuildMap,
     LIRBuildTuple,
     LIRCall,
     LIRData,
@@ -254,8 +255,8 @@ class LIRLowering:
             result.append(lir)
 
         elif isinstance(instr, MIRMapBuild):
-            lir = LIRBuildList()
-            lir.count = len(instr.entries)
+            lir = LIRBuildMap()
+            lir.entry_count = len(instr.entries)
             if instr.result_name:
                 lir.dst_loc = (
                     self.ssa_to_loc.get(instr.result_name, ""),
@@ -326,6 +327,8 @@ class LIRLowering:
 
         if isinstance(term, MIRBranch):
             lir = LIRBranch()
+            lir.true_target = term.true_target
+            lir.false_target = term.false_target
             if term.condition:
                 lir.src_locs = [(self.ssa_to_loc.get(term.condition, ""), BOOL_TYPE)]
             return lir

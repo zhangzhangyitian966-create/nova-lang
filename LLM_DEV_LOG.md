@@ -4,6 +4,106 @@
 
 ---
 
+## 2026-07-16 11:35 第4轮LLM智能开发
+
+### 本轮概览
+- **开发任务数**: 3
+- **成功**: 3
+- **失败**: 0
+- **测试结果**: 403/403 通过（无回归）
+- **开发前基线**: 403/403
+- **开发后状态**: 403/403
+
+### 任务选择依据
+参考第 3 轮评审报告的"下一步计划"，本轮聚焦**架构突破**方向：
+1. C 后端接入统一 IR 管线（最高优先级，架构突破）
+2. 修复 Pass 管理器静默错误吞噬（easy，顺手做）
+3. 修复 LIR MapBuild 降级 bug（发现的明显正确性问题）
+
+选择理由：
+- 评审报告明确指出 C 后端绕过 IR 是"最大架构裂痕"，必须优先解决
+- Pass 错误修复是低投入高价值的质量改进
+- LIR MapBuild bug 是在代码分析中发现的正确性问题，顺手修复
+
+### 已完成任务
+
+#### 1. ✅ 修复 Pass 管理器静默错误吞噬
+- **难度**: easy
+- **分类**: 工程质量
+- **文件**: `ir/pass_manager.py`
+- **问题**: 3 处 `except Exception: pass` 静默吞掉所有异常，优化失败用户无感知
+- **实现内容**:
+  - 新增 `_record_pass_failure()` 方法统一处理失败记录
+  - 新增 `_pass_failures` 字典统计各 Pass 失败次数
+  - 默认模式：通过 `warnings.warn()` 发出警告
+  - Verbose 模式：输出完整堆栈跟踪到 stderr
+  - 新增公共 API：`set_verbose()`、`get_failure_stats()`
+  - 修复 `run_hir_passes`、`run_mir_passes`、`run_lir_passes` 三个方法
+- **代码量**: ~30 行新增
+
+#### 2. ✅ 修复 LIR MapBuild 降级 bug
+- **难度**: easy
+- **分类**: IR 降级 / Bug 修复
+- **文件**: `ir/ir_nodes.py`, `ir/lir_lowering.py`, `backend/wasm_backend.py`, `backend/cranelift_backend.py`
+- **问题**: `MIRMapBuild` 被错误地降级为 `LIRBuildList`，导致映射类型在 LIR 层完全丢失语义
+- **实现内容**:
+  - 新增 `LIRBuildMap` 指令节点（`entry_count` 字段）
+  - 修复 `lir_lowering.py` 中 MIRMapBuild → LIRBuildMap 的正确降级
+  - 在 `wasm_backend.py` 中添加 LIRBuildMap → `call $nova_map_new` 代码生成
+  - 在 `cranelift_backend.py` 中添加 LIRBuildMap → `call $nova_map_new` 代码生成
+- **代码量**: ~20 行新增/修改
+
+#### 3. ✅ C 后端 LIR 代码生成基础框架
+- **难度**: medium
+- **分类**: 架构治理 / 后端开发
+- **文件**: `backend/lir_c_backend.py`（新建）, `ir/ir_nodes.py`, `ir/lir_lowering.py`, `backend/wasm_backend.py`, `backend/cranelift_backend.py`
+- **问题**: C 后端完全绕过 IR 管线，是当前最大的架构裂痕
+- **实现内容（阶段一）**:
+  - 新建 `backend/lir_c_backend.py`，实现 `LIRCBackend` 类
+  - 支持 20+ 种 LIR 指令的 C 代码生成：
+    - **常量加载**: int/float/bool/string/unit/closure
+    - **运算**: 二元运算（含 `++` 字符串拼接特殊处理）、一元运算
+    - **控制流**: label、goto、if-goto（条件跳转）、return
+    - **函数调用**: 直接调用 + 内置函数名映射
+    - **数据移动**: LoadReg、StoreReg、全局变量加载/存储
+    - **数据结构**: BuildList、ListAppend、BuildMap、BuildTuple、BuildADT
+    - **访问操作**: FieldAccess、Index
+    - **其他**: Panic
+  - 虚拟寄存器直接映射为 C 局部变量，由 C 编译器做寄存器分配
+  - 同时完善了 `LIRBranch` 指令结构（补充 `true_target`/`false_target` 字段，之前只有 `pass`）
+  - 修复了 wasm/cranelift 后端中分支目标硬编码的问题
+- **代码量**: ~580 行新增
+- **阶段成果**: C 后端接入 IR 管线的基础框架已就绪，后续可继续做 compiler_pipeline 集成和端到端验证
+
+### 质量验证
+- ✅ 语法验证：所有修改文件通过 AST parse
+- ✅ 测试验证：403 个测试全部通过（与基线一致）
+- ✅ 无回归：与开发前基线一致，无失败测试
+- ✅ Git 备份：`llm-dev-cycle-4-20260716-1124`
+- ✅ 功能验证：
+  - Pass 错误处理：失败可感知，支持 verbose 和统计
+  - LIR MapBuild：映射类型在 LIR 层语义正确
+  - LIR→C 后端：基础指令生成框架完整
+
+### 参考的日志发现
+1. **第 3 轮评审报告**: 明确指出 C 后端绕过 IR 是"最大架构裂痕"，第 4 轮应聚焦架构突破
+2. **AUTO_REVIEW_LOG.md**: 发现 sys.path hack（17处）、裸异常捕获（11处）等系统性问题
+3. **AUTO_IMPROVE_LOG.md**: 自动改进引擎已处理导入清理和格式化，但未触及架构问题
+4. **代码分析发现**: LIR MapBuild 降级 bug、LIRBranch 缺少 target 字段等具体问题
+
+### 下一步计划（第 5 轮）
+1. **C 后端接入 IR 管线（阶段二）** — 完成 compiler_pipeline 集成，让 C 后端走完整 IR 管线，端到端验证
+2. **CSE Pass 实现准备** — 评估 MIR SSA 现状，为 CSE 实现做准备
+3. **根据进度考虑启动 MIR SSA 修复** — 如果 C 后端集成顺利，可提前开始 SSA 修复
+
+### 路线图进度
+- 总任务: 17
+- 已完成: 10 (59%)
+- 进行中: 1
+- 待开发: 6
+
+---
+
 ## 2026-07-16 11:08 第3轮评审（路线图评审）
 
 ### 评审概览

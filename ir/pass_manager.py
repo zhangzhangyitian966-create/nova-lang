@@ -5,6 +5,9 @@ Nova Pass 管理器
 Pass 管理器负责按序运行各层 Pass，并在达到不动点（无新变化）时停止。
 """
 
+import sys
+import warnings
+
 from ir_nodes import (
     FLOAT_TYPE,
     INT_TYPE,
@@ -831,6 +834,8 @@ class PassManager:
         self.mir_passes = []
         self.lir_passes = []
         self._verbose = False
+        # Pass 失败统计：{pass_name: 失败次数}
+        self._pass_failures = {}
 
     def add_hir_pass(self, pass_):
         self.hir_passes.append(pass_)
@@ -841,16 +846,36 @@ class PassManager:
     def add_lir_pass(self, pass_):
         self.lir_passes.append(pass_)
 
+    def set_verbose(self, verbose: bool):
+        """设置是否输出详细日志"""
+        self._verbose = verbose
+
+    def get_failure_stats(self) -> dict:
+        """获取 Pass 失败统计"""
+        return dict(self._pass_failures)
+
+    def _record_pass_failure(self, pass_name: str, exc: Exception):
+        """记录 Pass 失败并输出警告"""
+        self._pass_failures[pass_name] = self._pass_failures.get(pass_name, 0) + 1
+        count = self._pass_failures[pass_name]
+        msg = f"[PassWarning] {pass_name} 执行失败 (第{count}次): {type(exc).__name__}: {exc}"
+        if self._verbose:
+            print(msg, file=sys.stderr)
+            import traceback
+            traceback.print_exc(file=sys.stderr)
+        else:
+            warnings.warn(msg, stacklevel=3)
+
     def run_hir_passes(self, hir_module, max_iterations=10):
         total_changed = False
         for iteration in range(max_iterations):
             changed = False
             for pass_ in self.hir_passes:
+                pass_name = pass_.__class__.__name__
                 try:
                     changed |= pass_.run(hir_module)
-                except Exception:
-                    # TODO: 缩小异常范围，捕获更具体的异常类型
-                    pass
+                except Exception as e:
+                    self._record_pass_failure(pass_name, e)
             if not changed:
                 break
             total_changed = True
@@ -861,11 +886,11 @@ class PassManager:
         for iteration in range(max_iterations):
             changed = False
             for pass_ in self.mir_passes:
+                pass_name = pass_.__class__.__name__
                 try:
                     changed |= pass_.run(mir_module)
-                except Exception:
-                    # TODO: 缩小异常范围，捕获更具体的异常类型
-                    pass
+                except Exception as e:
+                    self._record_pass_failure(pass_name, e)
             if not changed:
                 break
             total_changed = True
@@ -876,11 +901,11 @@ class PassManager:
         for iteration in range(max_iterations):
             changed = False
             for pass_ in self.lir_passes:
+                pass_name = pass_.__class__.__name__
                 try:
                     changed |= pass_.run(lir_module)
-                except Exception:
-                    # TODO: 缩小异常范围，捕获更具体的异常类型
-                    pass
+                except Exception as e:
+                    self._record_pass_failure(pass_name, e)
             if not changed:
                 break
             total_changed = True

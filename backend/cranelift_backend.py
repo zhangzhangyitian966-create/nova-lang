@@ -22,6 +22,7 @@ from ir.ir_nodes import (
     LIRBranch,
     LIRBuildADT,
     LIRBuildList,
+    LIRBuildMap,
     LIRBuildTuple,
     LIRCall,
     LIRData,
@@ -179,12 +180,19 @@ class CraneliftBackend:
                 cond_loc = instr.src_locs[0][0] if instr.src_locs else "v0"
             else:
                 cond_loc = "v0"
-            self._emit(f"brz {cond_loc}, block_false")
-            self._emit(f"jump block_true")
+            false_target = instr.false_target or "block_false"
+            true_target = instr.true_target or "block_true"
+            self._emit(f"brz {cond_loc}, {false_target}")
+            self._emit(f"jump {true_target}")
 
         elif isinstance(instr, LIRBuildList):
             self._emit(
                 f"v{self._new_temp()} = call $nova_list_new(i64.const {instr.count})"
+            )
+
+        elif isinstance(instr, LIRBuildMap):
+            self._emit(
+                f"v{self._new_temp()} = call $nova_map_new(i64.const {instr.entry_count})"
             )
 
         elif isinstance(instr, LIRBuildTuple):

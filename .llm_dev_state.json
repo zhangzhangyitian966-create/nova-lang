@@ -1,5 +1,5 @@
 {
-  "cycles": 3,
+  "cycles": 4,
   "completed_tasks": [
     "dce_pass",
     "wasmgc_storereg",
@@ -7,7 +7,10 @@
     "fix_native_test",
     "fix_list_comprehension",
     "inlining_pass",
-    "fix_dce_field_names"
+    "fix_dce_field_names",
+    "fix_pass_error_handling",
+    "fix_lir_mapbuild",
+    "c_backend_lir_start"
   ],
   "failed_tasks": [],
   "task_history": [
@@ -58,9 +61,27 @@
       "task_id": "review_cycle_3",
       "status": "completed",
       "details": "第3轮路线图评审：完成三轮回顾、四维评估、问题总结、下阶段方向规划、任务池重构"
+    },
+    {
+      "cycle": 4,
+      "task_id": "fix_pass_error_handling",
+      "status": "completed",
+      "details": "修复 Pass 管理器 3 处静默错误吞噬：新增 _record_pass_failure 方法记录失败统计，支持 verbose 模式输出详细堆栈，默认模式通过 warnings.warn 发出警告；新增 set_verbose() 和 get_failure_stats() 公共 API"
+    },
+    {
+      "cycle": 4,
+      "task_id": "fix_lir_mapbuild",
+      "status": "completed",
+      "details": "修复 MIRMapBuild 错误降级为 LIRBuildList 的 bug：新增 LIRBuildMap 指令节点（entry_count 字段），修复 lir_lowering.py 中的降级逻辑，在 wasm_backend 和 cranelift_backend 中添加 LIRBuildMap 支持（调用 nova_map_new）"
+    },
+    {
+      "cycle": 4,
+      "task_id": "c_backend_lir_start",
+      "status": "completed",
+      "details": "C 后端接入 IR 管线第一步：新建 backend/lir_c_backend.py 实现 LIRCBackend 类，支持 20+ 种 LIR 指令的 C 代码生成（常量加载、运算、控制流、函数调用、列表/映射/元组/ADT 构建、字段/索引访问、全局变量、panic）；同时完善 LIRBranch 指令结构（补充 true_target/false_target 字段），修复 wasm/cranelift 后端的硬编码分支目标问题"
     }
   ],
-  "current_cycle": 3,
+  "current_cycle": 4,
   "baseline_tests": 403,
   "current_tests": 403,
   "last_review_cycle": 3,
@@ -73,9 +94,9 @@
       "priority": 95,
       "category": "architecture",
       "estimated": "2-3 天",
-      "status": "pending",
+      "status": "in_progress",
       "depends_on": [],
-      "reason": "当前最大架构裂痕：C 后端是最成熟的后端但完全绕过 IR，导致所有 IR 层工作无法通过 C 后端验证。打通后优化 Pass 效果可立即通过 C 后端编译运行验证"
+      "reason": "当前最大架构裂痕：C 后端是最成熟的后端但完全绕过 IR，导致所有 IR 层工作无法通过 C 后端验证。打通后优化 Pass 效果可立即通过 C 后端编译运行验证。第4轮已完成 LIR→C 基础框架（阶段一），后续需完成 compiler_pipeline 集成交互和端到端测试"
     },
     {
       "id": "fix_mir_ssa",
@@ -133,9 +154,33 @@
       "priority": 70,
       "category": "engineering",
       "estimated": "30 分钟",
-      "status": "pending",
+      "status": "completed",
       "depends_on": [],
       "reason": "当前 Pass 失败完全静默，用户不知道优化是否生效。低工作量高价值"
+    },
+    {
+      "id": "fix_lir_mapbuild",
+      "name": "修复 LIR MapBuild 降级 bug",
+      "description": "MIRMapBuild 当前错误地降级为 LIRBuildList，丢失映射语义，需新增 LIRBuildMap 指令并修复各后端支持",
+      "difficulty": "easy",
+      "priority": 72,
+      "category": "ir",
+      "estimated": "1 小时",
+      "status": "completed",
+      "depends_on": [],
+      "reason": "明显的正确性 bug，映射类型在 LIR 层完全丢失语义，影响所有后端对映射类型的支持"
+    },
+    {
+      "id": "c_backend_lir_start",
+      "name": "C 后端 LIR 代码生成基础框架",
+      "description": "新建 LIRCBackend 类实现 LIR→C 代码生成，支持常量、运算、控制流、函数调用、数据结构构建等基础指令",
+      "difficulty": "medium",
+      "priority": 92,
+      "category": "architecture",
+      "estimated": "1 天",
+      "status": "completed",
+      "depends_on": [],
+      "reason": "C 后端接入 IR 管线的第一步，为后续完全打通统一管线奠定基础。阶段一完成后可继续做 compiler_pipeline 集成和端到端验证"
     },
     {
       "id": "fix_phi_lowering",

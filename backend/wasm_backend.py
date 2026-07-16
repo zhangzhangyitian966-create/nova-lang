@@ -18,6 +18,7 @@ from ir.ir_nodes import (
     LIRBranch,
     LIRBuildADT,
     LIRBuildList,
+    LIRBuildMap,
     LIRBuildTuple,
     LIRCall,
     LIRFieldAccess,
@@ -284,11 +285,16 @@ class WasmGCBackend:
         elif isinstance(instr, LIRBranch):
             if instr.src_locs:
                 self._emit(f"(local.get ${instr.src_locs[0][0]})")
-            self._emit("(br_if $block_false)")
+            false_target = instr.false_target or "block_false"
+            self._emit(f"(br_if $block_{false_target})")
 
         elif isinstance(instr, LIRBuildList):
             self._emit(f"(i32.const {instr.count})")
             self._emit("(call $nova_list_new)")
+
+        elif isinstance(instr, LIRBuildMap):
+            self._emit(f"(i32.const {instr.entry_count})")
+            self._emit("(call $nova_map_new)")
 
         elif isinstance(instr, LIRBuildTuple):
             self._emit(f"(i32.const {instr.count * 8})")
