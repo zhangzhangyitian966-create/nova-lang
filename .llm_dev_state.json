@@ -1,5 +1,5 @@
 {
-  "cycles": 5,
+  "cycles": 6,
   "completed_tasks": [
     "dce_pass",
     "wasmgc_storereg",
@@ -13,10 +13,18 @@
     "c_backend_lir_start",
     "c_backend_pipeline",
     "fix_phi_lowering",
-    "cse_pass"
+    "cse_pass",
+    "review_cycle_3",
+    "review_cycle_6"
   ],
   "failed_tasks": [],
   "task_history": [
+    {
+      "cycle": 6,
+      "task_id": "review_cycle_6",
+      "status": "completed",
+      "details": "第6轮路线图评审：完成第4-5轮回顾、四维评估、问题总结、下阶段方向规划、任务池重构（新增5个任务、调整4个优先级、补充依赖关系）"
+    },
     {
       "cycle": 5,
       "task_id": "c_backend_pipeline",
@@ -102,34 +110,58 @@
       "details": "C 后端接入 IR 管线第一步：新建 backend/lir_c_backend.py 实现 LIRCBackend 类，支持 20+ 种 LIR 指令的 C 代码生成（常量加载、运算、控制流、函数调用、列表/映射/元组/ADT 构建、字段/索引访问、全局变量、panic）；同时完善 LIRBranch 指令结构（补充 true_target/false_target 字段），修复 wasm/cranelift 后端的硬编码分支目标问题"
     }
   ],
-  "current_cycle": 5,
+  "current_cycle": 6,
   "baseline_tests": 403,
   "current_tests": 403,
-  "last_review_cycle": 3,
+  "last_review_cycle": 6,
   "tasks": [
     {
-      "id": "c_backend_pipeline",
-      "name": "C 后端接入统一 IR 管线",
-      "description": "实现 LIR/MIR → C 代码生成，改造 compiler_pipeline 让 C 后端走 HIR→MIR→LIR 统一管线，消除'两个编译器'问题",
-      "difficulty": "hard",
-      "priority": 95,
-      "category": "architecture",
-      "estimated": "2-3 天",
-      "status": "completed",
+      "id": "fix_match_lowering",
+      "name": "完善 MIR match 降级（真正的模式匹配）",
+      "description": "当前 _lower_match_expr 是假实现（所有 arm 无条件顺序跳转），需实现真正的常量模式比较 + 条件分支判断逻辑，支持常量模式、通配符模式、变量绑定模式",
+      "difficulty": "medium",
+      "priority": 92,
+      "category": "ir",
+      "estimated": "4-6 小时",
+      "status": "pending",
       "depends_on": [],
-      "reason": "当前最大架构裂痕：C 后端是最成熟的后端但完全绕过 IR，导致所有 IR 层工作无法通过 C 后端验证。打通后优化 Pass 效果可立即通过 C 后端编译运行验证。第4轮完成 LIR→C 基础框架，第5轮完成 compiler_pipeline 集成交互"
+      "reason": "深度审计发现 MIR match 降级完全错误——所有 arm 用 MIRJump 无条件串联，每个 arm 体都会被执行。match 是函数式语言核心特性，降级不正确意味着 ADT/模式匹配功能形同虚设，必须优先修复"
+    },
+    {
+      "id": "fix_mir_loop_vars",
+      "name": "修复 MIR 循环变量绑定",
+      "description": "修复 for 循环中循环变量未绑定到环境的 bug，修复列表推导式循环变量绑定到可迭代对象本身而非当前元素的 bug，确保循环体内引用循环变量能得到正确的值",
+      "difficulty": "medium",
+      "priority": 90,
+      "category": "ir",
+      "estimated": "2-4 小时",
+      "status": "pending",
+      "depends_on": [],
+      "reason": "深度审计发现 MIR for 循环的循环变量从未加入 self.env，循环体内引用会返回 None，生成空 SSA 名；列表推导式循环变量绑定错误。这是影响所有循环程序的基础正确性问题"
     },
     {
       "id": "fix_mir_ssa",
       "name": "修复 MIR SSA 构建正确性",
-      "description": "重写 MIR 降级中的 SSA 构建：正确处理循环变量 SSA 更新、if-else 汇合点 Phi 构建、赋值不破坏单赋值原则、支配边界计算",
+      "description": "重写 MIR 降级中的 SSA 构建：正确处理循环变量 SSA 更新（循环头插入 Phi）、赋值生成新 SSA 名而非覆盖环境、if-else 汇合点 Phi 构建、支配边界计算",
       "difficulty": "hard",
-      "priority": 90,
+      "priority": 88,
       "category": "ir",
       "estimated": "2-4 天",
       "status": "pending",
-      "depends_on": ["c_backend_pipeline"],
-      "reason": "SSA 是所有经典优化的基础，目前 MIR SSA 有明显缺陷（循环变量不更新、赋值直接覆盖 env）。CSE 已在当前 SSA 形式下实现，但更高级的优化仍需正确的 SSA"
+      "depends_on": ["fix_match_lowering", "fix_mir_loop_vars"],
+      "reason": "SSA 是所有经典优化的基础。当前 MIR SSA 有明显缺陷（赋值直接覆盖 env、循环头无 Phi），但先修 match 和循环变量这些更直观的正确性问题，再系统性修复 SSA"
+    },
+    {
+      "id": "mir_ssa_verifier",
+      "name": "实现 MIR SSA 验证 Pass",
+      "description": "实现 SSA 验证 Pass，检查每个 SSA 名是否只定义一次、所有使用是否在支配范围内、Phi 节点是否在汇合点，确保 SSA 性质成立",
+      "difficulty": "medium",
+      "priority": 80,
+      "category": "ir",
+      "estimated": "4-6 小时",
+      "status": "pending",
+      "depends_on": ["fix_mir_ssa"],
+      "reason": "SSA 修复后需要验证机制来防止回归。验证 Pass 可以作为所有 MIR 优化的正确性保障，也能帮助发现潜在的 SSA 破坏问题"
     },
     {
       "id": "refactor_sys_path",
@@ -141,7 +173,7 @@
       "estimated": "1-2 天",
       "status": "pending",
       "depends_on": [],
-      "reason": "最普遍的技术债（19 处），导致导入顺序问题、调试困难、包工具无法使用。越早重构成本越低"
+      "reason": "最普遍的技术债（19 处），导致导入顺序问题、调试困难、包工具无法使用。MIR 正确性修复完成后，用一轮专门做工程治理"
     },
     {
       "id": "unify_ir_naming",
@@ -154,6 +186,78 @@
       "status": "pending",
       "depends_on": ["refactor_sys_path"],
       "reason": "四层 IR 中函数调用命名换了三次，每次写跨层代码都要回忆'这层叫什么'，已导致多个 field name bug。命名统一后可大幅降低 bug 率"
+    },
+    {
+      "id": "refactor_visitor_pattern",
+      "name": "引入 IR Visitor 模式消除重复遍历",
+      "description": "定义 HIRVisitor/HIRTransformer 基类，重构 ConstantFolding、Inlining、DeadCodeElimination 等 Pass 继承自 Visitor，消除 6 个重复的递归遍历方法（约 500 行重复代码）",
+      "difficulty": "medium",
+      "priority": 75,
+      "category": "engineering",
+      "estimated": "6-8 小时",
+      "status": "pending",
+      "depends_on": ["unify_ir_naming"],
+      "reason": "Pass 管理器中有 6 个方法重复实现了 HIR 表达式的递归匹配，约 500 行重复代码。引入 Visitor 模式后，每个 Pass 只需关注自身逻辑，大幅降低维护成本"
+    },
+    {
+      "id": "unify_c_backend",
+      "name": "统一 C 后端（LIR 路径功能对齐）",
+      "description": "将 c_codegen.py 中已实现但 lir_c_backend.py 缺失的功能迁移过来：ADT 代码生成、match 编译、闭包实现、列表推导式，待功能对齐后废弃旧的 AST→C 路径",
+      "difficulty": "hard",
+      "priority": 78,
+      "category": "architecture",
+      "estimated": "2-3 天",
+      "status": "pending",
+      "depends_on": ["fix_match_lowering", "fix_mir_ssa"],
+      "reason": "目前有两套 C 代码生成路径（AST 路径功能完整，LIR 路径仅阶段一），功能重叠增加维护成本。MIR 层正确性修复后，统一到 LIR→C 路径可以让所有后端共享 IR 优化成果"
+    },
+    {
+      "id": "fix_wasm_label",
+      "name": "修复 Wasm 后端 Label 实现",
+      "description": "将 Wasm 后端的 LIRLabel 从错误的 (block) 实现改为正确的结构化控制流：循环用 loop、向前跳转用 block、正确处理 br/br_if 的嵌套层级",
+      "difficulty": "medium",
+      "priority": 65,
+      "category": "backend",
+      "estimated": "3-5 小时",
+      "status": "pending",
+      "depends_on": ["fix_mir_ssa"],
+      "reason": "深度审计发现 Wasm 后端将 LIRLabel 实现为 Wasm block，但 block 只能向前跳出不能跳入，循环回跳完全失效。需要重构为结构化控制流"
+    },
+    {
+      "id": "native_call_abi",
+      "name": "实现原生后端函数调用 ABI",
+      "description": "实现 System V AMD64 ABI 参数传递和 call 地址回填",
+      "difficulty": "hard",
+      "priority": 40,
+      "category": "backend",
+      "estimated": "3-5 天",
+      "status": "pending",
+      "depends_on": ["fix_mir_ssa"],
+      "reason": "原生后端整体完成度低（代码生成器质量差、寄存器分配摆设、无跳转回填），项目已有 C 后端和 Cranelift 后端两个更可行路径，自研 x86_64 优先级进一步降低"
+    },
+    {
+      "id": "licm_pass",
+      "name": "实现循环不变量外提 Pass (LICM)",
+      "description": "在 MIR 层识别循环，将不变运算外提到循环外",
+      "difficulty": "hard",
+      "priority": 35,
+      "category": "optimization",
+      "estimated": "1-2 周",
+      "status": "pending",
+      "depends_on": ["fix_mir_ssa", "cse_pass", "mir_ssa_verifier"],
+      "reason": "高级优化，依赖 SSA、循环分析和验证机制。当前阶段优先级低，先打好基础"
+    },
+    {
+      "id": "c_backend_pipeline",
+      "name": "C 后端接入统一 IR 管线",
+      "description": "实现 LIR/MIR → C 代码生成，改造 compiler_pipeline 让 C 后端走 HIR→MIR→LIR 统一管线，消除'两个编译器'问题",
+      "difficulty": "hard",
+      "priority": 95,
+      "category": "architecture",
+      "estimated": "2-3 天",
+      "status": "completed",
+      "depends_on": [],
+      "reason": "当前最大架构裂痕：C 后端是最成熟的后端但完全绕过 IR，导致所有 IR 层工作无法通过 C 后端验证。打通后优化 Pass 效果可立即通过 C 后端编译运行验证"
     },
     {
       "id": "cse_pass",
@@ -216,30 +320,6 @@
       "reason": "Phi 降级是控制流正确性的核心，之前被评为 hard 但实际实现相对直接，修复后所有含 if/match/循环的程序控制流语义才正确"
     },
     {
-      "id": "native_call_abi",
-      "name": "实现原生后端函数调用 ABI",
-      "description": "实现 System V AMD64 ABI 参数传递和 call 地址回填",
-      "difficulty": "hard",
-      "priority": 50,
-      "category": "backend",
-      "estimated": "3-5 天",
-      "status": "pending",
-      "depends_on": ["fix_mir_ssa", "fix_phi_lowering"],
-      "reason": "原生后端整体完成度仅 ~30%，工程量巨大。项目已有 C 后端和 Cranelift 后端两个更可行路径，自研 x86_64 优先级降低"
-    },
-    {
-      "id": "licm_pass",
-      "name": "实现循环不变量外提 Pass (LICM)",
-      "description": "在 MIR 层识别循环，将不变运算外提到循环外",
-      "difficulty": "hard",
-      "priority": 45,
-      "category": "optimization",
-      "estimated": "1-2 周",
-      "status": "pending",
-      "depends_on": ["fix_mir_ssa", "cse_pass"],
-      "reason": "高级优化，依赖 SSA 和循环分析。当前阶段优先级较低，先打好基础"
-    },
-    {
       "id": "dce_pass",
       "name": "实现死代码消除 Pass (DCE)",
       "description": "在 HIR 层实现 DeadCodeElimination Pass，移除未使用的 let 绑定和无副作用表达式",
@@ -298,18 +378,6 @@
       "category": "backend",
       "estimated": "1 小时",
       "status": "completed"
-    },
-    {
-      "id": "fix_match_lowering",
-      "name": "完善 MIR match 降级（真正的模式匹配）",
-      "description": "当前 _lower_match_expr 是假实现（所有 arm 无条件顺序跳转），需实现真正的常量模式比较 + 条件分支判断逻辑",
-      "difficulty": "medium",
-      "priority": 78,
-      "category": "ir",
-      "estimated": "3-5 小时",
-      "status": "pending",
-      "depends_on": [],
-      "reason": "match 是函数式语言核心特性，降级不正确意味着 ADT/模式匹配功能形同虚设。先做常量模式和通配符/绑定模式，构造器模式可后续扩展"
     }
   ]
 }
