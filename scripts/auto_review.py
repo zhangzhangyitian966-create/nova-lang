@@ -403,23 +403,201 @@ class CodeQualityAnalyzer(ast.NodeVisitor):
                         "建议完成或移除这些待办事项"
                     )
         
+        # 检查调试 print 语句
+        self._check_print_debug()
+        
         # 检查魔法数字
-        # （在 AST 层面做更好，但简单起见这里用行级检查）
+        self._check_magic_numbers()
         
         # 检查嵌套循环深度
         self._check_nested_loops()
         
         # 检查低效字符串拼接
         self._check_string_concat()
+        
+        # 检查未使用的导入
+        self._check_unused_imports()
+        
+        # 检查命名规范
+        self._check_naming_conventions()
+        
+        # 检查 docstring（公开函数/类）
+        self._check_docstrings()
+    
+    def _check_print_debug(self):
+        """检查调试用 print 语句"""
+        for node in ast.walk(self._tree if hasattr(self, '_tree') else ast.parse('')):
+            if isinstance(node, ast.Call):
+                if isinstance(node.func, ast.Name) and node.func.id == 'print':
+                    # 排除有文件写入的 print（print(..., file=...)）
+                    has_file_kw = any(kw.arg == 'file' for kw in node.keywords)
+                    if not has_file_kw:
+                        self._add_issue(
+                            "print_debug",
+                            node.lineno,
+                            "调试用 print 语句",
+                            "建议使用 logging 模块或移除调试输出"
+                        )
+    
+    def _check_magic_numbers(self):
+        """检查魔法数字"""
+        tree = self._tree if hasattr(self, '_tree') else ast.parse('')
+        # 常见允许的数字
+        allowed = {0, 1, 2, -1, 10, 100, 1000, 60, 24, 7, 365}
+        # 跳过的上下文
+        skip_contexts = {'__len__', '__init__', 'main'}
+        
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Constant) and isinstance(node.value, (int, float)):
+                val = node.value
+                # 跳过常见的魔法数字
+                if val in allowed:
+                    continue
+                # 跳过 0-100 之间的常见整数（太多误报）
+                if isinstance(val, int) and 0 <= val <= 10:
+                    continue
+                # 检查是否在赋值或比较上下文中
+                # 简单起见，只报告非平凡的数字
+                if isinstance(val, int) and abs(val) > 100:
+                    self._add_issue(
+                        "magic_number",
+                        node.lineno,
+                        f"魔法数字: {val}",
+                        "建议定义为命名常量，提高代码可读性"
+                    )
     
     def _check_nested_loops(self):
-        """检查嵌套循环"""
-        for node in ast.walk(self._tree if hasattr(self, '_tree') else ast.parse('')):
-            pass  # 简化处理，在主分析中做
+        """检查深层嵌套循环"""
+        tree = self._tree if hasattr(self, '_tree') else ast.parse('')
+        
+        def check_loop_depth(node, depth=0, parent_func=None):
+            max_depth = 0
+            for child in ast.iter_child_nodes(node):
+                if isinstance(child, (ast.For, ast.While)):
+                    new_depth = depth + 1
+                    if new_depth >= 3:
+                        func_name = parent_func.name if parent_func else "模块级"
+                        self._add_issue(
+                            "nested_loop",
+                            child.lineno,
+                            f"深层嵌套循环 (深度 {new_depth})，函数: {func_name}",
+                            "建议使用列表推导或提取函数来降低嵌套深度"
+                        )
+                    check_loop_depth(child, new_depth, parent_func)
+                elif isinstance(child, ast.FunctionDef):
+                    check_loop_depth(child, 0, child)
+                else:
+                    check_loop_depth(child, depth, parent_func)
+        
+        check_loop_depth(tree)
     
     def _check_string_concat(self):
-        """检查低效字符串拼接"""
-        pass  # 简化处理
+        """检查低效字符串拼接（循环中的 +=）"""
+        tree = self._tree if hasattr(self, '_tree') else ast.parse('')
+        
+        for node in ast.walk(tree):
+            if isinstance(node, (ast.For, ast.While)):
+                for child in ast.walk(node):
+                    if isinstance(child, ast.AugAssign) and isinstance(child.op, ast.Add):
+                        if isinstance(child.target, ast.Name):
+                            # 可能是字符串拼接
+                            self._add_issue(
+                                "inefficient_string_concat",
+                                child.lineno,
+                                f"循环中字符串拼接: {child.target.id} += ...",
+                                "建议使用列表收集然后 join，或使用 f-string / StringIO"
+                            )
+                            break  # 每个循环只报一次
+    
+    def _check_unused_imports(self):
+        """检查未使用的导入（粗略估计）"""
+        # 收集导入的名称
+        imported_names = set()
+        import_nodes = {}
+        
+        for node in ast.walk(self._tree if hasattr(self, '_tree') else ast.parse('')):
+            if isinstance(node, ast.Import):
+                for alias in node.names:
+                    name = alias.asname if alias.asname else alias.name.split('.')[0]
+                    imported_names.add(name)
+                    import_nodes[name] = node.lineno
+            elif isinstance(node, ast.ImportFrom):
+                for alias in node.names:
+                    if alias.name == '*':
+                        continue  # 跳过通配符导入
+                    name = alias.asname if alias.asname else alias.name
+                    imported_names.add(name)
+                    import_nodes[name] = node.lineno
+        
+        # 检查使用情况（基于 used_names）
+        # 注意：这是粗略检查，可能有误报
+        for name, lineno in import_nodes.items():
+            if name not in self.used_names:
+                # 进一步检查：名称可能作为属性被使用（如 module.func）
+                # 简单起见，只报告确定未使用的
+                base_name = name.split('.')[0]
+                if base_name not in self.used_names:
+                    self._add_issue(
+                        "unused_import",
+                        lineno,
+                        f"可能未使用的导入: {name}",
+                        "建议移除未使用的导入以保持代码整洁"
+                    )
+    
+    def _check_naming_conventions(self):
+        """检查命名规范"""
+        tree = self._tree if hasattr(self, '_tree') else ast.parse('')
+        
+        for node in ast.walk(tree):
+            # 函数命名：应该用 snake_case
+            if isinstance(node, ast.FunctionDef):
+                name = node.name
+                # 跳过特殊方法和测试函数
+                if not name.startswith('__') and not name.startswith('test_'):
+                    # 检查是否有大写字母（非 snake_case）
+                    if re.search(r'[A-Z]', name):
+                        self._add_issue(
+                            "inconsistent_naming",
+                            node.lineno,
+                            f"函数命名不规范: {name} (应使用 snake_case)",
+                            "建议遵循 PEP 8 命名规范，函数使用小写加下划线"
+                        )
+            
+            # 类命名：应该用 CamelCase
+            elif isinstance(node, ast.ClassDef):
+                name = node.name
+                if not name[0].isupper() or '_' in name:
+                    self._add_issue(
+                        "inconsistent_naming",
+                        node.lineno,
+                        f"类命名不规范: {name} (应使用 CamelCase)",
+                        "建议遵循 PEP 8 命名规范，类使用大驼峰命名"
+                    )
+    
+    def _check_docstrings(self):
+        """检查公开函数/类的文档字符串"""
+        tree = self._tree if hasattr(self, '_tree') else ast.parse('')
+        
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ClassDef):
+                # 只检查公开类
+                if not node.name.startswith('_'):
+                    if not ast.get_docstring(node):
+                        self._add_issue(
+                            "no_docstring",
+                            node.lineno,
+                            f"公开类缺少文档字符串: {node.name}",
+                            "建议为公开类添加文档字符串说明其用途"
+                        )
+            elif isinstance(node, ast.FunctionDef):
+                # 只检查公开方法/函数（且不是 __init__ 等特殊方法）
+                if not node.name.startswith('_'):
+                    # 检查是否在类内
+                    in_class = False
+                    # 简化：只报告顶级公开函数
+                    if not ast.get_docstring(node):
+                        # 降低报告频率：只报告文件级函数
+                        pass  # 太多了，暂不报告
 
 
 def analyze_file_ast(filepath):
