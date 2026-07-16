@@ -20,7 +20,7 @@ import os
 from typing import Dict, List, Optional, Any, Callable
 
 from nova.compiler import Bytecode, FunctionBlock, Instruction, Op
-from nova.errors import RuntimeError_
+from nova.errors import RuntimeError_, MatchFailure
 
 
 # ============================================================
@@ -204,6 +204,9 @@ class NovaVM:
         self.globals["head"] = NovaBuiltinFn("head", self._builtin_head, 1)
         self.globals["tail"] = NovaBuiltinFn("tail", self._builtin_tail, 1)
 
+        # 模式匹配失败
+        self.globals["__match_failure"] = NovaBuiltinFn("__match_failure", self._builtin_match_failure, 0)
+
         # 文件 I/O
         self.globals["read_file"] = NovaBuiltinFn("read_file", self._builtin_read_file, 1)
         self.globals["write_file"] = NovaBuiltinFn("write_file", self._builtin_write_file, 2)
@@ -269,6 +272,9 @@ class NovaVM:
         if len(lst) > 0:
             return NovaADTValue("Option", "Some", [lst[1:]], ["value"])
         return NovaADTValue("Option", "None", [], [])
+
+    def _builtin_match_failure(self, *args):
+        raise MatchFailure()
 
     def _builtin_read_file(self, *args):
         path = args[0]
@@ -537,6 +543,9 @@ class NovaVM:
     def run(self):
         """执行主代码"""
         normal_exit = self._run_code(self.code, self.constants)
+        # 顶层 TRY_UNWRAP 提前返回 -> 抛出运行时错误
+        if not normal_exit:
+            raise RuntimeError_("? 操作符不能在顶层使用")
         # 只有正常结束时才自动调用 main
         if normal_exit:
             self._auto_call_main()
@@ -1038,10 +1047,20 @@ class NovaVM:
             count = instr.operands[0]
             result = {}
             pairs = self._pop(count * 2)
-            for i in range(0, len(pairs), 2):
-                key = pairs[i]
-                val = pairs[i + 1]
-                result[key] = val
+            try:
+                for i in range(0, len(pairs), 2):
+                    key = pairs[i]
+                    val = pairs[i + 1]
+                    result[key] = val
+            except TypeError as e:
+                # 捕获不可哈希键的错误，转换为 Nova 运行时错误
+                for i in range(0, len(pairs), 2):
+                    key = pairs[i]
+                    try:
+                        hash(key)
+                    except TypeError:
+                        raise RuntimeError_(f"Map 的键必须是可哈希的，得到 {type(key).__name__}")
+                raise RuntimeError_(f"Map 的键必须是可哈希的: {e}")
             self.stack.append(result)
 
         elif opcode == Op.INDEX:
@@ -1063,11 +1082,18 @@ class NovaVM:
             field = instr.operands[0]
             obj = self._pop()[0]
             if isinstance(obj, tuple):
-                self.stack.append(obj[int(field)])
+                try:
+                    idx = int(field)
+                    self.stack.append(obj[idx])
+                except (ValueError, IndexError):
+                    raise RuntimeError_(f"元组索引 '{field}' 越界")
             elif isinstance(obj, NovaADTValue):
                 try:
                     idx = int(field)
-                    self.stack.append(obj.fields[idx])
+                    if 0 <= idx < len(obj.fields):
+                        self.stack.append(obj.fields[idx])
+                    else:
+                        raise RuntimeError_(f"ADT 字段索引 {idx} 越界")
                 except ValueError:
                     found = False
                     for i, fname in enumerate(obj.field_names):

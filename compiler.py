@@ -777,9 +777,9 @@ class BytecodeCompiler:
                 # guard 失败：extract_and_bind 后栈上只有 [subject]，直接跳到下一个 arm
                 self.bytecode.patch_jump(guard_fail_pos, next_arm_start)
 
-        # 所有 arm 都匹配失败
+        # 所有 arm 都匹配失败：抛出 MatchFailure 错误
         self.bytecode.emit_op(Op.POP)  # 弹出 subject
-        self.bytecode.emit_op(Op.CONST_UNIT)  # 默认值
+        self.bytecode.emit_op(Op.CALL_BUILTIN, "__match_failure", 0)  # 抛出匹配失败错误
         self.bytecode.emit_op(Op.MATCH_END)
 
         end_pos = self.bytecode.current_pos()
@@ -1143,6 +1143,13 @@ class BytecodeCompiler:
         loop_start = self.bytecode.current_pos()
         self.bytecode.emit_op(Op.FOR_ITER, 0)  # fail_ip 占位
 
+        # 推入 for 循环栈帧，使 break/continue 能正确识别最内层循环类型
+        self._loop_stack.append({
+            "type": "for",
+            "break_patches": [],
+            "continue_target": loop_start,
+        })
+
         # 绑定循环变量（循环变量需要可变以支持每次迭代更新）
         self.bytecode.emit_op(Op.STORE_VAR, expr.var_name, True)
 
@@ -1165,6 +1172,9 @@ class BytecodeCompiler:
         # 回填 FOR_ITER 的 fail_ip：空循环直接跳过
         after_loop = self.bytecode.current_pos()
         self.bytecode.patch_jump(loop_start, after_loop)
+
+        # 弹出 for 循环栈帧
+        self._loop_stack.pop()
 
 
 # ============================================================

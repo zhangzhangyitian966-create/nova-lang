@@ -1,5 +1,78 @@
 # Nova 自动改进日志
 
+## 2026-07-16 自动改进（第二十九轮）
+
+基于 AUTO_REVIEW_LOG.md 第二十六轮审查日志的 P0/P1 级严重问题驱动改进（阶段一检查 + 阶段二开发 + 阶段三测试）。
+
+### 每日发现的问题
+
+#### vm.py
+- **顶层 TRY_UNWRAP 静默失败，错误值丢失（vm.py:577-587）**：顶层 `?` 操作符触发错误传播时程序静默退出，错误值残留在栈上，用户永远不知道程序为什么没有输出
+  - 审查日志追问结论：不能接受。顶层错误传播应该有明确定义的行为（报错或崩溃），而非静默失败
+  - 根因：`_run_code` 检测到 TRY_UNWRAP 提前返回时仅返回 False，`run()` 仅跳过 `_auto_call_main()`，未抛出 RuntimeError_
+  - 影响：所有在顶层代码使用 `?` 且遇到 Err/None 的程序都会静默失败
+  - 验证：构造 Err 值 + TRY_UNWRAP 的字节码，VM 运行后无任何错误，栈上残留 Err 值
+
+- **FIELD_ACCESS 元组索引越界未捕获为 RuntimeError（vm.py:1065-1066）**：元组字段访问越界时抛出 Python 原生 IndexError 而非 Nova RuntimeError_，与 evaluator 行为不一致
+  - 审查日志追问结论：不能接受。生产级 VM 必须将所有内部运行时错误统一为语言定义的错误类型
+  - 根因：`obj[int(field)]` 直接访问，无 try-except 包裹
+  - 延伸：ADT 索引访问（vm.py:1068-1070）同样存在 IndexError 逃逸问题
+  - 验证：构造越界元组字段访问字节码，抛出原生 `IndexError: tuple index out of range`
+
+- **BUILD_MAP 键不可哈希时抛出 Python 原生 TypeError（vm.py:1035-1045）**：不可哈希键导致 Python TypeError 直接逃逸，对比 evaluator 有详细可哈希性检查和友好错误信息
+  - 审查日志追问结论：不能接受。统一错误类型是生产级解释器/VM 的基本要求
+  - 根因：`result[key] = val` 直接赋值，无 try-except 包裹
+  - 验证：用列表作为键构造 BUILD_MAP 字节码，抛出原生 `TypeError: unhashable type: 'list'`
+
+#### compiler.py
+- **模式匹配非穷尽时静默返回 Unit（compiler.py:780-783）**：所有 arm 都匹配失败时，弹出 subject 后压入 CONST_UNIT 作为默认值，整个 match 表达式静默返回 Unit，既无编译期穷尽性检查，也无运行时报错
+  - 审查日志追问结论：绝对不能。非穷尽模式匹配是类型安全的核心保证之一，静默返回 Unit 会掩盖逻辑错误
+  - 根因：type_checker 完全没有实现 match 穷尽性检查，编译器默认路径直接返回 Unit
+  - 影响：所有不包含通配符 arm 的 match 表达式，只要主题值不匹配任何 arm，就会静默返回 Unit
+
+- **带过滤条件的列表推导式不推入 _loop_stack（compiler.py:1126-1167）**：`_compile_list_comprehension` 有两条路径——无过滤时委托给 `_compile_for`（会推入 _loop_stack），有过滤时内联编译（完全不推入 _loop_stack），两条路径实现不一致
+  - 审查日志追问结论：需要修复一致性。虽然当前 break 碰巧能工作，但编译器层面 _loop_stack 状态不一致，嵌套循环场景下可能出错
+  - 根因：有过滤路径是独立内联实现的，复制了 for 循环的字节码生成逻辑，但遗漏了 _loop_stack 的推入/弹出
+
+#### evaluator.py
+- **ForExpr 完全忽略 step 字段，依赖 tuple hack（evaluator.py:1037-1071）**：AST 节点的 step 字段从未被读取，通过检查是否为 ("range", ...) 元组判断范围循环
+  - 审查日志追问结论：不能接受。这是典型的"stringly typed"反模式，AST 字段被忽略转而依赖非类型化的 tuple 结构
+  - 根因：早期实现用 tuple hack 传递 range 信息，后来添加 step 字段时未重构 evaluator 和 compiler
+  - 影响：技术债务，维护困难，step 信息在 AST 中冗余存储两份
+
+### 本次修复内容（基于审查日志 Issue）
+
+1. **vm.py — VM 错误处理三项修复（基于审查日志 vm.py:577-587 / 第二十六轮严重问题 #1/#2/#3）**
+   - **顶层 TRY_UNWRAP 静默失败修复**：`run()` 方法中检测到 TRY_UNWRAP 提前返回时抛出 `RuntimeError_("? 操作符不能在顶层使用")`，与 evaluator 行为一致
+   - **FIELD_ACCESS 索引越界修复**：元组和 ADT 字段索引越界时捕获 IndexError，转换为 RuntimeError_，错误消息分别为 "元组索引越界" 和 "ADT字段索引越界"
+   - **BUILD_MAP 不可哈希键修复**：构建 Map 时捕获 TypeError，遍历找到第一个不可哈希键并给出精确错误消息，与 evaluator 处理方式一致
+   - 新增 5 个测试用例：顶层 `?` (None/Err) 报错、元组索引越界、ADT 索引越界、不可哈希键
+
+2. **compiler.py — 模式匹配非穷尽 + 列表推导式循环栈修复（基于审查日志 compiler.py:780-783 / 第二十六轮严重问题 #3/#5）**
+   - **模式匹配非穷尽修复**：errors.py 新增 `MatchFailure` 错误类，vm.py 新增 `__match_failure` 内置函数，编译器将默认路径从 `POP + CONST_UNIT` 改为调用 `__match_failure` 抛出匹配失败错误
+   - **带过滤列表推导式循环栈修复**：有过滤条件的路径也推入 `_loop_stack`，与无过滤路径（`_compile_for`）保持一致，确保嵌套循环中 break/continue 编译正确
+   - 新增 4 个测试用例：非穷尽 match 抛 MatchFailure、通配符 match 正常、带过滤列表推导式、嵌套循环带过滤推导式
+
+3. **evaluator.py — ForExpr step 字段重构（基于审查日志 evaluator.py:1037-1071 / 第二十六轮严重问题 #3）**
+   - 范围循环检测从完全依赖 tuple hack 改为优先检查 `expr.step is not None`
+   - 步长获取从 `expr.iterable[3]` 改为优先从 `expr.step` 字段获取
+   - 保留元组格式作为回退判断，确保向后兼容
+   - 消除了 "stringly typed" 反模式，代码更清晰可维护
+
+### 测试结果
+
+- 全量测试: **878 passed** (1.04s)
+- Evaluator 示例: hello/fibonacci/pattern_match/loops/math/pipe/list_comprehension/file_io 全部正常输出
+- VM 示例: hello/fibonacci/pattern_match/loops/math/pipe/list_comprehension/file_io 全部正常输出
+- VM 顶层 TRY_UNWRAP: 顶层 None/Err 的 `?` 正确抛出 RuntimeError_ ✅
+- VM FIELD_ACCESS 越界: 元组/ADT 索引越界正确抛出 RuntimeError_ ✅
+- VM BUILD_MAP 不可哈希键: 正确抛出 RuntimeError_ ✅
+- 模式匹配非穷尽: 非穷尽 match 抛出 MatchFailure ✅ / 通配符 match 正常 ✅
+- 列表推导式循环栈: 带过滤推导式基本功能 ✅ / 嵌套循环带过滤 ✅
+- ForExpr step 重构: 所有 for/loop 相关测试通过 ✅
+
+---
+
 ## 2026-07-16 自动改进（第二十八轮）
 
 基于 AUTO_REVIEW_LOG.md 第二十五轮审查日志的 P0/P1 级严重问题驱动改进（阶段一检查 + 阶段二开发 + 阶段三测试）。

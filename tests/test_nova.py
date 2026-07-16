@@ -3779,6 +3779,91 @@ class TestBytecodeVM(unittest.TestCase):
             vm.run()
         self.assertIn("Cannot assign to immutable variable 'x'", str(ctx.exception))
 
+    # --- 顶层 TRY_UNWRAP 保护 ---
+
+    def test_vm_top_level_try_unwrap_none_raises(self):
+        """VM: 顶层使用 ? (None) 应抛出 RuntimeError_ 而非静默退出"""
+        from nova.compiler import Bytecode, Op
+        from nova.vm import NovaVM, NovaADTValue
+        bytecode = Bytecode()
+        none_val = NovaADTValue("Option", "None", [], [])
+        bytecode.constants.append(none_val)
+        bytecode.emit_op(Op.LOAD_CONST, 0)
+        bytecode.emit_op(Op.TRY_UNWRAP)
+        bytecode.emit_op(Op.HALT)
+        vm = NovaVM(bytecode)
+        with self.assertRaises(RuntimeError_) as ctx:
+            vm.run()
+        self.assertIn("? 操作符不能在顶层使用", str(ctx.exception))
+
+    def test_vm_top_level_try_unwrap_err_raises(self):
+        """VM: 顶层使用 ? (Err) 应抛出 RuntimeError_ 而非静默退出"""
+        from nova.compiler import Bytecode, Op
+        from nova.vm import NovaVM, NovaADTValue
+        bytecode = Bytecode()
+        err_val = NovaADTValue("Result", "Err", ["oops"], ["error"])
+        bytecode.constants.append(err_val)
+        bytecode.emit_op(Op.LOAD_CONST, 0)
+        bytecode.emit_op(Op.TRY_UNWRAP)
+        bytecode.emit_op(Op.HALT)
+        vm = NovaVM(bytecode)
+        with self.assertRaises(RuntimeError_) as ctx:
+            vm.run()
+        self.assertIn("? 操作符不能在顶层使用", str(ctx.exception))
+
+    # --- FIELD_ACCESS 索引越界 ---
+
+    def test_vm_field_access_tuple_index_out_of_bounds(self):
+        """VM: 元组字段索引越界应抛出 RuntimeError_ 而非 IndexError"""
+        vm = self._vm_run_no_check("let t = (1, 2, 3)")
+        # 手动构造越界访问
+        from nova.compiler import Bytecode, Op
+        from nova.vm import NovaVM
+        bytecode = Bytecode()
+        bytecode.constants.append((1, 2, 3))
+        bytecode.emit_op(Op.LOAD_CONST, 0)
+        bytecode.emit_op(Op.FIELD_ACCESS, 5)
+        bytecode.emit_op(Op.HALT)
+        vm = NovaVM(bytecode)
+        with self.assertRaises(RuntimeError_) as ctx:
+            vm.run()
+        self.assertIn("元组索引", str(ctx.exception))
+        self.assertIn("越界", str(ctx.exception))
+
+    def test_vm_field_access_adt_index_out_of_bounds(self):
+        """VM: ADT 字段索引越界应抛出 RuntimeError_ 而非 IndexError"""
+        from nova.compiler import Bytecode, Op
+        from nova.vm import NovaVM, NovaADTValue
+        bytecode = Bytecode()
+        adt_val = NovaADTValue("MyType", "Foo", [10, 20], ["a", "b"])
+        bytecode.constants.append(adt_val)
+        bytecode.emit_op(Op.LOAD_CONST, 0)
+        bytecode.emit_op(Op.FIELD_ACCESS, 5)
+        bytecode.emit_op(Op.HALT)
+        vm = NovaVM(bytecode)
+        with self.assertRaises(RuntimeError_) as ctx:
+            vm.run()
+        self.assertIn("ADT 字段索引", str(ctx.exception))
+        self.assertIn("越界", str(ctx.exception))
+
+    # --- BUILD_MAP 不可哈希键 ---
+
+    def test_vm_build_map_unhashable_key(self):
+        """VM: BUILD_MAP 不可哈希键应抛出 RuntimeError_ 而非 TypeError"""
+        from nova.compiler import Bytecode, Op
+        from nova.vm import NovaVM
+        bytecode = Bytecode()
+        bytecode.constants.append([1, 2, 3])  # 列表是不可哈希的
+        bytecode.constants.append(42)
+        bytecode.emit_op(Op.LOAD_CONST, 0)  # key = [1,2,3]
+        bytecode.emit_op(Op.LOAD_CONST, 1)  # val = 42
+        bytecode.emit_op(Op.BUILD_MAP, 1)
+        bytecode.emit_op(Op.HALT)
+        vm = NovaVM(bytecode)
+        with self.assertRaises(RuntimeError_) as ctx:
+            vm.run()
+        self.assertIn("可哈希", str(ctx.exception))
+
     def test_vm_mut_binding_assign_works(self):
         """函数内 mut 绑定的可变变量，再次赋值应正常工作"""
         from nova.compiler import Bytecode, FunctionBlock, Instruction, Op
@@ -3917,6 +4002,45 @@ class TestBytecodeVM(unittest.TestCase):
         with self.assertRaises(RuntimeError_) as ctx:
             vm.run()
         self.assertIn("Cannot assign to immutable variable 'x'", str(ctx.exception))
+
+    def test_vm_match_non_exhaustive_raises_error(self):
+        """非穷尽模式匹配在 VM 中应抛出 MatchFailure 错误"""
+        from nova.errors import MatchFailure
+        with self.assertRaises(MatchFailure):
+            self._vm_run("""
+                let x = match 3 {
+                    1 -> "one"
+                    2 -> "two"
+                }
+            """)
+
+    def test_vm_match_wildcard_does_not_fail(self):
+        """带通配符的模式匹配不应触发 MatchFailure"""
+        vm = self._vm_run("""
+            let x = match 42 {
+                1 -> "one"
+                _ -> "other"
+            }
+        """)
+        self.assertEqual(vm.get_global("x"), "other")
+
+    def test_vm_list_comprehension_filter_with_nested_loop(self):
+        """带过滤条件的列表推导式在嵌套循环中应正确处理 break/continue"""
+        vm = self._vm_run("""
+            let result = for i <- 1..3 {
+                let inner = [x * 2 for x <- 1..4 if x > 2]
+                inner
+            }
+            let x = result[1]
+        """)
+        self.assertEqual(vm.get_global("x"), [6, 8])
+
+    def test_vm_list_comprehension_filter_basic(self):
+        """带过滤条件的列表推导式基本功能测试"""
+        vm = self._vm_run("""
+            let evens = [x for x <- 1..10 if x % 2 == 0]
+        """)
+        self.assertEqual(vm.get_global("evens"), [2, 4, 6, 8, 10])
 
 
 # ============================================================

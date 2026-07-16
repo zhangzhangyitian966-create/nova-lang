@@ -327,6 +327,16 @@ class RuntimeError_(NovaError):
                          source=source, span=span)
 
 
+class MatchFailure(RuntimeError_):
+    """模式匹配失败错误：非穷尽 match 表达式运行时没有匹配的分支"""
+
+    def __init__(self, line: int = -1, column: int = -1,
+                 source: Optional[str] = None,
+                 span: Optional[Span] = None):
+        super().__init__("模式匹配失败：没有匹配的分支（考虑添加 _ 通配符）",
+                         line, column, source=source, span=span)
+
+
 class PassError(NovaError):
     """Pass 执行错误：某个优化 Pass 在运行时抛出异常
 

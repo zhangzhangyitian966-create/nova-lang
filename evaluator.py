@@ -1054,12 +1054,23 @@ class Evaluator:
 
     def _eval_for_expr(self, expr: ForExpr) -> Any:
         """求值 for 循环表达式，返回列表"""
-        # 确定迭代器
-        if isinstance(expr.iterable, tuple) and expr.iterable[0] == "range":
-            # 范围循环: ("range", start, end, step)
+        # 确定迭代器：优先使用 expr.step 字段判断范围循环，
+        # 保留对 iterable 元组格式的向后兼容
+        is_range = expr.step is not None or (
+            isinstance(expr.iterable, tuple) and expr.iterable[0] == "range"
+        )
+        if is_range:
+            # 范围循环: start..end [step n]
+            # start/end 从 iterable 元组中获取（AST 暂无独立字段）
             start = self.eval_expr(expr.iterable[1])
             end = self.eval_expr(expr.iterable[2])
-            step = self.eval_expr(expr.iterable[3]) if expr.iterable[3] else 1
+            # 步长优先从 expr.step 获取，回退到元组格式以保持兼容
+            if expr.step is not None:
+                step = self.eval_expr(expr.step)
+            elif expr.iterable[3] is not None:
+                step = self.eval_expr(expr.iterable[3])
+            else:
+                step = 1
             if step > 0:
                 items = list(range(start, end + 1, step))
             elif step < 0:
