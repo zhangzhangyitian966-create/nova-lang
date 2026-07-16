@@ -234,7 +234,7 @@ class NovaVM:
     def _setup_builtins(self):
         """注册内置函数到全局"""
         self.globals["print"] = NovaBuiltinFn("print", self._builtin_print, 1)
-        self.globals["read_line"] = NovaBuiltinFn("read_line", lambda *a: input() if a == () else "", 0)
+        self.globals["read_line"] = NovaBuiltinFn("read_line", self._builtin_read_line, 0)
         self.globals["int_to_str"] = NovaBuiltinFn("int_to_str", lambda *a: str(a[0]), 1)
         self.globals["float_to_str"] = NovaBuiltinFn("float_to_str", lambda *a: str(a[0]), 1)
         self.globals["str_to_int"] = NovaBuiltinFn("str_to_int", self._builtin_str_to_int, 1)
@@ -288,6 +288,12 @@ class NovaVM:
         print(val)
         self.output.append(val)
         return UNIT
+
+    def _builtin_read_line(self, *args):
+        try:
+            return input()
+        except EOFError:
+            return ""
 
     def _builtin_str_to_int(self, *args):
         try:
@@ -574,7 +580,7 @@ class NovaVM:
 
             if self._execute_instruction(instr):
                 # Early return triggered by TRY_UNWRAP
-                return self.stack[-1] if self.stack else UNIT
+                return self.stack.pop() if self.stack else UNIT
 
         if self.return_flag:
             self.return_flag = False
@@ -1205,6 +1211,9 @@ class NovaVM:
                 current = self._range_index[key]
                 end = iter_val[2]
                 step = iter_val[3]
+
+                if step == 0:
+                    raise RuntimeError_("range 步长不能为 0")
 
                 if (step > 0 and current <= end) or (step < 0 and current >= end):
                     self._range_index[key] = current + step
