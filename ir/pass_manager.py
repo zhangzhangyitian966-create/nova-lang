@@ -1153,29 +1153,31 @@ class SSAVerifier(Pass):
         for bb in mir_fn.basic_blocks:
             # 2.1 终结指令检查
             if bb.terminator is None:
-                self._error(fn_name, bb.label, -1,
-                           "基本块缺少终结指令")
+                self._error(fn_name, bb.label, -1, "基本块缺少终结指令")
                 continue
 
             # 2.2 检查 Phi 位置：所有 Phi 必须在块开头
             seen_non_phi = False
             for idx, instr in enumerate(bb.instructions):
-                is_phi = hasattr(instr, 'sources') and hasattr(instr, 'result_name')
+                is_phi = hasattr(instr, "sources") and hasattr(instr, "result_name")
                 if is_phi:
                     if seen_non_phi:
-                        self._error(fn_name, bb.label, idx,
-                                   "Phi 节点不在基本块开头")
+                        self._error(fn_name, bb.label, idx, "Phi 节点不在基本块开头")
                 else:
                     seen_non_phi = True
 
             # 2.3 收集定义
             for idx, instr in enumerate(bb.instructions):
-                if hasattr(instr, 'result_name') and instr.result_name:
+                if hasattr(instr, "result_name") and instr.result_name:
                     ssa_name = instr.result_name
                     if ssa_name in all_defs:
-                        self._error(fn_name, bb.label, idx,
-                                   "SSA 名 %s 被多次定义（之前定义在 %s）"
-                                   % (ssa_name, all_defs[ssa_name][0]))
+                        self._error(
+                            fn_name,
+                            bb.label,
+                            idx,
+                            "SSA 名 %s 被多次定义（之前定义在 %s）"
+                            % (ssa_name, all_defs[ssa_name][0]),
+                        )
                     else:
                         all_defs[ssa_name] = (bb.label, idx)
 
@@ -1186,37 +1188,48 @@ class SSAVerifier(Pass):
                 used = self._get_used_ssa(instr)
                 for used_name in used:
                     if used_name not in all_defs:
-                        self._error(fn_name, bb.label, idx,
-                                   "使用了未定义的 SSA 名: %s" % used_name)
+                        self._error(
+                            fn_name,
+                            bb.label,
+                            idx,
+                            "使用了未定义的 SSA 名: %s" % used_name,
+                        )
 
             # 3.2 终结指令中的使用
             if bb.terminator is not None:
                 used = self._get_terminator_used_ssa(bb.terminator)
                 for used_name in used:
                     if used_name not in all_defs:
-                        self._error(fn_name, bb.label, -1,
-                                   "终结指令使用了未定义的 SSA 名: %s" % used_name)
+                        self._error(
+                            fn_name,
+                            bb.label,
+                            -1,
+                            "终结指令使用了未定义的 SSA 名: %s" % used_name,
+                        )
 
         # 4. 检查 Phi 的 source 块是否是前驱
         for bb in mir_fn.basic_blocks:
             pred_labels = predecessors.get(bb.label, [])
             for idx, instr in enumerate(bb.instructions):
-                if not (hasattr(instr, 'sources') and hasattr(instr, 'result_name')):
+                if not (hasattr(instr, "sources") and hasattr(instr, "result_name")):
                     continue  # 不是 Phi
-                if not hasattr(instr, 'sources'):
+                if not hasattr(instr, "sources"):
                     continue
                 src_blocks = [src[0] for src in instr.sources]
                 for src_block in src_blocks:
                     if src_block not in pred_labels:
-                        self._error(fn_name, bb.label, idx,
-                                   "Phi 的 source 块 %s 不是当前块的前驱（前驱: %s）"
-                                   % (src_block, pred_labels))
+                        self._error(
+                            fn_name,
+                            bb.label,
+                            idx,
+                            "Phi 的 source 块 %s 不是当前块的前驱（前驱: %s）"
+                            % (src_block, pred_labels),
+                        )
 
     def _get_successors(self, terminator):
         """获取终结指令的后继块标签列表"""
-        from ir.ir_nodes import (
-            MIRJump, MIRBranch, MIRReturn, MIRCall
-        )
+        from ir.ir_nodes import MIRBranch, MIRCall, MIRJump, MIRReturn
+
         if isinstance(terminator, MIRJump):
             return [terminator.target]
         elif isinstance(terminator, MIRBranch):
@@ -1233,63 +1246,63 @@ class SSAVerifier(Pass):
         used = []
 
         # 二元运算
-        if hasattr(instr, 'left') and instr.left:
+        if hasattr(instr, "left") and instr.left:
             used.append(instr.left)
-        if hasattr(instr, 'right') and instr.right:
+        if hasattr(instr, "right") and instr.right:
             used.append(instr.right)
 
         # 一元运算
-        if hasattr(instr, 'operand') and instr.operand:
+        if hasattr(instr, "operand") and instr.operand:
             used.append(instr.operand)
 
         # 函数调用
-        if hasattr(instr, 'callee') and instr.callee:
+        if hasattr(instr, "callee") and instr.callee:
             # callee 可能是函数名字符串（不是 SSA 名），跳过
             pass
-        if hasattr(instr, 'args'):
+        if hasattr(instr, "args"):
             for arg in instr.args:
                 if arg:
                     used.append(arg)
 
         # 字段/索引访问
-        if hasattr(instr, 'object') and instr.object:
+        if hasattr(instr, "object") and instr.object:
             used.append(instr.object)
-        if hasattr(instr, 'index') and instr.index:
+        if hasattr(instr, "index") and instr.index:
             used.append(instr.index)
-        if hasattr(instr, 'value') and instr.value:
+        if hasattr(instr, "value") and instr.value:
             # value 可能是常量值而不是 SSA 名，需要判断
             # 这里保守处理：如果看起来像 SSA 名（以 v 开头）则加入
             if isinstance(instr.value, str) and instr.value:
                 used.append(instr.value)
 
         # 列表/元组/Map 构建
-        if hasattr(instr, 'elements'):
+        if hasattr(instr, "elements"):
             for elem in instr.elements:
                 if elem:
                     used.append(elem)
-        if hasattr(instr, 'entries'):
+        if hasattr(instr, "entries"):
             for k, v in instr.entries:
                 if k:
                     used.append(k)
                 if v:
                     used.append(v)
-        if hasattr(instr, 'fields'):
+        if hasattr(instr, "fields"):
             for k, v in instr.fields.items():
                 if v:
                     used.append(v)
 
         # 列表操作
-        if hasattr(instr, 'list_ssa') and instr.list_ssa:
+        if hasattr(instr, "list_ssa") and instr.list_ssa:
             used.append(instr.list_ssa)
-        if hasattr(instr, 'element_ssa') and instr.element_ssa:
+        if hasattr(instr, "element_ssa") and instr.element_ssa:
             used.append(instr.element_ssa)
 
         # 全局变量加载/存储
-        if hasattr(instr, 'src') and instr.src:
+        if hasattr(instr, "src") and instr.src:
             used.append(instr.src)
 
         # Phi 的 sources（注意：Phi 的 source 值是使用，不是定义
-        if hasattr(instr, 'sources'):
+        if hasattr(instr, "sources"):
             for label, val in instr.sources:
                 if val:
                     used.append(val)
@@ -1299,11 +1312,11 @@ class SSAVerifier(Pass):
     def _get_terminator_used_ssa(self, terminator):
         """获取终结指令使用的 SSA 名"""
         used = []
-        if hasattr(terminator, 'cond') and terminator.cond:
+        if hasattr(terminator, "cond") and terminator.cond:
             used.append(terminator.cond)
-        if hasattr(terminator, 'value') and terminator.value:
+        if hasattr(terminator, "value") and terminator.value:
             used.append(terminator.value)
-        if hasattr(terminator, 'args'):
+        if hasattr(terminator, "args"):
             for arg in terminator.args:
                 if arg:
                     used.append(arg)

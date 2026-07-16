@@ -124,60 +124,64 @@ class MIRLowering:
         支持所有常见的指令字段。
         """
         # 跳过 Phi 自身的 result_name
-        if hasattr(instr, 'result_name') and instr.result_name == old_ssa:
+        if hasattr(instr, "result_name") and instr.result_name == old_ssa:
             pass  # 不替换定义本身
 
         # 二元运算
-        if hasattr(instr, 'left') and instr.left == old_ssa:
+        if hasattr(instr, "left") and instr.left == old_ssa:
             instr.left = new_ssa
-        if hasattr(instr, 'right') and instr.right == old_ssa:
+        if hasattr(instr, "right") and instr.right == old_ssa:
             instr.right = new_ssa
 
         # 一元运算
-        if hasattr(instr, 'operand') and instr.operand == old_ssa:
+        if hasattr(instr, "operand") and instr.operand == old_ssa:
             instr.operand = new_ssa
 
         # 函数调用
-        if hasattr(instr, 'callee') and instr.callee == old_ssa:
+        if hasattr(instr, "callee") and instr.callee == old_ssa:
             instr.callee = new_ssa
-        if hasattr(instr, 'args'):
+        if hasattr(instr, "args"):
             instr.args = [new_ssa if a == old_ssa else a for a in instr.args]
 
         # 字段/索引访问
-        if hasattr(instr, 'object') and instr.object == old_ssa:
+        if hasattr(instr, "object") and instr.object == old_ssa:
             instr.object = new_ssa
-        if hasattr(instr, 'index') and instr.index == old_ssa:
+        if hasattr(instr, "index") and instr.index == old_ssa:
             instr.index = new_ssa
-        if hasattr(instr, 'value') and instr.value == old_ssa:
+        if hasattr(instr, "value") and instr.value == old_ssa:
             instr.value = new_ssa
 
         # 列表/元组/Map 构建
-        if hasattr(instr, 'elements'):
+        if hasattr(instr, "elements"):
             instr.elements = [new_ssa if e == old_ssa else e for e in instr.elements]
-        if hasattr(instr, 'entries'):
-            instr.entries = [(new_ssa if k == old_ssa else k,
-                              new_ssa if v == old_ssa else v)
-                             for k, v in instr.entries]
-        if hasattr(instr, 'fields'):
-            instr.fields = {k: new_ssa if v == old_ssa else v
-                            for k, v in instr.fields.items()}
+        if hasattr(instr, "entries"):
+            instr.entries = [
+                (new_ssa if k == old_ssa else k, new_ssa if v == old_ssa else v)
+                for k, v in instr.entries
+            ]
+        if hasattr(instr, "fields"):
+            instr.fields = {
+                k: new_ssa if v == old_ssa else v for k, v in instr.fields.items()
+            }
 
         # 列表操作
-        if hasattr(instr, 'list_ssa') and instr.list_ssa == old_ssa:
+        if hasattr(instr, "list_ssa") and instr.list_ssa == old_ssa:
             instr.list_ssa = new_ssa
-        if hasattr(instr, 'element_ssa') and instr.element_ssa == old_ssa:
+        if hasattr(instr, "element_ssa") and instr.element_ssa == old_ssa:
             instr.element_ssa = new_ssa
 
         # 全局变量加载/存储
-        if hasattr(instr, 'src') and instr.src == old_ssa:
+        if hasattr(instr, "src") and instr.src == old_ssa:
             instr.src = new_ssa
-        if hasattr(instr, 'dst') and instr.dst == old_ssa:
+        if hasattr(instr, "dst") and instr.dst == old_ssa:
             instr.dst = new_ssa
 
         # Phi 节点的 sources
-        if hasattr(instr, 'sources'):
-            instr.sources = [(label, new_ssa if val == old_ssa else val)
-                             for label, val in instr.sources]
+        if hasattr(instr, "sources"):
+            instr.sources = [
+                (label, new_ssa if val == old_ssa else val)
+                for label, val in instr.sources
+            ]
 
     def _replace_ssa_in_terminator(self, terminator, old_ssa, new_ssa):
         """
@@ -187,15 +191,15 @@ class MIRLowering:
             return
 
         # 分支条件
-        if hasattr(terminator, 'cond') and terminator.cond == old_ssa:
+        if hasattr(terminator, "cond") and terminator.cond == old_ssa:
             terminator.cond = new_ssa
 
         # 跳转值（如 return）
-        if hasattr(terminator, 'value') and terminator.value == old_ssa:
+        if hasattr(terminator, "value") and terminator.value == old_ssa:
             terminator.value = new_ssa
 
         # 函数调用参数
-        if hasattr(terminator, 'args'):
+        if hasattr(terminator, "args"):
             terminator.args = [new_ssa if a == old_ssa else a for a in terminator.args]
 
     def _replace_ssa_in_block(self, block, old_ssa, new_ssa, skip_phi=False):
@@ -204,7 +208,7 @@ class MIRLowering:
         skip_phi=True 时不替换 Phi 节点（用于替换 Phi 之前的引用）。
         """
         for instr in block.instructions:
-            if skip_phi and hasattr(instr, 'sources'):
+            if skip_phi and hasattr(instr, "sources"):
                 continue
             self._replace_ssa_in_instr(instr, old_ssa, new_ssa)
         self._replace_ssa_in_terminator(block.terminator, old_ssa, new_ssa)
@@ -554,7 +558,7 @@ class MIRLowering:
 
         merge_block = MIRBasicBlock(self._new_block())
         arm_body_blocks = []  # 每个 arm 的 body 块，用于收集 Phi source
-        arm_results = []      # 每个 arm body 的结果 SSA 名
+        arm_results = []  # 每个 arm body 的结果 SSA 名
         arm_modified_envs = []  # 每个 arm 修改的 env {name: ssa}
 
         # 为每个 arm 创建检查块和 body 块
@@ -576,7 +580,9 @@ class MIRLowering:
 
             # --- 模式检查块 ---
             self.current_block = check_blocks[i]
-            next_check = check_blocks[i + 1].label if i + 1 < len(arms) else fail_block.label
+            next_check = (
+                check_blocks[i + 1].label if i + 1 < len(arms) else fail_block.label
+            )
 
             self._lower_pattern(
                 arm.pattern,
@@ -667,9 +673,14 @@ class MIRLowering:
         直接在 block 中做绑定/什么都不做，调用方会跳 match_target。
         """
         from ir_nodes import (
-            HIRIntPattern, HIRFloatPattern, HIRStringPattern,
-            HIRBoolPattern, HIRCharPattern, HIRWildcardPattern,
-            HIRBindPattern, HIRConstructorPattern,
+            HIRBindPattern,
+            HIRBoolPattern,
+            HIRCharPattern,
+            HIRConstructorPattern,
+            HIRFloatPattern,
+            HIRIntPattern,
+            HIRStringPattern,
+            HIRWildcardPattern,
         )
 
         if isinstance(pattern, HIRWildcardPattern):
@@ -681,8 +692,16 @@ class MIRLowering:
             self.env[pattern.name] = value_ssa
             return
 
-        if isinstance(pattern, (HIRIntPattern, HIRFloatPattern, HIRStringPattern,
-                                 HIRBoolPattern, HIRCharPattern)):
+        if isinstance(
+            pattern,
+            (
+                HIRIntPattern,
+                HIRFloatPattern,
+                HIRStringPattern,
+                HIRBoolPattern,
+                HIRCharPattern,
+            ),
+        ):
             # 字面量模式：生成比较 + 条件分支
             const_type_map = {
                 HIRIntPattern: "int",
@@ -733,7 +752,9 @@ class MIRLowering:
 
             # 有字段模式：需要一个中间块来做字段绑定和递归检查
             field_check_block = MIRBasicBlock(self._new_block())
-            block.terminator = MIRBranch(tag_cmp_ssa, field_check_block.label, fail_target)
+            block.terminator = MIRBranch(
+                tag_cmp_ssa, field_check_block.label, fail_target
+            )
 
             self.current_block = field_check_block
             # 递归处理每个字段模式
@@ -754,7 +775,9 @@ class MIRLowering:
                 fblock = MIRBasicBlock(self._new_block())
                 self.current_block = fblock
 
-                self._lower_pattern(field_pat, field_ssa, fblock, current_target, fail_target)
+                self._lower_pattern(
+                    field_pat, field_ssa, fblock, current_target, fail_target
+                )
 
                 if fblock.terminator is None:
                     fblock.terminator = MIRJump(current_target)
@@ -841,9 +864,7 @@ class MIRLowering:
         cmp_instr.right = len_ssa
         cmp_ssa = self._emit(cmp_instr)
 
-        header_block.terminator = MIRBranch(
-            cmp_ssa, body_block.label, exit_block.label
-        )
+        header_block.terminator = MIRBranch(cmp_ssa, body_block.label, exit_block.label)
 
         # 压入循环上下文（break → exit, continue → header）
         self.loop_stack.append((header_block.label, exit_block.label))
@@ -966,9 +987,7 @@ class MIRLowering:
         cmp_instr.right = len_ssa
         cmp_ssa = self._emit(cmp_instr)
 
-        header_block.terminator = MIRBranch(
-            cmp_ssa, body_block.label, exit_block.label
-        )
+        header_block.terminator = MIRBranch(cmp_ssa, body_block.label, exit_block.label)
 
         # 压入循环上下文（break → exit, continue → header）
         self.loop_stack.append((header_block.label, exit_block.label))
@@ -1106,7 +1125,7 @@ class MIRLowering:
     def _lower_while_expr(self, hir_expr, block):
         """
         降级 while 循环，带正确的 SSA Phi 节点。
-        
+
         生成的 CFG 结构：
           entry:
             <lowered: any pre-loop code>
@@ -1121,7 +1140,7 @@ class MIRLowering:
             goto header
           exit:
             return unit
-        
+
         SSA 策略：
         1. 进入循环前保存 env 快照（pre_env）
         2. 处理完循环体后，比较 env 找出被修改的变量
@@ -1173,7 +1192,7 @@ class MIRLowering:
 
             phi_instr = MIRPhi(UNIT_TYPE)  # 类型简化，后续类型检查会处理
             phi_instr.sources = [
-                (block.label, pre_ssa),       # 入口边：循环前的值
+                (block.label, pre_ssa),  # 入口边：循环前的值
                 (body_block.label, body_ssa),  # 回边：循环体末尾的值
             ]
             phi_instr.result_name = self._new_ssa()
