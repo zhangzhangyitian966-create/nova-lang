@@ -1,5 +1,5 @@
 {
-  "cycles": 9,
+  "cycles": 10,
   "completed_tasks": [
     "dce_pass",
     "wasmgc_storereg",
@@ -19,10 +19,24 @@
     "fix_match_lowering",
     "fix_mir_loop_vars",
     "fix_mir_ssa_branch_env",
-    "review_cycle_9"
+    "review_cycle_9",
+    "fix_while_ssa",
+    "mir_ssa_verifier"
   ],
   "failed_tasks": [],
   "task_history": [
+    {
+      "cycle": 10,
+      "task_id": "fix_while_ssa",
+      "status": "completed",
+      "details": "修复 while 循环 SSA：重写 _lower_while_expr，env 快照对比法自动检测循环中被修改的变量，在 header 块开头插入 Phi 节点（入口边 + 回边），自动替换 header 和 body 中的旧 SSA 引用为 Phi 结果；新增 3 个通用辅助方法：_replace_ssa_in_instr、_replace_ssa_in_terminator、_replace_ssa_in_block"
+    },
+    {
+      "cycle": 10,
+      "task_id": "mir_ssa_verifier",
+      "status": "completed",
+      "details": "实现基础版 SSA 验证器 Pass（SSAVerifier）：支持 5 项检查（基本块终结指令、SSA 单赋值、使用前定义、Phi 节点位置、Phi source 块前驱验证）；手动测试验证了正确和错误场景，能正确检测未定义 SSA 名等问题"
+    },
     {
       "cycle": 9,
       "task_id": "review_cycle_9",
@@ -138,7 +152,7 @@
       "details": "C 后端接入 IR 管线第一步：新建 backend/lir_c_backend.py 实现 LIRCBackend 类，支持 20+ 种 LIR 指令的 C 代码生成（常量加载、运算、控制流、函数调用、列表/映射/元组/ADT 构建、字段/索引访问、全局变量、panic）；同时完善 LIRBranch 指令结构（补充 true_target/false_target 字段），修复 wasm/cranelift 后端的硬编码分支目标问题"
     }
   ],
-  "current_cycle": 9,
+  "current_cycle": 10,
   "baseline_tests": 403,
   "current_tests": 403,
   "last_review_cycle": 9,
@@ -190,7 +204,7 @@
       "priority": 86,
       "category": "ir",
       "estimated": "4-6 小时",
-      "status": "pending",
+      "status": "completed",
       "depends_on": [
         "fix_mir_ssa",
         "fix_while_phi",
@@ -438,7 +452,7 @@
       "priority": 90,
       "category": "ir",
       "estimated": "4-6 小时",
-      "status": "pending",
+      "status": "completed",
       "depends_on": [
         "fix_mir_ssa_branch_env"
       ],

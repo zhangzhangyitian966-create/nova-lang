@@ -24,10 +24,10 @@
 | ✅ | 完善 MIR match 降级（真正的模式匹配） | medium | 92 | 4-6 小时 | - |
 | ✅ | 修复 MIR 循环变量绑定 | medium | 90 | 2-4 小时 | - |
 | ✅ | SSA 分支环境隔离 + 汇合点 Phi 插入 | medium | 88 | 4-6 小时 | fix_match_lowering, fix_mir_loop_vars |
-| ⏳ | 修复 while 循环 SSA Phi 插入 | medium | 90 | 4-6 小时 | fix_mir_ssa_branch_env |
+| ✅ | 修复 while 循环 SSA Phi 插入 | medium | 90 | 4-6 小时 | fix_mir_ssa_branch_env |
 | ⏳ | 修复赋值表达式 SSA 语义 | medium | 88 | 3-5 小时 | fix_while_phi |
 | ⏳ | 修复 MIR SSA 构建正确性（循环 Phi + 完整 SSA） | hard | 85 | 2-3 天 | fix_mir_ssa_branch_env |
-| ⏳ | 实现 MIR SSA 验证 Pass | medium | 86 | 4-6 小时 | fix_while_phi, fix_assign_ssa |
+| ✅ | 实现 MIR SSA 验证 Pass | medium | 86 | 4-6 小时 | fix_while_phi, fix_assign_ssa |
 
 ## 🚀 优化 Pass
 
@@ -64,9 +64,9 @@
 
 ---
 
-**进度**: 14/27 (52%)
-**已完成**: 14
+**进度**: 16/27 (59%)
+**已完成**: 16
 **进行中**: 0
-**待开发**: 13
+**待开发**: 11
 
-> 注：第9轮评审后任务池从 25 个扩展到 27 个（新增 3 个高价值任务：while 循环 Phi、赋值 SSA 化、C 后端条件分支修复），完成率从 56% 变为 52%，反映了对 SSA 问题深度的新认知，而非实际退步。第7-8轮共完成 3 个 MIR 正确性任务（match 降级、循环变量绑定、分支环境隔离）。
+> 注：第9轮评审后任务池从 25 个扩展到 27 个（新增 3 个高价值任务：while 循环 Phi、赋值 SSA 化、C 后端条件分支修复）。第10轮完成 2 个 SSA 相关任务（while 循环 Phi + SSA 验证器），进度从 52% 提升到 59%。

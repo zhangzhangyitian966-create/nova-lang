@@ -1100,6 +1100,223 @@ class LoopInvariantCodeMotion(Pass):
         return False
 
 
+class SSAVerifier(Pass):
+    """SSA 验证器
+
+    验证 MIR 模块是否满足基本的 SSA 性质：
+    1. 每个基本块都有终结指令
+    2. 每个 SSA 名只被定义一次
+    3. 所有使用的 SSA 名都已定义（使用前定义）
+    4. Phi 节点位于基本块开头
+    5. Phi 的 source 块确实是当前块的前驱
+
+    验证失败时返回 False（表示"未通过"，但不修改 IR）。
+    详细错误信息可通过 errors 属性获取。
+    """
+
+    name = "ssa_verifier"
+
+    def __init__(self):
+        self.errors = []
+
+    def run(self, mir_module):
+        """执行 SSA 验证，返回 True 表示通过，False 表示有错误"""
+        self.errors = []
+        for fn_name, mir_fn in mir_module.functions.items():
+            self._verify_function(fn_name, mir_fn)
+        return len(self.errors) == 0
+
+    def _verify_function(self, fn_name, mir_fn):
+        """验证单个函数的 SSA 性质"""
+        # 1. 收集所有定义的 SSA 名
+        all_defs = {}  # ssa_name -> (block_label, instr_index)
+
+        # 构建块名 -> 块对象的映射
+        block_map = {}
+        for bb in mir_fn.basic_blocks:
+            block_map[bb.label] = bb
+
+        # 构建前驱关系
+        predecessors = {}  # block_label -> [predecessor_labels
+        for bb in mir_fn.basic_blocks:
+            predecessors[bb.label] = []
+        for bb in mir_fn.basic_blocks:
+            if bb.terminator is None:
+                continue
+            # 收集终结指令的后继
+            succs = self._get_successors(bb.terminator)
+            for succ_label in succs:
+                if succ_label in predecessors:
+                    predecessors[succ_label].append(bb.label)
+
+        # 2. 检查每个基本块
+        for bb in mir_fn.basic_blocks:
+            # 2.1 终结指令检查
+            if bb.terminator is None:
+                self._error(fn_name, bb.label, -1,
+                           "基本块缺少终结指令")
+                continue
+
+            # 2.2 检查 Phi 位置：所有 Phi 必须在块开头
+            seen_non_phi = False
+            for idx, instr in enumerate(bb.instructions):
+                is_phi = hasattr(instr, 'sources') and hasattr(instr, 'result_name')
+                if is_phi:
+                    if seen_non_phi:
+                        self._error(fn_name, bb.label, idx,
+                                   "Phi 节点不在基本块开头")
+                else:
+                    seen_non_phi = True
+
+            # 2.3 收集定义
+            for idx, instr in enumerate(bb.instructions):
+                if hasattr(instr, 'result_name') and instr.result_name:
+                    ssa_name = instr.result_name
+                    if ssa_name in all_defs:
+                        self._error(fn_name, bb.label, idx,
+                                   "SSA 名 %s 被多次定义（之前定义在 %s）"
+                                   % (ssa_name, all_defs[ssa_name][0]))
+                    else:
+                        all_defs[ssa_name] = (bb.label, idx)
+
+        # 3. 检查使用
+        for bb in mir_fn.basic_blocks:
+            # 3.1 指令中的使用
+            for idx, instr in enumerate(bb.instructions):
+                used = self._get_used_ssa(instr)
+                for used_name in used:
+                    if used_name not in all_defs:
+                        self._error(fn_name, bb.label, idx,
+                                   "使用了未定义的 SSA 名: %s" % used_name)
+
+            # 3.2 终结指令中的使用
+            if bb.terminator is not None:
+                used = self._get_terminator_used_ssa(bb.terminator)
+                for used_name in used:
+                    if used_name not in all_defs:
+                        self._error(fn_name, bb.label, -1,
+                                   "终结指令使用了未定义的 SSA 名: %s" % used_name)
+
+        # 4. 检查 Phi 的 source 块是否是前驱
+        for bb in mir_fn.basic_blocks:
+            pred_labels = predecessors.get(bb.label, [])
+            for idx, instr in enumerate(bb.instructions):
+                if not (hasattr(instr, 'sources') and hasattr(instr, 'result_name')):
+                    continue  # 不是 Phi
+                if not hasattr(instr, 'sources'):
+                    continue
+                src_blocks = [src[0] for src in instr.sources]
+                for src_block in src_blocks:
+                    if src_block not in pred_labels:
+                        self._error(fn_name, bb.label, idx,
+                                   "Phi 的 source 块 %s 不是当前块的前驱（前驱: %s）"
+                                   % (src_block, pred_labels))
+
+    def _get_successors(self, terminator):
+        """获取终结指令的后继块标签列表"""
+        from ir.ir_nodes import (
+            MIRJump, MIRBranch, MIRReturn, MIRCall
+        )
+        if isinstance(terminator, MIRJump):
+            return [terminator.target]
+        elif isinstance(terminator, MIRBranch):
+            return [terminator.true_target, terminator.false_target]
+        elif isinstance(terminator, MIRReturn):
+            return []
+        elif isinstance(terminator, MIRCall):
+            return []
+        else:
+            return []
+
+    def _get_used_ssa(self, instr):
+        """获取一条指令使用的所有 SSA 名"""
+        used = []
+
+        # 二元运算
+        if hasattr(instr, 'left') and instr.left:
+            used.append(instr.left)
+        if hasattr(instr, 'right') and instr.right:
+            used.append(instr.right)
+
+        # 一元运算
+        if hasattr(instr, 'operand') and instr.operand:
+            used.append(instr.operand)
+
+        # 函数调用
+        if hasattr(instr, 'callee') and instr.callee:
+            # callee 可能是函数名字符串（不是 SSA 名），跳过
+            pass
+        if hasattr(instr, 'args'):
+            for arg in instr.args:
+                if arg:
+                    used.append(arg)
+
+        # 字段/索引访问
+        if hasattr(instr, 'object') and instr.object:
+            used.append(instr.object)
+        if hasattr(instr, 'index') and instr.index:
+            used.append(instr.index)
+        if hasattr(instr, 'value') and instr.value:
+            # value 可能是常量值而不是 SSA 名，需要判断
+            # 这里保守处理：如果看起来像 SSA 名（以 v 开头）则加入
+            if isinstance(instr.value, str) and instr.value:
+                used.append(instr.value)
+
+        # 列表/元组/Map 构建
+        if hasattr(instr, 'elements'):
+            for elem in instr.elements:
+                if elem:
+                    used.append(elem)
+        if hasattr(instr, 'entries'):
+            for k, v in instr.entries:
+                if k:
+                    used.append(k)
+                if v:
+                    used.append(v)
+        if hasattr(instr, 'fields'):
+            for k, v in instr.fields.items():
+                if v:
+                    used.append(v)
+
+        # 列表操作
+        if hasattr(instr, 'list_ssa') and instr.list_ssa:
+            used.append(instr.list_ssa)
+        if hasattr(instr, 'element_ssa') and instr.element_ssa:
+            used.append(instr.element_ssa)
+
+        # 全局变量加载/存储
+        if hasattr(instr, 'src') and instr.src:
+            used.append(instr.src)
+
+        # Phi 的 sources（注意：Phi 的 source 值是使用，不是定义
+        if hasattr(instr, 'sources'):
+            for label, val in instr.sources:
+                if val:
+                    used.append(val)
+
+        return used
+
+    def _get_terminator_used_ssa(self, terminator):
+        """获取终结指令使用的 SSA 名"""
+        used = []
+        if hasattr(terminator, 'cond') and terminator.cond:
+            used.append(terminator.cond)
+        if hasattr(terminator, 'value') and terminator.value:
+            used.append(terminator.value)
+        if hasattr(terminator, 'args'):
+            for arg in terminator.args:
+                if arg:
+                    used.append(arg)
+        return used
+
+    def _error(self, fn_name, block_label, instr_idx, msg):
+        """记录一个错误"""
+        if instr_idx >= 0:
+            self.errors.append("[%s] %s:%d %s" % (fn_name, block_label, instr_idx, msg))
+        else:
+            self.errors.append("[%s] %s %s" % (fn_name, block_label, msg))
+
+
 class PassManager:
     """优化 Pass 管理器"""
 

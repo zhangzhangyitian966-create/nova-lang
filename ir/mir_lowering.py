@@ -118,6 +118,97 @@ class MIRLowering:
         self.current_block.instructions.append(instr)
         return ssa
 
+    def _replace_ssa_in_instr(self, instr, old_ssa, new_ssa):
+        """
+        替换一条指令中的 SSA 引用。
+        支持所有常见的指令字段。
+        """
+        # 跳过 Phi 自身的 result_name
+        if hasattr(instr, 'result_name') and instr.result_name == old_ssa:
+            pass  # 不替换定义本身
+
+        # 二元运算
+        if hasattr(instr, 'left') and instr.left == old_ssa:
+            instr.left = new_ssa
+        if hasattr(instr, 'right') and instr.right == old_ssa:
+            instr.right = new_ssa
+
+        # 一元运算
+        if hasattr(instr, 'operand') and instr.operand == old_ssa:
+            instr.operand = new_ssa
+
+        # 函数调用
+        if hasattr(instr, 'callee') and instr.callee == old_ssa:
+            instr.callee = new_ssa
+        if hasattr(instr, 'args'):
+            instr.args = [new_ssa if a == old_ssa else a for a in instr.args]
+
+        # 字段/索引访问
+        if hasattr(instr, 'object') and instr.object == old_ssa:
+            instr.object = new_ssa
+        if hasattr(instr, 'index') and instr.index == old_ssa:
+            instr.index = new_ssa
+        if hasattr(instr, 'value') and instr.value == old_ssa:
+            instr.value = new_ssa
+
+        # 列表/元组/Map 构建
+        if hasattr(instr, 'elements'):
+            instr.elements = [new_ssa if e == old_ssa else e for e in instr.elements]
+        if hasattr(instr, 'entries'):
+            instr.entries = [(new_ssa if k == old_ssa else k,
+                              new_ssa if v == old_ssa else v)
+                             for k, v in instr.entries]
+        if hasattr(instr, 'fields'):
+            instr.fields = {k: new_ssa if v == old_ssa else v
+                            for k, v in instr.fields.items()}
+
+        # 列表操作
+        if hasattr(instr, 'list_ssa') and instr.list_ssa == old_ssa:
+            instr.list_ssa = new_ssa
+        if hasattr(instr, 'element_ssa') and instr.element_ssa == old_ssa:
+            instr.element_ssa = new_ssa
+
+        # 全局变量加载/存储
+        if hasattr(instr, 'src') and instr.src == old_ssa:
+            instr.src = new_ssa
+        if hasattr(instr, 'dst') and instr.dst == old_ssa:
+            instr.dst = new_ssa
+
+        # Phi 节点的 sources
+        if hasattr(instr, 'sources'):
+            instr.sources = [(label, new_ssa if val == old_ssa else val)
+                             for label, val in instr.sources]
+
+    def _replace_ssa_in_terminator(self, terminator, old_ssa, new_ssa):
+        """
+        替换终结指令中的 SSA 引用。
+        """
+        if terminator is None:
+            return
+
+        # 分支条件
+        if hasattr(terminator, 'cond') and terminator.cond == old_ssa:
+            terminator.cond = new_ssa
+
+        # 跳转值（如 return）
+        if hasattr(terminator, 'value') and terminator.value == old_ssa:
+            terminator.value = new_ssa
+
+        # 函数调用参数
+        if hasattr(terminator, 'args'):
+            terminator.args = [new_ssa if a == old_ssa else a for a in terminator.args]
+
+    def _replace_ssa_in_block(self, block, old_ssa, new_ssa, skip_phi=False):
+        """
+        替换一个基本块中所有的 SSA 引用。
+        skip_phi=True 时不替换 Phi 节点（用于替换 Phi 之前的引用）。
+        """
+        for instr in block.instructions:
+            if skip_phi and hasattr(instr, 'sources'):
+                continue
+            self._replace_ssa_in_instr(instr, old_ssa, new_ssa)
+        self._replace_ssa_in_terminator(block.terminator, old_ssa, new_ssa)
+
     def _lower_function(self, hir_fn):
         self.ssa_counter = 0
         self.block_counter = 0
@@ -1013,11 +1104,42 @@ class MIRLowering:
         return list_phi_ssa
 
     def _lower_while_expr(self, hir_expr, block):
+        """
+        降级 while 循环，带正确的 SSA Phi 节点。
+        
+        生成的 CFG 结构：
+          entry:
+            <lowered: any pre-loop code>
+            goto header
+          header:
+            phi(x_init, x_back_edge)  // 循环中被修改的变量都有 Phi
+            cond = <lower condition>
+            if cond goto body else goto exit
+          body:
+            <lower body>
+            x_new = <updated value>
+            goto header
+          exit:
+            return unit
+        
+        SSA 策略：
+        1. 进入循环前保存 env 快照（pre_env）
+        2. 处理完循环体后，比较 env 找出被修改的变量
+        3. 在 header 块开头为每个被修改的变量插入 Phi 节点
+        4. Phi 的 sources: 入口边(pre值) + 回边(body末尾的值)
+        5. 替换 header 和 body 中对这些变量的引用为 Phi 结果
+        """
         header_block = MIRBasicBlock(self._new_block())
         body_block = MIRBasicBlock(self._new_block())
         exit_block = MIRBasicBlock(self._new_block())
 
+        # 1. 进入循环前保存 env 快照
+        pre_env = dict(self.env)
+
         block.terminator = MIRJump(header_block.label)
+
+        # 2. 先降级条件（用初始 env 值，后面会替换为 Phi 结果）
+        self.current_block = header_block
         cond_ssa = self._lower_expr(hir_expr.condition, header_block)
         header_block.terminator = MIRBranch(
             cond_ssa or "", body_block.label, exit_block.label
@@ -1026,12 +1148,47 @@ class MIRLowering:
         # 压入循环上下文（break → exit, continue → header）
         self.loop_stack.append((header_block.label, exit_block.label))
 
+        # 3. 降级循环体
+        self.current_block = body_block
         self._lower_expr(hir_expr.body, body_block)
         if body_block.terminator is None:
             body_block.terminator = MIRJump(header_block.label)
 
         # 弹出循环上下文
         self.loop_stack.pop()
+
+        # 4. 找出循环中被修改的变量（比较 pre_env 和当前 env）
+        modified_vars = {}
+        for name, ssa_val in self.env.items():
+            if name not in pre_env or pre_env[name] != ssa_val:
+                modified_vars[name] = ssa_val
+
+        # 5. 在 header 块开头为每个被修改的变量插入 Phi 节点
+        phi_offset = 0
+        for var_name, body_ssa in modified_vars.items():
+            pre_ssa = pre_env.get(var_name)
+            if pre_ssa is None:
+                # 循环中新定义的变量，入口边没有值，跳过（理论上不应该出现）
+                continue
+
+            phi_instr = MIRPhi(UNIT_TYPE)  # 类型简化，后续类型检查会处理
+            phi_instr.sources = [
+                (block.label, pre_ssa),       # 入口边：循环前的值
+                (body_block.label, body_ssa),  # 回边：循环体末尾的值
+            ]
+            phi_instr.result_name = self._new_ssa()
+            header_block.instructions.insert(phi_offset, phi_instr)
+            phi_offset += 1
+
+            # 6. 替换 header 和 body 中对旧 SSA 的引用为 Phi 结果
+            phi_result = phi_instr.result_name
+            # header 中对 pre_ssa 的引用替换为 phi_result
+            self._replace_ssa_in_block(header_block, pre_ssa, phi_result, skip_phi=True)
+            # body 中对 pre_ssa 的引用替换为 phi_result
+            self._replace_ssa_in_block(body_block, pre_ssa, phi_result, skip_phi=False)
+
+            # 更新 env 中的值为 Phi 结果
+            self.env[var_name] = phi_result
 
         self.all_blocks.extend([header_block, body_block, exit_block])
         self.current_block = exit_block
