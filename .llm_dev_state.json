@@ -1,5 +1,5 @@
 {
-  "cycles": 2,
+  "cycles": 3,
   "completed_tasks": [
     "dce_pass",
     "wasmgc_storereg",
@@ -52,12 +52,127 @@
       "task_id": "fix_dce_field_names",
       "status": "completed",
       "details": "修复了 DeadCodeElimination 中大量字段名不匹配的 bug：callee→function, args→arguments, items→elements, pairs→entries, collection→object, scrutinee→value, expr→result_expr, left/right→stages"
+    },
+    {
+      "cycle": 3,
+      "task_id": "review_cycle_3",
+      "status": "completed",
+      "details": "第3轮路线图评审：完成三轮回顾、四维评估、问题总结、下阶段方向规划、任务池重构"
     }
   ],
-  "current_cycle": 2,
-  "baseline_tests": 365,
+  "current_cycle": 3,
+  "baseline_tests": 403,
   "current_tests": 403,
+  "last_review_cycle": 3,
   "tasks": [
+    {
+      "id": "c_backend_pipeline",
+      "name": "C 后端接入统一 IR 管线",
+      "description": "实现 LIR/MIR → C 代码生成，改造 compiler_pipeline 让 C 后端走 HIR→MIR→LIR 统一管线，消除'两个编译器'问题",
+      "difficulty": "hard",
+      "priority": 95,
+      "category": "architecture",
+      "estimated": "2-3 天",
+      "status": "pending",
+      "depends_on": [],
+      "reason": "当前最大架构裂痕：C 后端是最成熟的后端但完全绕过 IR，导致所有 IR 层工作无法通过 C 后端验证。打通后优化 Pass 效果可立即通过 C 后端编译运行验证"
+    },
+    {
+      "id": "fix_mir_ssa",
+      "name": "修复 MIR SSA 构建正确性",
+      "description": "重写 MIR 降级中的 SSA 构建：正确处理循环变量 SSA 更新、if-else 汇合点 Phi 构建、赋值不破坏单赋值原则、支配边界计算",
+      "difficulty": "hard",
+      "priority": 90,
+      "category": "ir",
+      "estimated": "2-4 天",
+      "status": "pending",
+      "depends_on": ["c_backend_pipeline"],
+      "reason": "SSA 是所有经典优化的基础，目前 MIR SSA 有明显缺陷（循环变量不更新、赋值直接覆盖 env、Phi 只取第一个 source）。修复后 CSE/LICM 等优化才有意义"
+    },
+    {
+      "id": "refactor_sys_path",
+      "name": "消除 sys.path hack，标准化包结构",
+      "description": "重构为标准 Python 包结构，所有导入使用包路径（from nova.ir.ir_nodes import ...），消除 19 处 sys.path.insert，添加完整的 __init__.py 导出",
+      "difficulty": "medium",
+      "priority": 85,
+      "category": "engineering",
+      "estimated": "1-2 天",
+      "status": "pending",
+      "depends_on": [],
+      "reason": "最普遍的技术债（19 处），导致导入顺序问题、调试困难、包工具无法使用。越早重构成本越低"
+    },
+    {
+      "id": "unify_ir_naming",
+      "name": "统一跨 IR 层字段命名",
+      "description": "统一函数调用相关命名（callee/function/func_name → callee, args/arguments/arg_count → args），统一类型字段命名（ir_type/result_type → ir_type），减少认知负担和 bug 风险",
+      "difficulty": "medium",
+      "priority": 80,
+      "category": "engineering",
+      "estimated": "1 天",
+      "status": "pending",
+      "depends_on": ["refactor_sys_path"],
+      "reason": "四层 IR 中函数调用命名换了三次，每次写跨层代码都要回忆'这层叫什么'，已导致多个 field name bug。命名统一后可大幅降低 bug 率"
+    },
+    {
+      "id": "cse_pass",
+      "name": "实现公共子表达式消除 Pass (CSE)",
+      "description": "在 MIR 层实现基于哈希的局部公共子表达式消除，复用已计算的表达式结果",
+      "difficulty": "medium",
+      "priority": 75,
+      "category": "optimization",
+      "estimated": "3-5 小时",
+      "status": "pending",
+      "depends_on": ["fix_mir_ssa"],
+      "reason": "经典优化 Pass，依赖正确的 SSA 形式。SSA 修复后实现相对直接"
+    },
+    {
+      "id": "fix_pass_error_handling",
+      "name": "修复 Pass 管理器静默错误吞噬",
+      "description": "将 pass_manager.py 中 3 处 except Exception: pass 改为适当的错误报告和日志，让优化失败可被感知",
+      "difficulty": "easy",
+      "priority": 70,
+      "category": "engineering",
+      "estimated": "30 分钟",
+      "status": "pending",
+      "depends_on": [],
+      "reason": "当前 Pass 失败完全静默，用户不知道优化是否生效。低工作量高价值"
+    },
+    {
+      "id": "fix_phi_lowering",
+      "name": "修复 Phi 节点 LIR 降级",
+      "description": "Phi 节点当前只取第一个 source，需正确降级为前驱块末尾的 copy 指令",
+      "difficulty": "hard",
+      "priority": 65,
+      "category": "ir",
+      "estimated": "2-4 天",
+      "status": "pending",
+      "depends_on": ["fix_mir_ssa"],
+      "reason": "Phi 降级是 SSA 正确性的延续，但依赖 MIR SSA 先修好"
+    },
+    {
+      "id": "native_call_abi",
+      "name": "实现原生后端函数调用 ABI",
+      "description": "实现 System V AMD64 ABI 参数传递和 call 地址回填",
+      "difficulty": "hard",
+      "priority": 50,
+      "category": "backend",
+      "estimated": "3-5 天",
+      "status": "pending",
+      "depends_on": ["fix_mir_ssa", "fix_phi_lowering"],
+      "reason": "原生后端整体完成度仅 ~30%，工程量巨大。项目已有 C 后端和 Cranelift 后端两个更可行路径，自研 x86_64 优先级降低"
+    },
+    {
+      "id": "licm_pass",
+      "name": "实现循环不变量外提 Pass (LICM)",
+      "description": "在 MIR 层识别循环，将不变运算外提到循环外",
+      "difficulty": "hard",
+      "priority": 45,
+      "category": "optimization",
+      "estimated": "1-2 周",
+      "status": "pending",
+      "depends_on": ["fix_mir_ssa", "cse_pass"],
+      "reason": "高级优化，依赖 SSA 和循环分析。当前阶段优先级较低，先打好基础"
+    },
     {
       "id": "dce_pass",
       "name": "实现死代码消除 Pass (DCE)",
@@ -89,16 +204,6 @@
       "status": "completed"
     },
     {
-      "id": "cse_pass",
-      "name": "实现公共子表达式消除 Pass (CSE)",
-      "description": "在 MIR 层实现基于哈希的公共子表达式消除",
-      "difficulty": "medium",
-      "priority": 70,
-      "category": "optimization",
-      "estimated": "3-5 小时",
-      "status": "pending"
-    },
-    {
       "id": "fix_list_comprehension",
       "name": "修复列表推导式 MIR 降级",
       "description": "列表推导式当前直接返回空列表，需展开为 for 循环+list_push",
@@ -119,16 +224,6 @@
       "status": "completed"
     },
     {
-      "id": "fix_phi_lowering",
-      "name": "修复 Phi 节点降级",
-      "description": "Phi 节点当前只取第一个 source，需正确降级为前驱块 copy 指令",
-      "difficulty": "hard",
-      "priority": 75,
-      "category": "ir",
-      "estimated": "2-4 天",
-      "status": "pending"
-    },
-    {
       "id": "wasmgc_storereg",
       "name": "补充 WasmGC StoreReg 实现",
       "description": "WasmGC 后端 LIRStoreReg 是空 pass，需实现为 local.set",
@@ -137,26 +232,6 @@
       "category": "backend",
       "estimated": "1 小时",
       "status": "completed"
-    },
-    {
-      "id": "native_call_abi",
-      "name": "实现原生后端函数调用 ABI",
-      "description": "实现 System V AMD64 ABI 参数传递和 call 地址回填",
-      "difficulty": "hard",
-      "priority": 72,
-      "category": "backend",
-      "estimated": "3-5 天",
-      "status": "pending"
-    },
-    {
-      "id": "licm_pass",
-      "name": "实现循环不变量外提 Pass (LICM)",
-      "description": "在 MIR 层识别循环，将不变运算外提到循环外",
-      "difficulty": "hard",
-      "priority": 60,
-      "category": "optimization",
-      "estimated": "1-2 周",
-      "status": "pending"
     }
   ]
 }
