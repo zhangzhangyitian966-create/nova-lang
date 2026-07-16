@@ -166,6 +166,7 @@ class PassManager:
                 try:
                     changed |= pass_.run(hir_module)
                 except Exception:
+                    # TODO: 缩小异常范围，捕获更具体的异常类型
                     pass
             if not changed:
                 break
@@ -180,6 +181,7 @@ class PassManager:
                 try:
                     changed |= pass_.run(mir_module)
                 except Exception:
+                    # TODO: 缩小异常范围，捕获更具体的异常类型
                     pass
             if not changed:
                 break
@@ -194,6 +196,7 @@ class PassManager:
                 try:
                     changed |= pass_.run(lir_module)
                 except Exception:
+                    # TODO: 缩小异常范围，捕获更具体的异常类型
                     pass
             if not changed:
                 break

@@ -13,13 +13,14 @@ Nova 编译器 CLI
   nova help                  显示帮助
 """
 
-import sys
+from typing import Optional
 import os
 import subprocess
+import sys
+
 import argparse
 import shutil
 import tempfile
-from typing import Optional
 
 # 确保导入路径正确
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))

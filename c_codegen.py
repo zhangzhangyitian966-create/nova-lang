@@ -11,58 +11,186 @@ Nova 编程语言 - C 代码生成器
 from typing import List, Optional, Any, Dict, Set, Tuple
 
 from ast_nodes import (
-    Program, Block,
-    IntLiteral, FloatLiteral, StringLiteral, CharLiteral, BoolLiteral, UnitLiteral,
-    Identifier, BinaryOp, UnaryOp, PipeExpr, TryExpr,
-    Param, Lambda, FnDef, FnCall,
-    LetBinding, MutBinding, Assignment,
-    IfExpr, MatchArm, MatchExpr,
-    ForExpr, WhileExpr, BreakExpr, ContinueExpr,
-    PatternWildcard, PatternInt, PatternFloat, PatternString,
-    PatternBool, PatternChar, PatternIdentifier, PatternConstructor,
-    PatternTuple, PatternList,
-    ListExpr, ListComprehension, TupleExpr, MapExpr, FieldAccess,
-    ImportDecl, ExportDecl, TypeDef, VariantDef, AliasDef,
-    TypeInt, TypeFloat, TypeString, TypeBool, TypeChar, TypeUnit,
-    TypeIdentifier, TypeGeneric, TypeTuple, TypeFn,
+    Program,
+    Block,
+    IntLiteral,
+    FloatLiteral,
+    StringLiteral,
+    CharLiteral,
+    BoolLiteral,
+    UnitLiteral,
+    Identifier,
+    BinaryOp,
+    UnaryOp,
+    PipeExpr,
+    TryExpr,
+    Param,
+    Lambda,
+    FnDef,
+    FnCall,
+    LetBinding,
+    MutBinding,
+    Assignment,
+    IfExpr,
+    MatchArm,
+    MatchExpr,
+    ForExpr,
+    WhileExpr,
+    BreakExpr,
+    ContinueExpr,
+    PatternWildcard,
+    PatternInt,
+    PatternFloat,
+    PatternString,
+    PatternBool,
+    PatternChar,
+    PatternIdentifier,
+    PatternConstructor,
+    PatternTuple,
+    PatternList,
+    ListExpr,
+    ListComprehension,
+    TupleExpr,
+    MapExpr,
+    FieldAccess,
+    ImportDecl,
+    ExportDecl,
+    TypeDef,
+    VariantDef,
+    AliasDef,
+    TypeInt,
+    TypeFloat,
+    TypeString,
+    TypeBool,
+    TypeChar,
+    TypeUnit,
+    TypeIdentifier,
+    TypeGeneric,
+    TypeTuple,
+    TypeFn,
 )
-
 
 # ============================================================
 # C 关键字集合
 # ============================================================
 
 C_KEYWORDS: Set[str] = {
-    "auto", "break", "case", "char", "const", "continue", "default", "do",
-    "double", "else", "enum", "extern", "float", "for", "goto", "if",
-    "inline", "int", "long", "register", "restrict", "return", "short",
-    "signed", "sizeof", "static", "struct", "switch", "typedef", "union",
-    "unsigned", "void", "volatile", "while",
-    "_Alignas", "_Alignof", "_Atomic", "_Bool", "_Complex", "_Generic",
-    "_Imaginary", "_Noreturn", "_Static_assert", "_Thread_local",
+    "auto",
+    "break",
+    "case",
+    "char",
+    "const",
+    "continue",
+    "default",
+    "do",
+    "double",
+    "else",
+    "enum",
+    "extern",
+    "float",
+    "for",
+    "goto",
+    "if",
+    "inline",
+    "int",
+    "long",
+    "register",
+    "restrict",
+    "return",
+    "short",
+    "signed",
+    "sizeof",
+    "static",
+    "struct",
+    "switch",
+    "typedef",
+    "union",
+    "unsigned",
+    "void",
+    "volatile",
+    "while",
+    "_Alignas",
+    "_Alignof",
+    "_Atomic",
+    "_Bool",
+    "_Complex",
+    "_Generic",
+    "_Imaginary",
+    "_Noreturn",
+    "_Static_assert",
+    "_Thread_local",
     # C 标准库宏/类型名
-    "NULL", "true", "false", "bool", "int64_t", "uint64_t",
-    "size_t", "ptrdiff_t", "intptr_t", "uintptr_t",
-    "stdin", "stdout", "stderr", "EOF", "FILE",
-    "main", "printf", "fprintf", "sprintf", "snprintf",
-    "malloc", "calloc", "realloc", "free",
-    "memcpy", "memmove", "memset", "memcmp",
-    "strcmp", "strcpy", "strncpy", "strlen", "strcat", "strncat",
-    "exit", "abort", "assert",
-    "nova_string_new", "nova_string_concat", "nova_string_free",
-    "nova_list_new", "nova_list_push", "nova_list_free", "nova_list_get",
-    "nova_list_length", "nova_list_filter", "nova_list_map",
-    "nova_map_new", "nova_map_free", "nova_map_get", "nova_map_set",
-    "nova_closure_new", "nova_closure_call",
-    "nova_adt_new", "nova_adt_free", "nova_adt_variant", "nova_adt_get_field",
-    "nova_init", "nova_cleanup",
-    "NovaString", "NovaList", "NovaMap", "NovaClosure", "NovaADT",
+    "NULL",
+    "true",
+    "false",
+    "bool",
+    "int64_t",
+    "uint64_t",
+    "size_t",
+    "ptrdiff_t",
+    "intptr_t",
+    "uintptr_t",
+    "stdin",
+    "stdout",
+    "stderr",
+    "EOF",
+    "FILE",
+    "main",
+    "printf",
+    "fprintf",
+    "sprintf",
+    "snprintf",
+    "malloc",
+    "calloc",
+    "realloc",
+    "free",
+    "memcpy",
+    "memmove",
+    "memset",
+    "memcmp",
+    "strcmp",
+    "strcpy",
+    "strncpy",
+    "strlen",
+    "strcat",
+    "strncat",
+    "exit",
+    "abort",
+    "assert",
+    "nova_string_new",
+    "nova_string_concat",
+    "nova_string_free",
+    "nova_list_new",
+    "nova_list_push",
+    "nova_list_free",
+    "nova_list_get",
+    "nova_list_length",
+    "nova_list_filter",
+    "nova_list_map",
+    "nova_map_new",
+    "nova_map_free",
+    "nova_map_get",
+    "nova_map_set",
+    "nova_closure_new",
+    "nova_closure_call",
+    "nova_adt_new",
+    "nova_adt_free",
+    "nova_adt_variant",
+    "nova_adt_get_field",
+    "nova_init",
+    "nova_cleanup",
+    "NovaString",
+    "NovaList",
+    "NovaMap",
+    "NovaClosure",
+    "NovaADT",
 }
 
 
 # ============================================================
 # C 代码生成器
 # ============================================================
+
 
 class CCodeGen:
     """将 Nova AST 编译为 C 源代码"""
@@ -76,8 +204,12 @@ class CCodeGen:
         self.forward_decls: List[str] = []
         self.type_defs: List[str] = []
         self.current_context: str = "global"  # global / function / block
-        self.adt_info: Dict[str, List[Tuple[str, List[str]]]] = {}  # adt_name -> [(variant_name, [field_names])]
-        self.adt_field_types: Dict[str, Dict[str, List[str]]] = {}  # adt_name -> {variant_name -> [field_type_strings]}
+        self.adt_info: Dict[str, List[Tuple[str, List[str]]]] = (
+            {}
+        )  # adt_name -> [(variant_name, [field_names])]
+        self.adt_field_types: Dict[str, Dict[str, List[str]]] = (
+            {}
+        )  # adt_name -> {variant_name -> [field_type_strings]}
         self._main_fn_name: Optional[str] = None
 
     # ----------------------------------------------------------
@@ -351,7 +483,9 @@ class CCodeGen:
             step_c = self._compile_expr(iterable[3]) if iterable[3] else "1"
 
             i_var = self._new_temp()
-            self._emit(f"for (int64_t {i_var} = {start_c}; {i_var} < {end_c}; {i_var} += {step_c}) {{")
+            self._emit(
+                f"for (int64_t {i_var} = {start_c}; {i_var} < {end_c}; {i_var} += {step_c}) {{"
+            )
             self.indent_level += 1
             self._emit(f"int64_t {var_name} = {i_var};")
             body_c = self._compile_expr(for_expr.body)
@@ -369,10 +503,14 @@ class CCodeGen:
             idx_var = self._new_temp()
             len_var = self._new_temp()
             self._emit(f"int64_t {len_var} = nova_list_length({list_var});")
-            self._emit(f"for (int64_t {idx_var} = 0; {idx_var} < {len_var}; {idx_var}++) {{")
+            self._emit(
+                f"for (int64_t {idx_var} = 0; {idx_var} < {len_var}; {idx_var}++) {{"
+            )
             self.indent_level += 1
             # 默认元素类型为 int64_t
-            self._emit(f"int64_t {var_name} = (int64_t)(intptr_t)nova_list_get({list_var}, {idx_var});")
+            self._emit(
+                f"int64_t {var_name} = (int64_t)(intptr_t)nova_list_get({list_var}, {idx_var});"
+            )
             body_c = self._compile_expr(for_expr.body)
             if isinstance(for_expr.body, Block):
                 self._emit(body_c)
@@ -528,10 +666,19 @@ class CCodeGen:
 
         # 普通二元操作符
         op_map = {
-            "+": "+", "-": "-", "*": "*", "/": "/",
-            "%": "%", "==": "==", "!=": "!=",
-            "<": "<", ">": ">", "<=": "<=", ">=": ">=",
-            "&&": "&&", "||": "||",
+            "+": "+",
+            "-": "-",
+            "*": "*",
+            "/": "/",
+            "%": "%",
+            "==": "==",
+            "!=": "!=",
+            "<": "<",
+            ">": ">",
+            "<=": "<=",
+            ">=": ">=",
+            "&&": "&&",
+            "||": "||",
         }
         c_op = op_map.get(expr.op, expr.op)
         return f"({left_c} {c_op} {right_c})"
@@ -570,7 +717,9 @@ class CCodeGen:
 
         lines = []
         lines.append(f"{{")
-        lines.append(f"    {self._infer_c_type_from_expr(expr.subject)} {subject_tmp} = {subject_c};")
+        lines.append(
+            f"    {self._infer_c_type_from_expr(expr.subject)} {subject_tmp} = {subject_c};"
+        )
 
         for i, arm in enumerate(expr.arms):
             pattern_c, bindings = self._compile_pattern(arm.pattern, subject_tmp, expr)
@@ -581,7 +730,9 @@ class CCodeGen:
             # 绑定变量
             for bind_name, bind_expr in bindings:
                 c_name = self._mangle_name(bind_name)
-                lines.append(f"        {self._infer_c_type_from_expr(expr.subject)} {c_name} = {bind_expr};")
+                lines.append(
+                    f"        {self._infer_c_type_from_expr(expr.subject)} {c_name} = {bind_expr};"
+                )
 
             # 分支体
             body_c = self._compile_expr(arm.body)
@@ -597,7 +748,9 @@ class CCodeGen:
 
         return "\n".join(lines)
 
-    def _compile_pattern(self, pattern, subject_var: str, match_expr: MatchExpr) -> Tuple[str, List[Tuple[str, str]]]:
+    def _compile_pattern(
+        self, pattern, subject_var: str, match_expr: MatchExpr
+    ) -> Tuple[str, List[Tuple[str, str]]]:
         """编译模式，返回 (条件字符串, 绑定列表 [(name, c_expr)])"""
         bindings = []
 
@@ -612,10 +765,16 @@ class CCodeGen:
 
         elif isinstance(pattern, PatternString):
             escaped = self._escape_c_string(pattern.value)
-            return (f"nova_string_eq({subject_var}, nova_string_new(\"{escaped}\"))", bindings)
+            return (
+                f'nova_string_eq({subject_var}, nova_string_new("{escaped}"))',
+                bindings,
+            )
 
         elif isinstance(pattern, PatternBool):
-            return (f"{subject_var} == ({'true' if pattern.value else 'false'})", bindings)
+            return (
+                f"{subject_var} == ({'true' if pattern.value else 'false'})",
+                bindings,
+            )
 
         elif isinstance(pattern, PatternIdentifier):
             # 变量绑定模式
@@ -626,11 +785,15 @@ class CCodeGen:
             # ADT 构造器模式
             conds = []
             # 判断 tag
-            conds.append(f"{subject_var}.tag == NOVA_ADT_{self._find_adt_name(pattern.name)}_{pattern.name}")
+            conds.append(
+                f"{subject_var}.tag == NOVA_ADT_{self._find_adt_name(pattern.name)}_{pattern.name}"
+            )
             # 绑定字段
             for i, field_pat in enumerate(pattern.fields):
                 field_accessor = f"{subject_var}.{pattern.name}__field{i}"
-                field_conds, field_bindings = self._compile_pattern(field_pat, field_accessor, match_expr)
+                field_conds, field_bindings = self._compile_pattern(
+                    field_pat, field_accessor, match_expr
+                )
                 conds.append(field_conds)
                 bindings.extend(field_bindings)
 
@@ -640,17 +803,23 @@ class CCodeGen:
             conditions = []
             for i, elem_pat in enumerate(pattern.elements):
                 elem_accessor = f"nova_tuple_get({subject_var}, {i})"
-                elem_conds, elem_bindings = self._compile_pattern(elem_pat, elem_accessor, match_expr)
+                elem_conds, elem_bindings = self._compile_pattern(
+                    elem_pat, elem_accessor, match_expr
+                )
                 conditions.append(elem_conds)
                 bindings.extend(elem_bindings)
             return (" && ".join(conditions) if conditions else "1", bindings)
 
         elif isinstance(pattern, PatternList):
             conditions = []
-            conditions.append(f"nova_list_length({subject_var}) == {len(pattern.elements)}")
+            conditions.append(
+                f"nova_list_length({subject_var}) == {len(pattern.elements)}"
+            )
             for i, elem_pat in enumerate(pattern.elements):
                 elem_accessor = f"nova_list_get({subject_var}, {i})"
-                elem_conds, elem_bindings = self._compile_pattern(elem_pat, elem_accessor, match_expr)
+                elem_conds, elem_bindings = self._compile_pattern(
+                    elem_pat, elem_accessor, match_expr
+                )
                 conditions.append(elem_conds)
                 bindings.extend(elem_bindings)
             return (" && ".join(conditions), bindings)
@@ -673,7 +842,9 @@ class CCodeGen:
             callee_name = expr.callee.name
             # 检查是否是 ADT 构造器
             adt_name = self._find_adt_name(callee_name)
-            if adt_name != "Unknown" and callee_name in [v[0] for v in self.adt_info.get(adt_name, [])]:
+            if adt_name != "Unknown" and callee_name in [
+                v[0] for v in self.adt_info.get(adt_name, [])
+            ]:
                 return self._compile_adt_constructor(adt_name, callee_name, expr.args)
 
             # 内置函数特殊处理
@@ -738,11 +909,20 @@ class CCodeGen:
 
             # 数学内置函数
             math_builtins = {
-                "abs": "nova_abs", "sqrt": "nova_sqrt", "pow": "nova_pow",
-                "log": "nova_log", "log10": "nova_log10", "exp": "nova_exp",
-                "sin": "nova_sin", "cos": "nova_cos", "tan": "nova_tan",
-                "floor": "nova_floor", "ceil": "nova_ceil", "round": "nova_round",
-                "min": "nova_min", "max": "nova_max",
+                "abs": "nova_abs",
+                "sqrt": "nova_sqrt",
+                "pow": "nova_pow",
+                "log": "nova_log",
+                "log10": "nova_log10",
+                "exp": "nova_exp",
+                "sin": "nova_sin",
+                "cos": "nova_cos",
+                "tan": "nova_tan",
+                "floor": "nova_floor",
+                "ceil": "nova_ceil",
+                "round": "nova_round",
+                "min": "nova_min",
+                "max": "nova_max",
             }
             if callee_name in math_builtins:
                 args_c = ", ".join(self._compile_expr(a) for a in expr.args)
@@ -776,7 +956,9 @@ class CCodeGen:
 
         return f"{callee_c}({args_c})"
 
-    def _compile_adt_constructor(self, adt_name: str, variant_name: str, args: list) -> str:
+    def _compile_adt_constructor(
+        self, adt_name: str, variant_name: str, args: list
+    ) -> str:
         """编译 ADT 构造器调用"""
         # 构造器查找对应字段信息
         variants_info = self.adt_info.get(adt_name, [])
@@ -814,10 +996,15 @@ class CCodeGen:
 
         params_str = "void* _nova_closure_env"
         if expr.params:
-            param_parts = [f"{self._c_type_from_type_expr(p.type_annotation) if p.type_annotation else 'int64_t'} {self._mangle_name(p.name)}" for p in expr.params]
+            param_parts = [
+                f"{self._c_type_from_type_expr(p.type_annotation) if p.type_annotation else 'int64_t'} {self._mangle_name(p.name)}"
+                for p in expr.params
+            ]
             params_str = "void* _nova_closure_env, " + ", ".join(param_parts)
 
-        self.functions.append(f"/* lambda */ {ret_type} nova_lambda_{lambda_fn_name}({params_str});")
+        self.functions.append(
+            f"/* lambda */ {ret_type} nova_lambda_{lambda_fn_name}({params_str});"
+        )
         lines.append(f"    nova_lambda_{lambda_fn_name},")
         lines.append(f"    NULL /* env */")
         lines.append(f")")
@@ -840,11 +1027,13 @@ class CCodeGen:
 
     def _compile_nested_fn_def(self, fndef: FnDef) -> str:
         """编译嵌套函数定义为闭包"""
-        return self._compile_lambda(Lambda(
-            params=fndef.params,
-            return_type=fndef.return_type,
-            body=fndef.body,
-        ))
+        return self._compile_lambda(
+            Lambda(
+                params=fndef.params,
+                return_type=fndef.return_type,
+                body=fndef.body,
+            )
+        )
 
     def _compile_pipe_expr(self, expr: PipeExpr) -> str:
         """编译管道表达式：left |> right → right(left)"""
@@ -924,7 +1113,9 @@ class CCodeGen:
             start_c = self._compile_expr(iterable[1])
             end_c = self._compile_expr(iterable[2])
             idx_var = self._new_temp()
-            lines.append(f"    for (int64_t {idx_var} = {start_c}; {idx_var} < {end_c}; {idx_var}++) {{")
+            lines.append(
+                f"    for (int64_t {idx_var} = {start_c}; {idx_var} < {end_c}; {idx_var}++) {{"
+            )
             lines.append(f"        int64_t {var_name} = {idx_var};")
 
             # 可选过滤条件
@@ -933,7 +1124,9 @@ class CCodeGen:
                 lines.append(f"        if ({filter_c}) {{")
 
             elem_c = self._compile_expr(expr.expr)
-            lines.append(f"            nova_list_push({result_var}, (void*)(intptr_t){elem_c});")
+            lines.append(
+                f"            nova_list_push({result_var}, (void*)(intptr_t){elem_c});"
+            )
 
             if expr.filter_cond:
                 lines.append(f"        }}")
@@ -945,16 +1138,24 @@ class CCodeGen:
             list_var = self._new_temp()
             idx_var = self._new_temp()
             lines.append(f"    NovaList* {list_var} = {list_c};")
-            lines.append(f"    int64_t {self._new_temp()} = nova_list_length({list_var});")
-            lines.append(f"    for (int64_t {idx_var} = 0; {idx_var} < nova_list_length({list_var}); {idx_var}++) {{")
-            lines.append(f"        int64_t {var_name} = (int64_t)(intptr_t)nova_list_get({list_var}, {idx_var});")
+            lines.append(
+                f"    int64_t {self._new_temp()} = nova_list_length({list_var});"
+            )
+            lines.append(
+                f"    for (int64_t {idx_var} = 0; {idx_var} < nova_list_length({list_var}); {idx_var}++) {{"
+            )
+            lines.append(
+                f"        int64_t {var_name} = (int64_t)(intptr_t)nova_list_get({list_var}, {idx_var});"
+            )
 
             if expr.filter_cond:
                 filter_c = self._compile_expr(expr.filter_cond)
                 lines.append(f"        if ({filter_c}) {{")
 
             elem_c = self._compile_expr(expr.expr)
-            lines.append(f"            nova_list_push({result_var}, (void*)(intptr_t){elem_c});")
+            lines.append(
+                f"            nova_list_push({result_var}, (void*)(intptr_t){elem_c});"
+            )
 
             if expr.filter_cond:
                 lines.append(f"        }}")
@@ -991,7 +1192,9 @@ class CCodeGen:
         for key_expr, val_expr in expr.pairs:
             key_c = self._compile_expr(key_expr)
             val_c = self._compile_expr(val_expr)
-            lines.append(f"    nova_map_set({tmp}, (void*)(intptr_t){key_c}, (void*)(intptr_t){val_c});")
+            lines.append(
+                f"    nova_map_set({tmp}, (void*)(intptr_t){key_c}, (void*)(intptr_t){val_c});"
+            )
         lines.append(f"    {tmp}")
         lines.append(f"}}")
         return "\n".join(lines)
@@ -1020,18 +1223,26 @@ class CCodeGen:
             end_c = self._compile_expr(iterable[2])
             step_c = self._compile_expr(iterable[3]) if iterable[3] else "1"
             idx_var = self._new_temp()
-            lines.append(f"    for (int64_t {idx_var} = {start_c}; {idx_var} < {end_c}; {idx_var} += {step_c}) {{")
+            lines.append(
+                f"    for (int64_t {idx_var} = {start_c}; {idx_var} < {end_c}; {idx_var} += {step_c}) {{"
+            )
             lines.append(f"        int64_t {var_name} = {idx_var};")
         else:
             list_c = self._compile_expr(iterable)
             list_var = self._new_temp()
             idx_var = self._new_temp()
             lines.append(f"    NovaList* {list_var} = {list_c};")
-            lines.append(f"    for (int64_t {idx_var} = 0; {idx_var} < nova_list_length({list_var}); {idx_var}++) {{")
-            lines.append(f"        int64_t {var_name} = (int64_t)(intptr_t)nova_list_get({list_var}, {idx_var});")
+            lines.append(
+                f"    for (int64_t {idx_var} = 0; {idx_var} < nova_list_length({list_var}); {idx_var}++) {{"
+            )
+            lines.append(
+                f"        int64_t {var_name} = (int64_t)(intptr_t)nova_list_get({list_var}, {idx_var});"
+            )
 
         body_c = self._compile_expr(expr.body)
-        lines.append(f"        nova_list_push({result_var}, (void*)(intptr_t){body_c});")
+        lines.append(
+            f"        nova_list_push({result_var}, (void*)(intptr_t){body_c});"
+        )
         lines.append(f"    }}")
         lines.append(f"    {result_var}")
         lines.append(f"}}")
@@ -1127,7 +1338,9 @@ class CCodeGen:
                 return "NovaString*"
             if expr.op in ("==", "!=", "<", ">", "<=", ">=", "&&", "||"):
                 return "bool"
-            if isinstance(expr.left, FloatLiteral) or isinstance(expr.right, FloatLiteral):
+            if isinstance(expr.left, FloatLiteral) or isinstance(
+                expr.right, FloatLiteral
+            ):
                 return "double"
             return "int64_t"
         elif isinstance(expr, UnaryOp):
@@ -1191,7 +1404,7 @@ class CCodeGen:
         # 替换非字母数字下划线字符
         safe = []
         for ch in name:
-            if ch.isalnum() or ch == '_':
+            if ch.isalnum() or ch == "_":
                 safe.append(ch)
             else:
                 safe.append(f"_0x{ord(ch):02x}_")
@@ -1206,7 +1419,7 @@ class CCodeGen:
         # nova_fn_ 前缀已经避免了与 C 关键字冲突，所以直接安全化名称即可
         safe = []
         for ch in name:
-            if ch.isalnum() or ch == '_':
+            if ch.isalnum() or ch == "_":
                 safe.append(ch)
             else:
                 safe.append(f"_0x{ord(ch):02x}_")
@@ -1222,7 +1435,14 @@ class CCodeGen:
 
     def _escape_c_string(self, s: str) -> str:
         """转义 C 字符串字面量中的特殊字符"""
-        return s.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n").replace("\t", "\\t").replace("\r", "\\r").replace("\0", "\\0")
+        return (
+            s.replace("\\", "\\\\")
+            .replace('"', '\\"')
+            .replace("\n", "\\n")
+            .replace("\t", "\\t")
+            .replace("\r", "\\r")
+            .replace("\0", "\\0")
+        )
 
     def _escape_c_char(self, s: str) -> str:
         """转义 C 字符字面量"""

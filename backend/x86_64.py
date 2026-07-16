@@ -2,6 +2,7 @@
 x86_64 指令编码器
 直接输出机器码字节，无需任何外部依赖
 """
+
 import struct
 
 # x86_64 寄存器编码
@@ -47,16 +48,16 @@ class X86_64Emitter:
         self.code.append(b & 0xFF)
 
     def emit_uint32(self, v):
-        self.code.extend(struct.pack('<I', v & 0xFFFFFFFF))
+        self.code.extend(struct.pack("<I", v & 0xFFFFFFFF))
 
     def emit_uint64(self, v):
-        self.code.extend(struct.pack('<Q', v & 0xFFFFFFFFFFFFFFFF))
+        self.code.extend(struct.pack("<Q", v & 0xFFFFFFFFFFFFFFFF))
 
     def emit_int32(self, v):
-        self.code.extend(struct.pack('<i', v))
+        self.code.extend(struct.pack("<i", v))
 
     def emit_int8(self, v):
-        self.code.extend(struct.pack('<b', v))
+        self.code.extend(struct.pack("<b", v))
 
     def current_offset(self):
         return len(self.code)
@@ -529,11 +530,11 @@ class X86_64Emitter:
     def patch_rel32(self, offset, target):
         """回填 32 位相对跳转"""
         rel = target - (offset + 4)
-        struct.pack_into('<i', self.code, offset, rel)
+        struct.pack_into("<i", self.code, offset, rel)
 
     def patch_imm32(self, offset, value):
         """回填 32 位立即数"""
-        struct.pack_into('<I', self.code, offset, value)
+        struct.pack_into("<I", self.code, offset, value)
 
     def get_code(self):
         return bytes(self.code)

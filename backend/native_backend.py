@@ -4,38 +4,89 @@ Nova 自研原生代码生成后端
 
 零外部依赖 —— 不需要 gcc、clang、Cranelift、LLVM
 """
-import struct
-import os
-import sys
+
 from typing import Dict, List, Tuple, Optional, Any
+import os
+import struct
+import sys
 
 # 确保 ir 节点可以被导入
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'ir'))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "ir"))
 from ir_nodes import (
-    LIRModule, LIRFunction, LIRGlobal, LIRData,
-    LIRInstr, LIRLoadConst, LIRLoadGlobal, LIRStoreGlobal,
-    LIRLoadReg, LIRStoreReg, LIRBinOp, LIRUnaryOp,
-    LIRCall, LIRCallIndirect, LIRJump, LIRBranch, LIRReturn,
-    LIRLabel, LIRIndex, LIRFieldAccess,
-    LIRBuildList, LIRBuildTuple, LIRBuildADT, LIRPanic,
-    IRType, NovaType,
-    INT_TYPE, FLOAT_TYPE, STRING_TYPE, BOOL_TYPE, UNIT_TYPE,
+    LIRModule,
+    LIRFunction,
+    LIRGlobal,
+    LIRData,
+    LIRInstr,
+    LIRLoadConst,
+    LIRLoadGlobal,
+    LIRStoreGlobal,
+    LIRLoadReg,
+    LIRStoreReg,
+    LIRBinOp,
+    LIRUnaryOp,
+    LIRCall,
+    LIRCallIndirect,
+    LIRJump,
+    LIRBranch,
+    LIRReturn,
+    LIRLabel,
+    LIRIndex,
+    LIRFieldAccess,
+    LIRBuildList,
+    LIRBuildTuple,
+    LIRBuildADT,
+    LIRPanic,
+    IRType,
+    NovaType,
+    INT_TYPE,
+    FLOAT_TYPE,
+    STRING_TYPE,
+    BOOL_TYPE,
+    UNIT_TYPE,
 )
 
 from nova.backend.x86_64 import (
-    X86_64Emitter, RAX, RCX, RDX, RBX, RSP, RBP, RSI, RDI,
-    R8, R9, R10, R11, R12, R13, R14, R15,
-    XMM0, XMM1, XMM2, XMM3, XMM4, XMM5, XMM6, XMM7,
-    CALLER_SAVED, CALLEE_SAVED, ARG_REGS, RETURN_REG, XMM_ARG_REGS,
+    X86_64Emitter,
+    RAX,
+    RCX,
+    RDX,
+    RBX,
+    RSP,
+    RBP,
+    RSI,
+    RDI,
+    R8,
+    R9,
+    R10,
+    R11,
+    R12,
+    R13,
+    R14,
+    R15,
+    XMM0,
+    XMM1,
+    XMM2,
+    XMM3,
+    XMM4,
+    XMM5,
+    XMM6,
+    XMM7,
+    CALLER_SAVED,
+    CALLEE_SAVED,
+    ARG_REGS,
+    RETURN_REG,
+    XMM_ARG_REGS,
 )
-
 
 # ============================================================
 # 寄存器分配器（线性扫描算法）
 # ============================================================
 
+
 class LiveInterval:
     """活跃区间，表示一个虚拟寄存器的生命周期"""
+
     def __init__(self, vreg, start, end):
         self.vreg = vreg
         self.start = start
@@ -88,6 +139,7 @@ class LinearScanAllocator:
 # 代码生成器
 # ============================================================
 
+
 class NativeCodeGen:
     """Nova 自研 x86_64 代码生成器"""
 
@@ -97,10 +149,10 @@ class NativeCodeGen:
         self.data_section = bytearray()
         self.float_constants = []  # [(value_bytes, offset_in_data)]
         self.string_constants = []  # [(string_bytes, offset_in_data)]
-        self.symbols = {}          # name -> offset in code
-        self.data_symbols = {}     # name -> offset in data
-        self.relocations = []      # [(code_offset, symbol, addend)]
-        self.link_calls = []       # [(code_offset, func_name)]
+        self.symbols = {}  # name -> offset in code
+        self.data_symbols = {}  # name -> offset in data
+        self.relocations = []  # [(code_offset, symbol, addend)]
+        self.link_calls = []  # [(code_offset, func_name)]
 
     def compile(self, lir_module: LIRModule) -> bytes:
         """编译 LIR Module 为 ELF 二进制"""
@@ -125,14 +177,14 @@ class NativeCodeGen:
             for instr in func.body:
                 if isinstance(instr, LIRLoadConst):
                     if instr.const_type == "float":
-                        value_bytes = struct.pack('<d', float(instr.value))
+                        value_bytes = struct.pack("<d", float(instr.value))
                         self.float_constants.append((value_bytes, offset))
                         offset += len(value_bytes)
                         # 对齐到 8 字节
                         while offset % 8 != 0:
                             offset += 1
                     elif instr.const_type == "string":
-                        value_bytes = instr.value.encode('utf-8') + b'\x00'
+                        value_bytes = instr.value.encode("utf-8") + b"\x00"
                         self.string_constants.append((value_bytes, offset))
                         offset += len(value_bytes)
 
@@ -329,8 +381,9 @@ class NativeCodeGen:
     # ELF 文件生成器
     # ============================================================
 
-    def _generate_elf(self, func_code: Dict[str, bytes], start_code: bytes,
-                     module: LIRModule) -> bytes:
+    def _generate_elf(
+        self, func_code: Dict[str, bytes], start_code: bytes, module: LIRModule
+    ) -> bytes:
         """生成 Linux ELF 可执行文件"""
 
         # 1. 构建代码段
@@ -363,9 +416,9 @@ class NativeCodeGen:
         # 3. ELF 头 (64 bytes)
         ehdr = self._make_elf_header(
             entry=start_offset,
-            phoff=64,           # program headers 紧跟 ELF header
-            phnum=3,            # LOAD(code) + LOAD(data) + LOAD(rodata)
-            shoff=0,            # 无 section headers（简化）
+            phoff=64,  # program headers 紧跟 ELF header
+            phnum=3,  # LOAD(code) + LOAD(data) + LOAD(rodata)
+            shoff=0,  # 无 section headers（简化）
         )
 
         # 4. Program headers
@@ -389,8 +442,10 @@ class NativeCodeGen:
         data_ph = self._make_program_header(
             p_type=1,
             p_offset=data_offset,
-            p_vaddr=base_addr + ((data_offset + page_size - 1) // page_size) * page_size,
-            p_paddr=base_addr + ((data_offset + page_size - 1) // page_size) * page_size,
+            p_vaddr=base_addr
+            + ((data_offset + page_size - 1) // page_size) * page_size,
+            p_paddr=base_addr
+            + ((data_offset + page_size - 1) // page_size) * page_size,
             p_filesz=len(data),
             p_memsz=len(data),
             p_flags=6,  # PF_R | PF_W
@@ -409,48 +464,49 @@ class NativeCodeGen:
     def _make_elf_header(self, entry, phoff, phnum, shoff=0):
         """生成 ELF64 头"""
         e_ident = bytearray(16)
-        e_ident[0:4] = b'\x7fELF'       # magic
-        e_ident[4] = 2                     # 64-bit
-        e_ident[5] = 1                     # little-endian
-        e_ident[6] = 1                     # ELF version
-        e_ident[7] = 0                     # OS/ABI (ELFOSABI_NONE)
+        e_ident[0:4] = b"\x7fELF"  # magic
+        e_ident[4] = 2  # 64-bit
+        e_ident[5] = 1  # little-endian
+        e_ident[6] = 1  # ELF version
+        e_ident[7] = 0  # OS/ABI (ELFOSABI_NONE)
         # rest zero
 
         header = bytearray(e_ident)
-        header.extend(struct.pack('<H', 2))     # e_type: ET_EXEC
-        header.extend(struct.pack('<H', 62))    # e_machine: EM_X86_64
-        header.extend(struct.pack('<I', 1))     # e_version
-        header.extend(struct.pack('<Q', entry)) # e_entry
-        header.extend(struct.pack('<Q', phoff))  # e_phoff
-        header.extend(struct.pack('<Q', shoff))  # e_shoff
-        header.extend(struct.pack('<I', 0))     # e_flags
-        header.extend(struct.pack('<H', 64))    # e_ehsize
-        header.extend(struct.pack('<H', 56))    # e_phentsize
-        header.extend(struct.pack('<H', phnum)) # e_phnum
-        header.extend(struct.pack('<H', 0))     # e_shentsize
-        header.extend(struct.pack('<H', 0))     # e_shnum
-        header.extend(struct.pack('<H', 0))     # e_shstrndx
+        header.extend(struct.pack("<H", 2))  # e_type: ET_EXEC
+        header.extend(struct.pack("<H", 62))  # e_machine: EM_X86_64
+        header.extend(struct.pack("<I", 1))  # e_version
+        header.extend(struct.pack("<Q", entry))  # e_entry
+        header.extend(struct.pack("<Q", phoff))  # e_phoff
+        header.extend(struct.pack("<Q", shoff))  # e_shoff
+        header.extend(struct.pack("<I", 0))  # e_flags
+        header.extend(struct.pack("<H", 64))  # e_ehsize
+        header.extend(struct.pack("<H", 56))  # e_phentsize
+        header.extend(struct.pack("<H", phnum))  # e_phnum
+        header.extend(struct.pack("<H", 0))  # e_shentsize
+        header.extend(struct.pack("<H", 0))  # e_shnum
+        header.extend(struct.pack("<H", 0))  # e_shstrndx
 
         return bytes(header)
 
-    def _make_program_header(self, p_type, p_offset, p_vaddr, p_paddr,
-                              p_filesz, p_memsz, p_flags, p_align):
+    def _make_program_header(
+        self, p_type, p_offset, p_vaddr, p_paddr, p_filesz, p_memsz, p_flags, p_align
+    ):
         """生成 ELF64 Program Header"""
         ph = bytearray()
-        ph.extend(struct.pack('<I', p_type))
-        ph.extend(struct.pack('<I', p_flags))
-        ph.extend(struct.pack('<Q', p_offset))
-        ph.extend(struct.pack('<Q', p_vaddr))
-        ph.extend(struct.pack('<Q', p_paddr))
-        ph.extend(struct.pack('<Q', p_filesz))
-        ph.extend(struct.pack('<Q', p_memsz))
-        ph.extend(struct.pack('<Q', p_align))
+        ph.extend(struct.pack("<I", p_type))
+        ph.extend(struct.pack("<I", p_flags))
+        ph.extend(struct.pack("<Q", p_offset))
+        ph.extend(struct.pack("<Q", p_vaddr))
+        ph.extend(struct.pack("<Q", p_paddr))
+        ph.extend(struct.pack("<Q", p_filesz))
+        ph.extend(struct.pack("<Q", p_memsz))
+        ph.extend(struct.pack("<Q", p_align))
         return bytes(ph)
 
     def compile_and_write(self, lir_module: LIRModule, output_path: str):
         """编译并写入 ELF 文件"""
         elf = self.compile(lir_module)
-        with open(output_path, 'wb') as f:
+        with open(output_path, "wb") as f:
             f.write(elf)
         os.chmod(output_path, 0o755)
         return output_path
@@ -459,6 +515,7 @@ class NativeCodeGen:
 # ============================================================
 # 简化的直接编译器（不经过 LIR，直接从源码生成 x86_64）
 # ============================================================
+
 
 class SimpleNativeCompiler:
     """
@@ -473,7 +530,7 @@ class SimpleNativeCompiler:
     def compile_source(self, source: str, output_path: str) -> str:
         """将 Nova 源码编译为 x86_64 ELF"""
         # 1. 前端解析（复用现有）
-        sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+        sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
         from lexer import Lexer
         from parser import Parser
 
@@ -497,15 +554,13 @@ class SimpleNativeCompiler:
 
         # 构建用户函数
         for decl in ast.declarations:
-            if hasattr(decl, 'name'):
+            if hasattr(decl, "name"):
                 fn = LIRFunction(decl.name, [], INT_TYPE)
                 fn.body = [LIRLoadConst(), LIRReturn()]
                 lir.functions[decl.name] = fn
 
         # 简化的 _start
         lir.functions["_start"] = LIRFunction("_start", [], UNIT_TYPE)
-        lir.functions["_start"].body = [
-            LIRReturn()
-        ]
+        lir.functions["_start"].body = [LIRReturn()]
 
         return lir

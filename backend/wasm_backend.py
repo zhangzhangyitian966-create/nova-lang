@@ -3,25 +3,48 @@ Nova WasmGC 后端
 将 LIR 转换为 WebAssembly 文本格式（WAT），支持 GC 提案。
 """
 
-import subprocess
-import os
-import sys
-import tempfile
 from typing import List, Dict, Optional, Tuple
+import os
+import subprocess
+import sys
+
+import tempfile
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from ir.ir_nodes import (
-    LIRModule, LIRFunction, LIRGlobal, LIRData,
-    LIRInstr, LIRLoadConst, LIRLoadGlobal, LIRStoreGlobal,
-    LIRLoadReg, LIRStoreReg, LIRBinOp, LIRUnaryOp,
-    LIRCall, LIRCallIndirect, LIRJump, LIRBranch, LIRReturn,
-    LIRLabel, LIRIndex, LIRFieldAccess,
-    LIRBuildList, LIRBuildTuple, LIRBuildADT, LIRPanic,
-    IRType, NovaType,
-    INT_TYPE, FLOAT_TYPE, STRING_TYPE, BOOL_TYPE, UNIT_TYPE,
+    LIRModule,
+    LIRFunction,
+    LIRGlobal,
+    LIRData,
+    LIRInstr,
+    LIRLoadConst,
+    LIRLoadGlobal,
+    LIRStoreGlobal,
+    LIRLoadReg,
+    LIRStoreReg,
+    LIRBinOp,
+    LIRUnaryOp,
+    LIRCall,
+    LIRCallIndirect,
+    LIRJump,
+    LIRBranch,
+    LIRReturn,
+    LIRLabel,
+    LIRIndex,
+    LIRFieldAccess,
+    LIRBuildList,
+    LIRBuildTuple,
+    LIRBuildADT,
+    LIRPanic,
+    IRType,
+    NovaType,
+    INT_TYPE,
+    FLOAT_TYPE,
+    STRING_TYPE,
+    BOOL_TYPE,
+    UNIT_TYPE,
 )
-
 
 # Wasm 类型映射
 WASM_TYPE_MAP = {
@@ -90,23 +113,23 @@ class WasmGCBackend:
         self._emit("")
 
         # Option[T] - None
-        self._emit('(type $option_none (struct (field $tag i32)))')
+        self._emit("(type $option_none (struct (field $tag i32)))")
         # Option[T] - Some
-        self._emit('(type $option_some (struct (field $tag i32) (field $value i64)))')
+        self._emit("(type $option_some (struct (field $tag i32) (field $value i64)))")
         self._emit("")
 
         # Result[T, E] - Ok
-        self._emit('(type $result_ok (struct (field $tag i32) (field $value i64)))')
+        self._emit("(type $result_ok (struct (field $tag i32) (field $value i64)))")
         # Result[T, E] - Err
-        self._emit('(type $result_err (struct (field $tag i32) (field $error i64)))')
+        self._emit("(type $result_err (struct (field $tag i32) (field $error i64)))")
         self._emit("")
 
         # 列表 struct（WasmGC struct 类型）
-        self._emit('(type $nova_list (struct')
+        self._emit("(type $nova_list (struct")
         self.indent_level += 1
-        self._emit('(field $length i32)')
-        self._emit('(field $capacity i32)')
-        self._emit('(field $data i32)')
+        self._emit("(field $length i32)")
+        self._emit("(field $capacity i32)")
+        self._emit("(field $data i32)")
         self.indent_level -= 1
         self._emit(")")
         self._emit("")
@@ -117,33 +140,42 @@ class WasmGCBackend:
         self._emit("")
 
         runtime_imports = [
-            ('"nova_print"', '(func $nova_print (param i32))'),
-            ('"nova_print_int"', '(func $nova_print_int (param i64))'),
-            ('"nova_print_float"', '(func $nova_print_float (param f64))'),
-            ('"nova_string_concat"', '(func $nova_string_concat (param i32) (param i32) (result i32))'),
-            ('"nova_list_new"', '(func $nova_list_new (param i32) (result i32))'),
-            ('"nova_list_push"', '(func $nova_list_push (param i32) (param i64))'),
-            ('"nova_list_get"', '(func $nova_list_get (param i32) (param i32) (result i64))'),
-            ('"nova_list_length"', '(func $nova_list_length (param i32) (result i32))'),
-            ('"nova_sqrt"', '(func $nova_sqrt (param f64) (result f64))'),
-            ('"nova_sin"', '(func $nova_sin (param f64) (result f64))'),
-            ('"nova_cos"', '(func $nova_cos (param f64) (result f64))'),
-            ('"nova_pow"', '(func $nova_pow (param f64) (param f64) (result f64))'),
-            ('"nova_abs"', '(func $nova_abs (param f64) (result f64))'),
-            ('"nova_floor"', '(func $nova_floor (param f64) (result f64))'),
-            ('"nova_ceil"', '(func $nova_ceil (param f64) (result f64))'),
-            ('"nova_round"', '(func $nova_round (param f64) (result f64))'),
-            ('"nova_alloc"', '(func $nova_alloc (param i32) (result i32))'),
-            ('"nova_free"', '(func $nova_free (param i32))'),
-            ('"nova_init"', '(func $nova_init)'),
-            ('"nova_cleanup"', '(func $nova_cleanup)'),
-            ('"nova_json_parse"', '(func $nova_json_parse (param i32) (result i32))'),
-            ('"nova_json_stringify"', '(func $nova_json_stringify (param i32) (result i32))'),
-            ('"nova_panic"', '(func $nova_panic (param i32))'),
+            ('"nova_print"', "(func $nova_print (param i32))"),
+            ('"nova_print_int"', "(func $nova_print_int (param i64))"),
+            ('"nova_print_float"', "(func $nova_print_float (param f64))"),
+            (
+                '"nova_string_concat"',
+                "(func $nova_string_concat (param i32) (param i32) (result i32))",
+            ),
+            ('"nova_list_new"', "(func $nova_list_new (param i32) (result i32))"),
+            ('"nova_list_push"', "(func $nova_list_push (param i32) (param i64))"),
+            (
+                '"nova_list_get"',
+                "(func $nova_list_get (param i32) (param i32) (result i64))",
+            ),
+            ('"nova_list_length"', "(func $nova_list_length (param i32) (result i32))"),
+            ('"nova_sqrt"', "(func $nova_sqrt (param f64) (result f64))"),
+            ('"nova_sin"', "(func $nova_sin (param f64) (result f64))"),
+            ('"nova_cos"', "(func $nova_cos (param f64) (result f64))"),
+            ('"nova_pow"', "(func $nova_pow (param f64) (param f64) (result f64))"),
+            ('"nova_abs"', "(func $nova_abs (param f64) (result f64))"),
+            ('"nova_floor"', "(func $nova_floor (param f64) (result f64))"),
+            ('"nova_ceil"', "(func $nova_ceil (param f64) (result f64))"),
+            ('"nova_round"', "(func $nova_round (param f64) (result f64))"),
+            ('"nova_alloc"', "(func $nova_alloc (param i32) (result i32))"),
+            ('"nova_free"', "(func $nova_free (param i32))"),
+            ('"nova_init"', "(func $nova_init)"),
+            ('"nova_cleanup"', "(func $nova_cleanup)"),
+            ('"nova_json_parse"', "(func $nova_json_parse (param i32) (result i32))"),
+            (
+                '"nova_json_stringify"',
+                "(func $nova_json_stringify (param i32) (result i32))",
+            ),
+            ('"nova_panic"', "(func $nova_panic (param i32))"),
         ]
 
         for name, sig in runtime_imports:
-            self._emit(f"(import \"nova_runtime\" {name} {sig})")
+            self._emit(f'(import "nova_runtime" {name} {sig})')
         self._emit("")
 
     def _emit_memory(self):
@@ -182,15 +214,15 @@ class WasmGCBackend:
         for ch in s:
             if ch == '"':
                 result.append('\\"')
-            elif ch == '\\':
-                result.append('\\\\')
-            elif ch == '\n':
-                result.append('\\n')
-            elif ch == '\t':
-                result.append('\\t')
-            elif ch == '\r':
-                result.append('\\r')
-            elif 0x20 <= ord(ch) < 0x7f:
+            elif ch == "\\":
+                result.append("\\\\")
+            elif ch == "\n":
+                result.append("\\n")
+            elif ch == "\t":
+                result.append("\\t")
+            elif ch == "\r":
+                result.append("\\r")
+            elif 0x20 <= ord(ch) < 0x7F:
                 result.append(ch)
             else:
                 result.append(f"\\{ord(ch):02x}")
@@ -361,7 +393,7 @@ class WasmGCBackend:
         self.indent_level -= 1
         self._emit(")")
 
-        self._emit('(start $_start)')
+        self._emit("(start $_start)")
 
         # 关闭 module
         self.indent_level -= 1
@@ -375,7 +407,9 @@ class WasmGCBackend:
             self.string_table[string] = offset
         return self.string_table[string]
 
-    def compile_to_wasm(self, lir_module: LIRModule, output_path: str, optimize: bool = True) -> bool:
+    def compile_to_wasm(
+        self, lir_module: LIRModule, output_path: str, optimize: bool = True
+    ) -> bool:
         """编译为 .wasm 文件"""
         wat = self.compile(lir_module)
 
@@ -390,14 +424,16 @@ class WasmGCBackend:
             if optimize:
                 cmd.append("-O1")
 
-            result = subprocess.run(
-                cmd, capture_output=True, text=True, timeout=30
-            )
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
             if result.returncode != 0:
                 raise RuntimeError(f"Wasm compile failed: {result.stderr}")
         except FileNotFoundError:
             # wat2wasm 不可用，保存 .wat 文件
-            wat_output = output_path.rsplit(".", 1)[0] + ".wat" if output_path.endswith(".wasm") else output_path + ".wat"
+            wat_output = (
+                output_path.rsplit(".", 1)[0] + ".wat"
+                if output_path.endswith(".wasm")
+                else output_path + ".wat"
+            )
             with open(wat_output, "w") as f:
                 f.write(wat)
             return False  # 返回 False 表示只生成了 WAT

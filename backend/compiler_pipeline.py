@@ -18,7 +18,6 @@ from ir.mir_lowering import MIRLowering
 from ir.lir_lowering import LIRLowering
 from ir.pass_manager import default_optimization_pipeline
 
-
 # 编译目标常量
 BACKEND_NATIVE = "native"
 BACKEND_WASM = "wasm"
@@ -31,17 +30,22 @@ class NovaCompilerPipeline:
     def __init__(self, target: str = BACKEND_NATIVE, optimize_level: int = 2):
         self.target = target
         self.optimize_level = optimize_level
-        self.pass_manager = default_optimization_pipeline() if optimize_level > 0 else None
+        self.pass_manager = (
+            default_optimization_pipeline() if optimize_level > 0 else None
+        )
 
         # 选择后端
         if target == BACKEND_NATIVE:
             from backend.cranelift_backend import CraneliftBackend
+
             self.backend = CraneliftBackend()
         elif target == BACKEND_WASM:
             from backend.wasm_backend import WasmGCBackend
+
             self.backend = WasmGCBackend()
         else:
             from c_codegen import CCodeGen
+
             self.backend = CCodeGen()
 
     def compile_source(self, source: str, output_path: str) -> bool:

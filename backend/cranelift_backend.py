@@ -7,26 +7,49 @@ Cranelift 本身是 Rust 库，Python 无法直接调用。我们采用两种策
 2. 作为 fallback，保存 .clif 文件供后续使用
 """
 
-import subprocess
-import os
-import sys
-import tempfile
-import platform
 from typing import List, Dict, Optional, Tuple
+import os
+import subprocess
+import sys
+
+import platform
+import tempfile
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from ir.ir_nodes import (
-    LIRModule, LIRFunction, LIRGlobal, LIRData,
-    LIRInstr, LIRLoadConst, LIRLoadGlobal, LIRStoreGlobal,
-    LIRLoadReg, LIRStoreReg, LIRBinOp, LIRUnaryOp,
-    LIRCall, LIRCallIndirect, LIRJump, LIRBranch, LIRReturn,
-    LIRLabel, LIRIndex, LIRFieldAccess,
-    LIRBuildList, LIRBuildTuple, LIRBuildADT, LIRPanic,
-    IRType, NovaType,
-    INT_TYPE, FLOAT_TYPE, STRING_TYPE, BOOL_TYPE, UNIT_TYPE,
+    LIRModule,
+    LIRFunction,
+    LIRGlobal,
+    LIRData,
+    LIRInstr,
+    LIRLoadConst,
+    LIRLoadGlobal,
+    LIRStoreGlobal,
+    LIRLoadReg,
+    LIRStoreReg,
+    LIRBinOp,
+    LIRUnaryOp,
+    LIRCall,
+    LIRCallIndirect,
+    LIRJump,
+    LIRBranch,
+    LIRReturn,
+    LIRLabel,
+    LIRIndex,
+    LIRFieldAccess,
+    LIRBuildList,
+    LIRBuildTuple,
+    LIRBuildADT,
+    LIRPanic,
+    IRType,
+    NovaType,
+    INT_TYPE,
+    FLOAT_TYPE,
+    STRING_TYPE,
+    BOOL_TYPE,
+    UNIT_TYPE,
 )
-
 
 # Cranelift IR 类型映射
 CRANELIFT_TYPE_MAP = {
@@ -109,8 +132,7 @@ class CraneliftBackend:
 
     def _compile_function(self, func: LIRFunction):
         params = ", ".join(
-            f"{self._nova_type_to_clif(ty)} ${loc}"
-            for loc, ty in func.params
+            f"{self._nova_type_to_clif(ty)} ${loc}" for loc, ty in func.params
         )
         ret = self._nova_type_to_clif(func.return_type)
 
@@ -170,7 +192,9 @@ class CraneliftBackend:
             self._emit(f"jump block_true")
 
         elif isinstance(instr, LIRBuildList):
-            self._emit(f"v{self._new_temp()} = call $nova_list_new(i64.const {instr.count})")
+            self._emit(
+                f"v{self._new_temp()} = call $nova_list_new(i64.const {instr.count})"
+            )
 
         elif isinstance(instr, LIRBuildTuple):
             size = instr.count * 8
@@ -179,7 +203,9 @@ class CraneliftBackend:
         elif isinstance(instr, LIRBuildADT):
             tag = instr.type_tag
             fields_size = instr.field_count * 8 + 8
-            self._emit(f"v{self._new_temp()} = call $nova_alloc(i64.const {fields_size})")
+            self._emit(
+                f"v{self._new_temp()} = call $nova_alloc(i64.const {fields_size})"
+            )
 
         elif isinstance(instr, LIRFieldAccess):
             offset = instr.offset
@@ -217,20 +243,34 @@ class CraneliftBackend:
 
     def _emit_binop(self, instr: LIRBinOp):
         int_op_map = {
-            "+": "iadd", "-": "isub", "*": "imul",
-            "/": "sdiv", "%": "srem",
-            "&": "band", "|": "bor", "^": "bxor",
-            "<<": "ishl", ">>": "sshr",
-            "==": "icmp eq", "!=": "icmp ne",
-            "<": "icmp slt", ">": "icmp sgt",
-            "<=": "icmp sle", ">=": "icmp sge",
+            "+": "iadd",
+            "-": "isub",
+            "*": "imul",
+            "/": "sdiv",
+            "%": "srem",
+            "&": "band",
+            "|": "bor",
+            "^": "bxor",
+            "<<": "ishl",
+            ">>": "sshr",
+            "==": "icmp eq",
+            "!=": "icmp ne",
+            "<": "icmp slt",
+            ">": "icmp sgt",
+            "<=": "icmp sle",
+            ">=": "icmp sge",
         }
         float_op_map = {
-            "+": "fadd", "-": "fsub", "*": "fmul",
+            "+": "fadd",
+            "-": "fsub",
+            "*": "fmul",
             "/": "fdiv",
-            "==": "fcmp eq", "!=": "fcmp ne",
-            "<": "fcmp lt", ">": "fcmp gt",
-            "<=": "fcmp le", ">=": "fcmp ge",
+            "==": "fcmp eq",
+            "!=": "fcmp ne",
+            "<": "fcmp lt",
+            ">": "fcmp gt",
+            "<=": "fcmp le",
+            ">=": "fcmp ge",
         }
 
         op = int_op_map.get(instr.op, "iadd")
@@ -248,9 +288,7 @@ class CraneliftBackend:
 
     def _emit_call(self, instr: LIRCall):
         func_ref = f"$nova_{instr.func_name}"
-        arg_str = ", ".join(
-            f"i64 {loc}" for loc, _ in (instr.src_locs or [])
-        )
+        arg_str = ", ".join(f"i64 {loc}" for loc, _ in (instr.src_locs or []))
         if arg_str:
             self._emit(f"v{self._new_temp()} = call {func_ref}({arg_str})")
         else:
@@ -262,7 +300,9 @@ class CraneliftBackend:
         self._emit(f"@{data.name} = {{ {hex_str} }}")
         self._emit("")
 
-    def compile_to_object(self, lir_module: LIRModule, output_path: str, optimize: str = "speed") -> str:
+    def compile_to_object(
+        self, lir_module: LIRModule, output_path: str, optimize: str = "speed"
+    ) -> str:
         """编译 LIR 为目标文件"""
         clif_ir = self.compile(lir_module)
 
@@ -274,8 +314,18 @@ class CraneliftBackend:
         try:
             # 尝试调用 cranelift CLI 编译
             result = subprocess.run(
-                ["clif-util", "compile", "--optimize", optimize, "-o", output_path, clif_path],
-                capture_output=True, text=True, timeout=30
+                [
+                    "clif-util",
+                    "compile",
+                    "--optimize",
+                    optimize,
+                    "-o",
+                    output_path,
+                    clif_path,
+                ],
+                capture_output=True,
+                text=True,
+                timeout=30,
             )
             if result.returncode != 0:
                 raise RuntimeError(f"Cranelift compile failed: {result.stderr}")
@@ -287,7 +337,9 @@ class CraneliftBackend:
 
         return output_path
 
-    def _fallback_to_c(self, lir_module: LIRModule, output_path: str, clif_ir: str = "") -> str:
+    def _fallback_to_c(
+        self, lir_module: LIRModule, output_path: str, clif_ir: str = ""
+    ) -> str:
         """Fallback：当 Cranelift CLI 不可用时，保存 .clif 文件"""
         clif_output = output_path + ".clif"
         with open(clif_output, "w") as f:
