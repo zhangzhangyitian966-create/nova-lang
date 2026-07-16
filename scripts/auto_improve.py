@@ -352,7 +352,7 @@ def format_code():
 # ============================================================
 
 def sort_imports():
-    """整理导入顺序"""
+    """整理导入顺序（安全版本，只处理单行导入）"""
     changes = []
     files = get_python_files()
     
@@ -367,31 +367,51 @@ def sort_imports():
         
         lines = source.split('\n')
         
-        # 找出所有 import 行的范围
-        import_lines = []
+        # 安全检查：如果有括号内的多行导入，跳过这个文件
+        has_multiline_import = False
+        paren_depth = 0
+        for line in lines:
+            stripped = line.strip()
+            # 检查 from xxx import ( 的多行导入
+            if 'import (' in stripped or 'import (' in line:
+                has_multiline_import = True
+                break
+            if stripped.startswith('from ') and 'import' in stripped and '(' in line:
+                has_multiline_import = True
+                break
+        
+        if has_multiline_import:
+            continue  # 跳过有多行导入的文件，避免搞乱
+        
+        # 找出所有单行 import 的范围
         import_start = -1
         import_end = -1
+        in_import_block = False
         
         for i, line in enumerate(lines):
             stripped = line.strip()
-            if stripped.startswith('import ') or stripped.startswith('from '):
-                if import_start == -1:
+            is_import = (stripped.startswith('import ') or 
+                        stripped.startswith('from ')) and '(' not in stripped
+            
+            if is_import:
+                if not in_import_block:
                     import_start = i
+                    in_import_block = True
                 import_end = i
-            elif stripped == '' and import_start != -1:
-                # 空行可能是分隔符，继续看后面
-                pass
-            elif import_start != -1 and stripped:
+            elif stripped == '' and in_import_block:
+                # 空行可能是分隔符
+                continue
+            elif in_import_block and stripped:
                 # 非空行且不是 import，结束
                 break
         
         if import_start == -1 or import_end == -1:
             continue
         
-        # 收集 import
+        # 收集 import（只收集单行的）
         imports = []
         for i in range(import_start, import_end + 1):
-            if lines[i].strip():
+            if lines[i].strip() and '(' not in lines[i]:
                 imports.append(lines[i])
         
         if len(imports) < 3:
@@ -402,32 +422,37 @@ def sort_imports():
         third_party = []
         local = []
         
+        std_modules = {'os', 'sys', 're', 'ast', 'json', 'time', 'datetime', 
+                      'collections', 'subprocess', 'pathlib', 'typing',
+                      'io', 'enum', 'struct', 'hashlib', 'copy', 'itertools',
+                      'math', 'random', 'functools', 'operator', 'abc',
+                      'dataclasses', 'decimal', 'fraction', 'logging',
+                      'argparse', 'shutil', 'tempfile', 'uuid', 'base64'}
+        
         for imp in imports:
             stripped = imp.strip()
-            module = ''
-            if stripped.startswith('from '):
-                module = stripped.split()[1].split('.')[0]
-            elif stripped.startswith('import '):
-                module = stripped.split()[1].split('.')[0]
+            parts = stripped.split()
+            if len(parts) < 2:
+                continue
             
-            # 简单判断
-            std_modules = {'os', 'sys', 're', 'ast', 'json', 'time', 'datetime', 
-                          'collections', 'subprocess', 'pathlib', 'typing',
-                          'io', 'enum', 'struct', 'hashlib', 'copy', 'itertools'}
+            if stripped.startswith('from '):
+                module = parts[1].split('.')[0]
+            else:
+                module = parts[1].split('.')[0]
             
             if module in std_modules:
                 std_lib.append(imp)
-            elif '.' in stripped.split()[1] if len(stripped.split()) > 1 else False:
+            elif '.' in parts[1]:
                 local.append(imp)
             else:
                 third_party.append(imp)
         
         # 排序
-        std_lib.sort(key=lambda x: x.strip())
-        third_party.sort(key=lambda x: x.strip())
-        local.sort(key=lambda x: x.strip())
+        std_lib.sort(key=lambda x: x.strip().lower())
+        third_party.sort(key=lambda x: x.strip().lower())
+        local.sort(key=lambda x: x.strip().lower())
         
-        # 组合
+        # 组合（保持原顺序中的空行分隔）
         sorted_imports = []
         if std_lib:
             sorted_imports.extend(std_lib)
@@ -440,17 +465,27 @@ def sort_imports():
                 sorted_imports.append('')
             sorted_imports.extend(local)
         
-        if sorted_imports != imports:
+        # 比较是否有变化
+        original_imports = [l for l in imports if l.strip()]
+        new_imports_clean = [l for l in sorted_imports if l.strip()]
+        
+        if [l.strip() for l in new_imports_clean] != [l.strip() for l in original_imports]:
             # 替换
             new_lines = lines[:import_start] + sorted_imports + lines[import_end + 1:]
             new_source = '\n'.join(new_lines)
-            if write_file(filepath, new_source):
-                changes.append({
-                    'file': relpath,
-                    'type': 'import_sort',
-                    'count': len(imports),
-                    'description': f'整理 {len(imports)} 个导入语句',
-                })
+            
+            # 安全检查：确保可以被 AST 解析
+            try:
+                ast.parse(new_source)
+                if write_file(filepath, new_source):
+                    changes.append({
+                        'file': relpath,
+                        'type': 'import_sort',
+                        'count': len(imports),
+                        'description': f'整理 {len(imports)} 个导入语句',
+                    })
+            except SyntaxError:
+                pass  # 语法错误，跳过
     
     return changes
 
