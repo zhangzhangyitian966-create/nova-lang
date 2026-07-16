@@ -49,6 +49,7 @@ from ir_nodes import (
     MIRGlobal,
     MIRIndexAccess,
     MIRJump,
+    MIRListAppend,
     MIRListBuild,
     MIRMapBuild,
     MIRModule,
@@ -320,10 +321,7 @@ class MIRLowering:
             return val_ssa
 
         if isinstance(hir_expr, HIRListComprehension):
-            instr = MIRConst(hir_expr.ir_type)
-            instr.value = []
-            instr.const_type = "list"
-            return self._emit(instr)
+            return self._lower_list_comprehension(hir_expr, block)
 
         if isinstance(hir_expr, HIRADTConstructor):
             field_ssas = [self._lower_expr(f, block) or "" for f in hir_expr.fields]
@@ -456,6 +454,109 @@ class MIRLowering:
         self.all_blocks.extend([header_block, body_block, exit_block])
         self.current_block = exit_block
         return None
+
+    def _lower_list_comprehension(self, hir_expr, block):
+        """
+        降级列表推导式：[result_expr | variable <- iterable, filter?]
+
+        编译为以下结构：
+          list = []               // 空列表
+          header:                 // 循环头
+            iter = iterable       // 获取迭代器（此处简化为直接判断 iterable）
+            if iter goto body else goto exit
+          body:
+            // 可选 filter 检查
+            // 计算 result_expr
+            list = list_append(list, result)
+            goto header
+          exit:
+            return list
+        """
+        header_block = MIRBasicBlock(self._new_block())
+        body_block = MIRBasicBlock(self._new_block())
+        exit_block = MIRBasicBlock(self._new_block())
+
+        # 1. 在入口块创建空列表
+        empty_list_instr = MIRListBuild(hir_expr.ir_type)
+        empty_list_instr.elements = []
+        list_ssa = self._emit(empty_list_instr)
+
+        # 2. 跳转到循环头
+        block.terminator = MIRJump(header_block.label)
+
+        # 3. 循环头：降级可迭代对象，条件分支
+        self.current_block = header_block
+        iter_ssa = self._lower_expr(hir_expr.iterable, header_block)
+        header_block.terminator = MIRBranch(
+            iter_ssa or "", body_block.label, exit_block.label
+        )
+
+        # 压入循环上下文（break → exit, continue → header）
+        self.loop_stack.append((header_block.label, exit_block.label))
+
+        # 4. 循环体
+        self.current_block = body_block
+
+        # 将循环变量绑定到环境（简化：绑定到 iterable 本身，后续可迭代器化）
+        self.env[hir_expr.variable] = iter_ssa or ""
+
+        result_ssa = None
+        if hir_expr.filter is not None:
+            # 有 filter：先判断 filter 条件
+            filter_block = MIRBasicBlock(self._new_block())
+            filter_false_block = MIRBasicBlock(self._new_block())
+
+            filter_ssa = self._lower_expr(hir_expr.filter, body_block)
+            body_block.terminator = MIRBranch(
+                filter_ssa or "", filter_block.label, filter_false_block.label
+            )
+
+            # filter 为真：计算 result_expr 并 append
+            self.current_block = filter_block
+            result_ssa = self._lower_expr(hir_expr.result_expr, filter_block)
+
+            append_instr = MIRListAppend(hir_expr.ir_type)
+            append_instr.list_ssa = list_ssa
+            append_instr.element_ssa = result_ssa or ""
+            new_list_ssa = self._emit(append_instr)
+            list_ssa = new_list_ssa
+
+            filter_block.terminator = MIRJump(header_block.label)
+
+            # filter 为假：跳过，直接回到循环头
+            self.current_block = filter_false_block
+            filter_false_block.terminator = MIRJump(header_block.label)
+
+            self.all_blocks.extend([filter_block, filter_false_block])
+        else:
+            # 无 filter：直接计算 result_expr 并 append
+            result_ssa = self._lower_expr(hir_expr.result_expr, body_block)
+
+            append_instr = MIRListAppend(hir_expr.ir_type)
+            append_instr.list_ssa = list_ssa
+            append_instr.element_ssa = result_ssa or ""
+            new_list_ssa = self._emit(append_instr)
+            list_ssa = new_list_ssa
+
+            if body_block.terminator is None:
+                body_block.terminator = MIRJump(header_block.label)
+
+        # 弹出循环上下文
+        self.loop_stack.pop()
+
+        # 5. exit 块：通过 Phi 合并列表值
+        phi_sources = [
+            (block.label, empty_list_instr.result_name),
+            (header_block.label, list_ssa),
+        ]
+        phi_instr = MIRPhi(hir_expr.ir_type)
+        phi_instr.sources = phi_sources
+        phi_instr.result_name = self._new_ssa()
+        exit_block.instructions.append(phi_instr)
+
+        self.all_blocks.extend([header_block, body_block, exit_block])
+        self.current_block = exit_block
+        return phi_instr.result_name
 
     def _lower_while_expr(self, hir_expr, block):
         header_block = MIRBasicBlock(self._new_block())

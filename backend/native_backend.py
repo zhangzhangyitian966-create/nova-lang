@@ -10,7 +10,8 @@ import struct
 import sys
 from typing import Dict, List, Tuple
 
-# 确保 ir 节点可以被导入
+# 确保项目根目录和 ir 目录在路径上
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "ir"))
 from ir_nodes import (
     INT_TYPE,
@@ -28,7 +29,7 @@ from ir_nodes import (
     LIRUnaryOp,
 )
 
-from nova.backend.x86_64 import (
+from backend.x86_64 import (
     CALLEE_SAVED,
     R8,
     R9,

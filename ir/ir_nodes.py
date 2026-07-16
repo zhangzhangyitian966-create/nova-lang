@@ -700,6 +700,14 @@ class MIRListBuild(MIRInstruction):
 
 
 @dataclass
+class MIRListAppend(MIRInstruction):
+    """MIR 列表追加元素（返回新的列表）"""
+
+    list_ssa: str = ""  # 目标列表 SSA 名
+    element_ssa: str = ""  # 待追加元素 SSA 名
+
+
+@dataclass
 class MIRTupleBuild(MIRInstruction):
     """MIR 元组构建"""
 
@@ -980,6 +988,13 @@ class LIRBuildList(LIRInstr):
     """LIR 构建列表"""
 
     count: int = 0
+
+
+@dataclass
+class LIRListAppend(LIRInstr):
+    """LIR 列表追加元素"""
+
+    pass
 
 
 @dataclass

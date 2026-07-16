@@ -13,6 +13,7 @@ from ir_nodes import (
     LIRBranch,
     LIRBuildADT,
     LIRBuildList,
+    LIRListAppend,
     LIRBuildTuple,
     LIRCall,
     LIRData,
@@ -39,6 +40,7 @@ from ir_nodes import (
     MIRFieldAccess,
     MIRIndexAccess,
     MIRJump,
+    MIRListAppend,
     MIRListBuild,
     MIRLoad,
     MIRMapBuild,
@@ -217,6 +219,23 @@ class LIRLowering:
         elif isinstance(instr, MIRListBuild):
             lir = LIRBuildList()
             lir.count = len(instr.elements)
+            if instr.result_name:
+                lir.dst_loc = (
+                    self.ssa_to_loc.get(instr.result_name, ""),
+                    instr.result_type,
+                )
+            result.append(lir)
+
+        elif isinstance(instr, MIRListAppend):
+            lir = LIRListAppend()
+            if instr.list_ssa:
+                lir.src_locs = [
+                    (self.ssa_to_loc.get(instr.list_ssa, ""), instr.result_type)
+                ]
+            if instr.element_ssa:
+                lir.src_locs.append(
+                    (self.ssa_to_loc.get(instr.element_ssa, ""), instr.result_type)
+                )
             if instr.result_name:
                 lir.dst_loc = (
                     self.ssa_to_loc.get(instr.result_name, ""),

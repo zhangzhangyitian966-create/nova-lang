@@ -1,9 +1,13 @@
 {
-  "cycles": 1,
+  "cycles": 2,
   "completed_tasks": [
     "dce_pass",
     "wasmgc_storereg",
-    "fix_break_continue"
+    "fix_break_continue",
+    "fix_native_test",
+    "fix_list_comprehension",
+    "inlining_pass",
+    "fix_dce_field_names"
   ],
   "failed_tasks": [],
   "task_history": [
@@ -24,9 +28,35 @@
       "task_id": "fix_break_continue",
       "status": "completed",
       "details": "实现了 MIR 层循环栈追踪，break/continue 正确降级为 MIRJump 到 exit/header 块"
+    },
+    {
+      "cycle": 2,
+      "task_id": "fix_native_test",
+      "status": "completed",
+      "details": "修复了 native_backend.py 的导入路径（nova.backend.x86_64 → backend.x86_64），解锁 38 个原生后端测试"
+    },
+    {
+      "cycle": 2,
+      "task_id": "fix_list_comprehension",
+      "status": "completed",
+      "details": "实现了列表推导式 MIR 降级：从空 stub 改为 for 循环 + MIRListAppend + Phi 节点合并的 CFG 结构，新增 MIRListAppend 和 LIRListAppend 指令"
+    },
+    {
+      "cycle": 2,
+      "task_id": "inlining_pass",
+      "status": "completed",
+      "details": "重写了 Inlining Pass：修复字段名 bug（fn_expr→function, args→arguments, stmts→exprs），实现真正的函数内联（参数替换、递归遍历 20+ 表达式类型）"
+    },
+    {
+      "cycle": 2,
+      "task_id": "fix_dce_field_names",
+      "status": "completed",
+      "details": "修复了 DeadCodeElimination 中大量字段名不匹配的 bug：callee→function, args→arguments, items→elements, pairs→entries, collection→object, scrutinee→value, expr→result_expr, left/right→stages"
     }
   ],
-  "current_cycle": null,
+  "current_cycle": 2,
+  "baseline_tests": 365,
+  "current_tests": 403,
   "tasks": [
     {
       "id": "dce_pass",
@@ -46,7 +76,7 @@
       "priority": 80,
       "category": "optimization",
       "estimated": "2-4 小时",
-      "status": "pending"
+      "status": "completed"
     },
     {
       "id": "fix_native_test",
@@ -56,7 +86,7 @@
       "priority": 85,
       "category": "test",
       "estimated": "30 分钟",
-      "status": "pending"
+      "status": "completed"
     },
     {
       "id": "cse_pass",
@@ -76,7 +106,7 @@
       "priority": 85,
       "category": "ir",
       "estimated": "1-2 天",
-      "status": "pending"
+      "status": "completed"
     },
     {
       "id": "fix_break_continue",
