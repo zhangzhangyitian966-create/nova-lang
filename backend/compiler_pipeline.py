@@ -42,9 +42,10 @@ class NovaCompilerPipeline:
 
             self.backend = WasmGCBackend()
         else:
-            from c_codegen import CCodeGen
+            # C 后端：使用 LIR → C 路径，受益于 IR 层优化
+            from backend.lir_c_backend import LIRCBackend
 
-            self.backend = CCodeGen()
+            self.backend = LIRCBackend()
 
     def compile_source(self, source: str, output_path: str) -> bool:
         """完整的编译管道：源码 -> 目标代码"""
@@ -85,8 +86,8 @@ class NovaCompilerPipeline:
         elif self.target == BACKEND_WASM:
             return self.backend.compile_to_wasm(lir_module, output_path)
         elif self.target == BACKEND_C:
-            # 生成 C 代码
-            c_code = self.backend.generate(ast)
+            # 使用 LIR → C 路径，受益于 IR 层所有优化 Pass
+            c_code = self.backend.compile(lir_module)
             with open(output_path, "w") as f:
                 f.write(c_code)
 

@@ -107,16 +107,58 @@ class LIRLowering:
             self.ssa_to_loc[ssa_name] = loc
             lir_fn.params.append((loc, param_type))
 
+        # 第一阶段：为所有 Phi 节点分配目标位置
+        # （必须在 lowering 前完成，因为 Phi 的结果可能被后续指令引用）
+        phi_info = {}  # bb_label -> [(phi_result_name, phi_result_type, sources)]
+        for bb in mir_fn.basic_blocks:
+            phi_list = []
+            for instr in bb.instructions:
+                if isinstance(instr, MIRPhi) and instr.result_name:
+                    loc = self._new_loc()
+                    self.ssa_to_loc[instr.result_name] = loc
+                    phi_list.append((instr.result_name, instr.result_type, instr.sources))
+            if phi_list:
+                phi_info[bb.label] = phi_list
+
+        # 第二阶段：生成 LIR 指令
         body = []
         for bb in mir_fn.basic_blocks:
             label_instr = LIRLabel(name=bb.label)
             body.append(label_instr)
 
             for instr in bb.instructions:
+                # Phi 节点不在此处生成指令（在前驱块末尾插入拷贝）
+                if isinstance(instr, MIRPhi):
+                    continue
                 lir_instrs = self._lower_instruction(instr)
                 body.extend(lir_instrs)
 
+            # 在终结指令前，为后继块的 Phi 节点插入拷贝指令
             if bb.terminator:
+                # 找出当前块跳转到哪些后继块
+                succ_blocks = self._get_successor_blocks(bb.terminator)
+                # 为每个后继块的 Phi 节点插入拷贝
+                for succ_label in succ_blocks:
+                    if succ_label in phi_info:
+                        for phi_result_name, phi_result_type, sources in phi_info[succ_label]:
+                            # 找到从前驱块（当前块）来的 source
+                            src_ssa = None
+                            for pred_label, ssa_name in sources:
+                                if pred_label == bb.label:
+                                    src_ssa = ssa_name
+                                    break
+                            if src_ssa and src_ssa in self.ssa_to_loc:
+                                src_loc = self.ssa_to_loc[src_ssa]
+                                dst_loc = self.ssa_to_loc[phi_result_name]
+                                # 生成 LoadReg + StoreReg 实现拷贝
+                                # 用 LIRLoadReg 从 src 加载，然后通过 StoreReg 存入 dst
+                                # 实际上我们用 LIRLoadReg 的 dst 就是目标位置
+                                # 但更简单的方式是：生成一条 LIRLoadReg，src 是源位置，dst 是目标位置
+                                copy_instr = LIRLoadReg()
+                                copy_instr.src_locs = [(src_loc, phi_result_type)]
+                                copy_instr.dst_loc = (dst_loc, phi_result_type)
+                                body.append(copy_instr)
+
                 lir_term = self._lower_terminator(bb.terminator)
                 body.append(lir_term)
 
@@ -125,6 +167,25 @@ class LIRLowering:
         lir_fn.stack_size = self.loc_counter * 8
 
         return lir_fn
+
+    def _get_successor_blocks(self, terminator):
+        """获取终结指令跳转到的后继块标签列表"""
+        if isinstance(terminator, MIRJump):
+            return [terminator.target]
+        elif isinstance(terminator, MIRBranch):
+            return [terminator.true_target, terminator.false_target]
+        elif isinstance(terminator, MIRSwitch):
+            targets = [terminator.default_target] if terminator.default_target else []
+            for _, target in terminator.cases:
+                targets.append(target)
+            return targets
+        elif isinstance(terminator, MIRMatchJump):
+            return [terminator.default_target] if terminator.default_target else []
+        elif isinstance(terminator, MIRReturn):
+            return []
+        elif isinstance(terminator, MIRPanic):
+            return []
+        return []
 
     def _lower_instruction(self, instr):
         result = []
@@ -304,20 +365,6 @@ class LIRLowering:
                     instr.result_type,
                 )
             result.append(lir)
-
-        elif isinstance(instr, MIRPhi):
-            if instr.sources:
-                _, src_ssa = instr.sources[0]
-                if src_ssa in self.ssa_to_loc and instr.result_name:
-                    lir = LIRLoadReg()
-                    lir.src_locs = [
-                        (self.ssa_to_loc.get(src_ssa, ""), instr.result_type)
-                    ]
-                    lir.dst_loc = (
-                        self.ssa_to_loc.get(instr.result_name, ""),
-                        instr.result_type,
-                    )
-                    result.append(lir)
 
         return result
 

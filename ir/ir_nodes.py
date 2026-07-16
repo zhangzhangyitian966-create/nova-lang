@@ -866,6 +866,7 @@ class LIRData:
 # --- LIR 指令 ---
 
 
+@dataclass
 class LIRInstr:
     """LIR 指令基类，带寄存器/栈分配信息"""
 

@@ -809,12 +809,241 @@ class DeadCodeElimination(Pass):
 
 
 class CommonSubexprElimination(Pass):
-    """公共子表达式消除"""
+    """公共子表达式消除（CSE）
+
+    在 MIR 层执行基于值编号的局部公共子表达式消除。
+    对于每个基本块内的纯运算指令，如果相同的表达式已被计算过，
+    则直接复用之前的结果，避免重复计算。
+
+    支持的可消除指令：
+    - MIRBinOp: 二元运算（算术、比较、逻辑）
+    - MIRUnaryOp: 一元运算
+    - MIRFieldAccess: 字段访问（对象不可变时安全）
+    - MIRIndexAccess: 索引访问（列表不可变时安全）
+    - MIRTupleBuild: 元组构建（元素相同则元组相同）
+    """
 
     name = "cse"
 
     def run(self, mir_module):
-        return False
+        """对 MIR 模块执行 CSE，返回是否发生了变化"""
+        changed = False
+        for fn_name, mir_fn in mir_module.functions.items():
+            changed |= self._cse_function(mir_fn)
+        return changed
+
+    def _cse_function(self, mir_fn):
+        """对单个函数执行 CSE"""
+        changed = False
+        for bb in mir_fn.basic_blocks:
+            changed |= self._cse_basic_block(bb)
+        return changed
+
+    def _cse_basic_block(self, bb):
+        """对单个基本块执行局部 CSE
+
+        使用值编号：维护表达式指纹 -> SSA 名 的映射。
+        如果发现重复的表达式，将后续指令中对该结果的引用替换为已有的 SSA 名。
+        """
+        changed = False
+        # 值编号表: 表达式指纹 -> 已存在的 SSA 名
+        value_table = {}
+        # 替换映射: 被消除的 SSA 名 -> 复用的 SSA 名
+        replacements = {}
+
+        new_instructions = []
+        for instr in bb.instructions:
+            # 先替换指令中引用的 SSA 名（处理之前被消除的指令）
+            self._replace_instr_operands(instr, replacements)
+
+            # 尝试计算表达式指纹
+            fingerprint = self._compute_fingerprint(instr)
+
+            if fingerprint is not None and instr.result_name:
+                if fingerprint in value_table:
+                    # 找到相同的表达式，复用已有的结果
+                    existing_ssa = value_table[fingerprint]
+                    replacements[instr.result_name] = existing_ssa
+                    changed = True
+                    # 跳过这条指令（不加入 new_instructions）
+                    continue
+                else:
+                    # 新的表达式，加入值编号表
+                    value_table[fingerprint] = instr.result_name
+
+            new_instructions.append(instr)
+
+        # 如果有变化，更新基本块的指令列表
+        if changed:
+            bb.instructions = new_instructions
+
+            # 更新终结指令中的操作数引用
+            if bb.terminator:
+                self._replace_terminator_operands(bb.terminator, replacements)
+
+        return changed
+
+    def _compute_fingerprint(self, instr):
+        """计算指令的表达式指纹，用于判断是否为重复的公共子表达式
+
+        返回 None 表示该指令不可做 CSE（有副作用或不适合）。
+        """
+        # 延迟导入，避免循环依赖
+        from ir_nodes import (
+            MIRBinOp,
+            MIRUnaryOp,
+            MIRFieldAccess,
+            MIRIndexAccess,
+            MIRTupleBuild,
+        )
+
+        if isinstance(instr, MIRBinOp):
+            # 可交换运算（+、*、==、!=）不区分左右顺序
+            commutative_ops = {"+", "*", "==", "!=", "&&", "||"}
+            if instr.op in commutative_ops and instr.left > instr.right:
+                return ("binop", instr.op, instr.right, instr.left)
+            return ("binop", instr.op, instr.left, instr.right)
+
+        elif isinstance(instr, MIRUnaryOp):
+            return ("unaryop", instr.op, instr.operand)
+
+        elif isinstance(instr, MIRFieldAccess):
+            return ("field", instr.object, instr.field_name, instr.field_index)
+
+        elif isinstance(instr, MIRIndexAccess):
+            return ("index", instr.object, instr.index)
+
+        elif isinstance(instr, MIRTupleBuild):
+            # 元组构建：元素顺序相同则相同
+            return ("tuple", tuple(instr.elements))
+
+        # 其他类型不做 CSE
+        return None
+
+    def _replace_instr_operands(self, instr, replacements):
+        """替换指令中的操作数 SSA 名
+
+        将出现在 replacements 中的 SSA 名替换为对应的值。
+        """
+        if not replacements:
+            return
+
+        # 延迟导入
+        from ir_nodes import (
+            MIRBinOp,
+            MIRUnaryOp,
+            MIRCall,
+            MIRFieldAccess,
+            MIRIndexAccess,
+            MIRListBuild,
+            MIRListAppend,
+            MIRTupleBuild,
+            MIRMapBuild,
+            MIRADTBuild,
+            MIRClosureCreate,
+            MIRStore,
+            MIRPhi,
+        )
+
+        if isinstance(instr, MIRBinOp):
+            if instr.left in replacements:
+                instr.left = replacements[instr.left]
+            if instr.right in replacements:
+                instr.right = replacements[instr.right]
+
+        elif isinstance(instr, MIRUnaryOp):
+            if instr.operand in replacements:
+                instr.operand = replacements[instr.operand]
+
+        elif isinstance(instr, MIRCall):
+            instr.args = [
+                replacements[a] if a in replacements else a
+                for a in instr.args
+            ]
+            if instr.callee in replacements:
+                instr.callee = replacements[instr.callee]
+
+        elif isinstance(instr, MIRFieldAccess):
+            if instr.object in replacements:
+                instr.object = replacements[instr.object]
+
+        elif isinstance(instr, MIRIndexAccess):
+            if instr.object in replacements:
+                instr.object = replacements[instr.object]
+            if instr.index in replacements:
+                instr.index = replacements[instr.index]
+
+        elif isinstance(instr, MIRListBuild):
+            instr.elements = [
+                replacements[e] if e in replacements else e
+                for e in instr.elements
+            ]
+
+        elif isinstance(instr, MIRListAppend):
+            if instr.list_ssa in replacements:
+                instr.list_ssa = replacements[instr.list_ssa]
+            if instr.element_ssa in replacements:
+                instr.element_ssa = replacements[instr.element_ssa]
+
+        elif isinstance(instr, MIRTupleBuild):
+            instr.elements = [
+                replacements[e] if e in replacements else e
+                for e in instr.elements
+            ]
+
+        elif isinstance(instr, MIRMapBuild):
+            instr.entries = [
+                (
+                    replacements[k] if k in replacements else k,
+                    replacements[v] if v in replacements else v,
+                )
+                for k, v in instr.entries
+            ]
+
+        elif isinstance(instr, MIRADTBuild):
+            instr.fields = [
+                replacements[f] if f in replacements else f
+                for f in instr.fields
+            ]
+
+        elif isinstance(instr, MIRClosureCreate):
+            instr.captures = [
+                replacements[c] if c in replacements else c
+                for c in instr.captures
+            ]
+
+        elif isinstance(instr, MIRStore):
+            if instr.value in replacements:
+                instr.value = replacements[instr.value]
+
+        elif isinstance(instr, MIRPhi):
+            instr.sources = [
+                (label, replacements[ssa] if ssa in replacements else ssa)
+                for label, ssa in instr.sources
+            ]
+
+    def _replace_terminator_operands(self, terminator, replacements):
+        """替换终结指令中的操作数 SSA 名"""
+        if not replacements:
+            return
+
+        from ir_nodes import MIRBranch, MIRSwitch, MIRReturn, MIRMatchJump
+
+        if isinstance(terminator, MIRBranch):
+            if terminator.condition in replacements:
+                terminator.condition = replacements[terminator.condition]
+
+        elif isinstance(terminator, MIRSwitch):
+            if terminator.value in replacements:
+                terminator.value = replacements[terminator.value]
+
+        elif isinstance(terminator, MIRReturn):
+            if terminator.value and terminator.value in replacements:
+                terminator.value = replacements[terminator.value]
+
+        elif isinstance(terminator, MIRMatchJump):
+            if terminator.value in replacements:
+                terminator.value = replacements[terminator.value]
 
 
 class LoopInvariantCodeMotion(Pass):
