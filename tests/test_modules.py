@@ -824,3 +824,185 @@ let my_val = 100
 
         assert "my_func" in evaluator.exported_names
         assert "my_val" in evaluator.exported_names
+
+
+# ============================================================
+# 测试导入冲突检测（编译器级别）
+# ============================================================
+
+class TestImportConflictDetection:
+    """测试编译器在导入时检测命名冲突的能力"""
+
+    def _compile_with_import(self, main_source: str, module_source: str,
+                              module_name: str = "mod") -> tuple:
+        """辅助函数：编译带有导入的代码，返回 (bytecode, stderr_output)
+        使用 BytecodeCompiler 直接测试冲突检测。
+        """
+        import io
+        import tempfile
+        import os
+
+        tmpdir = tempfile.mkdtemp(prefix="nova_conflict_test_")
+        try:
+            # 写入被导入模块
+            mod_path = os.path.join(tmpdir, f"{module_name}.nova")
+            with open(mod_path, 'w') as f:
+                f.write(module_source)
+
+            # 写入主模块
+            main_path = os.path.join(tmpdir, "main.nova")
+            with open(main_path, 'w') as f:
+                f.write(main_source)
+
+            # 解析主模块
+            from nova.lexer import Lexer
+            from nova.parser import Parser
+            from nova.modules import ModuleManager
+            from nova.compiler import BytecodeCompiler
+
+            with open(main_path, 'r') as f:
+                source = f.read()
+
+            lexer = Lexer(source)
+            tokens = lexer.tokenize()
+            parser = Parser(tokens)
+            program = parser.parse()
+
+            # 编译并捕获 stderr 警告
+            manager = ModuleManager(search_paths=[tmpdir])
+            compiler = BytecodeCompiler(module_manager=manager, current_file=main_path)
+
+            # 捕获 stderr
+            old_stderr = sys.stderr
+            sys.stderr = io.StringIO()
+            try:
+                bytecode = compiler.compile(program)
+                stderr_output = sys.stderr.getvalue()
+            finally:
+                sys.stderr = old_stderr
+
+            return bytecode, stderr_output
+        finally:
+            import shutil
+            shutil.rmtree(tmpdir, ignore_errors=True)
+
+    def test_import_let_binding_conflict(self):
+        """主文件与导入模块有同名 let 绑定时应发出警告"""
+        main_source = """
+let x = 5
+import "./mod"
+"""
+        mod_source = """
+export x
+
+let x = 10
+"""
+        _, stderr = self._compile_with_import(main_source, mod_source)
+        assert "shadows existing binding" in stderr
+        assert "x" in stderr
+
+    def test_import_mut_binding_conflict(self):
+        """主文件与导入模块有同名 mut 绑定时应发出警告"""
+        main_source = """
+mut counter = 0
+import "./mod"
+"""
+        mod_source = """
+export counter
+
+let counter = 100
+"""
+        _, stderr = self._compile_with_import(main_source, mod_source)
+        assert "shadows existing binding" in stderr
+        assert "counter" in stderr
+
+    def test_import_type_def_conflict(self):
+        """主文件与导入模块有同名 type 定义时应发出警告"""
+        main_source = """
+type Color { Red | Green | Blue }
+import "./mod"
+"""
+        mod_source = """
+export Color
+
+type Color { Cyan | Magenta | Yellow }
+"""
+        _, stderr = self._compile_with_import(main_source, mod_source)
+        assert "shadows existing binding" in stderr
+        assert "Color" in stderr
+
+    def test_import_type_constructor_conflict(self):
+        """导入模块的变体构造器与主文件绑定时应发出警告"""
+        main_source = """
+let Red = "red_value"
+import "./mod"
+"""
+        mod_source = """
+export Color
+
+type Color { Red | Green | Blue }
+"""
+        _, stderr = self._compile_with_import(main_source, mod_source)
+        assert "shadows existing binding" in stderr
+        assert "Red" in stderr
+
+    def test_import_no_conflict_let(self):
+        """无冲突的 let 绑定导入应该正常工作且无警告"""
+        main_source = """
+let x = 5
+import "./mod"
+"""
+        mod_source = """
+export y
+
+let y = 10
+"""
+        _, stderr = self._compile_with_import(main_source, mod_source)
+        assert "shadows existing binding" not in stderr
+
+    def test_import_no_conflict_type(self):
+        """无冲突的 type 定义导入应该正常工作且无警告"""
+        main_source = """
+type Color { Red | Green | Blue }
+import "./mod"
+"""
+        mod_source = """
+export Shape
+
+type Shape { Circle | Square }
+"""
+        _, stderr = self._compile_with_import(main_source, mod_source)
+        assert "shadows existing binding" not in stderr
+
+    def test_import_function_conflict_still_works(self):
+        """函数名冲突检测仍然正常工作（回归测试）"""
+        main_source = """
+fn foo() -> Int { 42 }
+import "./mod"
+"""
+        mod_source = """
+export foo
+
+fn foo() -> Int { 99 }
+"""
+        _, stderr = self._compile_with_import(main_source, mod_source)
+        assert "shadows existing binding" in stderr
+        assert "foo" in stderr
+
+    def test_import_before_binding_no_conflict(self):
+        """导入在绑定之前时不应报错（导入先定义，后被绑定覆盖是另一个方向）"""
+        main_source = """
+import "./mod"
+let x = 5
+"""
+        mod_source = """
+export x
+
+let x = 10
+"""
+        # 导入先于本地绑定，导入的值会被本地绑定覆盖
+        # 这不是导入冲突检测的范畴（导入时还没有 x）
+        _, stderr = self._compile_with_import(main_source, mod_source)
+        # 导入时 x 还未定义，所以不应该有警告
+        # （注意：这是当前设计，未来可能需要双向检测）
+        assert "shadows existing binding" not in stderr

@@ -227,6 +227,9 @@ class BytecodeCompiler:
         self._init_builtin_adt_constructors()
         self._module_manager = module_manager  # ModuleManager 实例
         self._current_file = current_file      # 当前文件路径
+        # 顶层绑定名称集合：跟踪所有已定义的顶层名称（函数、let、mut、类型构造器等）
+        # 用于导入冲突检测
+        self._top_level_names: set = set()
         # 统一循环栈：跟踪所有类型的循环（while/for），用于正确编译 break/continue
         # 每个元素为 dict: {"type": "while"|"for", "break_patches": List[int], "continue_target": int}
         self._loop_stack: List[Dict[str, Any]] = []
@@ -275,11 +278,14 @@ class BytecodeCompiler:
             return
 
         if isinstance(decl, TypeDef):
+            # 注册类型名和所有变体构造器名到顶层绑定集合（用于冲突检测）
+            self._top_level_names.add(decl.name)
             for variant in decl.variants:
                 field_count = len(variant.fields)
                 field_names = tuple(f[0] for f in variant.fields)
                 # 注册构造器到编译器的 ADT 构造器表（用于模式匹配识别）
                 self._adt_constructors[variant.name] = (decl.name, field_count)
+                self._top_level_names.add(variant.name)
                 if variant.fields:
                     # 带字段的构造器 -> 注册构造函数
                     self.bytecode.emit_op(
@@ -293,16 +299,19 @@ class BytecodeCompiler:
                     self.bytecode.emit_op(Op.STORE_VAR, variant.name, False)
 
         elif isinstance(decl, AliasDef):
-            pass
+            self._top_level_names.add(decl.name)
 
         elif isinstance(decl, FnDef):
+            self._top_level_names.add(decl.name)
             self._compile_fn_def(decl)
 
         elif isinstance(decl, LetBinding):
+            self._top_level_names.add(decl.name)
             self._compile_expr(decl.value)
             self.bytecode.emit_op(Op.STORE_VAR, decl.name, False)
 
         elif isinstance(decl, MutBinding):
+            self._top_level_names.add(decl.name)
             self._compile_expr(decl.value)
             self.bytecode.emit_op(Op.STORE_VAR, decl.name, True)
 
@@ -366,11 +375,21 @@ class BytecodeCompiler:
             # 检测同名冲突：如果声明名称已存在于当前编译上下文中，发出警告
             decl_name = self._get_decl_name(imp_decl)
             if decl_name is not None:
-                if decl_name in self.bytecode.functions or decl_name in self._builtin_names:
+                if (decl_name in self._top_level_names
+                        or decl_name in self._builtin_names):
                     print(
                         f"warning: import '{decl_name}' shadows existing binding",
                         file=sys.stderr,
                     )
+            # 对于 TypeDef，还需要检查每个变体构造器名是否冲突
+            if isinstance(imp_decl, TypeDef):
+                for variant in imp_decl.variants:
+                    if (variant.name in self._top_level_names
+                            or variant.name in self._builtin_names):
+                        print(
+                            f"warning: import '{variant.name}' (constructor of {decl_name}) shadows existing binding",
+                            file=sys.stderr,
+                        )
             # 内联编译
             self._compile_decl(imp_decl)
 
@@ -541,7 +560,7 @@ class BytecodeCompiler:
             self._compile_expr(expr.left)
             self.bytecode.emit_op(Op.DUP)
             jump_pos = self.bytecode.current_pos()
-            self.bytecode.emit_op(Op.POP_JUMP_IF_FALSE, 0)
+            self.bytecode.emit_op(Op.JUMP_IF_FALSE, 0)
             # true 路径：left 为 true，弹出 dup 的值，计算 right
             self.bytecode.emit_op(Op.POP)
             self._compile_expr(expr.right)

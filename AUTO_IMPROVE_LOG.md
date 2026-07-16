@@ -1,5 +1,61 @@
 # Nova 自动改进日志
 
+## 2026-07-16 自动改进（第三十一轮）
+
+基于 AUTO_REVIEW_LOG.md 第二十六轮审查日志的 P0/P1 级严重问题驱动改进（阶段一检查 + 阶段二开发 + 阶段三测试）。
+
+### 每日发现的问题
+
+#### compiler.py
+- **`&&` 运算符使用 POP_JUMP_IF_FALSE 污染 _while_loops 栈（compiler.py:544）**：`&&` 短路求值使用 `POP_JUMP_IF_FALSE`，该指令在 VM 中有 while 循环跟踪副作用，导致 `true && true` 执行后 `_while_loops` 栈残留假条目
+  - 审查日志追问结论：不能接受。逻辑运算符不应干扰循环控制状态
+  - 根因：修复栈丢失问题时直接选用了 POP_JUMP_IF_FALSE，未考虑其 while 循环跟踪副作用
+  - 影响：嵌套在循环内的 `&&` 表达式可能导致 break/continue 行为异常
+  - 验证：VM 执行 `true && true` 后检查 `_while_loops`，发现残留一条 end_ip 记录
+
+#### compiler.py
+- **导入冲突检测仅覆盖函数，漏掉 Let/Mut/Type 绑定（compiler.py:367-372）**：主文件 `let x = 5`，导入模块也 `export x = 10`，导入静默覆盖连警告都没有
+  - 审查日志追问结论：不能接受。Nova 的内联导入模型本身就危险，连基本的冲突检测都不完整
+  - 根因：早期实现只考虑了函数导入，后续添加 let/mut/type 时未扩展冲突检测
+  - 影响：同名绑定静默覆盖，导致难以调试的逻辑错误
+
+#### 测试基础设施
+- **无 Evaluator vs VM 一致性测试（P0 级质量基础设施缺失）**：两个后端语义漂移无法检测，只能靠人工审查发现不一致
+  - 审查日志追问结论：不能接受。双后端语言必须有一致性测试保障
+  - 根因：项目早期只有 Evaluator，后来添加 VM 时未同步建立一致性测试体系
+  - 影响：之前已发现 Unit bool 语义、闭包捕获语义、范围迭代语义等多处不一致
+
+### 本次修复内容（基于审查日志 Issue）
+
+1. **compiler.py — `&&` 运算符改用 JUMP_IF_FALSE（基于审查日志 compiler.py:493-500 / 第二十六轮严重问题延伸）**
+   - 将 `&&` 的 `POP_JUMP_IF_FALSE` 改为 `JUMP_IF_FALSE`，与 `||` 的实现对称
+   - 消除 `_while_loops` 栈被逻辑运算符污染的问题
+   - 新增 2 个测试用例：`&&` 和 `||` 均不污染循环栈
+
+2. **compiler.py — 导入冲突检测扩展到所有顶层绑定（基于审查日志 compiler.py:367-372 / 第二十六轮严重问题 #4）**
+   - 新增 `_top_level_names` 集合，跟踪所有顶层绑定名称（函数、let、mut、类型、构造器）
+   - `_compile_decl` 中注册各类声明的名称到 `_top_level_names`
+   - `_compile_import` 中冲突检测改用 `_top_level_names`，覆盖所有绑定类型
+   - 新增对 ADT 变体构造器名的冲突检测
+   - 新增 8 个测试用例：let/mut/type/构造器冲突检测、无冲突回归、函数冲突回归
+
+3. **tests/test_consistency.py — 建立 Evaluator vs VM 一致性测试套件（基于审查日志 P0 问题 #8）**
+   - 新建一致性测试框架：`run_both()` 同时运行两端、`_normalize_value()` 规范化值比较
+   - 57 个测试用例覆盖 12 大类：算术、字符串、列表、布尔逻辑、元组、ADT、函数、管道、范围迭代、错误传播、打印输出、边界情况
+   - 两端值规范化处理：NovaADTValue、NovaClosure、NovaChar、Unit 等不同类统一比较
+   - 所有 57 个测试全部通过，验证当前两端核心语义一致
+
+### 测试结果
+
+- 全量测试: **950 passed** (1.60s) — 从 878 增至 950 (+72)
+- Evaluator 示例: hello/fibonacci/pattern_match/loops/math/pipe/list_comprehension 全部正常输出
+- VM 示例: hello/fibonacci/pattern_match 全部正常输出
+- `&&` 栈污染修复: `_while_loops` 执行后为空 ✅ / 与 `||` 对称 ✅
+- 导入冲突检测: let/mut/type/构造器冲突均警告 ✅ / 无冲突正常 ✅
+- 一致性测试: 57 个测试全部通过 ✅ / 12 大类核心功能语义一致 ✅
+
+---
+
 ## 2026-07-16 自动改进（第三十轮）
 
 基于 AUTO_REVIEW_LOG.md 第二十六轮审查日志的 P0/P1 级严重问题驱动改进（阶段一检查 + 阶段二开发 + 阶段三测试）。

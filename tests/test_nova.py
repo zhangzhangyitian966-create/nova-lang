@@ -1343,6 +1343,85 @@ class TestErrors(unittest.TestCase):
         self.assertEqual(result.variant_name, "Some")
         self.assertEqual(result.fields[0], 2)
 
+    # === ? 操作符解包行为验证（解包 Some/Ok，传播 None/Err）===
+
+    def test_try_expr_some_unwrap_returns_inner_value(self):
+        """Some(42)? 应返回 42（内部值），而非 Some(42)（整个 ADT）"""
+        ev = eval_source("""
+            fn test() -> Int {
+                Some(42)?
+            }
+            let result = test()
+        """, check_types=False)
+        from nova.evaluator import NovaADTValue
+        result = ev.env.lookup("result")
+        self.assertNotIsInstance(result, NovaADTValue,
+            "? 操作符应解包 Some，返回内部值而非整个 ADT")
+        self.assertEqual(result, 42)
+
+    def test_try_expr_ok_unwrap_returns_inner_value(self):
+        """Ok("hello")? 应返回 "hello"（内部值），而非 Ok("hello")（整个 ADT）"""
+        ev = eval_source("""
+            type Result[T, E] { Ok(T) Err(E) }
+            fn test() -> String {
+                Ok("hello")?
+            }
+            let result = test()
+        """, check_types=False)
+        from nova.evaluator import NovaADTValue
+        result = ev.env.lookup("result")
+        self.assertNotIsInstance(result, NovaADTValue,
+            "? 操作符应解包 Ok，返回内部值而非整个 ADT")
+        self.assertEqual(result, "hello")
+
+    def test_try_expr_none_early_return_propagates_error(self):
+        """None? 应提前返回函数，传播 None（错误传播）"""
+        ev = eval_source("""
+            fn test() -> Option[Int] {
+                let x = None?
+                Some(42)
+            }
+            let result = test()
+        """, check_types=False)
+        from nova.evaluator import NovaADTValue
+        result = ev.env.lookup("result")
+        self.assertIsInstance(result, NovaADTValue)
+        self.assertEqual(result.variant_name, "None")
+        self.assertEqual(result.type_name, "Option")
+
+    def test_try_expr_err_early_return_propagates_error(self):
+        """Err("err")? 应提前返回函数，传播 Err("err")（错误传播）"""
+        ev = eval_source("""
+            type Result[T, E] { Ok(T) Err(E) }
+            fn test() -> Result[Int, String] {
+                let x = Err("err")?
+                Ok(42)
+            }
+            let result = test()
+        """, check_types=False)
+        from nova.evaluator import NovaADTValue
+        result = ev.env.lookup("result")
+        self.assertIsInstance(result, NovaADTValue)
+        self.assertEqual(result.variant_name, "Err")
+        self.assertEqual(result.type_name, "Result")
+        self.assertEqual(result.fields[0], "err")
+
+    def test_try_expr_let_binding_unwrap_not_adt(self):
+        """let x = some_option? 中 x 应是解包后的值，不是 ADT"""
+        ev = eval_source("""
+            fn test() -> Int {
+                let some_option = Some(42)
+                let x = some_option?
+                x
+            }
+            let result = test()
+        """, check_types=False)
+        from nova.evaluator import NovaADTValue
+        result = ev.env.lookup("result")
+        self.assertNotIsInstance(result, NovaADTValue,
+            "let x = some_option? 中 x 应为解包后的值，不是 ADT")
+        self.assertEqual(result, 42)
+
     def test_break_top_level_raises_runtime_error(self):
         """顶层使用 break 应报 RuntimeError_ 而非崩溃"""
         with self.assertRaises(RuntimeError_) as ctx:
@@ -2278,6 +2357,33 @@ class TestBytecodeVM(unittest.TestCase):
         self.assertEqual(vm.get_global("x"), 25)  # 1+3+5+7+9 = 25
         self.assertEqual(len(vm.stack), 0,
                          f"函数内 while continue 后顶层栈未平衡: {len(vm.stack)} 个残留元素")
+
+    def test_vm_logical_and_no_while_loop_pollution(self):
+        """&& 运算符不应污染 _while_loops 栈（应使用 JUMP_IF_FALSE 而非 POP_JUMP_IF_FALSE）"""
+        vm = self._vm_run("""
+            let x = true && true
+            let y = true && false
+            let z = false && true
+        """)
+        self.assertEqual(vm.get_global("x"), True)
+        self.assertEqual(vm.get_global("y"), False)
+        self.assertEqual(vm.get_global("z"), False)
+        # 关键验证：执行完 && 后 _while_loops 栈应为空，不应被短路跳转污染
+        self.assertEqual(len(vm._while_loops), 0,
+                         f"&& 运算符执行后 _while_loops 栈被污染，有 {len(vm._while_loops)} 个残留条目")
+
+    def test_vm_logical_or_no_while_loop_pollution(self):
+        """|| 运算符不应污染 _while_loops 栈（与 && 对称验证）"""
+        vm = self._vm_run("""
+            let x = true || true
+            let y = false || true
+            let z = false || false
+        """)
+        self.assertEqual(vm.get_global("x"), True)
+        self.assertEqual(vm.get_global("y"), True)
+        self.assertEqual(vm.get_global("z"), False)
+        self.assertEqual(len(vm._while_loops), 0,
+                         f"|| 运算符执行后 _while_loops 栈被污染，有 {len(vm._while_loops)} 个残留条目")
 
     def test_vm_adt(self):
         vm = self._vm_run("""
