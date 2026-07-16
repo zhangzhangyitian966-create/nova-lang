@@ -342,6 +342,13 @@ class MIRLowering:
         return None
 
     def _lower_if_expr(self, hir_expr, block):
+        """降级 if 表达式。
+
+        SSA 语义：
+        - true/false 分支在独立的 env 上下文中运行（分支隔离）
+        - 两个分支都修改的变量，在 merge 块插入 Phi 节点
+        - if 表达式的结果值也通过 Phi 合并
+        """
         cond_ssa = self._lower_expr(hir_expr.condition, block)
 
         true_block = MIRBasicBlock(self._new_block())
@@ -352,31 +359,80 @@ class MIRLowering:
             cond_ssa or "", true_block.label, false_block.label
         )
 
+        # 保存进入分支前的 env 状态
+        pre_env = dict(self.env)
+
+        # --- true 分支 ---
         old_block = self.current_block
         self.current_block = true_block
         true_result = self._lower_expr(hir_expr.consequence, true_block)
         if true_block.terminator is None:
             true_block.terminator = MIRJump(merge_block.label)
+        # 收集 true 分支修改的变量
+        true_modified = {}
+        for name, ssa in self.env.items():
+            if name not in pre_env or pre_env[name] != ssa:
+                true_modified[name] = ssa
+        # 恢复 env 和 current_block
+        self.env = dict(pre_env)
         self.current_block = old_block
 
+        # --- false 分支 ---
         self.current_block = false_block
         false_result = None
         if hir_expr.alternative:
             false_result = self._lower_expr(hir_expr.alternative, false_block)
         if false_block.terminator is None:
             false_block.terminator = MIRJump(merge_block.label)
+        # 收集 false 分支修改的变量
+        false_modified = {}
+        for name, ssa in self.env.items():
+            if name not in pre_env or pre_env[name] != ssa:
+                false_modified[name] = ssa
+        # 恢复 env
+        self.env = dict(pre_env)
         self.current_block = old_block
 
-        phi_sources = []
+        # --- merge 块：为被修改的变量插入 Phi ---
+        self.current_block = merge_block
+
+        # 找出所有在任一分支中被修改的变量
+        all_modified_names = set(true_modified.keys()) | set(false_modified.keys())
+
+        for name in all_modified_names:
+            phi_sources = []
+
+            # true 分支：如果修改了就用修改后的值，否则用进入分支前的值
+            if name in true_modified:
+                phi_sources.append((true_block.label, true_modified[name]))
+            elif name in pre_env:
+                phi_sources.append((true_block.label, pre_env[name]))
+
+            # false 分支：同理
+            if name in false_modified:
+                phi_sources.append((false_block.label, false_modified[name]))
+            elif name in pre_env:
+                phi_sources.append((false_block.label, pre_env[name]))
+
+            # 只有当至少有两个不同来源时才需要 Phi
+            if len(phi_sources) >= 2:
+                instr = MIRPhi(UNIT_TYPE)  # 类型简化，后续类型检查会处理
+                instr.sources = phi_sources
+                instr.result_name = self._new_ssa()
+                merge_block.instructions.append(instr)
+                self.env[name] = instr.result_name
+
+        # --- 表达式结果 Phi（if 表达式本身的值）---
+        result_phi_sources = []
         if true_result:
-            phi_sources.append((true_block.label, true_result))
+            result_phi_sources.append((true_block.label, true_result))
         if false_result:
-            phi_sources.append((false_block.label, false_result))
+            result_phi_sources.append((false_block.label, false_result))
 
         merge_ssa = None
-        if phi_sources:
+        if result_phi_sources:
             instr = MIRPhi(hir_expr.ir_type)
-            instr.sources = phi_sources
+            instr.sources = result_phi_sources
             instr.result_name = self._new_ssa()
             merge_block.instructions.append(instr)
             merge_ssa = instr.result_name
@@ -387,177 +443,241 @@ class MIRLowering:
 
     def _lower_match_expr(self, hir_expr, block):
         """
-        降级 match 表达式：使用级联比较（if-elseif 链）实现模式匹配。
+        降级 match 表达式：实现真正的模式匹配分支逻辑。
 
-        支持的模式类型：
-        - 常量模式（Int/Float/String/Bool/Char）：生成 == 比较 + 条件分支
-        - 通配符模式（_）：无条件匹配
-        - 绑定模式（x）：无条件匹配 + 将 scrutinee 绑定到变量名
+        编译策略：
+          - 每个 arm 生成一个"模式检查块" + "arm body 块"
+          - 检查块中生成模式比较代码，匹配成功跳 body 块，失败跳下一个 arm 的检查块
+          - 所有 body 块跳转到 merge 块，通过 Phi 节点合并结果
+          - 支持模式：字面量模式(int/float/string/bool/char)、通配符(_)、
+            绑定模式(x)、构造器模式(Variant(fields...))
 
-        控制流结构：
-          bb_check_0: 比较 scrutinee == pattern_0
-            if true goto bb_arm_0 else goto bb_check_1
-          bb_arm_0: arm_0 body → goto bb_merge
-          bb_check_1: 比较 scrutinee == pattern_1
-            if true goto bb_arm_1 else goto bb_check_2
-          ...
-          bb_arm_N: arm_N body → goto bb_merge
-          bb_merge: phi(arm_0_result, arm_1_result, ...)
+        SSA 语义：
+          - 每个 arm 在独立的 env 上下文中运行（arm 间隔离）
+          - 多个 arm 都修改的变量，在 merge 块插入 Phi 节点
         """
         value_ssa = self._lower_expr(hir_expr.value, block)
         arms = hir_expr.arms
         if not arms:
             return None
 
-        # 保存当前环境，每个 arm 独立计算，避免变量泄漏
-        saved_env = dict(self.env)
-
         merge_block = MIRBasicBlock(self._new_block())
-        arm_body_blocks = []
-        phi_sources = []  # (arm_block_label, result_ssa)
+        arm_body_blocks = []  # 每个 arm 的 body 块，用于收集 Phi source
+        arm_results = []      # 每个 arm body 的结果 SSA 名
+        arm_modified_envs = []  # 每个 arm 修改的 env {name: ssa}
 
-        # 当前"fall-through"块（下一个模式检查的入口）
-        current_fallthrough = block
+        # 为每个 arm 创建检查块和 body 块
+        check_blocks = [MIRBasicBlock(self._new_block()) for _ in range(len(arms))]
+        body_blocks = [MIRBasicBlock(self._new_block()) for _ in range(len(arms))]
+        # 最后一个 arm 之后的失败块（理论上穷举匹配不会到达）
+        fail_block = MIRBasicBlock(self._new_block())
+
+        # 入口块跳转到第一个 arm 的检查块
+        block.terminator = MIRJump(check_blocks[0].label)
+
+        # 保存进入 match 前的 env 状态
+        pre_env = dict(self.env)
+        old_block = self.current_block
 
         for i, arm in enumerate(arms):
-            arm_body_block = MIRBasicBlock(self._new_block())
-            arm_body_blocks.append(arm_body_block)
+            # 每个 arm 开始前恢复 env（arm 间隔离）
+            self.env = dict(pre_env)
 
-            # 恢复环境到 match 开始时的状态（每个 arm 独立）
-            self.env = dict(saved_env)
+            # --- 模式检查块 ---
+            self.current_block = check_blocks[i]
+            next_check = check_blocks[i + 1].label if i + 1 < len(arms) else fail_block.label
 
-            # 判断模式类型，生成检查代码
-            pattern = arm.pattern
-            is_unconditional = False  # 是否无条件匹配（通配符/绑定模式）
+            self._lower_pattern(
+                arm.pattern,
+                value_ssa or "",
+                check_blocks[i],
+                body_blocks[i].label,
+                next_check,
+            )
 
-            if isinstance(pattern, (HIRWildcardPattern, HIRBindPattern)):
-                # 通配符或绑定模式：无条件匹配
-                is_unconditional = True
+            # 如果检查块没有被设置 terminator（比如通配符模式无条件匹配），
+            # 默认跳转到 body 块
+            if check_blocks[i].terminator is None:
+                check_blocks[i].terminator = MIRJump(body_blocks[i].label)
 
-                # 绑定模式：将 scrutinee 绑定到变量名
-                if isinstance(pattern, HIRBindPattern):
-                    self.env[pattern.name] = value_ssa or ""
+            # --- arm body 块 ---
+            self.current_block = body_blocks[i]
+            arm_result = self._lower_expr(arm.body, body_blocks[i])
+            if body_blocks[i].terminator is None:
+                body_blocks[i].terminator = MIRJump(merge_block.label)
 
-                # 无条件跳转到 arm body
-                current_fallthrough.terminator = MIRJump(arm_body_block.label)
+            arm_body_blocks.append(body_blocks[i])
+            arm_results.append(arm_result)
 
-            else:
-                # 常量模式：生成比较 + 条件分支
-                check_block = current_fallthrough
-                self.current_block = check_block
+            # 收集本 arm 修改的变量
+            modified = {}
+            for name, ssa in self.env.items():
+                if name not in pre_env or pre_env[name] != ssa:
+                    modified[name] = ssa
+            arm_modified_envs.append(modified)
 
-                # 生成模式对应的常量指令
-                const_ssa = self._emit_pattern_const(pattern)
+        # --- 失败块（理论不可达，放一个 panic） ---
+        self.env = dict(pre_env)
+        self.current_block = fail_block
+        fail_block.terminator = MIRPanic("non-exhaustive match")
 
-                # 生成比较指令（scrutinee == pattern_value）
-                cmp_instr = MIRBoolLiteral().ir_type
-                from ir_nodes import BOOL_TYPE
-                cmp_instr = MIRBinOp(BOOL_TYPE)
-                cmp_instr.op = "=="
-                cmp_instr.left = value_ssa or ""
-                cmp_instr.right = const_ssa or ""
-                cmp_ssa = self._emit(cmp_instr)
+        # --- merge 块：为被修改的变量插入 Phi + 表达式结果 Phi ---
+        self.current_block = merge_block
+        self.env = dict(pre_env)
 
-                # 条件跳转：匹配成功 → arm body，失败 → 下一个检查
-                next_check_block = MIRBasicBlock(self._new_block())
-                check_block.terminator = MIRBranch(
-                    cmp_ssa, arm_body_block.label, next_check_block.label
-                )
-                self.all_blocks.append(next_check_block)
-                current_fallthrough = next_check_block
+        # 找出所有在任一 arm 中被修改的变量
+        all_modified_names = set()
+        for modified in arm_modified_envs:
+            all_modified_names.update(modified.keys())
 
-            # 降级 arm body
-            self.current_block = arm_body_block
-            arm_result = self._lower_expr(arm.body, arm_body_block)
+        for name in all_modified_names:
+            phi_sources = []
 
-            # 如果有 guard 条件，需要额外检查
-            # （guard 为假时 fall-through 到下一个 arm）
-            if arm.guard is not None and not is_unconditional:
-                # guard 检查块
-                guard_true_block = MIRBasicBlock(self._new_block())
-                next_fallthrough = MIRBasicBlock(self._new_block())
+            for i, arm_block in enumerate(arm_body_blocks):
+                if name in arm_modified_envs[i]:
+                    # 本 arm 修改了该变量，用修改后的值
+                    phi_sources.append((arm_block.label, arm_modified_envs[i][name]))
+                elif name in pre_env:
+                    # 本 arm 未修改，用进入 match 前的值
+                    phi_sources.append((arm_block.label, pre_env[name]))
 
-                guard_ssa = self._lower_expr(arm.guard, arm_body_block)
-                arm_body_block.terminator = MIRBranch(
-                    guard_ssa or "", guard_true_block.label, next_fallthrough.label
-                )
+            # 至少两个不同来源才需要 Phi
+            if len(phi_sources) >= 2:
+                instr = MIRPhi(UNIT_TYPE)
+                instr.sources = phi_sources
+                instr.result_name = self._new_ssa()
+                merge_block.instructions.append(instr)
+                self.env[name] = instr.result_name
 
-                # guard 为真：继续执行 arm body 剩余部分
-                # （简化：guard 直接在 body 前检查，body 在 guard_true_block 中）
-                # 这里重新组织：body 在 guard_true_block 中计算
-                # 为简化实现，将 guard 视为 arm body 的前置条件
-                # 重新计算 arm result 在 guard_true_block 中
-                self.current_block = guard_true_block
-                arm_result = self._lower_expr(arm.body, guard_true_block)
+        # --- 表达式结果 Phi（match 表达式本身的值）---
+        result_phi_sources = []
+        for i, arm_block in enumerate(arm_body_blocks):
+            if arm_results[i]:
+                result_phi_sources.append((arm_block.label, arm_results[i]))
 
-                if guard_true_block.terminator is None:
-                    guard_true_block.terminator = MIRJump(merge_block.label)
-
-                self.all_blocks.extend([guard_true_block, next_fallthrough])
-                arm_body_block = guard_true_block  # 用 guard_true 作为 arm 的结果块
-                current_fallthrough = next_fallthrough
-            else:
-                # 无 guard：arm body 结束后跳转到 merge
-                if arm_body_block.terminator is None:
-                    arm_body_block.terminator = MIRJump(merge_block.label)
-
-            # 收集 Phi 来源
-            if arm_result:
-                phi_sources.append((arm_body_block.label, arm_result))
-
-            # 如果是无条件匹配，后续 arm 不可达，停止处理
-            if is_unconditional and arm.guard is None:
-                break
-
-        # 恢复环境
-        self.env = dict(saved_env)
-
-        # merge 块：Phi 节点合并所有 arm 结果
         merge_ssa = None
-        if phi_sources:
+        if result_phi_sources:
             instr = MIRPhi(hir_expr.ir_type)
-            instr.sources = phi_sources
+            instr.sources = result_phi_sources
             instr.result_name = self._new_ssa()
             merge_block.instructions.append(instr)
             merge_ssa = instr.result_name
 
-        self.all_blocks.extend(arm_body_blocks + [merge_block])
+        self.all_blocks.extend(check_blocks + body_blocks + [fail_block, merge_block])
         self.current_block = merge_block
         return merge_ssa
 
-    def _emit_pattern_const(self, pattern):
-        """为常量模式生成 MIRConst 指令，返回结果 SSA 名。"""
+    def _lower_pattern(self, pattern, value_ssa, block, match_target, fail_target):
+        """
+        降级单个模式：在 block 中生成模式检查代码。
+        匹配成功跳 match_target，失败跳 fail_target。
+
+        对于绑定模式和通配符模式，由于总是匹配成功，
+        直接在 block 中做绑定/什么都不做，调用方会跳 match_target。
+        """
         from ir_nodes import (
-            INT_TYPE, FLOAT_TYPE, STRING_TYPE, BOOL_TYPE, CHAR_TYPE,
+            HIRIntPattern, HIRFloatPattern, HIRStringPattern,
+            HIRBoolPattern, HIRCharPattern, HIRWildcardPattern,
+            HIRBindPattern, HIRConstructorPattern,
         )
 
-        if isinstance(pattern, HIRIntPattern):
-            instr = MIRConst(INT_TYPE)
-            instr.value = pattern.value
-            instr.const_type = "int"
-        elif isinstance(pattern, HIRFloatPattern):
-            instr = MIRConst(FLOAT_TYPE)
-            instr.value = pattern.value
-            instr.const_type = "float"
-        elif isinstance(pattern, HIRStringPattern):
-            instr = MIRConst(STRING_TYPE)
-            instr.value = pattern.value
-            instr.const_type = "string"
-        elif isinstance(pattern, HIRBoolPattern):
-            instr = MIRConst(BOOL_TYPE)
-            instr.value = pattern.value
-            instr.const_type = "bool"
-        elif isinstance(pattern, HIRCharPattern):
-            instr = MIRConst(CHAR_TYPE)
-            instr.value = pattern.value
-            instr.const_type = "char"
-        else:
-            # 不支持的模式类型，返回 unit（不应到达）
-            instr = MIRConst(UNIT_TYPE)
-            instr.value = None
-            instr.const_type = "unit"
+        if isinstance(pattern, HIRWildcardPattern):
+            # 通配符总是匹配，什么都不用做
+            return
 
-        return self._emit(instr)
+        if isinstance(pattern, HIRBindPattern):
+            # 绑定模式：总是匹配，将值绑定到变量名
+            self.env[pattern.name] = value_ssa
+            return
+
+        if isinstance(pattern, (HIRIntPattern, HIRFloatPattern, HIRStringPattern,
+                                 HIRBoolPattern, HIRCharPattern)):
+            # 字面量模式：生成比较 + 条件分支
+            const_type_map = {
+                HIRIntPattern: "int",
+                HIRFloatPattern: "float",
+                HIRStringPattern: "string",
+                HIRBoolPattern: "bool",
+                HIRCharPattern: "char",
+            }
+            const_instr = MIRConst(pattern.__class__)  # 类型不重要
+            const_instr.value = pattern.value
+            const_instr.const_type = const_type_map[type(pattern)]
+            const_ssa = self._emit(const_instr)
+
+            cmp_instr = MIRBinOp(UNIT_TYPE)  # 结果类型应为 Bool，简化处理
+            cmp_instr.op = "=="
+            cmp_instr.left = value_ssa
+            cmp_instr.right = const_ssa
+            cmp_ssa = self._emit(cmp_instr)
+
+            block.terminator = MIRBranch(cmp_ssa, match_target, fail_target)
+            return
+
+        if isinstance(pattern, HIRConstructorPattern):
+            # 构造器模式：比较 variant tag，匹配成功后递归绑定字段
+            # 1. 先比较 variant 名称（通过 ADT 标签访问）
+            tag_instr = MIRFieldAccess(UNIT_TYPE)
+            tag_instr.object = value_ssa
+            tag_instr.field_name = "tag"
+            tag_instr.field_index = 0
+            tag_ssa = self._emit(tag_instr)
+
+            # 生成 variant 名常量做比较
+            tag_const = MIRConst(UNIT_TYPE)
+            tag_const.value = pattern.variant_name
+            tag_const.const_type = "string"
+            tag_const_ssa = self._emit(tag_const)
+
+            tag_cmp = MIRBinOp(UNIT_TYPE)
+            tag_cmp.op = "=="
+            tag_cmp.left = tag_ssa
+            tag_cmp.right = tag_const_ssa
+            tag_cmp_ssa = self._emit(tag_cmp)
+
+            # 如果字段模式为空，直接比较 tag 即可
+            if not pattern.field_patterns:
+                block.terminator = MIRBranch(tag_cmp_ssa, match_target, fail_target)
+                return
+
+            # 有字段模式：需要一个中间块来做字段绑定和递归检查
+            field_check_block = MIRBasicBlock(self._new_block())
+            block.terminator = MIRBranch(tag_cmp_ssa, field_check_block.label, fail_target)
+
+            self.current_block = field_check_block
+            # 递归处理每个字段模式
+            current_target = match_target
+            # 从后往前处理，这样 fail_target 可以串联起来
+            for j in range(len(pattern.field_patterns) - 1, -1, -1):
+                field_pat = pattern.field_patterns[j]
+                field_name = f"field{j}"
+
+                # 提取字段值
+                field_instr = MIRFieldAccess(UNIT_TYPE)
+                field_instr.object = value_ssa
+                field_instr.field_name = field_name
+                field_instr.field_index = j + 1  # tag 在 index 0
+                field_ssa = self._emit(field_instr)
+
+                # 为该字段创建检查块
+                fblock = MIRBasicBlock(self._new_block())
+                self.current_block = fblock
+
+                self._lower_pattern(field_pat, field_ssa, fblock, current_target, fail_target)
+
+                if fblock.terminator is None:
+                    fblock.terminator = MIRJump(current_target)
+
+                self.all_blocks.append(fblock)
+                current_target = fblock.label
+
+            # field_check_block 跳转到第一个字段的检查块
+            field_check_block.terminator = MIRJump(current_target)
+            self.all_blocks.append(field_check_block)
+            return
+
+        # 不支持的模式：当作通配符处理（总是匹配）
+        return
 
     def _lower_pipe_expr(self, hir_expr, block):
         result = self._lower_expr(hir_expr.stages[0], block)
@@ -571,143 +691,108 @@ class MIRLowering:
 
     def _lower_for_expr(self, hir_expr, block):
         """
-        降级 for 循环表达式：使用索引迭代可迭代对象。
+        降级 for 循环表达式：用索引遍历实现，正确绑定循环变量。
 
-        控制流结构：
-          bb_entry:
-            iter = iterable
-            idx = 0
-            goto bb_header
-          bb_header:
-            len = list_length(iter)
-            cond = idx < len
-            if cond goto bb_body else goto bb_exit
-          bb_body:
-            elem = iter[idx]       // 当前元素
-            env[variable] = elem   // 绑定循环变量
-            body_expr
-            idx = idx + 1
-            goto bb_header
-          bb_exit:
+        编译结构：
+          iter = iterable          // 计算可迭代对象
+          len = list_length(iter)  // 获取长度
+          i = 0                    // 索引变量
+          goto header
+          header:
+            phi_i = phi(entry: i, body: i_next)
+            cond = phi_i < len
+            if cond goto body else goto exit
+          body:
+            elem = list_get(iter, phi_i)   // 当前元素
+            variable = elem                // 绑定循环变量
+            body_expr...
+            i_next = phi_i + 1
+            goto header
+          exit:
             return unit
         """
-        from ir_nodes import INT_TYPE
-
         header_block = MIRBasicBlock(self._new_block())
         body_block = MIRBasicBlock(self._new_block())
         exit_block = MIRBasicBlock(self._new_block())
 
-        # 1. 在入口块降级可迭代对象，初始化索引
+        # 在入口块计算可迭代对象和长度
         iter_ssa = self._lower_expr(hir_expr.iterable, block)
 
-        # idx = 0
-        zero_instr = MIRConst(INT_TYPE)
-        zero_instr.value = 0
-        zero_instr.const_type = "int"
-        idx_ssa = self._emit(zero_instr)
-
-        block.terminator = MIRJump(header_block.label)
-
-        # 2. 循环头：计算长度，判断条件
-        self.current_block = header_block
-
         # 调用 list_length 获取长度
-        len_instr = MIRCall(INT_TYPE)
+        len_instr = MIRCall(UNIT_TYPE)
         len_instr.callee = "list_length"
         len_instr.args = [iter_ssa or ""]
         len_ssa = self._emit(len_instr)
 
-        # cond = idx < len
-        cmp_instr = MIRBinOp(INT_TYPE)  # 实际是 bool 类型
-        from ir_nodes import BOOL_TYPE
-        cmp_instr = MIRBinOp(BOOL_TYPE)
+        # 索引变量初始值 0
+        idx_init_instr = MIRConst(UNIT_TYPE)
+        idx_init_instr.value = 0
+        idx_init_instr.const_type = "int"
+        idx_init_ssa = self._emit(idx_init_instr)
+
+        # 跳转到循环头
+        block.terminator = MIRJump(header_block.label)
+
+        # --- 循环头：Phi 节点 + 条件判断 ---
+        self.current_block = header_block
+
+        # 索引变量的 Phi（先占位，body 处理完后补充 source）
+        idx_phi = MIRPhi(UNIT_TYPE)
+        idx_phi.result_name = self._new_ssa()
+        idx_phi.sources = []  # 稍后填充
+        header_block.instructions.append(idx_phi)
+        idx_phi_ssa = idx_phi.result_name
+
+        # 比较 i < len
+        cmp_instr = MIRBinOp(UNIT_TYPE)
         cmp_instr.op = "<"
-        cmp_instr.left = idx_ssa
+        cmp_instr.left = idx_phi_ssa
         cmp_instr.right = len_ssa
-        cond_ssa = self._emit(cmp_instr)
+        cmp_ssa = self._emit(cmp_instr)
 
         header_block.terminator = MIRBranch(
-            cond_ssa, body_block.label, exit_block.label
+            cmp_ssa, body_block.label, exit_block.label
         )
 
         # 压入循环上下文（break → exit, continue → header）
         self.loop_stack.append((header_block.label, exit_block.label))
 
-        # 3. 循环体：获取当前元素，绑定循环变量，执行 body
+        # --- 循环体 ---
         self.current_block = body_block
 
-        # elem = iter[idx] (MIRIndexAccess)
-        elem_instr = MIRIndexAccess(hir_expr.ir_type)
-        elem_instr.object = iter_ssa or ""
-        elem_instr.index = idx_ssa
-        elem_ssa = self._emit(elem_instr)
+        # 获取当前元素: list_get(iter, i)
+        get_instr = MIRCall(UNIT_TYPE)
+        get_instr.callee = "list_get"
+        get_instr.args = [iter_ssa or "", idx_phi_ssa]
+        elem_ssa = self._emit(get_instr)
 
         # 绑定循环变量到当前元素
         self.env[hir_expr.variable] = elem_ssa
 
-        # 执行 body
         self._lower_expr(hir_expr.body, body_block)
 
-        # idx = idx + 1
-        one_instr = MIRConst(INT_TYPE)
-        one_instr.value = 1
-        one_instr.const_type = "int"
-        one_ssa = self._emit(one_instr)
+        # 索引递增: i = i + 1
+        inc_instr = MIRBinOp(UNIT_TYPE)
+        inc_instr.op = "+"
+        inc_instr.left = idx_phi_ssa
+        inc_right = MIRConst(UNIT_TYPE)
+        inc_right.value = 1
+        inc_right.const_type = "int"
+        inc_right_ssa = self._emit(inc_right)
+        inc_instr.right = inc_right_ssa
+        inc_ssa = self._emit(inc_instr)
 
-        add_instr = MIRBinOp(INT_TYPE)
-        add_instr.op = "+"
-        add_instr.left = idx_ssa
-        add_instr.right = one_ssa
-        new_idx_ssa = self._emit(add_instr)
-
-        # 更新 idx_ssa 用于下一轮迭代（通过 header 的 Phi）
-        # 注意：这里简化处理，直接在 body 末尾更新，header 中用 Phi 合并
         if body_block.terminator is None:
             body_block.terminator = MIRJump(header_block.label)
 
-        # 在 header 块开头插入 Phi 节点合并 idx 的初始值和循环回边值
-        phi_instr = MIRPhi(INT_TYPE)
-        phi_instr.sources = [
-            (block.label, idx_ssa),
-            (body_block.label, new_idx_ssa),
-        ]
-        phi_instr.result_name = self._new_ssa()
-        header_block.instructions.insert(0, phi_instr)
-
-        # 更新 idx_ssa 引用为 Phi 结果
-        # （简化：header 中后续使用的 idx 仍是旧的，但由于 body 中计算 new_idx_ssa
-        #  用的是旧 idx_ssa，而 header 开头的 Phi 定义了新名，需要更新引用）
-        # 为简化实现，这里用一个变通方案：将 idx_ssa 重映射到 Phi 结果
-        # 实际正确做法是重写 header 中所有 idx_ssa 的引用
-        # 这里做一个简化：直接替换 header 中指令里的 idx_ssa 为 phi 结果
-        phi_result = phi_instr.result_name
-        for instr in header_block.instructions[1:]:  # 跳过 Phi 本身
-            if hasattr(instr, 'left') and instr.left == idx_ssa:
-                instr.left = phi_result
-            if hasattr(instr, 'right') and instr.right == idx_ssa:
-                instr.right = phi_result
-            if hasattr(instr, 'index') and instr.index == idx_ssa:
-                instr.index = phi_result
-            if hasattr(instr, 'object') and instr.object == idx_ssa:
-                instr.object = phi_result
-            if hasattr(instr, 'args'):
-                instr.args = [phi_result if a == idx_ssa else a for a in instr.args]
-
-        # 同时更新 body 中 idx_ssa 的引用（body 用的是 header Phi 出来的值）
-        for instr in body_block.instructions:
-            if hasattr(instr, 'left') and instr.left == idx_ssa:
-                instr.left = phi_result
-            if hasattr(instr, 'right') and instr.right == idx_ssa:
-                instr.right = phi_result
-            if hasattr(instr, 'index') and instr.index == idx_ssa:
-                instr.index = phi_result
-            if hasattr(instr, 'object') and instr.object == idx_ssa:
-                instr.object = phi_result
-            if hasattr(instr, 'args'):
-                instr.args = [phi_result if a == idx_ssa else a for a in instr.args]
-
         # 弹出循环上下文
         self.loop_stack.pop()
+
+        # 填充 Phi 的 sources
+        idx_phi.sources = [
+            (block.label, idx_init_ssa),
+            (body_block.label, inc_ssa),
+        ]
 
         self.all_blocks.extend([header_block, body_block, exit_block])
         self.current_block = exit_block
@@ -717,68 +802,81 @@ class MIRLowering:
         """
         降级列表推导式：[result_expr | variable <- iterable, filter?]
 
-        编译为以下结构（带索引迭代）：
-          bb_entry:
-            list = []               // 空列表
-            iter = iterable
-            idx = 0
-            goto bb_header
-          bb_header:
-            len = list_length(iter)
-            cond = idx < len
-            if cond goto bb_body else goto bb_exit
-          bb_body:
-            elem = iter[idx]       // 当前元素
-            env[variable] = elem   // 绑定循环变量到当前元素
+        用索引遍历实现，循环变量正确绑定到当前元素。
+        编译结构：
+          list = []                    // 空列表
+          iter = iterable              // 可迭代对象
+          len = list_length(iter)      // 长度
+          i = 0                        // 索引
+          goto header
+          header:
+            phi_i = phi(entry: i, latch: i_next)
+            phi_list = phi(entry: list, latch: list_next)
+            cond = phi_i < len
+            if cond goto body else goto exit
+          body:
+            elem = list_get(iter, phi_i)   // 当前元素
+            variable = elem                // 绑定循环变量
             // 可选 filter 检查
             // 计算 result_expr
-            list = list_append(list, result)
-            idx = idx + 1
-            goto bb_header
-          bb_exit:
-            phi(list_init, list_final)
-            return list
+            list_next = list_append(phi_list, result)
+            i_next = phi_i + 1
+            goto header
+          exit:
+            return phi_list
         """
-        from ir_nodes import INT_TYPE, BOOL_TYPE
-
         header_block = MIRBasicBlock(self._new_block())
         body_block = MIRBasicBlock(self._new_block())
         exit_block = MIRBasicBlock(self._new_block())
 
-        # 1. 在入口块创建空列表，降级可迭代对象，初始化索引
+        # 1. 在入口块创建空列表、计算可迭代对象和长度
         empty_list_instr = MIRListBuild(hir_expr.ir_type)
         empty_list_instr.elements = []
-        list_ssa = self._emit(empty_list_instr)
+        list_init_ssa = self._emit(empty_list_instr)
 
         iter_ssa = self._lower_expr(hir_expr.iterable, block)
 
-        # idx = 0
-        zero_instr = MIRConst(INT_TYPE)
-        zero_instr.value = 0
-        zero_instr.const_type = "int"
-        idx_ssa = self._emit(zero_instr)
-
-        # 2. 跳转到循环头
-        block.terminator = MIRJump(header_block.label)
-
-        # 3. 循环头：计算长度，条件分支
-        self.current_block = header_block
-
         # 调用 list_length 获取长度
-        len_instr = MIRCall(INT_TYPE)
+        len_instr = MIRCall(UNIT_TYPE)
         len_instr.callee = "list_length"
         len_instr.args = [iter_ssa or ""]
         len_ssa = self._emit(len_instr)
 
-        # cond = idx < len
-        cmp_instr = MIRBinOp(BOOL_TYPE)
+        # 索引变量初始值 0
+        idx_init_instr = MIRConst(UNIT_TYPE)
+        idx_init_instr.value = 0
+        idx_init_instr.const_type = "int"
+        idx_init_ssa = self._emit(idx_init_instr)
+
+        # 2. 跳转到循环头
+        block.terminator = MIRJump(header_block.label)
+
+        # 3. 循环头：Phi 节点 + 条件分支
+        self.current_block = header_block
+
+        # 索引 Phi（先占位，稍后填充 sources）
+        idx_phi = MIRPhi(UNIT_TYPE)
+        idx_phi.result_name = self._new_ssa()
+        idx_phi.sources = []
+        header_block.instructions.append(idx_phi)
+        idx_phi_ssa = idx_phi.result_name
+
+        # 列表 Phi（循环携带的列表值）
+        list_phi = MIRPhi(hir_expr.ir_type)
+        list_phi.result_name = self._new_ssa()
+        list_phi.sources = []
+        header_block.instructions.append(list_phi)
+        list_phi_ssa = list_phi.result_name
+
+        # 比较 i < len
+        cmp_instr = MIRBinOp(UNIT_TYPE)
         cmp_instr.op = "<"
-        cmp_instr.left = idx_ssa
+        cmp_instr.left = idx_phi_ssa
         cmp_instr.right = len_ssa
-        cond_ssa = self._emit(cmp_instr)
+        cmp_ssa = self._emit(cmp_instr)
 
         header_block.terminator = MIRBranch(
-            cond_ssa, body_block.label, exit_block.label
+            cmp_ssa, body_block.label, exit_block.label
         )
 
         # 压入循环上下文（break → exit, continue → header）
@@ -787,20 +885,22 @@ class MIRLowering:
         # 4. 循环体
         self.current_block = body_block
 
-        # elem = iter[idx] (MIRIndexAccess) — 当前元素
-        elem_instr = MIRIndexAccess(hir_expr.ir_type)
-        elem_instr.object = iter_ssa or ""
-        elem_instr.index = idx_ssa
-        elem_ssa = self._emit(elem_instr)
+        # 获取当前元素: list_get(iter, i)
+        get_instr = MIRCall(UNIT_TYPE)
+        get_instr.callee = "list_get"
+        get_instr.args = [iter_ssa or "", idx_phi_ssa]
+        elem_ssa = self._emit(get_instr)
 
-        # 将循环变量绑定到当前元素（修复：之前错误地绑定到整个 iterable）
+        # 绑定循环变量到当前元素
         self.env[hir_expr.variable] = elem_ssa
 
-        # 保存 list_ssa 的当前值（用于 Phi 节点追踪）
-        last_list_ssa = list_ssa
-        last_block_label = body_block.label  # 最后更新 list 的块标签
+        # 用于接收最终列表值的变量（可能经过 filter 分支）
+        final_list_ssa = None
+        # 索引递增的结果（在所有路径上都应该有）
+        final_idx_ssa = None
+        # 循环体尾部跳转到 header 的块
+        latch_block = None
 
-        result_ssa = None
         if hir_expr.filter is not None:
             # 有 filter：先判断 filter 条件
             filter_block = MIRBasicBlock(self._new_block())
@@ -811,100 +911,106 @@ class MIRLowering:
                 filter_ssa or "", filter_block.label, filter_false_block.label
             )
 
-            # filter 为真：计算 result_expr 并 append
+            # --- filter 为真：计算 result_expr 并 append ---
             self.current_block = filter_block
             result_ssa = self._lower_expr(hir_expr.result_expr, filter_block)
 
             append_instr = MIRListAppend(hir_expr.ir_type)
-            append_instr.list_ssa = list_ssa
+            append_instr.list_ssa = list_phi_ssa
             append_instr.element_ssa = result_ssa or ""
             new_list_ssa = self._emit(append_instr)
-            list_ssa = new_list_ssa
-            last_list_ssa = new_list_ssa
-            last_block_label = filter_block.label
+
+            # 索引递增
+            inc_instr_t = MIRBinOp(UNIT_TYPE)
+            inc_instr_t.op = "+"
+            inc_instr_t.left = idx_phi_ssa
+            inc_const_t = MIRConst(UNIT_TYPE)
+            inc_const_t.value = 1
+            inc_const_t.const_type = "int"
+            inc_const_ssa_t = self._emit(inc_const_t)
+            inc_instr_t.right = inc_const_ssa_t
+            inc_ssa_t = self._emit(inc_instr_t)
 
             filter_block.terminator = MIRJump(header_block.label)
 
-            # filter 为假：跳过，直接回到循环头（list 不变）
+            # --- filter 为假：跳过 append，索引仍然递增 ---
             self.current_block = filter_false_block
+
+            inc_instr_f = MIRBinOp(UNIT_TYPE)
+            inc_instr_f.op = "+"
+            inc_instr_f.left = idx_phi_ssa
+            inc_const_f = MIRConst(UNIT_TYPE)
+            inc_const_f.value = 1
+            inc_const_f.const_type = "int"
+            inc_const_ssa_f = self._emit(inc_const_f)
+            inc_instr_f.right = inc_const_ssa_f
+            inc_ssa_f = self._emit(inc_instr_f)
+
             filter_false_block.terminator = MIRJump(header_block.label)
 
             self.all_blocks.extend([filter_block, filter_false_block])
+
+            # 两个分支都跳回 header，Phi 有两个来源
+            # 列表 Phi 的来源：filter 为真时是 new_list_ssa，为假时是 list_phi_ssa（不变）
+            list_phi.sources = [
+                (block.label, list_init_ssa),
+                (filter_block.label, new_list_ssa),
+                (filter_false_block.label, list_phi_ssa),
+            ]
+            # 索引 Phi 的来源
+            idx_phi.sources = [
+                (block.label, idx_init_ssa),
+                (filter_block.label, inc_ssa_t),
+                (filter_false_block.label, inc_ssa_f),
+            ]
         else:
             # 无 filter：直接计算 result_expr 并 append
             result_ssa = self._lower_expr(hir_expr.result_expr, body_block)
 
             append_instr = MIRListAppend(hir_expr.ir_type)
-            append_instr.list_ssa = list_ssa
+            append_instr.list_ssa = list_phi_ssa
             append_instr.element_ssa = result_ssa or ""
             new_list_ssa = self._emit(append_instr)
-            list_ssa = new_list_ssa
-            last_list_ssa = new_list_ssa
-            last_block_label = body_block.label
+
+            # 索引递增
+            inc_instr = MIRBinOp(UNIT_TYPE)
+            inc_instr.op = "+"
+            inc_instr.left = idx_phi_ssa
+            inc_const = MIRConst(UNIT_TYPE)
+            inc_const.value = 1
+            inc_const.const_type = "int"
+            inc_const_ssa = self._emit(inc_const)
+            inc_instr.right = inc_const_ssa
+            inc_ssa = self._emit(inc_instr)
 
             if body_block.terminator is None:
                 body_block.terminator = MIRJump(header_block.label)
 
-        # idx = idx + 1（在 body 或 filter 块末尾，跳转前）
-        # 需要找到最后一个有终结指令且终结指令是跳转到 header 的块
-        # 简化：在 body_block 中计算 idx+1，如果有 filter 则在 filter 和 filter_false 中都算
-        # 更简单的做法：在 header 中用 Phi 合并 idx
-        one_instr = MIRConst(INT_TYPE)
-        one_instr.value = 1
-        one_instr.const_type = "int"
-        one_ssa = self._emit(one_instr)
-
-        add_instr = MIRBinOp(INT_TYPE)
-        add_instr.op = "+"
-        add_instr.left = idx_ssa
-        add_instr.right = one_ssa
-        new_idx_ssa = self._emit(add_instr)
+            # 填充 Phi sources
+            list_phi.sources = [
+                (block.label, list_init_ssa),
+                (body_block.label, new_list_ssa),
+            ]
+            idx_phi.sources = [
+                (block.label, idx_init_ssa),
+                (body_block.label, inc_ssa),
+            ]
 
         # 弹出循环上下文
         self.loop_stack.pop()
 
-        # 5. 在 header 块开头插入 Phi 节点合并 idx
-        idx_phi_instr = MIRPhi(INT_TYPE)
-        idx_phi_instr.sources = [
-            (block.label, idx_ssa),
-            (last_block_label, new_idx_ssa),
-        ]
-        idx_phi_instr.result_name = self._new_ssa()
-        header_block.instructions.insert(0, idx_phi_instr)
-
-        # 更新 header 和 body 中 idx_ssa 的引用为 Phi 结果
-        phi_idx_result = idx_phi_instr.result_name
-        for blk in [header_block, body_block] + (
-            [filter_block, filter_false_block] if hir_expr.filter else []
-        ):
-            for instr in blk.instructions:
-                if instr is idx_phi_instr:
-                    continue
-                if hasattr(instr, 'left') and instr.left == idx_ssa:
-                    instr.left = phi_idx_result
-                if hasattr(instr, 'right') and instr.right == idx_ssa:
-                    instr.right = phi_idx_result
-                if hasattr(instr, 'index') and instr.index == idx_ssa:
-                    instr.index = phi_idx_result
-                if hasattr(instr, 'object') and instr.object == idx_ssa:
-                    instr.object = phi_idx_result
-                if hasattr(instr, 'args'):
-                    instr.args = [phi_idx_result if a == idx_ssa else a for a in instr.args]
-
-        # 6. exit 块：通过 Phi 合并列表值
-        # 初始值来自入口块，最终值来自最后更新 list 的块
-        phi_sources = [
-            (block.label, empty_list_instr.result_name),
-            (last_block_label, last_list_ssa),
-        ]
-        phi_instr = MIRPhi(hir_expr.ir_type)
-        phi_instr.sources = phi_sources
-        phi_instr.result_name = self._new_ssa()
-        exit_block.instructions.append(phi_instr)
+        # 5. exit 块：列表 Phi 的值就是结果
+        # 将 list_phi 从 header 移到 exit？不，list_phi 在 header 中定义是正确的，
+        # 因为 header 支配 exit。但 header 有分支指令，Phi 应该在 header 开头。
+        # 结果值就是 list_phi_ssa（header 中的 Phi）。
+        # 但我们需要 exit 块里的结果值——实际上，从 exit 块看，
+        # 列表的最终值在 header 的 Phi 中就已经可用（header 支配 exit）。
+        # 为了清晰，在 exit 块放一个空的"结果"，直接返回 list_phi_ssa。
+        # 由于 header 支配 exit，exit 可以引用 list_phi_ssa。
 
         self.all_blocks.extend([header_block, body_block, exit_block])
         self.current_block = exit_block
-        return phi_instr.result_name
+        return list_phi_ssa
 
     def _lower_while_expr(self, hir_expr, block):
         header_block = MIRBasicBlock(self._new_block())

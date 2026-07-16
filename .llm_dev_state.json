@@ -1,5 +1,5 @@
 {
-  "cycles": 7,
+  "cycles": 8,
   "completed_tasks": [
     "dce_pass",
     "wasmgc_storereg",
@@ -17,10 +17,17 @@
     "review_cycle_3",
     "review_cycle_6",
     "fix_match_lowering",
-    "fix_mir_loop_vars"
+    "fix_mir_loop_vars",
+    "fix_mir_ssa_branch_env"
   ],
   "failed_tasks": [],
   "task_history": [
+    {
+      "cycle": 8,
+      "task_id": "fix_mir_ssa_branch_env",
+      "status": "completed",
+      "details": "SSA 分支环境隔离 + 汇合点 Phi 插入：修复 _lower_if_expr 和 _lower_match_expr 中的 env 全局污染问题，每个分支/arm 在独立 env 上下文中运行；在 merge 块为所有被分支修改的变量自动创建 Phi 节点。这是 SSA 构建修复的第一步，覆盖最常见的 if/match 分支场景。"
+    },
     {
       "cycle": 7,
       "task_id": "fix_match_lowering",
