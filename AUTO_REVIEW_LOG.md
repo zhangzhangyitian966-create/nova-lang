@@ -3904,14 +3904,14 @@ let id = fun x -> x in id 1 + id "a" — **会报错**，但原因错误（在 +
 | VM 虚拟机 | `vm.py` | 已审查 | 2026-07-15 | 6 | 9 | 7 |
 | 编译器 | `compiler.py` | 已审查 | 2026-07-15 | 5 | 7 | 5 |
 | 求值器 | `evaluator.py` | 已审查 | 2026-07-15 | 4 | 6 | 6 |
-| 类型检查器 | `type_checker.py` | 已审查 | 2026-07-15 | 7 | 5 | 4 |
+| 类型检查器 | `type_checker.py` | 已审查 | 2026-07-16 | 8 | 8 | 10 |
 | 词法分析器 | `lexer.py` | 已审查 | 2026-07-15 | 2 | 3 | 4 |
 | 语法分析器 | `parser.py` | 已审查 | 2026-07-15 | 4 | 5 | 3 |
 | 错误处理 | `errors.py` | 已审查 | 2026-07-15 | 3 | 3 | 3 |
 | 模块系统 | `modules.py` | 已审查 | 2026-07-15 | 2 | 4 | 2 |
 | 环境 | `environment.py` | 已审查 | 2026-07-15 | 1 | 3 | 2 |
-| C 代码生成 | `c_codegen.py` | 已审查 | 2026-07-15 | 5 | 4 | 4 |
-| Native 后端 | `backend/native_backend.py` | 已审查 | 2026-07-15 | 5 | 4 | 2 |
+| C 代码生成 | `c_codegen.py` | 已审查 | 2026-07-16 | 13 | 2 | 12 |
+| Native 后端 | `backend/native_backend.py` | 已审查 | 2026-07-16 | 11 | 8 | 7 |
 | Cranelift 后端 | `backend/cranelift_backend.py` | 已审查 | 2026-07-15 | 4 | 3 | 1 |
 | WASM 后端 | `backend/wasm_backend.py` | 已审查 | 2026-07-15 | 5 | 2 | 2 |
 | x86_64 指令 | `backend/x86_64.py` | 已审查 | 2026-07-15 | 0 | 1 | 1 |
@@ -19150,3 +19150,131 @@ Nova 求值器属于经典的直接 AST 遍历解释器，可追溯到 Lisp 的 
 ### 测试验证
 测试结果：960 passed / 0 failed
 
+
+
+---
+
+## 2026-07-16 06:31 类型检查器 (type_checker.py) 第九轮审查报告
+
+### 评分
+- 原创性：4/5
+- 正确性：2/5
+- 完整性：3/5
+- 工程质量：3/5
+
+### 严重问题
+1. [type_checker.py:306-309] Ok 和 Err 构造函数的类型签名中存在游离类型变量 → 无法从调用上下文推断，返回类型中包含无法确定的 TypeVar → 将 E 通过调用上下文的返回类型约束推断，或使用更完善的类型推断算法（如 Algorithm W 的合一机制）
+2. [type_checker.py:295-309] 内置 ADT 在 adt_variants 中存储的字段类型与 env.define() 注册的构造函数类型使用不同的 TypeVar 实例 → TypeVar.__eq__ 基于 identity，模式匹配时的类型替换可能失败 → 确保 adt_variants 和构造函数签名共享同一批 TypeVar 实例
+3. [type_checker.py:561-602] 函数体检查时创建的参数 TypeVar 与第一遍 _infer_fn_type 注册的函数类型中的 TypeVar 是不同实例 → 推断出 body_type 后写回时类型推断可能失效 → 在第二遍检查函数体时复用第一遍创建的 TypeVar 实例
+4. [type_checker.py:1437-1466] _collect_type_bindings 缺少出现检查（occurs check） → 构造无限类型，导致后续 _types_compatible 或 _substitute_type_vars 无限递归 → 添加 occurs check，绑定前检测 TypeVar 是否出现在 actual 类型的递归结构中
+5. [type_checker.py:1578-1583] _types_compatible 对 TypeVar 的处理过于宽松，只要任意一方是 TypeVar 就返回 True → 类型检查对未推断完成的类型几乎总是通过，大幅削弱类型系统严谨性 → 区分"推断模式"和"检查模式"，或使用合一（unification）而非简单的兼容判断
+6. [type_checker.py:718-730] MatchExpr 缺少穷尽性检查 → 只检查各分支类型一致，未验证模式是否覆盖主题类型的所有可能情况 → 实现模式穷尽性检测算法，对未覆盖的情况报告警告或错误
+7. [type_checker.py:1113-1117] BreakExpr 和 ContinueExpr 未检查是否位于循环内部 → 在顶层或函数体中直接使用 break/continue 不会被捕获 → 添加 _in_loop 状态变量，进入循环时设为 True，退出时恢复
+8. [type_checker.py:1314-1318] 比较运算符仅支持 Int 和 Float，不支持 String、Char 等可比较类型 → 字符串比较等操作类型检查不通过 → 扩展比较操作符的类型支持，至少包含 String 和 Char
+
+### 中等问题
+1. [type_checker.py:1002-1003] TryExpr 的 Option 分支直接访问 inner_ty.type_params[0]，未检查 type_params 是否为空 → 与 Result 分支处理不一致，可能导致 IndexError → 添加边界检查：if len(inner_ty.type_params) < 1: return ERROR_TYPE
+2. [type_checker.py:1519-1542] _from_ast_type 中 TypeGeneric 参数数量错误时返回猜测类型而非 ERROR_TYPE → 可能引发级联错误 → 参数数量错误时返回 ERROR_TYPE，与其他错误路径一致
+3. [type_checker.py:366] json_parse 返回类型为 TypeVar("json_value")，等价于"任意类型" → 完全绕过了类型检查 → 定义 JsonValue ADT 或使用更严格的类型表示
+4. [type_checker.py:520] 导入模块的名称被添加到 _user_defined_names → 导入名称与本程序定义的名称区分处理不明确 → 区分"导入名称"和"用户定义名称"，重复定义检测时给出更准确的错误信息
+5. [type_checker.py:412-417] 函数重复定义检测只检查 _user_defined_names，不检查内置函数 → 用户可以覆盖 print、map 等内置函数，可能导致意外行为 → 对覆盖内置函数的情况发出警告，或禁止覆盖
+6. [type_checker.py:1209-1218] PatternConstructor 查找构造器时遍历所有 ADT 的所有变体 → 时间复杂度 O(n)，ADT 数量多时性能较差 → 在 TypeEnv 中建立构造器名 → ADT 的反向映射
+7. [type_checker.py:1404-1418] _substitute_type_vars 同时支持 Dict[TypeVar, NovaType] 和 Dict[str, NovaType] 两种 bindings 格式 → 设计脆弱，容易因空字典或混合 key 而出错 → 统一为一种格式（推荐 TypeVar identity 格式）
+8. [type_checker.py:1071-1105] ForExpr 返回 List[body_ty]，将命令式 for 循环与列表推导式语义混淆 → 传统 for 循环应返回 Unit → 明确语言设计，若 for 循环是推导式语义则重命名，若是命令式循环则返回 Unit
+
+### 轻微问题
+1. [type_checker.py:39] NovaType 基类只有 pass，未定义抽象接口或公共方法 → 代码结构不够清晰 → 添加抽象方法（如 __eq__, __hash__ 的默认实现），或使用 ABC
+2. [type_checker.py:169-176] TypeVar._counter 是类变量，在并发场景下不安全 → 自动命名方案缺乏作用域隔离 → 使用实例级计数器或 UUID 确保唯一性
+3. [type_checker.py:198] _bindings: Dict[str, tuple] 中 tuple 的结构不明确（类型, 可变性） → 缺乏类型安全 → 使用 NamedTuple 或 dataclass 替代裸 tuple
+4. [type_checker.py:570-587] 环境切换使用 old_env = self.env; self.env = child_env; ...; self.env = old_env 模式 → 代码中多处重复，容易因异常导致环境未恢复 → 实现上下文管理器（with self.env.child() as child_env:）
+5. [type_checker.py:1071-1156] ForExpr 和 ListComprehension 的迭代类型检查逻辑大量重复 → 约 40 行几乎相同 → 抽取公共方法 _check_iterable(expr) -> elem_ty
+6. [type_checker.py:478-480] _collect_decl 的 else 分支只有 pass → 空分支增加认知负担 → 移除 else 分支或保留更简洁的注释
+7. [type_checker.py:604-611] _check_decl_body 中多个 pass 分支（TypeDef/AliasDef/ImportDecl/ExportDecl） → 冗余 → 合并为一个 elif 或直接移除
+8. [type_checker.py:884-885 / 922-923] except ValueError: pass 静默忽略异常 → 缺乏日志或错误报告 → 至少添加注释说明为什么静默忽略
+9. [type_checker.py:1178-1181] _check_pattern 方法内部导入模式相关的 AST 节点类 → 违背导入应在模块顶部的惯例 → 将导入移至文件顶部
+10. [type_checker.py:490] _handle_import_decl 内部导入 ModuleResolver → 同上 → 将导入移至文件顶部
+
+---
+
+## 2026-07-16 06:31 C 代码生成 (c_codegen.py) 第九轮审查报告
+
+### 评分
+- 原创性：4/5
+- 正确性：2/5
+- 完整性：2.5/5
+- 工程质量：2.5/5
+
+### 严重问题
+1. [c_codegen.py:214 vs 867/707] ADT 字段命名不一致，生成的代码无法编译 → _collect_type_def 中结构体字段命名为 variant_fieldname 格式，但构造器和模式中使用 variant__field{i} 格式，两套命名体系完全不匹配 → 统一命名方式，建议在 _collect_type_def 中也使用索引式命名 __field{i}
+2. [c_codegen.py:596] TryExpr 硬编码的 tag 名与 ADT 命名规范不符 → 代码写死 NOVA_OPTION_NONE_TAG 和 NOVA_RESULT_ERR_TAG，但实际生成的枚举值格式是 NOVA_ADT_Option_None，? 运算符完全不可用 → 使用 NOVA_ADT_Option_None / NOVA_ADT_Result_Err 格式，或通过 _find_adt_name + adt_info 动态查找
+3. [c_codegen.py:595,597] TryExpr 假设所有 ADT 都是堆分配指针 → inner_c 假定是 NovaADT* 指针，但用户自定义的栈分配 ADT 不能赋值给指针，return 类型也不匹配 → 需要区分堆分配和栈分配 ADT，或统一使用堆分配指针表示 Option/Result
+4. [c_codegen.py:184-185] AliasDef 完全未实现 → 只写了 pass 和注释 "C 中使用 typedef"，但从未生成任何 typedef 代码，类型别名在 C 输出中不存在 → 实现 _collect_alias_def，生成 typedef 原始类型 别名; 并加入 type_defs
+5. [c_codegen.py:653] 模式匹配绑定的类型推断错误 → 用整个 subject 的类型作为每个字段绑定的类型，对于 ADT 构造器模式每个字段应有各自的类型 → 使用 adt_field_types 中记录的字段类型信息，按字段索引获取正确的 C 类型
+6. [c_codegen.py:409, 1111, 1187] 列表迭代硬编码 int64_t 类型 → for x in list 场景下元素一律强制转为 int64_t，字符串、浮点、结构体等类型的列表迭代会产生错误结果 → 从列表的元素类型推断，生成对应类型的拆箱代码
+7. [c_codegen.py:1082, 1137, 1149] 列表/元组/Map 元素装箱方式单一 → 所有元素都通过 (void*)(intptr_t) 装箱，浮点值和大于 intptr_t 的结构体无法正确存入 → 复用 _box_to_voidptr 逻辑，根据元素类型选择合适的装箱方式
+8. [c_codegen.py:690] 字符串模式匹配内存泄漏 → 每次比较都调用 nova_string_new 创建新字符串但从不释放，大规模 match 会导致严重内存泄漏 → 先用临时变量保存新字符串，比较后调用 nova_string_free 释放
+9. [c_codegen.py:1301-1302] Identifier 类型推断一律返回 int64_t → 对于引用字符串、列表、自定义类型等的标识符推断结果完全错误，导致依赖此推断的代码类型错误 → 需实现作用域变量类型查找机制（利用已有的 _scope_stack）
+10. [c_codegen.py:1357-1358] TryExpr 类型推断错误 → 返回整个 Option/Result 的类型，但 ? 运算符应"解包"类型（Option[T] → T） → 实现类型解包逻辑，从 Option/Result 的泛型参数中提取内部类型
+11. [c_codegen.py:628-635] 无 else 的 if 表达式返回 "0" → 当 then 分支是字符串/浮点/结构体类型时与默认的 "0" (int) 类型不一致，且未初始化的临时变量可能是未定义行为 → 应根据 then 分支类型生成合理的默认值（指针用 NULL、浮点用 0.0 等）
+12. [c_codegen.py:180-197] VariantDef 未处理 → ast_nodes 中导入了 VariantDef，但 _collect_decl_info 没有对应分支，独立的变体定义会被静默忽略 → 添加 isinstance(decl, VariantDef) 分支，注册到对应的 ADT 中或报错
+13. [c_codegen.py:1152-1159] FieldAccess 不支持 ADT 命名字段访问 → 只处理了数字索引（元组）和 .field（普通结构体），ADT 的命名字段需要知道当前 variant 才能访问 → 对 ADT 类型的字段访问，需通过 adt_info 查找字段所在的 variant 和索引
+
+### 中等问题
+1. [c_codegen.py:1349-1350] WhileExpr 类型推断与编译结果不一致 → _infer_c_type_from_expr 返回 body 的类型，但 _compile_while_expr_to_stmt 返回 ""（空表达式），调用方依赖类型推断分配临时变量时会出错 → While 循环应为 void 类型，统一返回 void
+2. [c_codegen.py:1268-1269] 泛型 ADT 类型转换错误 → TypeGeneric 中如果 base 在 adt_info 中返回 NovaADT_base，但泛型 ADT 与具体 ADT 是不同概念 → 需要明确泛型 ADT 的表示方式
+
+### 轻微问题
+1. [c_codegen.py:247-251] 冗余赋值 → ret_type = "void" 后又 else: ret_type = "void"，else 分支多余 → 移除冗余的 else 分支
+2. [c_codegen.py:530-534] BreakExpr/ContinueExpr 返回位置错误 → return [], "break" 将语句放在 result_expr 中，但它们是语句而非表达式 → 返回 ["break"], "" / ["continue"], ""
+3. [c_codegen.py:1044, 1053] let 与 mut 绑定编译代码完全重复 → 两个方法逻辑一致，仅类名不同 → 提取公共方法，或让 mut 调用 let 的实现
+4. [c_codegen.py:368-416 与 1161-1208] for 循环编译代码大量重复 → _compile_for_expr_main 和 _compile_for_expr_to_stmt 逻辑高度雷同 → 提取公共的 for 循环体生成函数，通过参数控制是否收集结果
+5. [c_codegen.py:280-305] 函数体编译分支重复 → Block 和非 Block 的两个分支中 setup 处理逻辑重复 → 提取公共的 body 编译逻辑
+6. [c_codegen.py:548-561] 使用 GNU 语句表达式 ({...}) → 依赖 GCC 扩展，不符合标准 C，MSVC 下无法编译 → 改为标准的语句+临时变量方式，或注明仅支持 GCC/Clang
+7. [c_codegen.py:952] Lambda 前向声明放入 functions 列表 → 前向声明被追加到 self.functions 而非 self.forward_decls，语义上不正确 → 将 lambda 前向声明放入 forward_decls
+8. [c_codegen.py:1078, 1090, 1143, 1166] 魔法数字硬编码 → nova_list_new(8)、nova_map_new(16) 等初始容量作为魔法数字散布在代码中 → 定义常量如 DEFAULT_LIST_CAPACITY = 8
+9. [c_codegen.py:970-971] 作用域栈直接赋值保存/恢复 → old_scope_stack = self._scope_stack; self._scope_stack = [] 这种方式脆弱，若中间异常会导致状态不一致 → 用 _push_scope / _pop_scope 管理，或用 try/finally 确保恢复
+10. [c_codegen.py:418-436] _compile_decl 方法似乎未被使用 → 代码中实际使用 _compile_decl_in_main 和 _compile_expr_to_stmt，此方法可能是遗留代码 → 确认是否使用，未使用则删除
+11. [c_codegen.py:546] 未处理表达式静默降级为注释 → return [], "/* unhandled: ... */" 会生成语法上无效的 C 表达式，后续代码拼接会出错 → 应抛出明确异常或生成 0 / ((void)0) 等有效占位
+12. [c_codegen.py:1401-1403] 字符串转义函数链式 replace 易出错 → 单行 6 个 replace 串联，可读性差且容易遗漏转义字符 → 使用 str.translate 或统一的转义映射表
+
+---
+
+## 2026-07-16 06:31 Native 后端 (backend/native_backend.py) 第九轮审查报告
+
+### 评分
+- 原创性：4/5
+- 正确性：2/5
+- 完整性：3/5
+- 工程质量：3/5
+
+### 严重问题
+1. [native_backend.py:1317-1322] ELF 入口地址错误，程序无法启动 → _make_elf_header(entry=start_offset) 中 start_offset = 0，但 ELF 的 e_entry 字段必须是虚拟地址不是代码段内偏移，入口点在虚拟地址 0 会立即段错误 → entry 应计算为 base_addr + sizeof(ehdr) + phnum * sizeof(phdr) + start_offset
+2. [native_backend.py:1328-1337] ELF code segment 大小不足，代码映射不完整 → p_filesz=len(code) 只能映射文件前 len(code) 字节，其中前 176 字节是 header，实际代码尾部缺失 → p_filesz = 176 + len(code)，或将 p_offset 设为代码实际起始偏移并相应调整 p_vaddr
+3. [native_backend.py:1339-1349] ELF data segment 偏移计算错误 → data_offset = len(code) 被用作 data_ph.p_offset，但 data 在文件中的实际偏移是 176 + len(code)，数据段虚拟地址与文件偏移不匹配 → 统一 code/data 的文件偏移和虚拟地址计算，确保 p_vaddr mod p_align == p_offset mod p_align
+4. [native_backend.py:1253-1270] RIP-relative 重定位计算基准错误 → 假设代码段从地址 0 开始，但实际上代码段从 base_addr + 176 开始，所有常量加载的地址都计算错误 → 重定位计算应基于代码段和数据段的实际虚拟地址
+5. [native_backend.py:1106] _compile_index 破坏基址寄存器 → e.add_reg_reg(base_reg, RCX) 直接将偏移加到 base_reg 上，修改了基址寄存器的值，后续使用该虚拟寄存器时会得到错误的值 → 使用临时寄存器（如 RAX）计算最终地址，或使用 SIB 寻址模式直接加载
+6. [native_backend.py:1125-1189] 栈上构建数据结构后未恢复栈指针 → _compile_build_list、_compile_build_tuple、_compile_build_adt 都通过 sub_rsp_imm 分配空间但未恢复 RSP，函数尾声只恢复 func.stack_size，导致栈帧损坏 → 预先在 func.stack_size 中计入所有数据结构构建的栈空间，或在每个构建函数结束后恢复 RSP
+7. [native_backend.py:1125-1189] 栈对齐违反 System V ABI → 分配的栈空间大小不保证 16 字节对齐，调用需要 16 字节对齐的函数时会崩溃 → 函数序言中 sub rsp 后保证 RSP 16 字节对齐
+8. [native_backend.py:510-541, 564-591] 浮点参数超过 8 个时未压栈 → 只有整型参数超过 6 个时才压栈，但浮点参数超过 8 个时没有任何压栈处理 → 添加浮点参数的栈传递逻辑，注意栈上参数布局和对齐
+9. [native_backend.py:1225] _generate_start 中 argc/argv 读取错误 → e.mov_reg_mem(RDI, RSP, 8) 从 [rsp+8] 加载到 RDI，但 [rsp+8] 是 argv[0] 不是 argc → 若传 argc 用 [rsp+0]，若传 argv 用 rsp + 8
+10. [native_backend.py:1012-1017] _compile_store_global 硬编码使用 RBX，可能破坏寄存器 → 直接使用 RBX 作为临时寄存器计算全局变量地址，但 RBX 可能已被分配给某个虚拟寄存器 → 检查 RBX 是否空闲，或从 free_gprs 中取一个临时寄存器
+11. [native_backend.py:74-77] 线性扫描分配器 spill slot off-by-one → max_slot = max(max_slot, self.spill_counter) 取的是递增后的 spill_counter 而不是实际分配的 spill_slot，栈空间多分配 → max_slot = max(max_slot, interval.spill_slot + 1)
+
+### 中等问题
+1. [native_backend.py:869-876] 浮点取反临时寄存器可能冲突 → FLOAT_NEG 操作中若没有空闲 XMM 寄存器则使用 XMM7，但 XMM7 可能正在被使用 → 确保有空闲寄存器可用，否则溢出一个寄存器到栈上
+2. [native_backend.py:1116-1119] _compile_field_access 缺少空值检查 → instr.src_locs[0][0] 和 instr.dst_loc[0] 没有检查列表是否为空 → 添加参数校验，抛出有意义的错误信息
+3. [native_backend.py:462-465, 474-477] 常量加载未处理 data_offset 为 None 的情况 → 如果常量未在 _collect_constants 中收集，寄存器被分配了但没有加载任何值，静默失败 → data_offset is None 时应抛出明确的错误
+4. [native_backend.py:560-561] _compile_call_indirect 中空函数指针静默置 0 → 如果函数指针寄存器未分配，代码将 R11 设为 0 并继续执行调用，错误信息不明确 → 抛出明确的错误信息，说明函数指针未分配
+5. [native_backend.py:1195-1217] _compile_counted_loop 空实现 → 方法体只有 pass，完全没有实现，调用后无任何效果 → 要么删除该方法，要么实现实际的循环优化逻辑
+6. [native_backend.py:1145-1148, 1163-1166, 1186-1189] _compile_build_* 中 src_locs 与 count 不一致无检查 → count 多于实际元素时部分内存未初始化，少于实际元素时部分元素未写入 → 添加断言或校验，确保 count == len(src_locs)
+7. [native_backend.py:487-492] 闭包常量解析依赖字符串格式 → 从 instr.value 中解析目标函数名，依赖字符串格式 "<closure:fn_name>"，基于字符串拼接的解析方式脆弱 → 在 IR 层使用结构化字段传递函数名
+8. [native_backend.py:503] 条件分支 cond_reg 默认值掩盖 bug → vregs.get(instr.cond_reg, RAX) 当 cond_reg 存在但未在 vregs 中时静默使用 RAX，可能掩盖寄存器未分配的 bug → 使用 _get_vreg 获取，若不存在则抛出明确错误
+
+### 轻微问题
+1. [native_backend.py:9, 124-125] 未使用的导入和实例变量 → sys 模块未使用，self.code 和 self.data_section 作为实例变量声明但从未使用 → 移除未使用的导入和实例变量
+2. [native_backend.py:多处] _alloc_vreg 返回 None 时处理不一致 → 有些调用点检查 if reg is not None，有些调用点直接假设一定成功 → 统一错误处理方式，例如分配失败时统一抛出异常
+3. [native_backend.py:1414-1532] 生产代码中混入测试/示例代码 → SimpleNativeCompiler 类及其 _build_comprehensive_lir 方法是测试/演示代码 → 移到单独的测试文件或示例文件中
+4. [native_backend.py:195-201] 字符串常量数据段未对齐 → 浮点常量有 8 字节对齐，但字符串常量后没有对齐 → 在字符串常量后也做适当的对齐填充
+5. [native_backend.py:993-996] _compile_load_global 使用 lea+mov 两次内存访问 → 先用 lea 计算地址，再用 mov 加载值，需要两次指令 → 直接使用 mov reg, [rip + offset] 一条指令完成
+6. [native_backend.py:770-813] 大量重复的比较指令发射代码 → 整数比较和浮点比较的 6 种比较操作各自重复发射 cmp/ucomisd + setcc + movzx 模式 → 抽取为辅助函数，通过操作符映射到 setcc 指令
+7. [native_backend.py:692-694, 743-745, 829-831, 878-880, 965-967, 1431-1434, 1529-1532] 多处 NotImplementedError → 未实现的功能点较多，包括未知 const_type、浮点取模、未知运算符、未知 LIR 指令、compile_source 等 → 逐步实现或明确标注为未来工作
