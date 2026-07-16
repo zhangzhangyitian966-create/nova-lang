@@ -19278,3 +19278,76 @@ Nova 求值器属于经典的直接 AST 遍历解释器，可追溯到 Lisp 的 
 5. [native_backend.py:993-996] _compile_load_global 使用 lea+mov 两次内存访问 → 先用 lea 计算地址，再用 mov 加载值，需要两次指令 → 直接使用 mov reg, [rip + offset] 一条指令完成
 6. [native_backend.py:770-813] 大量重复的比较指令发射代码 → 整数比较和浮点比较的 6 种比较操作各自重复发射 cmp/ucomisd + setcc + movzx 模式 → 抽取为辅助函数，通过操作符映射到 setcc 指令
 7. [native_backend.py:692-694, 743-745, 829-831, 878-880, 965-967, 1431-1434, 1529-1532] 多处 NotImplementedError → 未实现的功能点较多，包括未知 const_type、浮点取模、未知运算符、未知 LIR 指令、compile_source 等 → 逐步实现或明确标注为未来工作
+
+---
+
+## 2026-07-16 07:05 第23轮全模块自动审查
+
+审查文件: 21 个
+发现问题: 224 个 (严重:9 中等:38 轻微:177)
+
+### 严重问题
+1. [backend/native_backend.py:102] 未实现功能: 尚未支持的操作将抛出 NotImplementedError。
+   追问：如果是 OCaml/Haskell 的编译器，这个 bug 能被接受吗？→ 不能，这是必须修复的基础正确性问题
+2. [backend/native_backend.py:692] 未实现功能: raise NotImplementedError(
+   追问：如果是 OCaml/Haskell 的编译器，这个 bug 能被接受吗？→ 不能，这是必须修复的基础正确性问题
+3. [backend/native_backend.py:743] 未实现功能: raise NotImplementedError(
+   追问：如果是 OCaml/Haskell 的编译器，这个 bug 能被接受吗？→ 不能，这是必须修复的基础正确性问题
+4. [backend/native_backend.py:829] 未实现功能: raise NotImplementedError(
+   追问：如果是 OCaml/Haskell 的编译器，这个 bug 能被接受吗？→ 不能，这是必须修复的基础正确性问题
+5. [backend/native_backend.py:878] 未实现功能: raise NotImplementedError(
+   追问：如果是 OCaml/Haskell 的编译器，这个 bug 能被接受吗？→ 不能，这是必须修复的基础正确性问题
+6. [backend/native_backend.py:965] 未实现功能: raise NotImplementedError(
+   追问：如果是 OCaml/Haskell 的编译器，这个 bug 能被接受吗？→ 不能，这是必须修复的基础正确性问题
+7. [backend/native_backend.py:1431] 未实现功能: raise NotImplementedError(
+   追问：如果是 OCaml/Haskell 的编译器，这个 bug 能被接受吗？→ 不能，这是必须修复的基础正确性问题
+8. [backend/native_backend.py:1529] 未实现功能: raise NotImplementedError(
+   追问：如果是 OCaml/Haskell 的编译器，这个 bug 能被接受吗？→ 不能，这是必须修复的基础正确性问题
+9. [ir/pass_manager.py:30] 未实现功能: raise NotImplementedError
+   追问：如果是 OCaml/Haskell 的编译器，这个 bug 能被接受吗？→ 不能，这是必须修复的基础正确性问题
+
+### 中等问题
+1. [vm.py:1572] 空实现: pass
+2. [vm.py:1577] 空实现: pass
+3. [compiler.py:922] 空实现: pass
+4. [compiler.py:925] 空实现: pass
+5. [compiler.py:933] 空实现: pass
+6. [evaluator.py:663] 空实现: pass
+7. [evaluator.py:673] 空实现: pass
+8. [evaluator.py:758] 空实现: pass
+9. [evaluator.py:1019] 空实现: pass
+10. [evaluator.py:1227] 空实现: pass
+11. [evaluator.py:1250] 空实现: pass
+12. [type_checker.py:39] 空实现: pass
+13. [type_checker.py:480] 空实现: pass
+14. [type_checker.py:885] 空实现: pass
+15. [type_checker.py:923] 空实现: pass
+16. [c_codegen.py:197] 空实现: pass
+17. [errors.py:404] 空实现: pass
+18. [modules.py:57] 空实现: pass
+19. [modules.py:315] 空实现: pass
+20. [modules.py:318] 空实现: pass
+... 还有 18 个中等问题
+
+### 轻微问题
+1. [vm.py:326] 运行时错误: raise RuntimeError_("filter 谓词必须返回 Bool 类型")
+2. [vm.py:354] 运行时错误: raise RuntimeError_(f"文件 '{path}' 不存在")
+3. [vm.py:363] 运行时错误: raise RuntimeError_(f"写入文件 '{path}' 失败: {e}")
+4. [vm.py:370] 运行时错误: raise RuntimeError_(f"列出目录 '{path}' 失败: {e}")
+5. [vm.py:378] 运行时错误: raise RuntimeError_(f"JSON 解析失败: {e}")
+6. [vm.py:400] 运行时错误: raise RuntimeError_(f"JSON 序列化失败: {e}")
+7. [vm.py:458] 运行时错误: raise RuntimeError_(
+8. [vm.py:470] 运行时错误: raise RuntimeError_(
+9. [vm.py:477] 运行时错误: raise RuntimeError_(
+10. [vm.py:490] 运行时错误: raise RuntimeError_(f"未找到函数 '{fn.func_name}'")
+11. [vm.py:508] 运行时错误: raise RuntimeError_(f"无法调用非函数值: {fn}")
+12. [vm.py:513] 运行时错误: raise RuntimeError_("栈溢出：调用深度超过限制")
+13. [vm.py:517] 运行时错误: raise RuntimeError_(f"未找到函数 '{closure.func_name}'")
+14. [vm.py:521] 运行时错误: raise RuntimeError_(
+15. [vm.py:619] 运行时错误: raise RuntimeError_("? 操作符不能在顶层使用")
+16. [vm.py:671] 运行时错误: raise RuntimeError_(f"VM stack underflow: need {n}, have {len(self.stack)}")
+17. [vm.py:684] 运行时错误: raise RuntimeError_("VM 错误: 模式匹配失败时没有对应的 match 栈基指针")
+18. [vm.py:753] 运行时错误: raise RuntimeError_(f"未定义的变量 '{name}'")
+19. [vm.py:769] 运行时错误: raise RuntimeError_(f"Cannot assign to immutable variable '{name}'")
+20. [vm.py:781] 运行时错误: raise RuntimeError_(f"Cannot assign to immutable variable '{name}'")
+... 还有 157 个轻微问题
