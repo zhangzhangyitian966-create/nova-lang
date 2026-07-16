@@ -16,36 +16,70 @@ Nova 编程语言 - 字节码编译器
 from typing import Dict, List, Optional, Any, Tuple
 
 from ast_nodes import (
-    Program, Block,
-    IntLiteral, FloatLiteral, StringLiteral, CharLiteral, BoolLiteral, UnitLiteral,
-    Identifier, BinaryOp, UnaryOp, PipeExpr, TryExpr,
-    Param, Lambda, FnDef, FnCall,
-    LetBinding, MutBinding, Assignment,
-    IfExpr, MatchArm, MatchExpr,
-    ForExpr, WhileExpr, BreakExpr, ContinueExpr,
-    ListExpr, ListComprehension, TupleExpr, MapExpr, FieldAccess,
-    TypeDef, VariantDef, AliasDef,
-    PatternWildcard, PatternInt, PatternFloat, PatternString,
-    PatternBool, PatternChar, PatternIdentifier, PatternConstructor,
-    PatternTuple, PatternList,
+    Program,
+    Block,
+    IntLiteral,
+    FloatLiteral,
+    StringLiteral,
+    CharLiteral,
+    BoolLiteral,
+    UnitLiteral,
+    Identifier,
+    BinaryOp,
+    UnaryOp,
+    PipeExpr,
+    TryExpr,
+    Param,
+    Lambda,
+    FnDef,
+    FnCall,
+    LetBinding,
+    MutBinding,
+    Assignment,
+    IfExpr,
+    MatchArm,
+    MatchExpr,
+    ForExpr,
+    WhileExpr,
+    BreakExpr,
+    ContinueExpr,
+    ListExpr,
+    ListComprehension,
+    TupleExpr,
+    MapExpr,
+    FieldAccess,
+    TypeDef,
+    VariantDef,
+    AliasDef,
+    PatternWildcard,
+    PatternInt,
+    PatternFloat,
+    PatternString,
+    PatternBool,
+    PatternChar,
+    PatternIdentifier,
+    PatternConstructor,
+    PatternTuple,
+    PatternList,
 )
-
 
 # ============================================================
 # 指令定义
 # ============================================================
 
+
 class Op:
     """字节码操作码"""
+
     # 常量与加载
-    CONST_INT = "CONST_INT"          # operands: (value,)
-    CONST_FLOAT = "CONST_FLOAT"      # operands: (value,)
-    CONST_STRING = "CONST_STRING"    # operands: (value,)
-    CONST_BOOL = "CONST_BOOL"        # operands: (value,)
-    CONST_UNIT = "CONST_UNIT"        # operands: ()
-    LOAD_CONST = "LOAD_CONST"        # operands: (index,)
-    LOAD_VAR = "LOAD_VAR"            # operands: (name,)
-    STORE_VAR = "STORE_VAR"          # operands: (name, mutable)
+    CONST_INT = "CONST_INT"  # operands: (value,)
+    CONST_FLOAT = "CONST_FLOAT"  # operands: (value,)
+    CONST_STRING = "CONST_STRING"  # operands: (value,)
+    CONST_BOOL = "CONST_BOOL"  # operands: (value,)
+    CONST_UNIT = "CONST_UNIT"  # operands: ()
+    LOAD_CONST = "LOAD_CONST"  # operands: (index,)
+    LOAD_VAR = "LOAD_VAR"  # operands: (name,)
+    STORE_VAR = "STORE_VAR"  # operands: (name, mutable)
 
     # 运算
     ADD = "ADD"
@@ -66,46 +100,48 @@ class Op:
     NOT = "NOT"
 
     # 控制流
-    JUMP = "JUMP"                    # operands: (target_ip,)
+    JUMP = "JUMP"  # operands: (target_ip,)
     JUMP_IF_FALSE = "JUMP_IF_FALSE"  # operands: (target_ip,)
-    JUMP_IF_TRUE = "JUMP_IF_TRUE"    # operands: (target_ip,)
+    JUMP_IF_TRUE = "JUMP_IF_TRUE"  # operands: (target_ip,)
     POP_JUMP_IF_FALSE = "POP_JUMP_IF_FALSE"  # operands: (target_ip,)
-    LOOP = "LOOP"                    # operands: (loop_start_ip,) - 标记循环继续跳回
-    LOOP_END = "LOOP_END"            # operands: (loop_start_ip,) - 循环结束/继续跳回
+    LOOP = "LOOP"  # operands: (loop_start_ip,) - 标记循环继续跳回
+    LOOP_END = "LOOP_END"  # operands: (loop_start_ip,) - 循环结束/继续跳回
     BREAK = "BREAK"
     CONTINUE = "CONTINUE"
 
     # 函数
-    CLOSURE = "CLOSURE"              # operands: (func_name, param_count, code_key)
-    CALL = "CALL"                    # operands: (arg_count,)
+    CLOSURE = "CLOSURE"  # operands: (func_name, param_count, code_key)
+    CALL = "CALL"  # operands: (arg_count,)
     RETURN = "RETURN"
-    CALL_BUILTIN = "CALL_BUILTIN"    # operands: (name, arg_count)
+    CALL_BUILTIN = "CALL_BUILTIN"  # operands: (name, arg_count)
 
     # 数据结构
-    BUILD_LIST = "BUILD_LIST"        # operands: (count,)
-    BUILD_TUPLE = "BUILD_TUPLE"      # operands: (count,)
-    BUILD_MAP = "BUILD_MAP"          # operands: (count,)
+    BUILD_LIST = "BUILD_LIST"  # operands: (count,)
+    BUILD_TUPLE = "BUILD_TUPLE"  # operands: (count,)
+    BUILD_MAP = "BUILD_MAP"  # operands: (count,)
     INDEX = "INDEX"
-    FIELD_ACCESS = "FIELD_ACCESS"     # operands: (field_name,)
-    BUILD_RANGE = "BUILD_RANGE"       # operands: () - 从栈上弹出 start, end, [step]
-    FOR_ITER = "FOR_ITER"            # operands: (loop_start_ip,) - 迭代一步
+    FIELD_ACCESS = "FIELD_ACCESS"  # operands: (field_name,)
+    BUILD_RANGE = "BUILD_RANGE"  # operands: () - 从栈上弹出 start, end, [step]
+    FOR_ITER = "FOR_ITER"  # operands: (loop_start_ip,) - 迭代一步
 
     # 模式匹配
-    MATCH_START = "MATCH_START"      # operands: (arm_count,)
-    MATCH_TEST_INT = "MATCH_TEST_INT"    # operands: (value, fail_ip,)
+    MATCH_START = "MATCH_START"  # operands: (arm_count,)
+    MATCH_TEST_INT = "MATCH_TEST_INT"  # operands: (value, fail_ip,)
     MATCH_TEST_BOOL = "MATCH_TEST_BOOL"  # operands: (value, fail_ip,)
     MATCH_TEST_STRING = "MATCH_TEST_STRING"  # operands: (value, fail_ip,)
-    MATCH_BIND = "MATCH_BIND"        # operands: (name,)
+    MATCH_BIND = "MATCH_BIND"  # operands: (name,)
     MATCH_WILDCARD = "MATCH_WILDCARD"
     MATCH_CONSTRUCTOR = "MATCH_CONSTRUCTOR"  # operands: (name, field_count, fail_ip,)
     MATCH_END = "MATCH_END"
 
     # 管道
-    PIPE_CALL = "PIPE_CALL"          # operands: (arg_count,)
+    PIPE_CALL = "PIPE_CALL"  # operands: (arg_count,)
 
     # ADT
-    MAKE_ADT = "MAKE_ADT"           # operands: (type_name, variant_name, field_count,)
-    REGISTER_CTOR = "REGISTER_CTOR"  # operands: (type_name, variant_name, field_count, name)
+    MAKE_ADT = "MAKE_ADT"  # operands: (type_name, variant_name, field_count,)
+    REGISTER_CTOR = (
+        "REGISTER_CTOR"  # operands: (type_name, variant_name, field_count, name)
+    )
 
     # 其他
     POP = "POP"
@@ -139,11 +175,18 @@ class Instruction:
 # 编译结果
 # ============================================================
 
+
 class FunctionBlock:
     """函数字节码块"""
 
-    def __init__(self, name: str, param_count: int, code: List[Instruction],
-                 constants: List[Any], param_names: List[str] = None):
+    def __init__(
+        self,
+        name: str,
+        param_count: int,
+        code: List[Instruction],
+        constants: List[Any],
+        param_names: List[str] = None,
+    ):
         self.name = name
         self.param_count = param_count
         self.code = code
@@ -193,7 +236,9 @@ class Bytecode:
         # 格式: MATCH_TEST_* (value, fail_ip_placeholder) 或
         #        MATCH_CONSTRUCTOR (name, field_count, fail_ip_placeholder)
         if len(instr.operands) == 3:
-            self.code[pos] = Instruction(instr.opcode, instr.operands[0], instr.operands[1], fail_ip)
+            self.code[pos] = Instruction(
+                instr.opcode, instr.operands[0], instr.operands[1], fail_ip
+            )
         elif len(instr.operands) == 2:
             self.code[pos] = Instruction(instr.opcode, instr.operands[0], fail_ip)
 
@@ -201,6 +246,7 @@ class Bytecode:
 # ============================================================
 # 编译器
 # ============================================================
+
 
 class BytecodeCompiler:
     """AST 到字节码的编译器"""
@@ -213,13 +259,39 @@ class BytecodeCompiler:
     def _init_builtin_names(self):
         """初始化内置函数名称集合"""
         self._builtin_names = {
-            "print", "read_line", "int_to_str", "float_to_str", "str_to_int",
-            "str_len", "list_length", "filter", "map", "sum", "head", "tail",
-            "read_file", "write_file", "file_exists", "list_dir",
-            "json_parse", "json_stringify",
-            "abs", "sqrt", "pow", "log", "log10", "exp",
-            "sin", "cos", "tan", "floor", "ceil", "round",
-            "min", "max", "pi",
+            "print",
+            "read_line",
+            "int_to_str",
+            "float_to_str",
+            "str_to_int",
+            "str_len",
+            "list_length",
+            "filter",
+            "map",
+            "sum",
+            "head",
+            "tail",
+            "read_file",
+            "write_file",
+            "file_exists",
+            "list_dir",
+            "json_parse",
+            "json_stringify",
+            "abs",
+            "sqrt",
+            "pow",
+            "log",
+            "log10",
+            "exp",
+            "sin",
+            "cos",
+            "tan",
+            "floor",
+            "ceil",
+            "round",
+            "min",
+            "max",
+            "pi",
         }
 
     def compile(self, program: Program) -> Bytecode:
@@ -243,7 +315,10 @@ class BytecodeCompiler:
                     # 带字段的构造器 -> 注册构造函数
                     self.bytecode.emit_op(
                         Op.REGISTER_CTOR,
-                        decl.name, variant.name, len(variant.fields), variant.name
+                        decl.name,
+                        variant.name,
+                        len(variant.fields),
+                        variant.name,
                     )
                     self.bytecode.emit_op(Op.STORE_VAR, variant.name, False)
                 else:
@@ -292,7 +367,9 @@ class BytecodeCompiler:
 
         self.bytecode = old_bytecode
 
-        func_block = FunctionBlock(fn_name, param_count, fn_code, fn_consts, param_names)
+        func_block = FunctionBlock(
+            fn_name, param_count, fn_code, fn_consts, param_names
+        )
         self.bytecode.functions[fn_name] = func_block
 
         # 将子函数/lambdas 也注册到主 bytecode 的 functions 中
@@ -440,10 +517,18 @@ class BytecodeCompiler:
         self._compile_expr(expr.right)
 
         op_map = {
-            "+": Op.ADD, "-": Op.SUB, "*": Op.MUL, "/": Op.DIV, "%": Op.MOD,
+            "+": Op.ADD,
+            "-": Op.SUB,
+            "*": Op.MUL,
+            "/": Op.DIV,
+            "%": Op.MOD,
             "++": Op.CONCAT,
-            "==": Op.EQ, "!=": Op.NEQ,
-            "<": Op.LT, ">": Op.GT, "<=": Op.LTE, ">=": Op.GTE,
+            "==": Op.EQ,
+            "!=": Op.NEQ,
+            "<": Op.LT,
+            ">": Op.GT,
+            "<=": Op.LTE,
+            ">=": Op.GTE,
         }
         if op in op_map:
             self.bytecode.emit_op(op_map[op])
@@ -550,7 +635,9 @@ class BytecodeCompiler:
         self.bytecode = old_bytecode
 
         lambda_name = f"<lambda_{len(self.bytecode.functions)}_{id(fn_code)}>"
-        func_block = FunctionBlock(lambda_name, param_count, fn_code, fn_consts, param_names)
+        func_block = FunctionBlock(
+            lambda_name, param_count, fn_code, fn_consts, param_names
+        )
         self.bytecode.functions[lambda_name] = func_block
 
         self.bytecode.emit_op(Op.CLOSURE, lambda_name, param_count)
@@ -662,7 +749,9 @@ class BytecodeCompiler:
 
         elif isinstance(pattern, PatternConstructor):
             fail_pos = self.bytecode.current_pos()
-            self.bytecode.emit_op(Op.MATCH_CONSTRUCTOR, pattern.name, len(pattern.fields), 0)
+            self.bytecode.emit_op(
+                Op.MATCH_CONSTRUCTOR, pattern.name, len(pattern.fields), 0
+            )
             return fail_pos
 
         elif isinstance(pattern, (PatternTuple, PatternList)):
@@ -685,8 +774,9 @@ class BytecodeCompiler:
             # 字段已由 MATCH_CONSTRUCTOR 压栈（subject 已被弹出）
             for field_pattern in pattern.fields:
                 self._compile_pattern_extract_and_bind(field_pattern)
-        elif isinstance(pattern, (PatternInt, PatternFloat, PatternString,
-                                  PatternBool, PatternChar)):
+        elif isinstance(
+            pattern, (PatternInt, PatternFloat, PatternString, PatternBool, PatternChar)
+        ):
             self.bytecode.emit_op(Op.POP)  # 弹出 subject
         elif isinstance(pattern, (PatternTuple, PatternList)):
             self.bytecode.emit_op(Op.POP)
@@ -720,7 +810,9 @@ class BytecodeCompiler:
 
         elif isinstance(pattern, PatternConstructor):
             fail_pos = self.bytecode.current_pos()
-            self.bytecode.emit_op(Op.MATCH_CONSTRUCTOR, pattern.name, len(pattern.fields), 0)
+            self.bytecode.emit_op(
+                Op.MATCH_CONSTRUCTOR, pattern.name, len(pattern.fields), 0
+            )
             return fail_pos
 
         elif isinstance(pattern, PatternTuple):
@@ -741,7 +833,9 @@ class BytecodeCompiler:
             self.bytecode.emit_op(Op.MATCH_BIND, pattern.name)
         elif isinstance(pattern, PatternConstructor):
             for field_pattern in pattern.fields:
-                self._compile_pattern_bindings(field_pattern, has_subject_on_stack=False)
+                self._compile_pattern_bindings(
+                    field_pattern, has_subject_on_stack=False
+                )
         elif isinstance(pattern, PatternTuple):
             for elem_pattern in pattern.elements:
                 self._compile_pattern_bindings(elem_pattern, has_subject_on_stack=False)
@@ -761,7 +855,11 @@ class BytecodeCompiler:
     def _compile_for(self, expr: ForExpr):
         """编译 for 循环"""
         # 确定迭代器
-        if isinstance(expr.iterable, tuple) and len(expr.iterable) >= 2 and expr.iterable[0] == "range":
+        if (
+            isinstance(expr.iterable, tuple)
+            and len(expr.iterable) >= 2
+            and expr.iterable[0] == "range"
+        ):
             self._compile_expr(expr.iterable[1])  # start
             self._compile_expr(expr.iterable[2])  # end
             if len(expr.iterable) > 3 and expr.iterable[3] is not None:
@@ -817,7 +915,11 @@ class BytecodeCompiler:
 
     def _compile_list_comprehension(self, expr: ListComprehension):
         """编译列表推导式"""
-        if isinstance(expr.iterable, tuple) and len(expr.iterable) >= 2 and expr.iterable[0] == "range":
+        if (
+            isinstance(expr.iterable, tuple)
+            and len(expr.iterable) >= 2
+            and expr.iterable[0] == "range"
+        ):
             start_expr = expr.iterable[1]
             end_expr = expr.iterable[2]
             step_expr = expr.iterable[3] if len(expr.iterable) > 3 else None
@@ -837,6 +939,7 @@ class BytecodeCompiler:
 # 字节码打印（调试用）
 # ============================================================
 
+
 def dump_bytecode(bytecode: Bytecode) -> str:
     """将字节码格式化为可读字符串"""
     lines = []
@@ -851,7 +954,9 @@ def dump_bytecode(bytecode: Bytecode) -> str:
 
     for name, func in bytecode.functions.items():
         lines.append("")
-        lines.append(f"Function '{name}' (params={func.param_count}, names={func.param_names}):")
+        lines.append(
+            f"Function '{name}' (params={func.param_count}, names={func.param_names}):"
+        )
         lines.append(f"  Constants: {func.constants}")
         for i, instr in enumerate(func.code):
             lines.append(f"  {i:4d}: {instr}")

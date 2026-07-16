@@ -14,33 +14,70 @@ Nova 编程语言 - 类型检查器
 from typing import Dict, Optional, List, Any
 
 from ast_nodes import (
-    Program, Block,
-    IntLiteral, FloatLiteral, StringLiteral, CharLiteral, BoolLiteral, UnitLiteral,
-    Identifier, BinaryOp, UnaryOp, PipeExpr, TryExpr,
-    Param, Lambda, FnDef, FnCall,
-    LetBinding, MutBinding, Assignment,
-    IfExpr, MatchArm, MatchExpr,
-    ForExpr, WhileExpr, BreakExpr, ContinueExpr,
-    ListExpr, ListComprehension, TupleExpr, FieldAccess,
-    TypeDef, VariantDef, AliasDef,
-    ImportDecl, ExportDecl,
-    TypeInt, TypeFloat, TypeString, TypeBool, TypeChar, TypeUnit,
-    TypeIdentifier, TypeGeneric, TypeTuple, TypeFn, Span,
+    Program,
+    Block,
+    IntLiteral,
+    FloatLiteral,
+    StringLiteral,
+    CharLiteral,
+    BoolLiteral,
+    UnitLiteral,
+    Identifier,
+    BinaryOp,
+    UnaryOp,
+    PipeExpr,
+    TryExpr,
+    Param,
+    Lambda,
+    FnDef,
+    FnCall,
+    LetBinding,
+    MutBinding,
+    Assignment,
+    IfExpr,
+    MatchArm,
+    MatchExpr,
+    ForExpr,
+    WhileExpr,
+    BreakExpr,
+    ContinueExpr,
+    ListExpr,
+    ListComprehension,
+    TupleExpr,
+    FieldAccess,
+    TypeDef,
+    VariantDef,
+    AliasDef,
+    ImportDecl,
+    ExportDecl,
+    TypeInt,
+    TypeFloat,
+    TypeString,
+    TypeBool,
+    TypeChar,
+    TypeUnit,
+    TypeIdentifier,
+    TypeGeneric,
+    TypeTuple,
+    TypeFn,
+    Span,
 )
 from errors import TypeCheckError
-
 
 # ============================================================
 # 类型表示
 # ============================================================
 
+
 class NovaType:
     """Nova 类型基类"""
+
     pass
 
 
 class PrimType(NovaType):
     """基本类型：Int, Float, String, Bool, Char, Unit"""
+
     def __init__(self, name: str):
         self.name = name
 
@@ -56,6 +93,7 @@ class PrimType(NovaType):
 
 class ListType(NovaType):
     """列表类型 List[ElemType]"""
+
     def __init__(self, elem_type: NovaType):
         self.elem_type = elem_type
 
@@ -71,14 +109,17 @@ class ListType(NovaType):
 
 class MapType(NovaType):
     """Map 类型 Map[KeyType, ValueType]"""
+
     def __init__(self, key_type: NovaType, value_type: NovaType):
         self.key_type = key_type
         self.value_type = value_type
 
     def __eq__(self, other):
-        return (isinstance(other, MapType)
-                and self.key_type == other.key_type
-                and self.value_type == other.value_type)
+        return (
+            isinstance(other, MapType)
+            and self.key_type == other.key_type
+            and self.value_type == other.value_type
+        )
 
     def __hash__(self):
         return hash(("Map", self.key_type, self.value_type))
@@ -89,13 +130,16 @@ class MapType(NovaType):
 
 class TupleType(NovaType):
     """元组类型 (T1, T2, ...)"""
+
     def __init__(self, elements: List[NovaType]):
         self.elements = elements
 
     def __eq__(self, other):
-        return (isinstance(other, TupleType)
-                and len(self.elements) == len(other.elements)
-                and all(a == b for a, b in zip(self.elements, other.elements)))
+        return (
+            isinstance(other, TupleType)
+            and len(self.elements) == len(other.elements)
+            and all(a == b for a, b in zip(self.elements, other.elements))
+        )
 
     def __hash__(self):
         return hash(("Tuple", tuple(hash(e) for e in self.elements)))
@@ -106,18 +150,23 @@ class TupleType(NovaType):
 
 class FnType(NovaType):
     """函数类型 (T1, T2, ...) -> RetType"""
+
     def __init__(self, param_types: List[NovaType], return_type: NovaType):
         self.param_types = param_types
         self.return_type = return_type
 
     def __eq__(self, other):
-        return (isinstance(other, FnType)
-                and len(self.param_types) == len(other.param_types)
-                and all(a == b for a, b in zip(self.param_types, other.param_types))
-                and self.return_type == other.return_type)
+        return (
+            isinstance(other, FnType)
+            and len(self.param_types) == len(other.param_types)
+            and all(a == b for a, b in zip(self.param_types, other.param_types))
+            and self.return_type == other.return_type
+        )
 
     def __hash__(self):
-        return hash(("Fn", tuple(hash(p) for p in self.param_types), hash(self.return_type)))
+        return hash(
+            ("Fn", tuple(hash(p) for p in self.param_types), hash(self.return_type))
+        )
 
     def __repr__(self):
         params = ", ".join(str(p) for p in self.param_types)
@@ -126,6 +175,7 @@ class FnType(NovaType):
 
 class ADTType(NovaType):
     """代数数据类型"""
+
     def __init__(self, name: str, type_params: List[NovaType] = None):
         self.name = name
         self.type_params = type_params or []
@@ -144,6 +194,7 @@ class ADTType(NovaType):
 
 class TypeVar(NovaType):
     """类型变量（用于推断）"""
+
     _counter = 0
 
     def __init__(self, name: str = None):
@@ -167,13 +218,16 @@ class TypeVar(NovaType):
 # 类型环境
 # ============================================================
 
+
 class TypeEnv:
     """类型环境"""
 
-    def __init__(self, parent: Optional['TypeEnv'] = None):
+    def __init__(self, parent: Optional["TypeEnv"] = None):
         self.parent = parent
         self.types: Dict[str, NovaType] = {}
-        self.adt_variants: Dict[str, List[tuple]] = {}  # adt_name -> [(variant_name, [field_types])]
+        self.adt_variants: Dict[str, List[tuple]] = (
+            {}
+        )  # adt_name -> [(variant_name, [field_types])]
         self.aliases: Dict[str, NovaType] = {}
 
     def define(self, name: str, ty: NovaType):
@@ -194,7 +248,7 @@ class TypeEnv:
         result.update(self.adt_variants)
         return result
 
-    def child(self) -> 'TypeEnv':
+    def child(self) -> "TypeEnv":
         return TypeEnv(parent=self)
 
 
@@ -222,7 +276,10 @@ class TypeChecker:
         """注册内置函数和类型的类型签名"""
         # 内置 Option 和 Result
         self.env.adt_variants["Option"] = [("Some", [TypeVar("T")]), ("None", [])]
-        self.env.adt_variants["Result"] = [("Ok", [TypeVar("T")]), ("Err", [TypeVar("E")])]
+        self.env.adt_variants["Result"] = [
+            ("Ok", [TypeVar("T")]),
+            ("Err", [TypeVar("E")]),
+        ]
 
         # print: (a) -> Unit
         a = TypeVar("a")
@@ -249,7 +306,9 @@ class TypeChecker:
 
         # filter: (Fn[T, Bool], List[T]) -> List[T]
         t1 = TypeVar("T1")
-        self.env.define("filter", FnType([FnType([t1], BOOL_T), ListType(t1)], ListType(t1)))
+        self.env.define(
+            "filter", FnType([FnType([t1], BOOL_T), ListType(t1)], ListType(t1))
+        )
 
         # map: (Fn[A, B], List[A]) -> List[B]
         a2 = TypeVar("A")
@@ -265,7 +324,9 @@ class TypeChecker:
 
         # tail: (List[T]) -> Option[List[T]]
         t3 = TypeVar("T3")
-        self.env.define("tail", FnType([ListType(t3)], ADTType("Option", [ListType(t3)])))
+        self.env.define(
+            "tail", FnType([ListType(t3)], ADTType("Option", [ListType(t3)]))
+        )
 
         # ====== 文件 I/O ======
         # read_file: (String) -> String
@@ -318,7 +379,8 @@ class TypeChecker:
                     col = decl.span.column if decl.span else -1
                     raise TypeCheckError(
                         f"let 绑定 '{decl.name}' 的推断类型 {ty} 与标注类型 {annotated} 不匹配",
-                        line, col
+                        line,
+                        col,
                     )
             self.env.define(decl.name, ty)
 
@@ -491,7 +553,9 @@ class TypeChecker:
                     raise TypeCheckError(
                         f"函数期望至多 {len(callee_ty.param_types)} 个参数，但传入了 {len(arg_types)} 个"
                     )
-                for i, (arg_t, param_t) in enumerate(zip(arg_types, callee_ty.param_types)):
+                for i, (arg_t, param_t) in enumerate(
+                    zip(arg_types, callee_ty.param_types)
+                ):
                     if not self._types_compatible(arg_t, param_t):
                         raise TypeCheckError(
                             f"参数 {i} 类型不匹配：期望 {param_t}，得到 {arg_t}"
@@ -500,7 +564,9 @@ class TypeChecker:
                     return callee_ty.return_type
                 else:
                     # 部分应用：返回剩余参数 -> 返回值 的函数类型
-                    return FnType(callee_ty.param_types[len(arg_types):], callee_ty.return_type)
+                    return FnType(
+                        callee_ty.param_types[len(arg_types) :], callee_ty.return_type
+                    )
             elif isinstance(callee_ty, TypeVar):
                 # 未类型化的参数（duck typing）：允许任意调用
                 # 返回一个 TypeVar 表示结果类型
@@ -516,11 +582,14 @@ class TypeChecker:
                 if len(right_ty.param_types) >= 1:
                     # 检查管道值是否与函数最后一个参数兼容
                     # 因为管道的典型用法是 f(arg1) |> 等价于 f(piped_value)
-                    last_param = right_ty.param_types[-1] if right_ty.param_types else None
+                    last_param = (
+                        right_ty.param_types[-1] if right_ty.param_types else None
+                    )
                     # 也检查第一个参数（直接调用场景）
                     first_param = right_ty.param_types[0]
-                    if (self._types_compatible(left_ty, last_param)
-                            or self._types_compatible(left_ty, first_param)):
+                    if self._types_compatible(
+                        left_ty, last_param
+                    ) or self._types_compatible(left_ty, first_param):
                         return right_ty.return_type
             # 如果无法确定，返回右侧类型
             return right_ty
@@ -635,7 +704,9 @@ class TypeChecker:
         else:
             raise TypeCheckError(f"未知的表达式类型: {type(expr).__name__}")
 
-    def check_match_arm(self, arm, subject_type: NovaType, match_expr: MatchExpr) -> NovaType:
+    def check_match_arm(
+        self, arm, subject_type: NovaType, match_expr: MatchExpr
+    ) -> NovaType:
         """检查 match 分支"""
         child_env = self.env.child()
         self._check_pattern(arm.pattern, subject_type, child_env, match_expr)
@@ -648,8 +719,15 @@ class TypeChecker:
     def _check_pattern(self, pattern, subject_type: NovaType, env: TypeEnv, match_expr):
         """检查模式与类型的匹配"""
         from ast_nodes import (
-            PatternWildcard, PatternInt, PatternFloat, PatternString,
-            PatternBool, PatternIdentifier, PatternConstructor, PatternTuple, PatternList,
+            PatternWildcard,
+            PatternInt,
+            PatternFloat,
+            PatternString,
+            PatternBool,
+            PatternIdentifier,
+            PatternConstructor,
+            PatternTuple,
+            PatternList,
         )
 
         if isinstance(pattern, PatternWildcard):
@@ -713,30 +791,42 @@ class TypeChecker:
 
         # 算术操作
         if expr.op in ("+", "-", "*", "/"):
-            if self._types_compatible(left_ty, INT_T) and self._types_compatible(right_ty, INT_T):
+            if self._types_compatible(left_ty, INT_T) and self._types_compatible(
+                right_ty, INT_T
+            ):
                 return INT_T
-            if self._types_compatible(left_ty, FLOAT_T) and self._types_compatible(right_ty, FLOAT_T):
+            if self._types_compatible(left_ty, FLOAT_T) and self._types_compatible(
+                right_ty, FLOAT_T
+            ):
                 return FLOAT_T
             raise TypeCheckError(
                 f"操作符 '{expr.op}' 的操作数类型不兼容：{left_ty} 和 {right_ty}"
             )
 
         if expr.op == "%":
-            if self._types_compatible(left_ty, INT_T) and self._types_compatible(right_ty, INT_T):
+            if self._types_compatible(left_ty, INT_T) and self._types_compatible(
+                right_ty, INT_T
+            ):
                 return INT_T
             raise TypeCheckError(f"操作符 '%' 需要 Int 类型操作数")
 
         # 字符串拼接
         if expr.op == "++":
-            if self._types_compatible(left_ty, STRING_T) and self._types_compatible(right_ty, STRING_T):
+            if self._types_compatible(left_ty, STRING_T) and self._types_compatible(
+                right_ty, STRING_T
+            ):
                 return STRING_T
             raise TypeCheckError(f"操作符 '++' 需要 String 类型操作数")
 
         # 比较操作
         if expr.op in ("==", "!=", "<", ">", "<=", ">="):
             if expr.op in ("<", ">", "<=", ">="):
-                if not (self._types_compatible(left_ty, INT_T) and self._types_compatible(right_ty, INT_T)
-                        or self._types_compatible(left_ty, FLOAT_T) and self._types_compatible(right_ty, FLOAT_T)):
+                if not (
+                    self._types_compatible(left_ty, INT_T)
+                    and self._types_compatible(right_ty, INT_T)
+                    or self._types_compatible(left_ty, FLOAT_T)
+                    and self._types_compatible(right_ty, FLOAT_T)
+                ):
                     raise TypeCheckError(f"操作符 '{expr.op}' 需要数值类型操作数")
             return BOOL_T
 
@@ -819,7 +909,7 @@ class TypeChecker:
         elif isinstance(type_node, TypeFn):
             return FnType(
                 [self._from_ast_type(p) for p in type_node.param_types],
-                self._from_ast_type(type_node.return_type)
+                self._from_ast_type(type_node.return_type),
             )
         raise TypeCheckError(f"未知的类型注解: {type(type_node).__name__}")
 
@@ -833,8 +923,10 @@ class TypeChecker:
         if isinstance(a, FnType) and isinstance(b, FnType):
             if len(a.param_types) != len(b.param_types):
                 return False
-            return (all(self._types_compatible(pa, pb) for pa, pb in zip(a.param_types, b.param_types))
-                    and self._types_compatible(a.return_type, b.return_type))
+            return all(
+                self._types_compatible(pa, pb)
+                for pa, pb in zip(a.param_types, b.param_types)
+            ) and self._types_compatible(a.return_type, b.return_type)
         # 递归检查 ListType
         if isinstance(a, ListType) and isinstance(b, ListType):
             return self._types_compatible(a.elem_type, b.elem_type)

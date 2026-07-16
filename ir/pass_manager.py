@@ -7,12 +7,24 @@ Pass 管理器负责按序运行各层 Pass，并在达到不动点（无新变�
 
 from typing import List
 from ir_nodes import (
-    IRType, NovaType,
-    INT_TYPE, FLOAT_TYPE, BOOL_TYPE,
-    HIRModule, HIRFnDecl, HIRLetDecl,
+    IRType,
+    NovaType,
+    INT_TYPE,
+    FLOAT_TYPE,
+    BOOL_TYPE,
+    HIRModule,
+    HIRFnDecl,
+    HIRLetDecl,
     HIRExpr,
-    HIRIntLiteral, HIRFloatLiteral, HIRBoolLiteral, HIRStringLiteral,
-    HIRBinaryOp, HIRBlockExpr, HIRCallExpr, HIRIfExpr, HIRUnitLiteral,
+    HIRIntLiteral,
+    HIRFloatLiteral,
+    HIRBoolLiteral,
+    HIRStringLiteral,
+    HIRBinaryOp,
+    HIRBlockExpr,
+    HIRCallExpr,
+    HIRIfExpr,
+    HIRUnitLiteral,
     MIRModule,
     LIRModule,
 )
@@ -20,6 +32,7 @@ from ir_nodes import (
 
 class Pass:
     """优化 Pass 基类"""
+
     name = ""
 
     def run(self, module) -> bool:
@@ -28,6 +41,7 @@ class Pass:
 
 class ConstantFolding(Pass):
     """常量折叠"""
+
     name = "constant_folding"
 
     def run(self, hir_module):
@@ -52,7 +66,9 @@ class ConstantFolding(Pass):
         if isinstance(expr.right, HIRBinaryOp):
             changed |= self._fold_expr(expr.right)
 
-        if isinstance(expr.left, HIRIntLiteral) and isinstance(expr.right, HIRIntLiteral):
+        if isinstance(expr.left, HIRIntLiteral) and isinstance(
+            expr.right, HIRIntLiteral
+        ):
             result = self._eval_int_binop(expr.op, expr.left.value, expr.right.value)
             if result is not None:
                 expr.__class__ = HIRIntLiteral
@@ -63,7 +79,9 @@ class ConstantFolding(Pass):
                 del expr.right
                 return True
 
-        if isinstance(expr.left, HIRFloatLiteral) and isinstance(expr.right, HIRFloatLiteral):
+        if isinstance(expr.left, HIRFloatLiteral) and isinstance(
+            expr.right, HIRFloatLiteral
+        ):
             result = self._eval_float_binop(expr.op, expr.left.value, expr.right.value)
             if result is not None:
                 expr.__class__ = HIRFloatLiteral
@@ -110,6 +128,7 @@ class ConstantFolding(Pass):
 
 class Inlining(Pass):
     """函数内联"""
+
     name = "inlining"
 
     def run(self, hir_module):
@@ -118,6 +137,7 @@ class Inlining(Pass):
 
 class DeadCodeElimination(Pass):
     """死代码消除"""
+
     name = "dead_code_elimination"
 
     def run(self, hir_module):
@@ -126,6 +146,7 @@ class DeadCodeElimination(Pass):
 
 class CommonSubexprElimination(Pass):
     """公共子表达式消除"""
+
     name = "cse"
 
     def run(self, mir_module):
@@ -134,6 +155,7 @@ class CommonSubexprElimination(Pass):
 
 class LoopInvariantCodeMotion(Pass):
     """循环不变量外提"""
+
     name = "licm"
 
     def run(self, mir_module):

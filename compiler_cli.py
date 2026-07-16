@@ -41,7 +41,9 @@ class NovaCompiler:
         self.c_flags = ["-O2", "-Wall"]
         self.output_dir = "build"
         self.link_runtime = True
-        self.runtime_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "runtime")
+        self.runtime_dir = os.path.join(
+            os.path.dirname(os.path.abspath(__file__)), "runtime"
+        )
         self.verbose = False
         self.optimize = 2
 
@@ -70,8 +72,13 @@ class NovaCompiler:
     # 编译流程
     # ----------------------------------------------------------
 
-    def build(self, source_path: str, output_name: str = None,
-              optimize: str = "O2", target: str = None) -> str:
+    def build(
+        self,
+        source_path: str,
+        output_name: str = None,
+        optimize: str = "O2",
+        target: str = None,
+    ) -> str:
         """
         编译 Nova 源码为原生二进制
 
@@ -90,7 +97,7 @@ class NovaCompiler:
             sys.exit(1)
 
         # 读取源码
-        with open(source_path, 'r', encoding='utf-8') as f:
+        with open(source_path, "r", encoding="utf-8") as f:
             source = f.read()
 
         # 2. 前端处理: Lexer -> Parser -> Type Checker
@@ -115,7 +122,7 @@ class NovaCompiler:
             output_name = base_name
 
         c_file_path = os.path.join(self.output_dir, f"{base_name}.c")
-        with open(c_file_path, 'w', encoding='utf-8') as f:
+        with open(c_file_path, "w", encoding="utf-8") as f:
             f.write(c_code)
 
         if self.verbose:
@@ -163,12 +170,7 @@ class NovaCompiler:
             print(f"[info] 执行: {' '.join(cmd)}")
 
         try:
-            result = subprocess.run(
-                cmd,
-                capture_output=True,
-                text=True,
-                timeout=30
-            )
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
             if result.returncode != 0:
                 print(f"C 编译器错误:", file=sys.stderr)
                 if result.stderr:
@@ -202,7 +204,7 @@ class NovaCompiler:
             print(f"错误: 文件 '{source_path}' 不存在", file=sys.stderr)
             sys.exit(1)
 
-        with open(source_path, 'r', encoding='utf-8') as f:
+        with open(source_path, "r", encoding="utf-8") as f:
             source = f.read()
 
         try:
@@ -220,7 +222,7 @@ class NovaCompiler:
             print(f"错误: 文件 '{source_path}' 不存在", file=sys.stderr)
             sys.exit(1)
 
-        with open(source_path, 'r', encoding='utf-8') as f:
+        with open(source_path, "r", encoding="utf-8") as f:
             source = f.read()
 
         try:
@@ -237,7 +239,7 @@ class NovaCompiler:
             base_name = os.path.splitext(os.path.basename(source_path))[0]
             output_path = f"{base_name}.c"
 
-        with open(output_path, 'w', encoding='utf-8') as f:
+        with open(output_path, "w", encoding="utf-8") as f:
             f.write(c_code)
 
         print(f"已生成 C 代码: {output_path}")
@@ -250,10 +252,14 @@ class NovaCompiler:
             print(f"错误: 文件 '{source_path}' 不存在", file=sys.stderr)
             sys.exit(1)
 
-        source = open(source_path, 'r', encoding='utf-8').read()
-        output = output_name or os.path.splitext(os.path.basename(source_path))[0] + ".wasm"
+        source = open(source_path, "r", encoding="utf-8").read()
+        output = (
+            output_name or os.path.splitext(os.path.basename(source_path))[0] + ".wasm"
+        )
 
-        pipeline = NovaCompilerPipeline(target=BACKEND_WASM, optimize_level=self.optimize)
+        pipeline = NovaCompilerPipeline(
+            target=BACKEND_WASM, optimize_level=self.optimize
+        )
         result = pipeline.compile_source(source, output)
 
         if result:
@@ -271,7 +277,7 @@ class NovaCompiler:
             print(f"错误: 文件 '{source_path}' 不存在", file=sys.stderr)
             sys.exit(1)
 
-        source = open(source_path, 'r', encoding='utf-8').read()
+        source = open(source_path, "r", encoding="utf-8").read()
         pipeline = NovaCompilerPipeline(target="c", optimize_level=0)
         return pipeline.compile_to_ir_text(source, level)
 
@@ -302,7 +308,7 @@ class NovaCompiler:
 
         # 创建 nova.toml
         toml_content = self._generate_toml(name)
-        with open(os.path.join(project_dir, "nova.toml"), 'w', encoding='utf-8') as f:
+        with open(os.path.join(project_dir, "nova.toml"), "w", encoding="utf-8") as f:
             f.write(toml_content)
 
         # 创建主文件
@@ -311,12 +317,18 @@ class NovaCompiler:
         else:
             src_content = self._get_template("basic")
 
-        with open(os.path.join(project_dir, "src", "main.nova"), 'w', encoding='utf-8') as f:
+        with open(
+            os.path.join(project_dir, "src", "main.nova"), "w", encoding="utf-8"
+        ) as f:
             f.write(src_content)
 
         # 创建测试文件
-        test_content = '// Nova 测试文件\n\nfn test_basic() -> Unit {\n  assert(1 + 1 == 2)\n}\n'
-        with open(os.path.join(project_dir, "tests", "test_basic.nova"), 'w', encoding='utf-8') as f:
+        test_content = (
+            "// Nova 测试文件\n\nfn test_basic() -> Unit {\n  assert(1 + 1 == 2)\n}\n"
+        )
+        with open(
+            os.path.join(project_dir, "tests", "test_basic.nova"), "w", encoding="utf-8"
+        ) as f:
             f.write(test_content)
 
         print(f"已创建 Nova 项目: {name}/")
@@ -331,7 +343,7 @@ class NovaCompiler:
         if output_path is None:
             output_path = f"main.nova"
 
-        with open(output_path, 'w', encoding='utf-8') as f:
+        with open(output_path, "w", encoding="utf-8") as f:
             f.write(content)
 
         print(f"已创建文件: {output_path} (模板: {template})")
@@ -362,7 +374,9 @@ manifest = "app.manifest"
         """获取模板内容"""
         templates_dir = os.path.join(
             os.path.dirname(os.path.abspath(__file__)),
-            "templates", template_name, "src"
+            "templates",
+            template_name,
+            "src",
         )
 
         # 优先从模板文件读取
@@ -371,7 +385,7 @@ manifest = "app.manifest"
             template_file = os.path.join(templates_dir, "lib.nova")
 
         if os.path.isfile(template_file):
-            with open(template_file, 'r', encoding='utf-8') as f:
+            with open(template_file, "r", encoding="utf-8") as f:
                 return f.read()
 
         # fallback 内置模板
@@ -385,6 +399,7 @@ manifest = "app.manifest"
 # ============================================================
 # CLI 命令处理
 # ============================================================
+
 
 def print_version():
     """显示版本信息"""
@@ -438,22 +453,28 @@ def main():
     build_parser = subparsers.add_parser("build", help="编译为原生二进制")
     build_parser.add_argument("file", help="Nova 源文件路径")
     build_parser.add_argument("-o", "--output", help="输出文件名")
-    build_parser.add_argument("-O", "--optimize", default="O2",
-                              choices=["O0", "O1", "O2", "O3", "Os"],
-                              help="优化级别")
-    build_parser.add_argument("-v", "--verbose", action="store_true",
-                              help="详细输出")
+    build_parser.add_argument(
+        "-O",
+        "--optimize",
+        default="O2",
+        choices=["O0", "O1", "O2", "O3", "Os"],
+        help="优化级别",
+    )
+    build_parser.add_argument("-v", "--verbose", action="store_true", help="详细输出")
 
     # run 命令
     run_parser = subparsers.add_parser("run", help="编译并运行")
     run_parser.add_argument("file", help="Nova 源文件路径")
     run_parser.add_argument("run_args", nargs="*", help="运行时参数")
     run_parser.add_argument("-o", "--output", help="输出文件名")
-    run_parser.add_argument("-O", "--optimize", default="O2",
-                            choices=["O0", "O1", "O2", "O3", "Os"],
-                            help="优化级别")
-    run_parser.add_argument("-v", "--verbose", action="store_true",
-                            help="详细输出")
+    run_parser.add_argument(
+        "-O",
+        "--optimize",
+        default="O2",
+        choices=["O0", "O1", "O2", "O3", "Os"],
+        help="优化级别",
+    )
+    run_parser.add_argument("-v", "--verbose", action="store_true", help="详细输出")
 
     # check 命令
     check_parser = subparsers.add_parser("check", help="仅类型检查")
@@ -465,31 +486,38 @@ def main():
     emit_c_parser.add_argument("-o", "--output", help="输出 C 文件路径")
 
     # emit-wasm 命令
-    emit_wasm_parser = subparsers.add_parser("emit-wasm", help="编译为 WebAssembly (WasmGC)")
+    emit_wasm_parser = subparsers.add_parser(
+        "emit-wasm", help="编译为 WebAssembly (WasmGC)"
+    )
     emit_wasm_parser.add_argument("file", help="Nova 源文件路径")
     emit_wasm_parser.add_argument("-o", "--output", help="输出文件名")
-    emit_wasm_parser.add_argument("-O", "--optimize", default=2, type=int,
-                                  choices=[0, 1, 2, 3],
-                                  help="优化级别")
+    emit_wasm_parser.add_argument(
+        "-O", "--optimize", default=2, type=int, choices=[0, 1, 2, 3], help="优化级别"
+    )
 
     # emit-ir 命令
     emit_ir_parser = subparsers.add_parser("emit-ir", help="输出 IR 中间表示")
     emit_ir_parser.add_argument("file", help="Nova 源文件路径")
-    emit_ir_parser.add_argument("-l", "--level", default="lir",
-                               choices=["hir", "mir", "lir"],
-                               help="IR 层级 (hir/mir/lir)")
+    emit_ir_parser.add_argument(
+        "-l",
+        "--level",
+        default="lir",
+        choices=["hir", "mir", "lir"],
+        help="IR 层级 (hir/mir/lir)",
+    )
 
     # init 命令
     init_parser = subparsers.add_parser("init", help="创建新项目")
     init_parser.add_argument("name", help="项目名称")
-    init_parser.add_argument("-t", "--template", default="basic",
-                             choices=["basic", "lib"],
-                             help="项目模板")
+    init_parser.add_argument(
+        "-t", "--template", default="basic", choices=["basic", "lib"], help="项目模板"
+    )
 
     # new 命令
     new_parser = subparsers.add_parser("new", help="从模板创建文件")
-    new_parser.add_argument("template", default="basic", nargs="?",
-                            help="模板名称 (basic/lib)")
+    new_parser.add_argument(
+        "template", default="basic", nargs="?", help="模板名称 (basic/lib)"
+    )
     new_parser.add_argument("-o", "--output", help="输出文件路径")
 
     # version
@@ -506,7 +534,9 @@ def main():
 
     if args.command == "build":
         compiler.verbose = args.verbose
-        output = compiler.build(args.file, output_name=args.output, optimize=args.optimize)
+        output = compiler.build(
+            args.file, output_name=args.output, optimize=args.optimize
+        )
         print(f"编译成功: {output}")
 
     elif args.command == "run":

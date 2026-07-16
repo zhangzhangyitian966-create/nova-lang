@@ -9,46 +9,126 @@ import sys
 import os
 
 # 确保能正确导入 ast_nodes
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from ast_nodes import (
-    Program, Block,
-    IntLiteral, FloatLiteral, StringLiteral, CharLiteral, BoolLiteral, UnitLiteral,
-    Identifier, BinaryOp, UnaryOp, PipeExpr, TryExpr,
-    Param, Lambda, FnDef, FnCall,
-    LetBinding, MutBinding, Assignment,
-    IfExpr, MatchArm, MatchExpr,
-    ForExpr, WhileExpr, BreakExpr, ContinueExpr,
-    PatternWildcard, PatternInt, PatternFloat, PatternString,
-    PatternBool, PatternChar, PatternIdentifier, PatternConstructor,
-    PatternTuple, PatternList,
-    ListExpr, ListComprehension, TupleExpr, MapExpr, FieldAccess,
-    ImportDecl, ExportDecl, TypeDef, VariantDef, AliasDef,
+    Program,
+    Block,
+    IntLiteral,
+    FloatLiteral,
+    StringLiteral,
+    CharLiteral,
+    BoolLiteral,
+    UnitLiteral,
+    Identifier,
+    BinaryOp,
+    UnaryOp,
+    PipeExpr,
+    TryExpr,
+    Param,
+    Lambda,
+    FnDef,
+    FnCall,
+    LetBinding,
+    MutBinding,
+    Assignment,
+    IfExpr,
+    MatchArm,
+    MatchExpr,
+    ForExpr,
+    WhileExpr,
+    BreakExpr,
+    ContinueExpr,
+    PatternWildcard,
+    PatternInt,
+    PatternFloat,
+    PatternString,
+    PatternBool,
+    PatternChar,
+    PatternIdentifier,
+    PatternConstructor,
+    PatternTuple,
+    PatternList,
+    ListExpr,
+    ListComprehension,
+    TupleExpr,
+    MapExpr,
+    FieldAccess,
+    ImportDecl,
+    ExportDecl,
+    TypeDef,
+    VariantDef,
+    AliasDef,
 )
 from ir_nodes import (
-    IRType, NovaType,
-    INT_TYPE, FLOAT_TYPE, STRING_TYPE, BOOL_TYPE, CHAR_TYPE, UNIT_TYPE, NEVER_TYPE,
-    HIRModule, HIRFunction, HIRTypeDef, HIRVariant,
-    HIRDecl, HIRFnDecl, HIRLetDecl, HIRTypeDecl, HIRAliasDecl, HIRImportDecl, HIRExportDecl,
+    IRType,
+    NovaType,
+    INT_TYPE,
+    FLOAT_TYPE,
+    STRING_TYPE,
+    BOOL_TYPE,
+    CHAR_TYPE,
+    UNIT_TYPE,
+    NEVER_TYPE,
+    HIRModule,
+    HIRFunction,
+    HIRTypeDef,
+    HIRVariant,
+    HIRDecl,
+    HIRFnDecl,
+    HIRLetDecl,
+    HIRTypeDecl,
+    HIRAliasDecl,
+    HIRImportDecl,
+    HIRExportDecl,
     HIRExpr,
-    HIRIntLiteral, HIRFloatLiteral, HIRStringLiteral, HIRBoolLiteral,
-    HIRCharLiteral, HIRUnitLiteral, HIRIdentifier,
-    HIRBinaryOp, HIRUnaryOp,
-    HIRIfExpr, HIRMatchExpr, HIRMatchArm,
-    HIRLambda, HIRCallExpr, HIRPipeExpr,
-    HIRListExpr, HIRTupleExpr, HIRMapExpr,
-    HIRFieldExpr, HIRIndexExpr, HIRBlockExpr,
-    HIRForExpr, HIRWhileExpr, HIRBreakExpr, HIRContinueExpr,
-    HIRListComprehension, HIRADTConstructor, HIRUnwrapExpr, HIRAssignExpr,
+    HIRIntLiteral,
+    HIRFloatLiteral,
+    HIRStringLiteral,
+    HIRBoolLiteral,
+    HIRCharLiteral,
+    HIRUnitLiteral,
+    HIRIdentifier,
+    HIRBinaryOp,
+    HIRUnaryOp,
+    HIRIfExpr,
+    HIRMatchExpr,
+    HIRMatchArm,
+    HIRLambda,
+    HIRCallExpr,
+    HIRPipeExpr,
+    HIRListExpr,
+    HIRTupleExpr,
+    HIRMapExpr,
+    HIRFieldExpr,
+    HIRIndexExpr,
+    HIRBlockExpr,
+    HIRForExpr,
+    HIRWhileExpr,
+    HIRBreakExpr,
+    HIRContinueExpr,
+    HIRListComprehension,
+    HIRADTConstructor,
+    HIRUnwrapExpr,
+    HIRAssignExpr,
     HIRPattern,
-    HIRIntPattern, HIRFloatPattern, HIRStringPattern, HIRBoolPattern,
-    HIRCharPattern, HIRWildcardPattern, HIRBindPattern,
-    HIRConstructorPattern, HIRRangePattern, HIRTuplePattern, HIRListPattern,
+    HIRIntPattern,
+    HIRFloatPattern,
+    HIRStringPattern,
+    HIRBoolPattern,
+    HIRCharPattern,
+    HIRWildcardPattern,
+    HIRBindPattern,
+    HIRConstructorPattern,
+    HIRRangePattern,
+    HIRTuplePattern,
+    HIRListPattern,
 )
 
 
 class HIRLoweringError(Exception):
     """HIR 降级过程中的错误"""
+
     pass
 
 
@@ -89,11 +169,15 @@ class HIRLowering:
 
         elif isinstance(decl, LetBinding):
             value = self._lower_expr(decl.value)
-            return HIRLetDecl(decl.name, NovaType(IRType.TYPE_VAR), value, is_mutable=False)
+            return HIRLetDecl(
+                decl.name, NovaType(IRType.TYPE_VAR), value, is_mutable=False
+            )
 
         elif isinstance(decl, MutBinding):
             value = self._lower_expr(decl.value)
-            return HIRLetDecl(decl.name, NovaType(IRType.TYPE_VAR), value, is_mutable=True)
+            return HIRLetDecl(
+                decl.name, NovaType(IRType.TYPE_VAR), value, is_mutable=True
+            )
 
         elif isinstance(decl, TypeDef):
             td = self._lower_type_def(decl)
@@ -235,7 +319,9 @@ class HIRLowering:
             return HIRTupleExpr([self._lower_expr(e) for e in expr.elements])
 
         elif isinstance(expr, MapExpr):
-            entries = [(self._lower_expr(k), self._lower_expr(v)) for k, v in expr.pairs]
+            entries = [
+                (self._lower_expr(k), self._lower_expr(v)) for k, v in expr.pairs
+            ]
             return HIRMapExpr(entries)
 
         elif isinstance(expr, FieldAccess):
@@ -243,7 +329,9 @@ class HIRLowering:
 
         elif isinstance(expr, Block):
             stmts = [self._lower_expr(s) for s in expr.statements]
-            tail = self._lower_expr(expr.tail_expression) if expr.tail_expression else None
+            tail = (
+                self._lower_expr(expr.tail_expression) if expr.tail_expression else None
+            )
             all_exprs = stmts
             if tail is not None:
                 all_exprs.append(tail)
@@ -269,7 +357,9 @@ class HIRLowering:
 
         elif isinstance(expr, ListComprehension):
             iterable = self._lower_iterable(expr.iterable, expr)
-            filter_expr = self._lower_expr(expr.filter_cond) if expr.filter_cond else None
+            filter_expr = (
+                self._lower_expr(expr.filter_cond) if expr.filter_cond else None
+            )
             return HIRListComprehension(
                 self._lower_expr(expr.expr),
                 expr.var_name,
@@ -284,14 +374,27 @@ class HIRLowering:
             )
 
         elif isinstance(expr, LetBinding):
-            return HIRBlockExpr([
-                HIRLetDecl(expr.name, NovaType(IRType.TYPE_VAR), self._lower_expr(expr.value))
-            ])
+            return HIRBlockExpr(
+                [
+                    HIRLetDecl(
+                        expr.name,
+                        NovaType(IRType.TYPE_VAR),
+                        self._lower_expr(expr.value),
+                    )
+                ]
+            )
 
         elif isinstance(expr, MutBinding):
-            return HIRBlockExpr([
-                HIRLetDecl(expr.name, NovaType(IRType.TYPE_VAR), self._lower_expr(expr.value), is_mutable=True)
-            ])
+            return HIRBlockExpr(
+                [
+                    HIRLetDecl(
+                        expr.name,
+                        NovaType(IRType.TYPE_VAR),
+                        self._lower_expr(expr.value),
+                        is_mutable=True,
+                    )
+                ]
+            )
 
         else:
             return HIRUnitLiteral()

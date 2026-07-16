@@ -21,7 +21,7 @@ class BindingInfo:
 class Environment:
     """Nova 运行时环境（作用域）"""
 
-    def __init__(self, parent: Optional['Environment'] = None):
+    def __init__(self, parent: Optional["Environment"] = None):
         self.parent = parent
         self.bindings: Dict[str, BindingInfo] = {}
 
@@ -58,7 +58,7 @@ class Environment:
             return
         raise NameError(f"未定义的变量 '{name}'")
 
-    def child(self) -> 'Environment':
+    def child(self) -> "Environment":
         """创建子作用域"""
         return Environment(parent=self)
 

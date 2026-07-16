@@ -11,10 +11,10 @@ from typing import List, Optional
 
 from errors import LexerError
 
-
 # ============================================================
 # Token 类型枚举
 # ============================================================
+
 
 class TokenType(Enum):
     # 字面量
@@ -22,7 +22,7 @@ class TokenType(Enum):
     FLOAT = auto()
     STRING = auto()
     CHAR = auto()
-    BOOL = auto()       # true / false
+    BOOL = auto()  # true / false
 
     # 标识符
     IDENT = auto()
@@ -47,47 +47,47 @@ class TokenType(Enum):
     CONTINUE = auto()
     IN = auto()
     STEP = auto()
-    RANGE = auto()       # ..
+    RANGE = auto()  # ..
 
     # 操作符
-    PLUS = auto()       # +
-    MINUS = auto()      # -
-    STAR = auto()       # *
-    SLASH = auto()      # /
-    PERCENT = auto()    # %
-    PLUSPLUS = auto()   # ++ (字符串拼接)
-    EQ = auto()         # ==
-    NEQ = auto()        # !=
-    LT = auto()         # <
-    GT = auto()         # >
-    LTE = auto()        # <=
-    GTE = auto()        # >=
-    AND = auto()        # &&
-    OR = auto()         # ||
-    NOT = auto()         # !
-    PIPE = auto()       # | (lambda 参数分隔)
-    PIPE_GT = auto()    # |> (管道操作符)
-    ARROW = auto()      # ->
+    PLUS = auto()  # +
+    MINUS = auto()  # -
+    STAR = auto()  # *
+    SLASH = auto()  # /
+    PERCENT = auto()  # %
+    PLUSPLUS = auto()  # ++ (字符串拼接)
+    EQ = auto()  # ==
+    NEQ = auto()  # !=
+    LT = auto()  # <
+    GT = auto()  # >
+    LTE = auto()  # <=
+    GTE = auto()  # >=
+    AND = auto()  # &&
+    OR = auto()  # ||
+    NOT = auto()  # !
+    PIPE = auto()  # | (lambda 参数分隔)
+    PIPE_GT = auto()  # |> (管道操作符)
+    ARROW = auto()  # ->
     FAT_ARROW = auto()  # =>
-    QUESTION = auto()   # ? (错误传播)
-    ASSIGN = auto()     # =
+    QUESTION = auto()  # ? (错误传播)
+    ASSIGN = auto()  # =
 
     # 标点符号
-    LPAREN = auto()     # (
-    RPAREN = auto()     # )
-    LBRACKET = auto()   # [
-    RBRACKET = auto()   # ]
-    LBRACE = auto()     # {
-    RBRACE = auto()     # }
-    COMMA = auto()       # ,
-    SEMICOLON = auto()   # ;
-    COLON = auto()       # :
-    DOT = auto()         # .
+    LPAREN = auto()  # (
+    RPAREN = auto()  # )
+    LBRACKET = auto()  # [
+    RBRACKET = auto()  # ]
+    LBRACE = auto()  # {
+    RBRACE = auto()  # }
+    COMMA = auto()  # ,
+    SEMICOLON = auto()  # ;
+    COLON = auto()  # :
+    DOT = auto()  # .
     UNDERSCORE = auto()  # _ (通配符)
     PIPE_VARIANT = auto()  # | (ADT 变体分隔符，在 type 定义中使用)
 
     # 特殊
-    UNIT = auto()       # () 空括号
+    UNIT = auto()  # () 空括号
     EOF = auto()
 
 
@@ -95,16 +95,20 @@ class TokenType(Enum):
 # Token 数据类
 # ============================================================
 
+
 @dataclass
 class Token:
     """词法单元"""
+
     type: TokenType
     value: str
     line: int
     column: int
 
     def __repr__(self):
-        return f"Token({self.type.name}, {self.value!r}, 行:{self.line}, 列:{self.column})"
+        return (
+            f"Token({self.type.name}, {self.value!r}, 行:{self.line}, 列:{self.column})"
+        )
 
 
 # ============================================================
@@ -138,6 +142,7 @@ KEYWORDS = {
 # 词法分析器
 # ============================================================
 
+
 class Lexer:
     """Nova 词法分析器"""
 
@@ -169,7 +174,7 @@ class Lexer:
         """推进并返回当前字符"""
         ch = self.source[self.pos]
         self.pos += 1
-        if ch == '\n':
+        if ch == "\n":
             self.line += 1
             self.column = 1
         else:
@@ -181,13 +186,13 @@ class Lexer:
         while self.pos < len(self.source):
             ch = self.source[self.pos]
             # 空白字符
-            if ch in (' ', '\t', '\n', '\r'):
+            if ch in (" ", "\t", "\n", "\r"):
                 self._advance()
             # // 单行注释
-            elif ch == '/' and self._peek_ahead() == '/':
+            elif ch == "/" and self._peek_ahead() == "/":
                 self._advance()  # 跳过 /
                 self._advance()  # 跳过 /
-                while self.pos < len(self.source) and self.source[self.pos] != '\n':
+                while self.pos < len(self.source) and self.source[self.pos] != "\n":
                     self._advance()
             else:
                 break
@@ -202,8 +207,12 @@ class Lexer:
             num_str += self._advance()
 
         # 浮点数
-        if (self.pos < len(self.source) and self.source[self.pos] == '.'
-                and self._peek_ahead() is not None and self._peek_ahead().isdigit()):
+        if (
+            self.pos < len(self.source)
+            and self.source[self.pos] == "."
+            and self._peek_ahead() is not None
+            and self._peek_ahead().isdigit()
+        ):
             num_str += self._advance()  # 小数点
             while self.pos < len(self.source) and self.source[self.pos].isdigit():
                 num_str += self._advance()
@@ -223,23 +232,23 @@ class Lexer:
             if ch == '"':
                 self._advance()  # 跳过结束引号
                 return Token(TokenType.STRING, result, start_line, start_col)
-            elif ch == '\\':
+            elif ch == "\\":
                 self._advance()  # 跳过反斜杠
                 esc = self._advance()
                 # 处理转义字符
-                if esc == 'n':
-                    result += '\n'
-                elif esc == 't':
-                    result += '\t'
-                elif esc == 'r':
-                    result += '\r'
-                elif esc == '\\':
-                    result += '\\'
+                if esc == "n":
+                    result += "\n"
+                elif esc == "t":
+                    result += "\t"
+                elif esc == "r":
+                    result += "\r"
+                elif esc == "\\":
+                    result += "\\"
                 elif esc == '"':
                     result += '"'
                 else:
                     result += esc
-            elif ch == '\n':
+            elif ch == "\n":
                 raise self._make_error("未闭合的字符串字面量", start_line, start_col)
             else:
                 result += self._advance()
@@ -247,7 +256,7 @@ class Lexer:
         raise self._make_error("未闭合的字符串字面量", start_line, start_col)
 
     def _read_char(self) -> Token:
-        """读取字符字面量 'x' """
+        """读取字符字面量 'x'"""
         start_line = self.line
         start_col = self.column
         self._advance()  # 跳过开始单引号 '
@@ -256,17 +265,17 @@ class Lexer:
             raise self._make_error("未闭合的字符字面量", start_line, start_col)
 
         ch = self.source[self.pos]
-        if ch == '\\':
+        if ch == "\\":
             self._advance()  # 跳过反斜杠
             esc = self._advance()
-            if esc == 'n':
-                ch = '\n'
-            elif esc == 't':
-                ch = '\t'
-            elif esc == 'r':
-                ch = '\r'
-            elif esc == '\\':
-                ch = '\\'
+            if esc == "n":
+                ch = "\n"
+            elif esc == "t":
+                ch = "\t"
+            elif esc == "r":
+                ch = "\r"
+            elif esc == "\\":
+                ch = "\\"
             elif esc == "'":
                 ch = "'"
             else:
@@ -286,7 +295,9 @@ class Lexer:
         start_col = self.column
         name = ""
 
-        while self.pos < len(self.source) and (self.source[self.pos].isalnum() or self.source[self.pos] == '_'):
+        while self.pos < len(self.source) and (
+            self.source[self.pos].isalnum() or self.source[self.pos] == "_"
+        ):
             name += self._advance()
 
         # 检查是否是关键字
@@ -297,8 +308,8 @@ class Lexer:
             return Token(tt, name, start_line, start_col)
 
         # 单独下划线是通配符
-        if name == '_':
-            return Token(TokenType.UNDERSCORE, '_', start_line, start_col)
+        if name == "_":
+            return Token(TokenType.UNDERSCORE, "_", start_line, start_col)
 
         # _x 或 x_ 等含下划线的名称是普通标识符
         return Token(TokenType.IDENT, name, start_line, start_col)
@@ -327,11 +338,11 @@ class Lexer:
             return self._read_char()
 
         # 标识符 / 关键字
-        if ch.isalpha() or ch == '_':
+        if ch.isalpha() or ch == "_":
             return self._read_identifier()
 
         # ( 始终为 LPAREN（UNIT 由 parser 处理）
-        if ch == '(':
+        if ch == "(":
             self._advance()
             return Token(TokenType.LPAREN, "(", start_line, start_col)
 
@@ -341,63 +352,63 @@ class Lexer:
         # 双字符操作符
         next_ch = self._peek()
         if next_ch:
-            if ch == '.' and next_ch == '.':
+            if ch == "." and next_ch == ".":
                 self._advance()
                 return Token(TokenType.RANGE, "..", start_line, start_col)
-            if ch == '+' and next_ch == '+':
+            if ch == "+" and next_ch == "+":
                 self._advance()
                 return Token(TokenType.PLUSPLUS, "++", start_line, start_col)
-            if ch == '-' and next_ch == '>':
+            if ch == "-" and next_ch == ">":
                 self._advance()
                 return Token(TokenType.ARROW, "->", start_line, start_col)
-            if ch == '=' and next_ch == '=':
+            if ch == "=" and next_ch == "=":
                 self._advance()
                 return Token(TokenType.EQ, "==", start_line, start_col)
-            if ch == '!' and next_ch == '=':
+            if ch == "!" and next_ch == "=":
                 self._advance()
                 return Token(TokenType.NEQ, "!=", start_line, start_col)
-            if ch == '<' and next_ch == '=':
+            if ch == "<" and next_ch == "=":
                 self._advance()
                 return Token(TokenType.LTE, "<=", start_line, start_col)
-            if ch == '>' and next_ch == '=':
+            if ch == ">" and next_ch == "=":
                 self._advance()
                 return Token(TokenType.GTE, ">=", start_line, start_col)
-            if ch == '&' and next_ch == '&':
+            if ch == "&" and next_ch == "&":
                 self._advance()
                 return Token(TokenType.AND, "&&", start_line, start_col)
-            if ch == '|' and next_ch == '|':
+            if ch == "|" and next_ch == "|":
                 self._advance()
                 return Token(TokenType.OR, "||", start_line, start_col)
-            if ch == '|' and next_ch == '>':
+            if ch == "|" and next_ch == ">":
                 self._advance()
                 return Token(TokenType.PIPE_GT, "|>", start_line, start_col)
-            if ch == '=' and next_ch == '>':
+            if ch == "=" and next_ch == ">":
                 self._advance()
                 return Token(TokenType.FAT_ARROW, "=>", start_line, start_col)
 
         # 单字符 token
         single_char_tokens = {
-            '+': TokenType.PLUS,
-            '-': TokenType.MINUS,
-            '*': TokenType.STAR,
-            '/': TokenType.SLASH,
-            '%': TokenType.PERCENT,
-            '<': TokenType.LT,
-            '>': TokenType.GT,
-            '!': TokenType.NOT,
-            '|': TokenType.PIPE,
-            '?': TokenType.QUESTION,
-            '=': TokenType.ASSIGN,
-            '(': TokenType.LPAREN,
-            ')': TokenType.RPAREN,
-            '[': TokenType.LBRACKET,
-            ']': TokenType.RBRACKET,
-            '{': TokenType.LBRACE,
-            '}': TokenType.RBRACE,
-            ',': TokenType.COMMA,
-            ';': TokenType.SEMICOLON,
-            ':': TokenType.COLON,
-            '.': TokenType.DOT,
+            "+": TokenType.PLUS,
+            "-": TokenType.MINUS,
+            "*": TokenType.STAR,
+            "/": TokenType.SLASH,
+            "%": TokenType.PERCENT,
+            "<": TokenType.LT,
+            ">": TokenType.GT,
+            "!": TokenType.NOT,
+            "|": TokenType.PIPE,
+            "?": TokenType.QUESTION,
+            "=": TokenType.ASSIGN,
+            "(": TokenType.LPAREN,
+            ")": TokenType.RPAREN,
+            "[": TokenType.LBRACKET,
+            "]": TokenType.RBRACKET,
+            "{": TokenType.LBRACE,
+            "}": TokenType.RBRACE,
+            ",": TokenType.COMMA,
+            ";": TokenType.SEMICOLON,
+            ":": TokenType.COLON,
+            ".": TokenType.DOT,
         }
 
         if ch in single_char_tokens:

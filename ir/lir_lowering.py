@@ -7,19 +7,64 @@ MIR -> LIR 降级器
 
 from typing import Optional, Dict, List, Tuple
 from ir_nodes import (
-    IRType, NovaType,
-    INT_TYPE, FLOAT_TYPE, STRING_TYPE, BOOL_TYPE, UNIT_TYPE, NEVER_TYPE,
-    MIRModule, MIRFunction, MIRBasicBlock, MIRGlobal,
-    MIRInstruction, MIRConst, MIRLoad, MIRStore, MIRBinOp, MIRUnaryOp,
-    MIRCall, MIRClosureCreate, MIRListBuild, MIRTupleBuild, MIRMapBuild,
-    MIRADTBuild, MIRFieldAccess, MIRIndexAccess, MIRPhi,
-    MIRTerminator, MIRJump, MIRBranch, MIRReturn, MIRSwitch, MIRMatchJump, MIRPanic,
-    LIRModule, LIRFunction, LIRGlobal, LIRData,
-    LIRInstr, LIRLoadConst, LIRLoadGlobal, LIRStoreGlobal,
-    LIRLoadReg, LIRStoreReg, LIRBinOp, LIRUnaryOp,
-    LIRCall, LIRCallIndirect, LIRJump, LIRBranch, LIRReturn,
-    LIRLabel, LIRIndex, LIRFieldAccess,
-    LIRBuildList, LIRBuildTuple, LIRBuildADT, LIRPanic,
+    IRType,
+    NovaType,
+    INT_TYPE,
+    FLOAT_TYPE,
+    STRING_TYPE,
+    BOOL_TYPE,
+    UNIT_TYPE,
+    NEVER_TYPE,
+    MIRModule,
+    MIRFunction,
+    MIRBasicBlock,
+    MIRGlobal,
+    MIRInstruction,
+    MIRConst,
+    MIRLoad,
+    MIRStore,
+    MIRBinOp,
+    MIRUnaryOp,
+    MIRCall,
+    MIRClosureCreate,
+    MIRListBuild,
+    MIRTupleBuild,
+    MIRMapBuild,
+    MIRADTBuild,
+    MIRFieldAccess,
+    MIRIndexAccess,
+    MIRPhi,
+    MIRTerminator,
+    MIRJump,
+    MIRBranch,
+    MIRReturn,
+    MIRSwitch,
+    MIRMatchJump,
+    MIRPanic,
+    LIRModule,
+    LIRFunction,
+    LIRGlobal,
+    LIRData,
+    LIRInstr,
+    LIRLoadConst,
+    LIRLoadGlobal,
+    LIRStoreGlobal,
+    LIRLoadReg,
+    LIRStoreReg,
+    LIRBinOp,
+    LIRUnaryOp,
+    LIRCall,
+    LIRCallIndirect,
+    LIRJump,
+    LIRBranch,
+    LIRReturn,
+    LIRLabel,
+    LIRIndex,
+    LIRFieldAccess,
+    LIRBuildList,
+    LIRBuildTuple,
+    LIRBuildADT,
+    LIRPanic,
 )
 
 
@@ -41,7 +86,11 @@ class LIRLowering:
         for name, mir_global in mir_module.globals.items():
             lir_global = LIRGlobal(name, mir_global.ir_type)
             if mir_global.init_value:
-                init_str = str(mir_global.init_value.value) if mir_global.init_value.value else ""
+                init_str = (
+                    str(mir_global.init_value.value)
+                    if mir_global.init_value.value
+                    else ""
+                )
                 lir_global.data = LIRData("data_%s" % name, init_str.encode("utf-8"))
             lir_module.globals.append(lir_global)
 
@@ -101,41 +150,61 @@ class LIRLowering:
             lir.value = instr.value
             lir.const_type = instr.const_type
             if instr.result_name:
-                lir.dst_loc = (self.ssa_to_loc.get(instr.result_name, ""), instr.result_type)
+                lir.dst_loc = (
+                    self.ssa_to_loc.get(instr.result_name, ""),
+                    instr.result_type,
+                )
             result.append(lir)
 
         elif isinstance(instr, MIRLoad):
             lir = LIRLoadGlobal()
             lir.global_name = instr.name
             if instr.result_name:
-                lir.dst_loc = (self.ssa_to_loc.get(instr.result_name, ""), instr.result_type)
+                lir.dst_loc = (
+                    self.ssa_to_loc.get(instr.result_name, ""),
+                    instr.result_type,
+                )
             result.append(lir)
 
         elif isinstance(instr, MIRStore):
             lir = LIRStoreGlobal()
             lir.global_name = instr.name
             if instr.value:
-                lir.src_locs = [(self.ssa_to_loc.get(instr.value, ""), instr.result_type)]
+                lir.src_locs = [
+                    (self.ssa_to_loc.get(instr.value, ""), instr.result_type)
+                ]
             result.append(lir)
 
         elif isinstance(instr, MIRBinOp):
             lir = LIRBinOp()
             lir.op = instr.op
             if instr.left:
-                lir.src_locs = [(self.ssa_to_loc.get(instr.left, ""), instr.result_type)]
+                lir.src_locs = [
+                    (self.ssa_to_loc.get(instr.left, ""), instr.result_type)
+                ]
             if instr.right:
-                lir.src_locs.append((self.ssa_to_loc.get(instr.right, ""), instr.result_type))
+                lir.src_locs.append(
+                    (self.ssa_to_loc.get(instr.right, ""), instr.result_type)
+                )
             if instr.result_name:
-                lir.dst_loc = (self.ssa_to_loc.get(instr.result_name, ""), instr.result_type)
+                lir.dst_loc = (
+                    self.ssa_to_loc.get(instr.result_name, ""),
+                    instr.result_type,
+                )
             result.append(lir)
 
         elif isinstance(instr, MIRUnaryOp):
             lir = LIRUnaryOp()
             lir.op = instr.op
             if instr.operand:
-                lir.src_locs = [(self.ssa_to_loc.get(instr.operand, ""), instr.result_type)]
+                lir.src_locs = [
+                    (self.ssa_to_loc.get(instr.operand, ""), instr.result_type)
+                ]
             if instr.result_name:
-                lir.dst_loc = (self.ssa_to_loc.get(instr.result_name, ""), instr.result_type)
+                lir.dst_loc = (
+                    self.ssa_to_loc.get(instr.result_name, ""),
+                    instr.result_type,
+                )
             result.append(lir)
 
         elif isinstance(instr, MIRCall):
@@ -143,7 +212,10 @@ class LIRLowering:
             lir.func_name = instr.callee
             lir.arg_count = len(instr.args)
             if instr.result_name:
-                lir.dst_loc = (self.ssa_to_loc.get(instr.result_name, ""), instr.result_type)
+                lir.dst_loc = (
+                    self.ssa_to_loc.get(instr.result_name, ""),
+                    instr.result_type,
+                )
             result.append(lir)
 
         elif isinstance(instr, MIRClosureCreate):
@@ -151,54 +223,81 @@ class LIRLowering:
             lir.value = "<closure:%s>" % instr.fn_name
             lir.const_type = "closure"
             if instr.result_name:
-                lir.dst_loc = (self.ssa_to_loc.get(instr.result_name, ""), instr.result_type)
+                lir.dst_loc = (
+                    self.ssa_to_loc.get(instr.result_name, ""),
+                    instr.result_type,
+                )
             result.append(lir)
 
         elif isinstance(instr, MIRListBuild):
             lir = LIRBuildList()
             lir.count = len(instr.elements)
             if instr.result_name:
-                lir.dst_loc = (self.ssa_to_loc.get(instr.result_name, ""), instr.result_type)
+                lir.dst_loc = (
+                    self.ssa_to_loc.get(instr.result_name, ""),
+                    instr.result_type,
+                )
             result.append(lir)
 
         elif isinstance(instr, MIRTupleBuild):
             lir = LIRBuildTuple()
             lir.count = len(instr.elements)
             if instr.result_name:
-                lir.dst_loc = (self.ssa_to_loc.get(instr.result_name, ""), instr.result_type)
+                lir.dst_loc = (
+                    self.ssa_to_loc.get(instr.result_name, ""),
+                    instr.result_type,
+                )
             result.append(lir)
 
         elif isinstance(instr, MIRMapBuild):
             lir = LIRBuildList()
             lir.count = len(instr.entries)
             if instr.result_name:
-                lir.dst_loc = (self.ssa_to_loc.get(instr.result_name, ""), instr.result_type)
+                lir.dst_loc = (
+                    self.ssa_to_loc.get(instr.result_name, ""),
+                    instr.result_type,
+                )
             result.append(lir)
 
         elif isinstance(instr, MIRADTBuild):
             lir = LIRBuildADT()
             lir.field_count = len(instr.fields)
             if instr.result_name:
-                lir.dst_loc = (self.ssa_to_loc.get(instr.result_name, ""), instr.result_type)
+                lir.dst_loc = (
+                    self.ssa_to_loc.get(instr.result_name, ""),
+                    instr.result_type,
+                )
             result.append(lir)
 
         elif isinstance(instr, MIRFieldAccess):
             lir = LIRFieldAccess()
             lir.offset = instr.field_index
             if instr.object:
-                lir.src_locs = [(self.ssa_to_loc.get(instr.object, ""), instr.result_type)]
+                lir.src_locs = [
+                    (self.ssa_to_loc.get(instr.object, ""), instr.result_type)
+                ]
             if instr.result_name:
-                lir.dst_loc = (self.ssa_to_loc.get(instr.result_name, ""), instr.result_type)
+                lir.dst_loc = (
+                    self.ssa_to_loc.get(instr.result_name, ""),
+                    instr.result_type,
+                )
             result.append(lir)
 
         elif isinstance(instr, MIRIndexAccess):
             lir = LIRIndex()
             if instr.object:
-                lir.src_locs = [(self.ssa_to_loc.get(instr.object, ""), instr.result_type)]
+                lir.src_locs = [
+                    (self.ssa_to_loc.get(instr.object, ""), instr.result_type)
+                ]
             if instr.index:
-                lir.src_locs.append((self.ssa_to_loc.get(instr.index, ""), instr.result_type))
+                lir.src_locs.append(
+                    (self.ssa_to_loc.get(instr.index, ""), instr.result_type)
+                )
             if instr.result_name:
-                lir.dst_loc = (self.ssa_to_loc.get(instr.result_name, ""), instr.result_type)
+                lir.dst_loc = (
+                    self.ssa_to_loc.get(instr.result_name, ""),
+                    instr.result_type,
+                )
             result.append(lir)
 
         elif isinstance(instr, MIRPhi):
@@ -206,8 +305,13 @@ class LIRLowering:
                 _, src_ssa = instr.sources[0]
                 if src_ssa in self.ssa_to_loc and instr.result_name:
                     lir = LIRLoadReg()
-                    lir.src_locs = [(self.ssa_to_loc.get(src_ssa, ""), instr.result_type)]
-                    lir.dst_loc = (self.ssa_to_loc.get(instr.result_name, ""), instr.result_type)
+                    lir.src_locs = [
+                        (self.ssa_to_loc.get(src_ssa, ""), instr.result_type)
+                    ]
+                    lir.dst_loc = (
+                        self.ssa_to_loc.get(instr.result_name, ""),
+                        instr.result_type,
+                    )
                     result.append(lir)
 
         return result

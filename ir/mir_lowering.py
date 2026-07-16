@@ -7,25 +7,79 @@ HIR -> MIR 降级器
 
 from typing import Optional, List, Tuple
 from ir_nodes import (
-    IRType, NovaType,
-    INT_TYPE, FLOAT_TYPE, STRING_TYPE, BOOL_TYPE, UNIT_TYPE, NEVER_TYPE,
-    HIRModule, HIRFunction, HIRTypeDef,
-    HIRDecl, HIRFnDecl, HIRLetDecl, HIRTypeDecl, HIRImportDecl, HIRExportDecl,
+    IRType,
+    NovaType,
+    INT_TYPE,
+    FLOAT_TYPE,
+    STRING_TYPE,
+    BOOL_TYPE,
+    UNIT_TYPE,
+    NEVER_TYPE,
+    HIRModule,
+    HIRFunction,
+    HIRTypeDef,
+    HIRDecl,
+    HIRFnDecl,
+    HIRLetDecl,
+    HIRTypeDecl,
+    HIRImportDecl,
+    HIRExportDecl,
     HIRExpr,
-    HIRIntLiteral, HIRFloatLiteral, HIRStringLiteral, HIRBoolLiteral,
-    HIRCharLiteral, HIRUnitLiteral, HIRIdentifier,
-    HIRBinaryOp, HIRUnaryOp,
-    HIRIfExpr, HIRMatchExpr, HIRMatchArm,
-    HIRLambda, HIRCallExpr, HIRPipeExpr,
-    HIRListExpr, HIRTupleExpr, HIRMapExpr,
-    HIRFieldExpr, HIRIndexExpr, HIRBlockExpr,
-    HIRForExpr, HIRWhileExpr, HIRBreakExpr, HIRContinueExpr,
-    HIRListComprehension, HIRADTConstructor, HIRUnwrapExpr, HIRAssignExpr,
-    MIRModule, MIRFunction, MIRBasicBlock, MIRGlobal,
-    MIRInstruction, MIRConst, MIRLoad, MIRStore, MIRBinOp, MIRUnaryOp,
-    MIRCall, MIRClosureCreate, MIRListBuild, MIRTupleBuild, MIRMapBuild,
-    MIRADTBuild, MIRFieldAccess, MIRIndexAccess, MIRPhi,
-    MIRTerminator, MIRJump, MIRBranch, MIRReturn, MIRSwitch, MIRMatchJump, MIRPanic,
+    HIRIntLiteral,
+    HIRFloatLiteral,
+    HIRStringLiteral,
+    HIRBoolLiteral,
+    HIRCharLiteral,
+    HIRUnitLiteral,
+    HIRIdentifier,
+    HIRBinaryOp,
+    HIRUnaryOp,
+    HIRIfExpr,
+    HIRMatchExpr,
+    HIRMatchArm,
+    HIRLambda,
+    HIRCallExpr,
+    HIRPipeExpr,
+    HIRListExpr,
+    HIRTupleExpr,
+    HIRMapExpr,
+    HIRFieldExpr,
+    HIRIndexExpr,
+    HIRBlockExpr,
+    HIRForExpr,
+    HIRWhileExpr,
+    HIRBreakExpr,
+    HIRContinueExpr,
+    HIRListComprehension,
+    HIRADTConstructor,
+    HIRUnwrapExpr,
+    HIRAssignExpr,
+    MIRModule,
+    MIRFunction,
+    MIRBasicBlock,
+    MIRGlobal,
+    MIRInstruction,
+    MIRConst,
+    MIRLoad,
+    MIRStore,
+    MIRBinOp,
+    MIRUnaryOp,
+    MIRCall,
+    MIRClosureCreate,
+    MIRListBuild,
+    MIRTupleBuild,
+    MIRMapBuild,
+    MIRADTBuild,
+    MIRFieldAccess,
+    MIRIndexAccess,
+    MIRPhi,
+    MIRTerminator,
+    MIRJump,
+    MIRBranch,
+    MIRReturn,
+    MIRSwitch,
+    MIRMatchJump,
+    MIRPanic,
 )
 
 
@@ -62,7 +116,9 @@ class MIRLowering:
                     decl.name, decl.ir_type, is_mutable=decl.is_mutable
                 )
             elif isinstance(decl, HIRFnDecl):
-                mir_module.functions[decl.fn_def.name] = self._lower_function(decl.fn_def)
+                mir_module.functions[decl.fn_def.name] = self._lower_function(
+                    decl.fn_def
+                )
 
         return mir_module
 
@@ -305,7 +361,9 @@ class MIRLowering:
         false_block = MIRBasicBlock(self._new_block())
         merge_block = MIRBasicBlock(self._new_block())
 
-        block.terminator = MIRBranch(cond_ssa or "", true_block.label, false_block.label)
+        block.terminator = MIRBranch(
+            cond_ssa or "", true_block.label, false_block.label
+        )
 
         old_block = self.current_block
         self.current_block = true_block
@@ -392,7 +450,9 @@ class MIRLowering:
 
         block.terminator = MIRJump(header_block.label)
         iter_ssa = self._lower_expr(hir_expr.iterable, header_block)
-        header_block.terminator = MIRBranch(iter_ssa or "", body_block.label, exit_block.label)
+        header_block.terminator = MIRBranch(
+            iter_ssa or "", body_block.label, exit_block.label
+        )
 
         self._lower_expr(hir_expr.body, body_block)
         if body_block.terminator is None:
@@ -409,7 +469,9 @@ class MIRLowering:
 
         block.terminator = MIRJump(header_block.label)
         cond_ssa = self._lower_expr(hir_expr.condition, header_block)
-        header_block.terminator = MIRBranch(cond_ssa or "", body_block.label, exit_block.label)
+        header_block.terminator = MIRBranch(
+            cond_ssa or "", body_block.label, exit_block.label
+        )
 
         self._lower_expr(hir_expr.body, body_block)
         if body_block.terminator is None:

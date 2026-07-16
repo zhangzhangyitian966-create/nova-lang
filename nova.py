@@ -28,7 +28,12 @@ from evaluator import Evaluator
 from errors import NovaError
 
 
-def run_source(source: str, check_types: bool = True, capture_output: bool = False, use_vm: bool = True):
+def run_source(
+    source: str,
+    check_types: bool = True,
+    capture_output: bool = False,
+    use_vm: bool = True,
+):
     """
     运行 Nova 源代码
 
@@ -59,6 +64,7 @@ def run_source(source: str, check_types: bool = True, capture_output: bool = Fal
         if use_vm:
             from compiler import BytecodeCompiler
             from vm import NovaVM
+
             compiler = BytecodeCompiler()
             bytecode = compiler.compile(ast)
             vm = NovaVM(bytecode)
@@ -88,7 +94,7 @@ def run_source(source: str, check_types: bool = True, capture_output: bool = Fal
 def dump_bytecode_file(filepath: str):
     """编译文件并打印字节码"""
     try:
-        with open(filepath, 'r', encoding='utf-8') as f:
+        with open(filepath, "r", encoding="utf-8") as f:
             source = f.read()
     except FileNotFoundError:
         print(f"错误: 文件 '{filepath}' 不存在", file=sys.stderr)
@@ -108,7 +114,7 @@ def dump_bytecode_file(filepath: str):
 def run_file(filepath: str, use_vm: bool = True):
     """运行 Nova 源文件"""
     try:
-        with open(filepath, 'r', encoding='utf-8') as f:
+        with open(filepath, "r", encoding="utf-8") as f:
             source = f.read()
     except FileNotFoundError:
         print(f"错误: 文件 '{filepath}' 不存在", file=sys.stderr)
@@ -127,6 +133,7 @@ def run_repl():
     print()
 
     from environment import Environment
+
     evaluator = Evaluator(check_types=False)
     buffer = ""
 
@@ -202,17 +209,17 @@ def _is_incomplete(source: str) -> bool:
             in_string = False
         elif in_string:
             continue
-        elif ch == '{':
+        elif ch == "{":
             depth_brace += 1
-        elif ch == '}':
+        elif ch == "}":
             depth_brace -= 1
-        elif ch == '(':
+        elif ch == "(":
             depth_paren += 1
-        elif ch == ')':
+        elif ch == ")":
             depth_paren -= 1
-        elif ch == '[':
+        elif ch == "[":
             depth_bracket += 1
-        elif ch == ']':
+        elif ch == "]":
             depth_bracket -= 1
 
     return depth_brace > 0 or depth_paren > 0 or depth_bracket > 0
@@ -229,9 +236,9 @@ def _count_indent(line: str) -> int:
             in_string = False
         elif in_string:
             continue
-        elif ch == '{':
+        elif ch == "{":
             depth += 1
-        elif ch == '}':
+        elif ch == "}":
             depth -= 1
     return depth
 
@@ -248,7 +255,7 @@ def main():
         run_repl()
     elif sys.argv[1] == "-e":
         if len(sys.argv) < 3:
-            print("用法: nova.py -e \"表达式\"", file=sys.stderr)
+            print('用法: nova.py -e "表达式"', file=sys.stderr)
             sys.exit(1)
         run_source(sys.argv[2])
     elif sys.argv[1] in ("-h", "--help"):
@@ -261,7 +268,7 @@ def main():
         print("  nova.py --eval <file.nova>       使用树遍历解释器运行")
         print("  nova.py --check <file.nova>      仅类型检查")
         print("  nova.py --dump-bytecode <file.nova>  编译并打印字节码")
-        print("  nova.py -e \"expr\"               求值表达式")
+        print('  nova.py -e "expr"               求值表达式')
     elif sys.argv[1] == "--vm":
         if len(sys.argv) < 3:
             print("用法: nova.py --vm <file.nova>", file=sys.stderr)
@@ -277,7 +284,7 @@ def main():
             print("用法: nova.py --check <file.nova>", file=sys.stderr)
             sys.exit(1)
         try:
-            with open(sys.argv[2], 'r', encoding='utf-8') as f:
+            with open(sys.argv[2], "r", encoding="utf-8") as f:
                 source = f.read()
         except FileNotFoundError:
             print(f"错误: 文件 '{sys.argv[2]}' 不存在", file=sys.stderr)

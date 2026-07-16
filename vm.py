@@ -14,21 +14,22 @@ VM 状态：
 - functions: 已编译函数的字节码块
 """
 
-import math
-import json
-import os
 from typing import Dict, List, Optional, Any, Callable
+import json
+import math
+import os
 
 from compiler import Bytecode, FunctionBlock, Instruction, Op
 from errors import RuntimeError_
-
 
 # ============================================================
 # 运行时值
 # ============================================================
 
+
 class UNIT_TYPE:
     """Unit 值单例标识"""
+
     _instance = None
 
     def __new__(cls):
@@ -61,9 +62,11 @@ class NovaADTValue:
         return self.variant_name
 
     def __eq__(self, other):
-        return (isinstance(other, NovaADTValue)
-                and self.variant_name == other.variant_name
-                and self.fields == other.fields)
+        return (
+            isinstance(other, NovaADTValue)
+            and self.variant_name == other.variant_name
+            and self.fields == other.fields
+        )
 
     def __hash__(self):
         return hash((self.variant_name, tuple(self.fields)))
@@ -122,11 +125,19 @@ class NovaConstructor:
 # 帧结构
 # ============================================================
 
+
 class Frame:
     """调用帧"""
 
-    def __init__(self, return_ip: int, base_sp: int, code: List[Instruction],
-                 constants: List[Any], locals_: Dict[str, Any], ip: int = 0):
+    def __init__(
+        self,
+        return_ip: int,
+        base_sp: int,
+        code: List[Instruction],
+        constants: List[Any],
+        locals_: Dict[str, Any],
+        ip: int = 0,
+    ):
         self.return_ip = return_ip
         self.base_sp = base_sp
         self.code = code
@@ -138,6 +149,7 @@ class Frame:
 # ============================================================
 # 虚拟机
 # ============================================================
+
 
 class NovaVM:
     """Nova 栈式虚拟机"""
@@ -164,12 +176,22 @@ class NovaVM:
     def _setup_builtins(self):
         """注册内置函数到全局"""
         self.globals["print"] = NovaBuiltinFn("print", self._builtin_print, 1)
-        self.globals["read_line"] = NovaBuiltinFn("read_line", lambda *a: input() if a == () else "", 0)
-        self.globals["int_to_str"] = NovaBuiltinFn("int_to_str", lambda *a: str(a[0]), 1)
-        self.globals["float_to_str"] = NovaBuiltinFn("float_to_str", lambda *a: str(a[0]), 1)
-        self.globals["str_to_int"] = NovaBuiltinFn("str_to_int", self._builtin_str_to_int, 1)
+        self.globals["read_line"] = NovaBuiltinFn(
+            "read_line", lambda *a: input() if a == () else "", 0
+        )
+        self.globals["int_to_str"] = NovaBuiltinFn(
+            "int_to_str", lambda *a: str(a[0]), 1
+        )
+        self.globals["float_to_str"] = NovaBuiltinFn(
+            "float_to_str", lambda *a: str(a[0]), 1
+        )
+        self.globals["str_to_int"] = NovaBuiltinFn(
+            "str_to_int", self._builtin_str_to_int, 1
+        )
         self.globals["str_len"] = NovaBuiltinFn("str_len", lambda *a: len(a[0]), 1)
-        self.globals["list_length"] = NovaBuiltinFn("list_length", lambda *a: len(a[0]), 1)
+        self.globals["list_length"] = NovaBuiltinFn(
+            "list_length", lambda *a: len(a[0]), 1
+        )
         self.globals["filter"] = NovaBuiltinFn("filter", self._builtin_filter, 2)
         self.globals["map"] = NovaBuiltinFn("map", self._builtin_map, 2)
         self.globals["sum"] = NovaBuiltinFn("sum", lambda *a: sum(a[0]), 1)
@@ -177,30 +199,68 @@ class NovaVM:
         self.globals["tail"] = NovaBuiltinFn("tail", self._builtin_tail, 1)
 
         # 文件 I/O
-        self.globals["read_file"] = NovaBuiltinFn("read_file", self._builtin_read_file, 1)
-        self.globals["write_file"] = NovaBuiltinFn("write_file", self._builtin_write_file, 2)
-        self.globals["file_exists"] = NovaBuiltinFn("file_exists", lambda *a: os.path.exists(a[0]), 1)
+        self.globals["read_file"] = NovaBuiltinFn(
+            "read_file", self._builtin_read_file, 1
+        )
+        self.globals["write_file"] = NovaBuiltinFn(
+            "write_file", self._builtin_write_file, 2
+        )
+        self.globals["file_exists"] = NovaBuiltinFn(
+            "file_exists", lambda *a: os.path.exists(a[0]), 1
+        )
         self.globals["list_dir"] = NovaBuiltinFn("list_dir", self._builtin_list_dir, 1)
 
         # JSON
-        self.globals["json_parse"] = NovaBuiltinFn("json_parse", self._builtin_json_parse, 1)
-        self.globals["json_stringify"] = NovaBuiltinFn("json_stringify", self._builtin_json_stringify, 1)
+        self.globals["json_parse"] = NovaBuiltinFn(
+            "json_parse", self._builtin_json_parse, 1
+        )
+        self.globals["json_stringify"] = NovaBuiltinFn(
+            "json_stringify", self._builtin_json_stringify, 1
+        )
 
         # 数学函数
-        self.globals["abs"] = NovaBuiltinFn("abs", lambda *a: abs(self._to_float(a[0])), 1)
-        self.globals["sqrt"] = NovaBuiltinFn("sqrt", lambda *a: math.sqrt(self._to_float(a[0])), 1)
-        self.globals["pow"] = NovaBuiltinFn("pow", lambda *a: math.pow(self._to_float(a[0]), self._to_float(a[1])), 2)
-        self.globals["log"] = NovaBuiltinFn("log", lambda *a: math.log(self._to_float(a[0])), 1)
-        self.globals["log10"] = NovaBuiltinFn("log10", lambda *a: math.log10(self._to_float(a[0])), 1)
-        self.globals["exp"] = NovaBuiltinFn("exp", lambda *a: math.exp(self._to_float(a[0])), 1)
-        self.globals["sin"] = NovaBuiltinFn("sin", lambda *a: math.sin(self._to_float(a[0])), 1)
-        self.globals["cos"] = NovaBuiltinFn("cos", lambda *a: math.cos(self._to_float(a[0])), 1)
-        self.globals["tan"] = NovaBuiltinFn("tan", lambda *a: math.tan(self._to_float(a[0])), 1)
-        self.globals["floor"] = NovaBuiltinFn("floor", lambda *a: float(math.floor(self._to_float(a[0]))), 1)
-        self.globals["ceil"] = NovaBuiltinFn("ceil", lambda *a: float(math.ceil(self._to_float(a[0]))), 1)
-        self.globals["round"] = NovaBuiltinFn("round", lambda *a: float(round(self._to_float(a[0]))), 1)
-        self.globals["min"] = NovaBuiltinFn("min", lambda *a: float(min(self._to_float(a[0]), self._to_float(a[1]))), 2)
-        self.globals["max"] = NovaBuiltinFn("max", lambda *a: float(max(self._to_float(a[0]), self._to_float(a[1]))), 2)
+        self.globals["abs"] = NovaBuiltinFn(
+            "abs", lambda *a: abs(self._to_float(a[0])), 1
+        )
+        self.globals["sqrt"] = NovaBuiltinFn(
+            "sqrt", lambda *a: math.sqrt(self._to_float(a[0])), 1
+        )
+        self.globals["pow"] = NovaBuiltinFn(
+            "pow", lambda *a: math.pow(self._to_float(a[0]), self._to_float(a[1])), 2
+        )
+        self.globals["log"] = NovaBuiltinFn(
+            "log", lambda *a: math.log(self._to_float(a[0])), 1
+        )
+        self.globals["log10"] = NovaBuiltinFn(
+            "log10", lambda *a: math.log10(self._to_float(a[0])), 1
+        )
+        self.globals["exp"] = NovaBuiltinFn(
+            "exp", lambda *a: math.exp(self._to_float(a[0])), 1
+        )
+        self.globals["sin"] = NovaBuiltinFn(
+            "sin", lambda *a: math.sin(self._to_float(a[0])), 1
+        )
+        self.globals["cos"] = NovaBuiltinFn(
+            "cos", lambda *a: math.cos(self._to_float(a[0])), 1
+        )
+        self.globals["tan"] = NovaBuiltinFn(
+            "tan", lambda *a: math.tan(self._to_float(a[0])), 1
+        )
+        self.globals["floor"] = NovaBuiltinFn(
+            "floor", lambda *a: float(math.floor(self._to_float(a[0]))), 1
+        )
+        self.globals["ceil"] = NovaBuiltinFn(
+            "ceil", lambda *a: float(math.ceil(self._to_float(a[0]))), 1
+        )
+        self.globals["round"] = NovaBuiltinFn(
+            "round", lambda *a: float(round(self._to_float(a[0]))), 1
+        )
+        self.globals["min"] = NovaBuiltinFn(
+            "min", lambda *a: float(min(self._to_float(a[0]), self._to_float(a[1]))), 2
+        )
+        self.globals["max"] = NovaBuiltinFn(
+            "max", lambda *a: float(max(self._to_float(a[0]), self._to_float(a[1]))), 2
+        )
         self.globals["pi"] = NovaBuiltinFn("pi", lambda *a: math.pi, 0)
 
     def _to_float(self, val):
@@ -245,7 +305,7 @@ class NovaVM:
     def _builtin_read_file(self, *args):
         path = args[0]
         try:
-            with open(path, 'r', encoding='utf-8') as f:
+            with open(path, "r", encoding="utf-8") as f:
                 return f.read()
         except FileNotFoundError:
             raise RuntimeError_(f"文件 '{path}' 不存在")
@@ -253,7 +313,7 @@ class NovaVM:
     def _builtin_write_file(self, *args):
         path, content = args[0], args[1]
         try:
-            with open(path, 'w', encoding='utf-8') as f:
+            with open(path, "w", encoding="utf-8") as f:
                 f.write(content)
             return UNIT
         except IOError as e:
@@ -306,8 +366,11 @@ class NovaVM:
                 return self._convert_nova_to_json(val.fields[0])
             if val.variant_name == "Ok" and len(val.fields) == 1:
                 return self._convert_nova_to_json(val.fields[0])
-            return {"_type": val.type_name, "_variant": val.variant_name,
-                    "_fields": [self._convert_nova_to_json(f) for f in val.fields]}
+            return {
+                "_type": val.type_name,
+                "_variant": val.variant_name,
+                "_fields": [self._convert_nova_to_json(f) for f in val.fields],
+            }
         if isinstance(val, list):
             return [self._convert_nova_to_json(item) for item in val]
         if isinstance(val, tuple):
@@ -738,7 +801,7 @@ class NovaVM:
 
             if isinstance(iter_val, tuple) and iter_val[0] == "range":
                 # 范围迭代
-                if not hasattr(self, '_range_index'):
+                if not hasattr(self, "_range_index"):
                     self._range_index = {}
 
                 key = id(iter_val)
@@ -763,7 +826,7 @@ class NovaVM:
                     return
             elif isinstance(iter_val, list):
                 # 列表迭代
-                if not hasattr(self, '_list_index'):
+                if not hasattr(self, "_list_index"):
                     self._list_index = {}
 
                 key = id(iter_val)
@@ -794,7 +857,11 @@ class NovaVM:
             test_val = instr.operands[0]
             fail_ip = instr.operands[1]
             subject = self.stack[-1]  # peek
-            if isinstance(subject, int) and not isinstance(subject, bool) and subject == test_val:
+            if (
+                isinstance(subject, int)
+                and not isinstance(subject, bool)
+                and subject == test_val
+            ):
                 pass  # 匹配成功，subject 仍在栈上
             else:
                 self.ip = fail_ip  # 跳到下一个 arm（subject 仍保留）
@@ -833,9 +900,11 @@ class NovaVM:
             field_count = instr.operands[1]
             fail_ip = instr.operands[2]
             subject = self.stack.pop()
-            if (isinstance(subject, NovaADTValue) and
-                    subject.variant_name == ctor_name and
-                    len(subject.fields) == field_count):
+            if (
+                isinstance(subject, NovaADTValue)
+                and subject.variant_name == ctor_name
+                and len(subject.fields) == field_count
+            ):
                 # 匹配成功：弹出 subject，将字段压栈
                 for field_val in reversed(subject.fields):
                     self.stack.append(field_val)

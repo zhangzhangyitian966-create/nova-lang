@@ -11,20 +11,64 @@ Nova 编程语言 - 语法分析器（Parser）
 from typing import List, Optional, Any
 
 from ast_nodes import (
-    Span, Program, Block,
-    IntLiteral, FloatLiteral, StringLiteral, CharLiteral, BoolLiteral, UnitLiteral,
-    Identifier, BinaryOp, UnaryOp, PipeExpr, TryExpr,
-    Param, Lambda, FnDef, FnCall,
-    LetBinding, MutBinding, Assignment,
-    IfExpr, MatchArm, MatchExpr,
-    ForExpr, WhileExpr, BreakExpr, ContinueExpr,
-    PatternWildcard, PatternInt, PatternFloat, PatternString,
-    PatternBool, PatternChar, PatternIdentifier, PatternConstructor,
-    PatternTuple, PatternList,
-    ListExpr, ListComprehension, TupleExpr, MapExpr, FieldAccess,
-    ImportDecl, ExportDecl, TypeDef, VariantDef, AliasDef,
-    TypeInt, TypeFloat, TypeString, TypeBool, TypeChar, TypeUnit,
-    TypeIdentifier, TypeGeneric, TypeTuple, TypeFn,
+    Span,
+    Program,
+    Block,
+    IntLiteral,
+    FloatLiteral,
+    StringLiteral,
+    CharLiteral,
+    BoolLiteral,
+    UnitLiteral,
+    Identifier,
+    BinaryOp,
+    UnaryOp,
+    PipeExpr,
+    TryExpr,
+    Param,
+    Lambda,
+    FnDef,
+    FnCall,
+    LetBinding,
+    MutBinding,
+    Assignment,
+    IfExpr,
+    MatchArm,
+    MatchExpr,
+    ForExpr,
+    WhileExpr,
+    BreakExpr,
+    ContinueExpr,
+    PatternWildcard,
+    PatternInt,
+    PatternFloat,
+    PatternString,
+    PatternBool,
+    PatternChar,
+    PatternIdentifier,
+    PatternConstructor,
+    PatternTuple,
+    PatternList,
+    ListExpr,
+    ListComprehension,
+    TupleExpr,
+    MapExpr,
+    FieldAccess,
+    ImportDecl,
+    ExportDecl,
+    TypeDef,
+    VariantDef,
+    AliasDef,
+    TypeInt,
+    TypeFloat,
+    TypeString,
+    TypeBool,
+    TypeChar,
+    TypeUnit,
+    TypeIdentifier,
+    TypeGeneric,
+    TypeTuple,
+    TypeFn,
 )
 from lexer import Token, TokenType
 from errors import ParseError
@@ -146,7 +190,9 @@ class Parser:
 
         self._expect(TokenType.ASSIGN)
         value = self._parse_expression()
-        return LetBinding(name=name, value=value, type_annotation=type_ann, span=self._span(tok))
+        return LetBinding(
+            name=name, value=value, type_annotation=type_ann, span=self._span(tok)
+        )
 
     def _parse_mut_binding(self) -> MutBinding:
         tok = self._expect(TokenType.MUT)
@@ -159,7 +205,9 @@ class Parser:
 
         self._expect(TokenType.ASSIGN)
         value = self._parse_expression()
-        return MutBinding(name=name, value=value, type_annotation=type_ann, span=self._span(tok))
+        return MutBinding(
+            name=name, value=value, type_annotation=type_ann, span=self._span(tok)
+        )
 
     # ----------------------------------------------------------
     # fn 定义
@@ -183,7 +231,13 @@ class Parser:
         # 函数体
         body = self._parse_block_or_expr()
 
-        return FnDef(name=name, params=params, return_type=ret_type, body=body, span=self._span(tok))
+        return FnDef(
+            name=name,
+            params=params,
+            return_type=ret_type,
+            body=body,
+            span=self._span(tok),
+        )
 
     def _parse_param_list(self) -> List[Param]:
         """解析函数参数列表"""
@@ -201,7 +255,9 @@ class Parser:
         type_ann = None
         if self._match(TokenType.COLON):
             type_ann = self._parse_type_expr()
-        return Param(name=name_tok.value, type_annotation=type_ann, span=self._span(tok))
+        return Param(
+            name=name_tok.value, type_annotation=type_ann, span=self._span(tok)
+        )
 
     # ----------------------------------------------------------
     # type / alias 定义
@@ -217,7 +273,10 @@ class Parser:
         if self._peek_type() != TokenType.RBRACE:
             variants.append(self._parse_variant_def())
             # 支持用 | 分隔或直接换行的变体定义
-            while self._peek_type() == TokenType.PIPE or self._peek_type() == TokenType.IDENT:
+            while (
+                self._peek_type() == TokenType.PIPE
+                or self._peek_type() == TokenType.IDENT
+            ):
                 if self._peek_type() == TokenType.PIPE:
                     self._advance()
                 variants.append(self._parse_variant_def())
@@ -296,8 +355,12 @@ class Parser:
 
         # 基本类型名
         basic_types = {
-            "Int": TypeInt, "Float": TypeFloat, "String": TypeString,
-            "Bool": TypeBool, "Char": TypeChar, "Unit": TypeUnit,
+            "Int": TypeInt,
+            "Float": TypeFloat,
+            "String": TypeString,
+            "Bool": TypeBool,
+            "Char": TypeChar,
+            "Unit": TypeUnit,
         }
         if tok.type == TokenType.IDENT and tok.value in basic_types:
             self._advance()
@@ -313,8 +376,11 @@ class Parser:
                     while self._match(TokenType.COMMA):
                         params.append(self._parse_type_expr())
                 self._expect(TokenType.RBRACKET)
-                return TypeFn(param_types=params, return_type=TypeUnit(span=self._span(tok)),
-                             span=self._span(tok))
+                return TypeFn(
+                    param_types=params,
+                    return_type=TypeUnit(span=self._span(tok)),
+                    span=self._span(tok),
+                )
             return TypeIdentifier(name="Fn", span=self._span(tok))
 
         # 泛型类型或自定义类型
@@ -329,7 +395,12 @@ class Parser:
                 return TypeGeneric(base=name, params=params, span=self._span(tok))
             return TypeIdentifier(name=name, span=self._span(tok))
 
-        raise ParseError(f"期望类型表达式，但得到 '{tok.value}'", tok.line, tok.column, source=self._source)
+        raise ParseError(
+            f"期望类型表达式，但得到 '{tok.value}'",
+            tok.line,
+            tok.column,
+            source=self._source,
+        )
 
     # ----------------------------------------------------------
     # 语句
@@ -354,9 +425,11 @@ class Parser:
 
         while self._peek_type() != TokenType.RBRACE:
             # 检查赋值：ident = expr
-            if (self._peek_type() == TokenType.IDENT
-                    and self.pos + 1 < len(self.tokens)
-                    and self.tokens[self.pos + 1].type == TokenType.ASSIGN):
+            if (
+                self._peek_type() == TokenType.IDENT
+                and self.pos + 1 < len(self.tokens)
+                and self.tokens[self.pos + 1].type == TokenType.ASSIGN
+            ):
                 stmts.append(self._parse_assignment())
                 self._match(TokenType.SEMICOLON)
                 continue
@@ -444,12 +517,21 @@ class Parser:
 
             iterable = ("range", start_expr, end_expr, step_expr)
         else:
-            raise ParseError(f"for 循环期望 'in' 或 '<-'，但得到 '{self._cur().value}'",
-                           self._cur().line, self._cur().column, source=self._source)
+            raise ParseError(
+                f"for 循环期望 'in' 或 '<-'，但得到 '{self._cur().value}'",
+                self._cur().line,
+                self._cur().column,
+                source=self._source,
+            )
 
         body = self._parse_block_or_expr()
-        return ForExpr(var_name=var_name, iterable=iterable, body=body,
-                       step=None, span=self._span(tok))
+        return ForExpr(
+            var_name=var_name,
+            iterable=iterable,
+            body=body,
+            step=None,
+            span=self._span(tok),
+        )
 
     def _parse_while_expr(self) -> WhileExpr:
         """解析 while 循环表达式: while condition { body }"""
@@ -472,8 +554,12 @@ class Parser:
         if self._match(TokenType.ELSE):
             else_branch = self._parse_block_or_expr()
 
-        return IfExpr(condition=cond, then_branch=then_branch,
-                       else_branch=else_branch, span=self._span(tok))
+        return IfExpr(
+            condition=cond,
+            then_branch=then_branch,
+            else_branch=else_branch,
+            span=self._span(tok),
+        )
 
     def _parse_match_expr(self):
         """match 表达式"""
@@ -488,7 +574,16 @@ class Parser:
         if self._peek_type() != TokenType.RBRACE:
             arms.append(self._parse_match_arm())
             # 支持用逗号分隔或直接换行的分支
-            while self._peek_type() == TokenType.COMMA or self._peek_type() in (TokenType.IDENT, TokenType.UNDERSCORE, TokenType.INT, TokenType.FLOAT, TokenType.STRING, TokenType.BOOL, TokenType.LPAREN, TokenType.LBRACKET):
+            while self._peek_type() == TokenType.COMMA or self._peek_type() in (
+                TokenType.IDENT,
+                TokenType.UNDERSCORE,
+                TokenType.INT,
+                TokenType.FLOAT,
+                TokenType.STRING,
+                TokenType.BOOL,
+                TokenType.LPAREN,
+                TokenType.LBRACKET,
+            ):
                 if self._peek_type() == TokenType.COMMA:
                     self._advance()
                 arms.append(self._parse_match_arm())
@@ -583,10 +678,14 @@ class Parser:
                     while self._match(TokenType.COMMA):
                         fields.append(self._parse_pattern())
                 self._expect(TokenType.RPAREN)
-                return PatternConstructor(name=name, fields=fields, span=self._span(tok))
+                return PatternConstructor(
+                    name=name, fields=fields, span=self._span(tok)
+                )
             return PatternIdentifier(name=name, span=self._span(tok))
 
-        raise ParseError(f"无效的模式 '{tok.value}'", tok.line, tok.column, source=self._source)
+        raise ParseError(
+            f"无效的模式 '{tok.value}'", tok.line, tok.column, source=self._source
+        )
 
     # ----------------------------------------------------------
     # 逻辑或 (||)
@@ -630,7 +729,12 @@ class Parser:
 
     def _parse_comparison_expr(self):
         left = self._parse_cons_expr()
-        while self._peek_type() in (TokenType.LT, TokenType.GT, TokenType.LTE, TokenType.GTE):
+        while self._peek_type() in (
+            TokenType.LT,
+            TokenType.GT,
+            TokenType.LTE,
+            TokenType.GTE,
+        ):
             tok = self._advance()
             right = self._parse_cons_expr()
             left = BinaryOp(op=tok.value, left=left, right=right, span=self._span(tok))
@@ -707,7 +811,9 @@ class Parser:
             elif self._peek_type() == TokenType.DOT:
                 self._advance()
                 field_tok = self._expect(TokenType.IDENT)
-                expr = FieldAccess(target=expr, field=field_tok.value, span=self._span(field_tok))
+                expr = FieldAccess(
+                    target=expr, field=field_tok.value, span=self._span(field_tok)
+                )
             else:
                 break
 
@@ -786,7 +892,9 @@ class Parser:
         if tok.type == TokenType.LBRACE:
             return self._parse_block()
 
-        raise ParseError(f"意外的 token '{tok.value}'", tok.line, tok.column, source=self._source)
+        raise ParseError(
+            f"意外的 token '{tok.value}'", tok.line, tok.column, source=self._source
+        )
 
     def _parse_lambda(self) -> Lambda:
         """解析 Lambda 表达式 |params| -> Type { body } 或 |params| expr"""
@@ -807,7 +915,9 @@ class Parser:
 
         # 函数体
         body = self._parse_block_or_expr()
-        return Lambda(params=params, return_type=ret_type, body=body, span=self._span(tok))
+        return Lambda(
+            params=params, return_type=ret_type, body=body, span=self._span(tok)
+        )
 
     def _parse_list_expr(self):
         """解析列表表达式 [1, 2, 3] 或列表推导式 [expr for x in list]"""
@@ -852,8 +962,12 @@ class Parser:
             end_expr = self._parse_expression()
             iterable = ("range", start_expr, end_expr, None)
         else:
-            raise ParseError(f"列表推导式期望 'in' 或 '<-'",
-                           self._cur().line, self._cur().column, source=self._source)
+            raise ParseError(
+                f"列表推导式期望 'in' 或 '<-'",
+                self._cur().line,
+                self._cur().column,
+                source=self._source,
+            )
 
         # 可选过滤条件: if cond
         filter_cond = None
@@ -861,8 +975,13 @@ class Parser:
             filter_cond = self._parse_expression()
 
         self._expect(TokenType.RBRACKET)
-        return ListComprehension(expr=expr, var_name=var_name, iterable=iterable,
-                                  filter_cond=filter_cond, span=self._span(bracket_tok))
+        return ListComprehension(
+            expr=expr,
+            var_name=var_name,
+            iterable=iterable,
+            filter_cond=filter_cond,
+            span=self._span(bracket_tok),
+        )
 
     def _parse_tuple_or_grouped(self):
         """解析元组 (a, b) 或括号分组 (a)"""

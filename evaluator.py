@@ -22,26 +22,61 @@ import os
 from typing import Dict, List, Optional, Any, Callable
 
 from ast_nodes import (
-    Program, Block, Span,
-    IntLiteral, FloatLiteral, StringLiteral, CharLiteral, BoolLiteral, UnitLiteral,
-    Identifier, BinaryOp, UnaryOp, PipeExpr, TryExpr,
-    Param, Lambda, FnDef, FnCall,
-    LetBinding, MutBinding, Assignment,
-    IfExpr, MatchArm, MatchExpr,
-    ForExpr, WhileExpr, BreakExpr, ContinueExpr,
-    ListExpr, ListComprehension, TupleExpr, FieldAccess,
-    ImportDecl, ExportDecl, TypeDef, VariantDef, AliasDef,
-    PatternWildcard, PatternInt, PatternFloat, PatternString,
-    PatternBool, PatternChar, PatternIdentifier, PatternConstructor,
-    PatternTuple, PatternList,
+    Program,
+    Block,
+    Span,
+    IntLiteral,
+    FloatLiteral,
+    StringLiteral,
+    CharLiteral,
+    BoolLiteral,
+    UnitLiteral,
+    Identifier,
+    BinaryOp,
+    UnaryOp,
+    PipeExpr,
+    TryExpr,
+    Param,
+    Lambda,
+    FnDef,
+    FnCall,
+    LetBinding,
+    MutBinding,
+    Assignment,
+    IfExpr,
+    MatchArm,
+    MatchExpr,
+    ForExpr,
+    WhileExpr,
+    BreakExpr,
+    ContinueExpr,
+    ListExpr,
+    ListComprehension,
+    TupleExpr,
+    FieldAccess,
+    ImportDecl,
+    ExportDecl,
+    TypeDef,
+    VariantDef,
+    AliasDef,
+    PatternWildcard,
+    PatternInt,
+    PatternFloat,
+    PatternString,
+    PatternBool,
+    PatternChar,
+    PatternIdentifier,
+    PatternConstructor,
+    PatternTuple,
+    PatternList,
 )
 from environment import Environment
 from errors import RuntimeError_, BreakSignal, ContinueSignal
 
-
 # ============================================================
 # 运行时值
 # ============================================================
+
 
 class NovaClosure:
     """Nova 函数闭包值"""
@@ -71,9 +106,11 @@ class NovaADTValue:
         return self.variant_name
 
     def __eq__(self, other):
-        return (isinstance(other, NovaADTValue)
-                and self.variant_name == other.variant_name
-                and self.fields == other.fields)
+        return (
+            isinstance(other, NovaADTValue)
+            and self.variant_name == other.variant_name
+            and self.fields == other.fields
+        )
 
 
 class BuiltinFn:
@@ -109,11 +146,19 @@ class Evaluator:
         """注册内置函数"""
         self.env.define("print", BuiltinFn("print", self._builtin_print, 1))
         self.env.define("read_line", BuiltinFn("read_line", self._builtin_read_line, 0))
-        self.env.define("int_to_str", BuiltinFn("int_to_str", self._builtin_int_to_str, 1))
-        self.env.define("float_to_str", BuiltinFn("float_to_str", self._builtin_float_to_str, 1))
-        self.env.define("str_to_int", BuiltinFn("str_to_int", self._builtin_str_to_int, 1))
+        self.env.define(
+            "int_to_str", BuiltinFn("int_to_str", self._builtin_int_to_str, 1)
+        )
+        self.env.define(
+            "float_to_str", BuiltinFn("float_to_str", self._builtin_float_to_str, 1)
+        )
+        self.env.define(
+            "str_to_int", BuiltinFn("str_to_int", self._builtin_str_to_int, 1)
+        )
         self.env.define("str_len", BuiltinFn("str_len", self._builtin_str_len, 1))
-        self.env.define("list_length", BuiltinFn("list_length", self._builtin_list_length, 1))
+        self.env.define(
+            "list_length", BuiltinFn("list_length", self._builtin_list_length, 1)
+        )
         self.env.define("filter", BuiltinFn("filter", self._builtin_filter, 2))
         self.env.define("map", BuiltinFn("map", self._builtin_map, 2))
         self.env.define("sum", BuiltinFn("sum", self._builtin_sum, 1))
@@ -122,13 +167,22 @@ class Evaluator:
 
         # ====== 文件 I/O ======
         self.env.define("read_file", BuiltinFn("read_file", self._builtin_read_file, 1))
-        self.env.define("write_file", BuiltinFn("write_file", self._builtin_write_file, 2))
-        self.env.define("file_exists", BuiltinFn("file_exists", self._builtin_file_exists, 1))
+        self.env.define(
+            "write_file", BuiltinFn("write_file", self._builtin_write_file, 2)
+        )
+        self.env.define(
+            "file_exists", BuiltinFn("file_exists", self._builtin_file_exists, 1)
+        )
         self.env.define("list_dir", BuiltinFn("list_dir", self._builtin_list_dir, 1))
 
         # ====== JSON ======
-        self.env.define("json_parse", BuiltinFn("json_parse", self._builtin_json_parse, 1))
-        self.env.define("json_stringify", BuiltinFn("json_stringify", self._builtin_json_stringify, 1))
+        self.env.define(
+            "json_parse", BuiltinFn("json_parse", self._builtin_json_parse, 1)
+        )
+        self.env.define(
+            "json_stringify",
+            BuiltinFn("json_stringify", self._builtin_json_stringify, 1),
+        )
 
         # ====== 数学函数 ======
         self.env.define("abs", BuiltinFn("abs", self._builtin_abs, 1))
@@ -148,10 +202,23 @@ class Evaluator:
         self.env.define("pi", BuiltinFn("pi", self._builtin_pi, 0))
 
         # 注册内置 Option 和 Result 的构造函数
-        self.env.define("Some", BuiltinFn("Some", lambda *args: NovaADTValue("Option", "Some", list(args)), 1))
+        self.env.define(
+            "Some",
+            BuiltinFn(
+                "Some", lambda *args: NovaADTValue("Option", "Some", list(args)), 1
+            ),
+        )
         self.env.define("None", NovaADTValue("Option", "None", []))
-        self.env.define("Ok", BuiltinFn("Ok", lambda *args: NovaADTValue("Result", "Ok", list(args)), 1))
-        self.env.define("Err", BuiltinFn("Err", lambda *args: NovaADTValue("Result", "Err", list(args)), 1))
+        self.env.define(
+            "Ok",
+            BuiltinFn("Ok", lambda *args: NovaADTValue("Result", "Ok", list(args)), 1),
+        )
+        self.env.define(
+            "Err",
+            BuiltinFn(
+                "Err", lambda *args: NovaADTValue("Result", "Err", list(args)), 1
+            ),
+        )
 
     # ----------------------------------------------------------
     # 内置函数实现
@@ -217,7 +284,7 @@ class Evaluator:
     def _builtin_read_file(self, *args):
         path = args[0]
         try:
-            with open(path, 'r', encoding='utf-8') as f:
+            with open(path, "r", encoding="utf-8") as f:
                 return f.read()
         except FileNotFoundError:
             raise RuntimeError_(f"文件 '{path}' 不存在")
@@ -225,7 +292,7 @@ class Evaluator:
     def _builtin_write_file(self, *args):
         path, content = args[0], args[1]
         try:
-            with open(path, 'w', encoding='utf-8') as f:
+            with open(path, "w", encoding="utf-8") as f:
                 f.write(content)
             return UNIT_VALUE
         except IOError as e:
@@ -296,8 +363,11 @@ class Evaluator:
                 return self._convert_nova_to_json(val.fields[0])
             if val.variant_name == "Err":
                 return None
-            return {"_type": val.type_name, "_variant": val.variant_name,
-                    "_fields": [self._convert_nova_to_json(f) for f in val.fields]}
+            return {
+                "_type": val.type_name,
+                "_variant": val.variant_name,
+                "_fields": [self._convert_nova_to_json(f) for f in val.fields],
+            }
         if isinstance(val, list):
             return [self._convert_nova_to_json(item) for item in val]
         if isinstance(val, tuple):
@@ -392,15 +462,17 @@ class Evaluator:
         if isinstance(fn, BuiltinFn):
             # 如果参数不足且函数支持部分应用，返回一个柯里化版本
             if fn.arity > 0 and len(args) < fn.arity:
+
                 def curried(*more_args):
                     return fn.fn(*(args + list(more_args)))
+
                 return BuiltinFn(fn.name, curried, fn.arity - len(args))
             return fn.fn(*args)
 
         if isinstance(fn, NovaClosure):
             if len(args) < len(fn.params):
                 # 部分应用：返回捕获已提供参数的闭包
-                remaining_params = fn.params[len(args):]
+                remaining_params = fn.params[len(args) :]
                 captured = args
 
                 def partially_applied(*more_args):
@@ -484,12 +556,13 @@ class Evaluator:
                     def make_constructor(type_name, vname, fnames):
                         def constructor(*args):
                             return NovaADTValue(type_name, vname, list(args))
+
                         return constructor
 
                     ctor = BuiltinFn(
                         variant.name,
                         make_constructor(decl.name, variant.name, field_names),
-                        len(variant.fields)
+                        len(variant.fields),
                     )
                 else:
                     # 无字段构造器 -> 直接是值

@@ -35,7 +35,7 @@ class NovaError(Exception):
 
     def _format_with_context(self) -> str:
         """带源码上下文的友好格式，类似 Rust 错误输出"""
-        lines = self.source_code.split('\n')
+        lines = self.source_code.split("\n")
 
         # 提取出错行及其前后各 1 行
         err_line_idx = max(0, self.line - 1)  # 转换为 0-based
@@ -69,7 +69,9 @@ class NovaError(Exception):
 class LexerError(NovaError):
     """词法分析错误：非法字符、未闭合字符串等"""
 
-    def __init__(self, message: str, line: int, column: int, source: Optional[str] = None):
+    def __init__(
+        self, message: str, line: int, column: int, source: Optional[str] = None
+    ):
         super().__init__(f"词法错误: {message}", line, column)
         if source is not None:
             self.source_code = source
@@ -78,8 +80,13 @@ class LexerError(NovaError):
 class ParseError(NovaError):
     """语法分析错误：意外的 token、不完整的表达式等"""
 
-    def __init__(self, message: str, line: int = -1, column: int = -1,
-                 source: Optional[str] = None):
+    def __init__(
+        self,
+        message: str,
+        line: int = -1,
+        column: int = -1,
+        source: Optional[str] = None,
+    ):
         super().__init__(f"语法错误: {message}", line, column)
         if source is not None:
             self.source_code = source
@@ -88,8 +95,13 @@ class ParseError(NovaError):
 class TypeCheckError(NovaError):
     """类型检查错误：类型不匹配、未定义变量、类型推断失败等"""
 
-    def __init__(self, message: str, line: int = -1, column: int = -1,
-                 source: Optional[str] = None):
+    def __init__(
+        self,
+        message: str,
+        line: int = -1,
+        column: int = -1,
+        source: Optional[str] = None,
+    ):
         super().__init__(f"类型错误: {message}", line, column)
         if source is not None:
             self.source_code = source
@@ -98,8 +110,13 @@ class TypeCheckError(NovaError):
 class RuntimeError_(NovaError):
     """运行时错误：除零、未绑定变量、模式匹配失败等"""
 
-    def __init__(self, message: str, line: int = -1, column: int = -1,
-                 source: Optional[str] = None):
+    def __init__(
+        self,
+        message: str,
+        line: int = -1,
+        column: int = -1,
+        source: Optional[str] = None,
+    ):
         super().__init__(f"运行时错误: {message}", line, column)
         if source is not None:
             self.source_code = source
