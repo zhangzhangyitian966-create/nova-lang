@@ -2863,3 +2863,238 @@
 - 统一代码风格
 - 消除魔法数字
 
+
+---
+
+## 2026-07-16 23:59 第176轮深度审查
+
+# 第 176 轮深度审查报告
+
+**审查时间**: 2026-07-16 23:59:40
+**审查引擎**: v2.0 (AST 级深度分析)
+
+## 审查概览
+
+- 审查文件数: **39**
+- 总代码行数: **23,147**
+- 函数总数: **1122**
+- 类总数: **291**
+- 发现问题总数: **667**
+
+**问题严重程度分布:**
+
+- 🔴 **CRITICAL**: 0
+- 🟠 **HIGH**: 37
+- 🟡 **MEDIUM**: 174
+- 🟢 **LOW**: 456
+
+## 一、代码质量审查
+
+### 问题类型分布
+
+- 调试 print 语句: 214 (LOW)
+- 魔法数字: 162 (LOW)
+- 未使用的导入: 79 (MEDIUM)
+- 圈复杂度过高: 47 (MEDIUM)
+- 低效字符串拼接: 28 (LOW)
+- 缺少文档字符串: 24 (LOW)
+- 函数过长: 23 (MEDIUM)
+- 命名不规范: 20 (LOW)
+- sys.path hack: 19 (HIGH)
+- 类过大: 11 (MEDIUM)
+- 裸异常捕获: 11 (HIGH)
+- 过于宽泛的异常捕获: 9 (MEDIUM)
+- TODO/FIXME 遗留: 8 (LOW)
+- 上帝模块: 7 (HIGH)
+- 深层嵌套循环: 5 (MEDIUM)
+
+### 各模块问题统计
+
+| 模块 | 行数 | 问题数 | 问题密度 |
+|------|------|--------|----------|
+| auto_improve.py | 1097 | 85 | 77.5/K行 |
+| x86_64.py | 541 | 83 | 153.4/K行 |
+| auto_develop.py | 926 | 78 | 84.2/K行 |
+| test_native_backend.py | 479 | 77 | 160.8/K行 |
+| auto_review.py | 1202 | 67 | 55.7/K行 |
+| test_ir.py | 583 | 43 | 73.8/K行 |
+| agents.py | 340 | 29 | 85.3/K行 |
+| nova.py | 310 | 26 | 83.9/K行 |
+| compiler_cli.py | 576 | 19 | 33.0/K行 |
+| test_backends.py | 520 | 17 | 32.7/K行 |
+| pass_manager.py | 1466 | 15 | 10.2/K行 |
+| native_backend.py | 544 | 12 | 22.1/K行 |
+| mir_lowering.py | 1219 | 11 | 9.0/K行 |
+| llm_dev_common.py | 329 | 11 | 33.4/K行 |
+| c_codegen.py | 1488 | 7 | 4.7/K行 |
+
+### 🔴 高优先级问题
+
+- **[HIGH] sys.path hack** (第 10 行)
+  - 使用 sys.path hack 调整导入路径
+  - 建议: 建议使用标准的 Python 包结构和相对导入
+
+- **[HIGH] sys.path hack** (第 11 行)
+  - 使用 sys.path hack 调整导入路径
+  - 建议: 建议使用标准的 Python 包结构和相对导入
+
+- **[HIGH] sys.path hack** (第 17 行)
+  - 使用 sys.path hack 调整导入路径
+  - 建议: 建议使用标准的 Python 包结构和相对导入
+
+- **[HIGH] sys.path hack** (第 19 行)
+  - 使用 sys.path hack 调整导入路径
+  - 建议: 建议使用标准的 Python 包结构和相对导入
+
+- **[HIGH] sys.path hack** (第 20 行)
+  - 使用 sys.path hack 调整导入路径
+  - 建议: 建议使用标准的 Python 包结构和相对导入
+
+- **[HIGH] sys.path hack** (第 14 行)
+  - 使用 sys.path hack 调整导入路径
+  - 建议: 建议使用标准的 Python 包结构和相对导入
+
+- **[HIGH] sys.path hack** (第 15 行)
+  - 使用 sys.path hack 调整导入路径
+  - 建议: 建议使用标准的 Python 包结构和相对导入
+
+- **[HIGH] sys.path hack** (第 509 行)
+  - 使用 sys.path hack 调整导入路径
+  - 建议: 建议使用标准的 Python 包结构和相对导入
+
+- **[HIGH] sys.path hack** (第 12 行)
+  - 使用 sys.path hack 调整导入路径
+  - 建议: 建议使用标准的 Python 包结构和相对导入
+
+- **[HIGH] sys.path hack** (第 24 行)
+  - 使用 sys.path hack 调整导入路径
+  - 建议: 建议使用标准的 Python 包结构和相对导入
+
+- **[HIGH] sys.path hack** (第 12 行)
+  - 使用 sys.path hack 调整导入路径
+  - 建议: 建议使用标准的 Python 包结构和相对导入
+
+- **[HIGH] sys.path hack** (第 22 行)
+  - 使用 sys.path hack 调整导入路径
+  - 建议: 建议使用标准的 Python 包结构和相对导入
+
+- **[HIGH] 裸异常捕获** (第 133 行)
+  - 裸 except: 捕获所有异常
+  - 建议: 建议指定具体的异常类型，避免隐藏 bug
+
+- **[HIGH] 裸异常捕获** (第 143 行)
+  - 裸 except: 捕获所有异常
+  - 建议: 建议指定具体的异常类型，避免隐藏 bug
+
+- **[HIGH] 裸异常捕获** (第 623 行)
+  - 裸 except: 捕获所有异常
+  - 建议: 建议指定具体的异常类型，避免隐藏 bug
+
+- **[HIGH] 裸异常捕获** (第 635 行)
+  - 裸 except: 捕获所有异常
+  - 建议: 建议指定具体的异常类型，避免隐藏 bug
+
+- **[HIGH] 裸异常捕获** (第 146 行)
+  - 裸 except: 捕获所有异常
+  - 建议: 建议指定具体的异常类型，避免隐藏 bug
+
+- **[HIGH] 裸异常捕获** (第 155 行)
+  - 裸 except: 捕获所有异常
+  - 建议: 建议指定具体的异常类型，避免隐藏 bug
+
+- **[HIGH] 裸异常捕获** (第 361 行)
+  - 裸 except: 捕获所有异常
+  - 建议: 建议指定具体的异常类型，避免隐藏 bug
+
+- **[HIGH] 裸异常捕获** (第 163 行)
+  - 裸 except: 捕获所有异常
+  - 建议: 建议指定具体的异常类型，避免隐藏 bug
+
+## 二、架构审查
+
+### 架构发现
+
+- 存在 19 处 sys.path hack，建议重构为标准包结构
+- 目录代码量分布:
+-   - root: 14 文件, 8424 行
+-   - ir: 6 文件, 4552 行
+-   - scripts: 7 文件, 3960 行
+-   - tests: 5 文件, 3641 行
+-   - backend: 7 文件, 2570 行
+
+### 架构问题
+
+- **[HIGH] 模块 backend.compiler_pipeline 依赖过多 (14 个模块)**
+  - 建议拆分模块，降低单个模块的职责
+- **[HIGH] 模块 backend.cranelift_backend 依赖过多 (25 个模块)**
+  - 建议拆分模块，降低单个模块的职责
+- **[HIGH] 模块 backend.lir_c_backend 依赖过多 (25 个模块)**
+  - 建议拆分模块，降低单个模块的职责
+- **[HIGH] 模块 backend.native_backend 依赖过多 (25 个模块)**
+  - 建议拆分模块，降低单个模块的职责
+- **[HIGH] 模块 backend.wasm_backend 依赖过多 (24 个模块)**
+  - 建议拆分模块，降低单个模块的职责
+- **[HIGH] 模块 tests.test_backends 依赖过多 (49 个模块)**
+  - 建议拆分模块，降低单个模块的职责
+- **[HIGH] 模块 tests.test_native_backend 依赖过多 (28 个模块)**
+  - 建议拆分模块，降低单个模块的职责
+
+### 耦合度分析
+
+- 模块总数: 12
+- 依赖关系总数: 206
+- 平均依赖数: 17.2
+
+**最高依赖输出模块:**
+
+- tests.test_backends: 49 个依赖
+- tests.test_native_backend: 28 个依赖
+- backend.cranelift_backend: 25 个依赖
+- backend.lir_c_backend: 25 个依赖
+- backend.native_backend: 25 个依赖
+
+## 三、测试分析
+
+- 测试总数: 0
+- 通过: 0
+- 失败: 0
+- 错误: 0
+- 跳过: 0
+
+## 四、复杂度分析
+
+### 复杂度最高的函数 (Top 10)
+
+| 模块 | 函数 | 圈复杂度 |
+|------|------|----------|
+| vm.py | _execute_instruction | 123 |
+| type_checker.py | check_expr | 72 |
+| mir_lowering.py | _lower_expr | 70 |
+| pass_manager.py | _try_inline_expr | 61 |
+| auto_improve.py | discover_issues | 55 |
+| pass_manager.py | _get_used_ssa | 50 |
+| lir_c_backend.py | _compile_instr | 49 |
+| c_codegen.py | _infer_c_type_from_expr | 44 |
+| lexer.py | _next_token | 44 |
+| mir_lowering.py | _replace_ssa_in_instr | 42 |
+
+## 五、改进建议（按优先级）
+
+### P1 - 高优先级
+
+- 修复 HIGH 级别的代码质量问题
+- 重构 sys.path hack 为标准包结构
+- 降低高耦合模块的依赖
+
+### P2 - 中优先级
+
+- 补充单元测试，提高覆盖率
+- 为核心函数添加类型注解
+- 拆分过大的函数和类
+
+### P3 - 低优先级
+
+- 补充文档字符串
+- 统一代码风格
+- 消除魔法数字
+
