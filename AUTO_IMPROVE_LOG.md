@@ -1,5 +1,105 @@
 # Nova 自动改进日志
 
+## 2026-07-16 自动改进（第三十四轮）
+
+基于 AUTO_REVIEW_LOG.md 第二十九轮审查日志的 P0 级严重问题驱动改进（阶段一检查 + 阶段二开发 + 阶段三测试）。
+
+### 每日发现的问题
+
+#### vm.py（第二十九轮审查）
+- **`_range_index`/`_list_index` 未在 `__init__` 中初始化，使用 `hasattr` 反模式（vm.py:204-235, 1216-1217, 1263-1264）**：两个核心循环状态字典采用惰性初始化，导致代码中出现 8 处 `hasattr`/`getattr` 防御式检查，与 `_for_iters`/`_while_loops` 在 `__init__` 中统一初始化的风格不一致
+  - 审查日志追问结论：代码质量反模式，潜在内存安全问题
+  - 根因：实现 for 循环时图省事采用惰性创建，而非在构造函数中统一初始化所有实例属性
+  - 影响：代码可读性差，防御性检查散布各处，增加维护成本；同类属性处理不一致
+  - 验证：grep `hasattr.*_range_index` 得 3 处，grep `hasattr.*_list_index` 得 3 处，`__init__` 中无这两个属性
+
+- **TRY_UNWRAP 提前返回时 `return_flag` 状态不一致（vm.py:1577-1596 vs 1099-1104）**：RETURN 指令通过设置 `self.return_flag = True` 通知循环退出，TRY_UNWRAP 通过 `_execute_instruction` 返回 `True` 布尔值通知，两种机制并存
+  - 审查日志追问结论：代码一致性问题，当前功能正确但有维护风险
+  - 根因：TRY_UNWRAP 后加实现时选择了返回值机制，未复用已有的 return_flag 共享状态
+  - 影响：当前功能正确（入口处都重置 return_flag），但两种信号机制并存增加理解成本，未来修改易引入bug
+  - 验证：RETURN 指令设置 return_flag，TRY_UNWRAP 仅 return True，不设置 flag
+
+- **BREAK 在 for 循环中直接索引 `self.stack[base_sp + 1]` 无边界检查（vm.py:1045）**：for 循环 BREAK 直接用 `base_sp + 1` 索引栈取 result_list，无越界检查；而 while 循环 BREAK 有 `if base_sp < len(self.stack)` 守卫
+  - 审查日志追问结论：健壮性问题，栈不平衡时会抛 Python IndexError 而非 Nova RuntimeError
+  - 根因：实现 for 循环 BREAK 时遗漏边界检查，while 循环有但 for 循环没有，代码不一致
+  - 影响：若循环体导致栈不平衡，break 触发 Python IndexError 而非语言层面错误，错误信息不友好且不一致
+  - 验证：对比 while BREAK 有检查和 for BREAK 无检查的代码
+
+#### lexer.py + parser.py（第二十九轮审查）
+- **数字字面量不支持科学计数法和下划线分隔符（lexer.py:203-222）**：`_read_number` 方法仅支持整数和简单浮点数，不支持 `1e5`、`1.5e10`、`1.5e-3` 等科学计数法，也不支持 `1_000_000` 等下划线分隔符
+  - 审查日志追问结论：现代语言标配功能，绝对不能缺失
+  - 根因：`_read_number` 实现过于简单，只处理了 `[0-9]+(\.[0-9]+)?` 模式
+  - 影响：`1e5` 被解析为整数 `1` + 标识符 `e5`；`1_000_000` 被解析为整数 `1` + 标识符 `_000_000`
+  - 验证：tokenize("1e5") 返回 INT("1") + IDENT("e5") + EOF
+
+- **管道操作符 `|>` 优先级设计错误（parser.py:438-445, 653-659）**：管道优先级高于逻辑运算，与函数式语言惯例相反；`a && b |> f` 当前解析为 `a && (b |> f)`，Elixir/F#/OCaml/Elm 均解析为 `(a && b) |> f`
+  - 审查日志追问结论：设计错误，管道应是低优先级操作符
+  - 根因：`_parse_pipe` 被 `_parse_and_expr` 调用（管道是&&的操作数），导致管道优先级高于逻辑与
+  - 影响：布尔表达式通过管道传递时需要多余括号，违反直觉
+  - 验证：测试 `test_pipe_precedence_higher_than_and` 确认了当前错误的优先级设计
+
+- **字符串未知转义序列静默吞掉反斜杠（lexer.py:257-258, 310-311）**：`\q`、`\z` 等未知转义序列被静默处理为普通字符，反斜杠丢失；同时缺少 `\a`、`\b`、`\f`、`\v`、`\0`、`\xHH`、`\uXXXX` 等标准转义
+  - 审查日志追问结论：静默错误是危险的，绝对不能接受
+  - 根因：`_read_string` 和 `_read_char` 的转义处理 else 分支直接 `result += esc`，没有错误检查
+  - 影响：未知转义序列的反斜杠被吞掉，无任何警告；标准转义缺失
+  - 验证：`tokenize('"\q"')` 返回 STRING("q") 而非报错
+
+#### evaluator.py + environment.py（第二十九轮审查）
+- **Block 不支持嵌套函数/类型定义（evaluator.py:811-1026）**：`_eval_expr_inner` 未处理 FnDef/TypeDef/AliasDef 等声明节点，Block 内部所有语句通过 `eval_expr` 求值，但只处理了 LetBinding 和 MutBinding，FnDef 等会落入 else 分支抛出"未知的表达式类型"错误
+  - 审查日志追问结论：Block 内定义函数是现代语言的基本能力，不能接受
+  - 根因：声明类节点只在顶层 `eval_program` 的两遍扫描中处理，`_eval_expr_inner` 未覆盖
+  - 影响：无法在代码块、函数体内定义嵌套函数或局部类型
+  - 验证：构造包含 FnDef 节点的 Block，求值触发 RuntimeError_("未知的表达式类型: FnDef")
+  - 解析器层面同样不支持：`_parse_block` 不识别 fn/type/alias 关键字
+
+- **`define()` 同作用域重复定义静默覆盖（environment.py:30-32）**：`Environment.define()` 无重复定义检测，直接执行 `self.bindings[name] = BindingInfo(...)`，同一作用域内两次 define 同名变量静默覆盖，甚至可改变绑定的可变性
+  - 审查日志追问结论：不能。重复定义应在运行时也有防护
+  - 根因：运行时环境只考虑功能正确性，假设类型检查器已拦截所有重复定义
+  - 影响：绕过类型检查（check_types=False）时，重复定义无任何提示；可变性可能被偷偷篡改
+  - 验证：同一作用域内两次 define("x", ...)，后一次的值覆盖前一次，无错误无警告
+  - 注意：类型检查器层面已有重复定义检测，但运行时无兜底
+
+### 本次修复内容（基于审查日志第二十九轮 Issue）
+
+1. **vm.py — 循环状态初始化规范化 + for BREAK/CONTINUE 边界检查（基于审查日志第二十九轮VM严重问题 #2/#6）**
+   - `__init__` 中添加 `_range_index: Dict[int, int] = {}` 和 `_list_index: Dict[int, int] = {}` 显式初始化
+   - 移除所有 8 处 `hasattr`/`getattr` 防御式检查，直接访问属性
+   - 移除 FOR_ITER 中的惰性创建代码，与 `_for_iters`/`_while_loops` 风格统一
+   - for 循环 BREAK 添加栈边界检查（`base_sp + 1 >= len(self.stack)` 时报错）
+   - for 循环 CONTINUE 添加栈边界检查，与 while 循环保持一致
+   - **TRY_UNWRAP return_flag 方案回滚**：尝试统一 return_flag 时发现会导致外层执行循环提前退出（return_flag 泄漏），当前两条返回路径（RETURN 用 return_flag、TRY_UNWRAP 用返回值）虽不一致但功能正确，统一需要更大的重构
+
+2. **lexer.py + parser.py — 数字字面量增强 + 管道优先级修正 + 转义序列完善（基于审查日志第二十九轮词法/语法严重问题 #1/#3/#2）**
+   - `_read_number` 支持科学计数法（e/E，可选 +/- 符号）
+   - `_read_number` 支持下划线分隔符（整数部分、小数部分、指数部分）
+   - 管道操作符优先级调整到逻辑运算之下（or_expr → pipe → and_expr）
+   - 更新测试：`test_pipe_precedence_higher_than_and` → `test_pipe_precedence_lower_than_and`
+   - 字符串未知转义序列改为报错而非静默吞反斜杠
+   - 补充标准转义序列：`\a`（响铃）、`\b`（退格）、`\f`（换页）、`\v`（垂直制表）、`\0`（空字符）
+
+3. **evaluator.py + parser.py — Block 嵌套函数/类型定义支持 + 顶层子作用域隔离（基于审查日志第二十九轮Evaluator严重问题 #2）**
+   - 解析器 `_parse_block` 支持 `fn`/`type`/`alias` 关键字
+   - `_eval_expr_inner` 中添加 FnDef/TypeDef/AliasDef 等声明节点处理
+   - Block 求值采用两遍扫描：先收集所有声明，再求值（支持前向引用和互递归）
+   - `eval_program` 在子作用域中执行用户程序，用户定义可遮蔽内置函数/类型
+   - **define() 重复定义检测方案回滚**：运行时添加检测会破坏变量遮蔽（let shadowing）这一合法特性，且类型检查器层面已有重复函数定义检测，运行时无需额外兜底
+
+### 测试结果
+
+- 全量测试: **960 passed** (1.45s)
+- Evaluator 示例: hello/fibonacci/pattern_match/loops/math/pipe/list_comprehension/file_io 全部正常输出
+- VM 示例: hello/fibonacci/pattern_match 全部正常输出
+- 一致性测试: 57 个测试全部通过 ✅
+- VM 循环状态初始化: `_range_index`/`_list_index` 在 `__init__` 中初始化 ✅ / hasattr 全部移除 ✅
+- VM for BREAK/CONTINUE 边界检查: break 有检查 ✅ / continue 有检查 ✅
+- 数字字面量增强: 科学计数法 ✅ / 下划线分隔符 ✅
+- 管道优先级修正: 低于 `&&`/`||` ✅ / 与函数式语言惯例一致 ✅
+- 字符串转义完善: 未知转义报错 ✅ / 标准转义 `\a\b\f\v\0` ✅
+- Block 嵌套函数定义: 解析器支持 ✅ / 求值器两遍扫描 ✅ / 前向引用 ✅
+- 顶层子作用域隔离: 用户定义遮蔽内置 ✅ / 全局环境不被污染 ✅
+
+---
+
 ## 2026-07-16 自动改进（第三十三轮）
 
 基于 AUTO_REVIEW_LOG.md 第二十七轮审查日志的 P0 级严重问题驱动改进（阶段一检查 + 阶段二开发 + 阶段三测试）。

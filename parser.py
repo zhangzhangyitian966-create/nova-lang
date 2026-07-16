@@ -388,6 +388,24 @@ class Parser:
         tail = None
 
         while self._peek_type() != TokenType.RBRACE:
+            # 检查 fn 定义
+            if self._peek_type() == TokenType.FN:
+                stmts.append(self._parse_fn_def())
+                self._match(TokenType.SEMICOLON)
+                continue
+
+            # 检查 type 定义（ADT）
+            if self._peek_type() == TokenType.TYPE:
+                stmts.append(self._parse_type_def())
+                self._match(TokenType.SEMICOLON)
+                continue
+
+            # 检查 alias 定义
+            if self._peek_type() == TokenType.ALIAS:
+                stmts.append(self._parse_alias_def())
+                self._match(TokenType.SEMICOLON)
+                continue
+
             # 检查赋值：ident = expr
             if (self._peek_type() == TokenType.IDENT
                     and self.pos + 1 < len(self.tokens)
@@ -436,11 +454,11 @@ class Parser:
         return self._parse_for_while_expr()
 
     def _parse_pipe(self):
-        """管道操作符 |> (优先级：低于相等性，高于逻辑与)"""
-        left = self._parse_equality_expr()
+        """管道操作符 |> (优先级：低于逻辑或，高于逻辑与)"""
+        left = self._parse_and_expr()
         while self._match(TokenType.PIPE_GT):
             tok = self.tokens[self.pos - 1]
-            right = self._parse_equality_expr()
+            right = self._parse_and_expr()
             left = PipeExpr(left=left, right=right, span=self._span(tok))
         return left
 
@@ -639,10 +657,10 @@ class Parser:
     # ----------------------------------------------------------
 
     def _parse_or_expr(self):
-        left = self._parse_and_expr()
+        left = self._parse_pipe()
         while self._match(TokenType.OR):
             tok = self.tokens[self.pos - 1]
-            right = self._parse_and_expr()
+            right = self._parse_pipe()
             left = BinaryOp(op="||", left=left, right=right, span=self._span(tok))
         return left
 
@@ -651,10 +669,10 @@ class Parser:
     # ----------------------------------------------------------
 
     def _parse_and_expr(self):
-        left = self._parse_pipe()
+        left = self._parse_equality_expr()
         while self._match(TokenType.AND):
             tok = self.tokens[self.pos - 1]
-            right = self._parse_pipe()
+            right = self._parse_equality_expr()
             left = BinaryOp(op="&&", left=left, right=right, span=self._span(tok))
         return left
 

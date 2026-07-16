@@ -225,6 +225,12 @@ class NovaVM:
         # 循环控制：用于 while 循环的状态
         self._while_loops: List[Dict] = []
 
+        # 循环控制：range 迭代索引（key=loop_id, value=current）
+        self._range_index: Dict[int, int] = {}
+
+        # 循环控制：list 迭代索引（key=loop_id, value=current_idx）
+        self._list_index: Dict[int, int] = {}
+
         # 循环控制：唯一循环 ID 计数器，替代 id() 作为迭代键
         self._loop_id = 0
 
@@ -543,8 +549,8 @@ class NovaVM:
         # 保存循环状态深度，用于提前返回时清理
         saved_for_iters_len = len(self._for_iters)
         saved_while_loops_len = len(self._while_loops)
-        saved_range_keys = set(getattr(self, '_range_index', {}).keys())
-        saved_list_keys = set(getattr(self, '_list_index', {}).keys())
+        saved_range_keys = set(self._range_index.keys())
+        saved_list_keys = set(self._list_index.keys())
 
         # 切换到函数代码
         self.code = func_block.code
@@ -570,14 +576,12 @@ class NovaVM:
                 del self._for_iters[saved_for_iters_len:]
             if len(self._while_loops) > saved_while_loops_len:
                 del self._while_loops[saved_while_loops_len:]
-            if hasattr(self, '_range_index'):
-                new_keys = set(self._range_index.keys()) - saved_range_keys
-                for k in new_keys:
-                    del self._range_index[k]
-            if hasattr(self, '_list_index'):
-                new_keys = set(self._list_index.keys()) - saved_list_keys
-                for k in new_keys:
-                    del self._list_index[k]
+            new_keys = set(self._range_index.keys()) - saved_range_keys
+            for k in new_keys:
+                del self._range_index[k]
+            new_keys = set(self._list_index.keys()) - saved_list_keys
+            for k in new_keys:
+                del self._list_index[k]
 
         return result
 
@@ -1038,10 +1042,12 @@ class NovaVM:
                 base_sp = loop_info["base_sp"]
                 iter_type = loop_info.get("iter_type")
                 iter_key = loop_info.get("iter_key")
-                if iter_type == "range" and hasattr(self, '_range_index'):
+                if iter_type == "range":
                     self._range_index.pop(iter_key, None)
-                elif iter_type == "list" and hasattr(self, '_list_index'):
+                elif iter_type == "list":
                     self._list_index.pop(iter_key, None)
+                if base_sp + 1 >= len(self.stack):
+                    raise RuntimeError_("VM stack underflow: BREAK in for loop")
                 result_list = self.stack[base_sp + 1]
                 del self.stack[base_sp:]
                 self.stack.append(result_list)
@@ -1068,6 +1074,8 @@ class NovaVM:
                 loop_info = self._for_iters[-1]
                 base_sp = loop_info["base_sp"]
                 loop_start = loop_info["loop_start"]
+                if base_sp + 2 > len(self.stack):
+                    raise RuntimeError_("VM stack underflow: CONTINUE in for loop")
                 del self.stack[base_sp + 2:]
                 self.ip = loop_start
             else:
@@ -1213,9 +1221,6 @@ class NovaVM:
 
             if isinstance(iter_val, tuple) and iter_val[0] == "range":
                 # 范围迭代
-                if not hasattr(self, '_range_index'):
-                    self._range_index = {}
-
                 # 复用已有循环 ID 或分配新的
                 if self._for_iters and self._for_iters[-1].get("loop_start") == self.ip - 1:
                     key = self._for_iters[-1]["iter_key"]
@@ -1260,9 +1265,6 @@ class NovaVM:
                     return
             elif isinstance(iter_val, list):
                 # 列表迭代
-                if not hasattr(self, '_list_index'):
-                    self._list_index = {}
-
                 # 复用已有循环 ID 或分配新的
                 if self._for_iters and self._for_iters[-1].get("loop_start") == self.ip - 1:
                     key = self._for_iters[-1]["iter_key"]

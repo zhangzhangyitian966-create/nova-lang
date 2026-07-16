@@ -201,20 +201,47 @@ class Lexer:
                 break
 
     def _read_number(self) -> Token:
-        """读取数字（整数或浮点数）"""
+        """读取数字（整数或浮点数），支持下划线分隔符和科学计数法"""
         start_line = self.line
         start_col = self.column
         num_str = ""
+        is_float = False
 
-        while self.pos < len(self.source) and self.source[self.pos].isdigit():
+        # 整数部分（支持下划线）
+        while self.pos < len(self.source) and (self.source[self.pos].isdigit() or self.source[self.pos] == '_'):
             num_str += self._advance()
 
         # 浮点数
         if (self.pos < len(self.source) and self.source[self.pos] == '.'
-                and self._peek_ahead() is not None and self._peek_ahead().isdigit()):
+                and self._peek_ahead() is not None and (self._peek_ahead().isdigit() or self._peek_ahead() == '_')):
+            is_float = True
             num_str += self._advance()  # 小数点
-            while self.pos < len(self.source) and self.source[self.pos].isdigit():
+            # 小数部分（支持下划线）
+            while self.pos < len(self.source) and (self.source[self.pos].isdigit() or self.source[self.pos] == '_'):
                 num_str += self._advance()
+
+        # 科学计数法
+        if self.pos < len(self.source) and self.source[self.pos] in ('e', 'E'):
+            # 检查 e 后面是否有数字（或 +/- 后跟数字），否则 e 是标识符的一部分
+            e_pos = self.pos
+            ahead = self._peek_ahead()
+            if ahead is not None and ahead.isdigit():
+                is_float = True
+                num_str += self._advance()  # e/E
+                # 指数部分（支持下划线）
+                while self.pos < len(self.source) and (self.source[self.pos].isdigit() or self.source[self.pos] == '_'):
+                    num_str += self._advance()
+            elif ahead in ('+', '-'):
+                ahead2 = self._peek_ahead(2)
+                if ahead2 is not None and ahead2.isdigit():
+                    is_float = True
+                    num_str += self._advance()  # e/E
+                    num_str += self._advance()  # +/-
+                    # 指数部分（支持下划线）
+                    while self.pos < len(self.source) and (self.source[self.pos].isdigit() or self.source[self.pos] == '_'):
+                        num_str += self._advance()
+
+        if is_float:
             return Token(TokenType.FLOAT, num_str, start_line, start_col,
                          end_line=self.line, end_col=self.column - 1)
 
@@ -254,7 +281,20 @@ class Lexer:
                     result += '\\'
                 elif esc == '"':
                     result += '"'
+                elif esc == 'a':
+                    result += '\a'
+                elif esc == 'b':
+                    result += '\b'
+                elif esc == 'f':
+                    result += '\f'
+                elif esc == 'v':
+                    result += '\v'
+                elif esc == '0':
+                    result += '\0'
                 else:
+                    error_msg = f"词法错误：未知的转义序列 '\\{esc}' (行:{self.line}, 列:{self.column - 1})"
+                    self.errors.append(error_msg)
+                    print(error_msg, file=sys.stderr)
                     result += esc
             elif ch == '\n':
                 # 未闭合字符串：记录错误并跳过，继续词法分析
@@ -307,7 +347,20 @@ class Lexer:
                 ch = '\\'
             elif esc == "'":
                 ch = "'"
+            elif esc == 'a':
+                ch = '\a'
+            elif esc == 'b':
+                ch = '\b'
+            elif esc == 'f':
+                ch = '\f'
+            elif esc == 'v':
+                ch = '\v'
+            elif esc == '0':
+                ch = '\0'
             else:
+                error_msg = f"词法错误：未知的转义序列 '\\{esc}' (行:{self.line}, 列:{self.column - 1})"
+                self.errors.append(error_msg)
+                print(error_msg, file=sys.stderr)
                 ch = esc
         else:
             self._advance()

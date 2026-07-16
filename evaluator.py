@@ -583,29 +583,41 @@ class Evaluator:
         第二遍：求值 let/mut 绑定的值和顶层表达式
         这样支持前向引用和相互递归
         """
-        # 第一遍：收集所有函数和类型声明
-        for decl in program.declarations:
-            self._collect_decl(decl)
-
-        # 第二遍：求值绑定值和顶层表达式
-        for decl in program.declarations:
-            try:
-                self._eval_decl_body(decl)
-            except ReturnSignal:
-                raise RuntimeError_("? 操作符不能在顶层使用")
-            except BreakSignal:
-                raise RuntimeError_("break 不能在顶层使用")
-            except ContinueSignal:
-                raise RuntimeError_("continue 不能在顶层使用")
-
-        # 自动调用 main() 函数
+        # 在子作用域中运行用户程序，使用户定义可以遮蔽内置函数/类型
+        global_env = self.env
+        self.env = self.env.child()
+        error_occurred = True
         try:
-            main_fn = self.env.lookup("main")
-        except (NameError, RuntimeError_):
-            pass  # 没有 main 函数时忽略
-        else:
-            if callable(main_fn) or isinstance(main_fn, (NovaClosure, BuiltinFn)):
-                self._call_fn(main_fn, [])
+            # 第一遍：收集所有函数和类型声明
+            for decl in program.declarations:
+                self._collect_decl(decl)
+
+            # 第二遍：求值绑定值和顶层表达式
+            for decl in program.declarations:
+                try:
+                    self._eval_decl_body(decl)
+                except ReturnSignal:
+                    raise RuntimeError_("? 操作符不能在顶层使用")
+                except BreakSignal:
+                    raise RuntimeError_("break 不能在顶层使用")
+                except ContinueSignal:
+                    raise RuntimeError_("continue 不能在顶层使用")
+
+            # 自动调用 main() 函数
+            try:
+                main_fn = self.env.lookup("main")
+            except (NameError, RuntimeError_):
+                pass  # 没有 main 函数时忽略
+            else:
+                if callable(main_fn) or isinstance(main_fn, (NovaClosure, BuiltinFn)):
+                    self._call_fn(main_fn, [])
+
+            error_occurred = False
+        finally:
+            if error_occurred:
+                # 出错时恢复到全局环境，确保调用栈完全回退
+                self.env = global_env
+            # 正常完成时保留 self.env 指向程序作用域，以便外部访问用户定义的变量
 
     def _collect_decl(self, decl):
         """第一遍：注册函数和类型声明（不求值函数体）"""
@@ -905,8 +917,17 @@ class Evaluator:
             old_env = self.env
             self.env = child_env
             try:
+                # 第一遍：收集所有声明（函数、类型、别名）到当前环境
                 for stmt in expr.statements:
+                    if isinstance(stmt, (FnDef, TypeDef, AliasDef)):
+                        self._collect_decl(stmt)
+
+                # 第二遍：求值所有 let/mut 绑定和表达式
+                for stmt in expr.statements:
+                    if isinstance(stmt, (FnDef, TypeDef, AliasDef)):
+                        continue  # 第一遍已处理
                     self.eval_expr(stmt)
+
                 result = UNIT_VALUE
                 if expr.tail_expression:
                     result = self.eval_expr(expr.tail_expression)
