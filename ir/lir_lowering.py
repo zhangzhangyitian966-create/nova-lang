@@ -13,7 +13,6 @@ from ir_nodes import (
     LIRBranch,
     LIRBuildADT,
     LIRBuildList,
-    LIRListAppend,
     LIRBuildMap,
     LIRBuildTuple,
     LIRCall,
@@ -24,6 +23,7 @@ from ir_nodes import (
     LIRIndex,
     LIRJump,
     LIRLabel,
+    LIRListAppend,
     LIRLoadConst,
     LIRLoadGlobal,
     LIRLoadReg,
@@ -116,7 +116,9 @@ class LIRLowering:
                 if isinstance(instr, MIRPhi) and instr.result_name:
                     loc = self._new_loc()
                     self.ssa_to_loc[instr.result_name] = loc
-                    phi_list.append((instr.result_name, instr.result_type, instr.sources))
+                    phi_list.append(
+                        (instr.result_name, instr.result_type, instr.sources)
+                    )
             if phi_list:
                 phi_info[bb.label] = phi_list
 
@@ -140,7 +142,9 @@ class LIRLowering:
                 # 为每个后继块的 Phi 节点插入拷贝
                 for succ_label in succ_blocks:
                     if succ_label in phi_info:
-                        for phi_result_name, phi_result_type, sources in phi_info[succ_label]:
+                        for phi_result_name, phi_result_type, sources in phi_info[
+                            succ_label
+                        ]:
                             # 找到从前驱块（当前块）来的 source
                             src_ssa = None
                             for pred_label, ssa_name in sources:

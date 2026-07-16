@@ -20,11 +20,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "ir"))
 
 from ir.ir_nodes import (
-    BOOL_TYPE,
-    FLOAT_TYPE,
-    INT_TYPE,
     UNIT_TYPE,
-    IRType,
     LIRBinOp,
     LIRBranch,
     LIRBuildADT,
@@ -355,9 +351,7 @@ class LIRCBackend:
             if dst:
                 tag = instr.type_tag
                 fields_size = instr.field_count * 8 + 8
-                self._emit(
-                    f"{dst} = nova_adt_new({tag}, {fields_size});"
-                )
+                self._emit(f"{dst} = nova_adt_new({tag}, {fields_size});")
             return
 
         # 字段访问
@@ -365,9 +359,7 @@ class LIRCBackend:
             if instr.src_locs and dst:
                 src = self._loc_var_name(instr.src_locs[0][0])
                 offset = instr.offset
-                self._emit(
-                    f"{dst} = *(NovaValue*)((char*){src} + {offset});"
-                )
+                self._emit(f"{dst} = *(NovaValue*)((char*){src} + {offset});")
             return
 
         # 索引访问
@@ -385,7 +377,9 @@ class LIRCBackend:
             return
 
         # 未知指令：输出注释，不中断编译
-        self._emit(f"/* TODO: LIR instruction {type(instr).__name__} not implemented */")
+        self._emit(
+            f"/* TODO: LIR instruction {type(instr).__name__} not implemented */"
+        )
 
     def _compile_load_const(self, instr: LIRLoadConst, dst: str):
         """编译常量加载指令"""
@@ -404,7 +398,7 @@ class LIRCBackend:
             self._emit(f"{dst} = {bool_val};")
         elif ctype == "string":
             label = self._get_string_label(val if val else "")
-            self._emit(f'{dst} = (NovaString*)nova_string_new((char*){label});')
+            self._emit(f"{dst} = (NovaString*)nova_string_new((char*){label});")
         elif ctype == "unit":
             self._emit(f"{dst} = 0;")
         elif ctype == "closure":

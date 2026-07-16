@@ -11,34 +11,34 @@ import warnings
 from ir_nodes import (
     FLOAT_TYPE,
     INT_TYPE,
+    HIRADTConstructor,
+    HIRAssignExpr,
     HIRBinaryOp,
     HIRBlockExpr,
+    HIRBoolLiteral,
+    HIRCallExpr,
+    HIRCharLiteral,
+    HIRFieldExpr,
     HIRFloatLiteral,
     HIRFnDecl,
+    HIRForExpr,
     HIRIdentifier,
+    HIRIfExpr,
+    HIRIndexExpr,
     HIRIntLiteral,
+    HIRLambda,
     HIRLetDecl,
-    HIRStringLiteral,
-    HIRBoolLiteral,
-    HIRCharLiteral,
-    HIRUnitLiteral,
-    HIRTupleExpr,
+    HIRListComprehension,
     HIRListExpr,
     HIRMapExpr,
-    HIRFieldExpr,
-    HIRIndexExpr,
-    HIRUnaryOp,
-    HIRIfExpr,
-    HIRLambda,
-    HIRCallExpr,
-    HIRForExpr,
-    HIRWhileExpr,
-    HIRAssignExpr,
     HIRMatchExpr,
-    HIRListComprehension,
     HIRPipeExpr,
-    HIRADTConstructor,
+    HIRStringLiteral,
+    HIRTupleExpr,
+    HIRUnaryOp,
+    HIRUnitLiteral,
     HIRUnwrapExpr,
+    HIRWhileExpr,
 )
 
 
@@ -243,7 +243,9 @@ class Inlining(Pass):
             new_alt = None
             alt_changed = False
             if expr.alternative:
-                new_alt, alt_changed = self._try_inline_expr(expr.alternative, inlineable)
+                new_alt, alt_changed = self._try_inline_expr(
+                    expr.alternative, inlineable
+                )
             if cond_changed or cons_changed or alt_changed:
                 new_expr = HIRIfExpr(new_cond, new_cons, new_alt)
                 new_expr.ir_type = expr.ir_type
@@ -267,7 +269,9 @@ class Inlining(Pass):
             # 处理 let 绑定的值表达式
             new_value, val_changed = self._try_inline_expr(expr.value, inlineable)
             if val_changed:
-                new_let = HIRLetDecl(expr.name, new_value, expr.ir_type, is_mutable=expr.is_mutable)
+                new_let = HIRLetDecl(
+                    expr.name, new_value, expr.ir_type, is_mutable=expr.is_mutable
+                )
                 return new_let, True
             return expr, False
 
@@ -348,7 +352,6 @@ class Inlining(Pass):
                 else:
                     new_arms.append(arm)
             if val_changed or arms_changed:
-                from ir_nodes import HIRMatchArm
                 new_match = HIRMatchExpr(new_val, new_arms)
                 new_match.ir_type = expr.ir_type
                 return new_match, True
@@ -373,14 +376,20 @@ class Inlining(Pass):
             return expr, False
 
         elif isinstance(expr, HIRListComprehension):
-            new_result, result_changed = self._try_inline_expr(expr.result_expr, inlineable)
+            new_result, result_changed = self._try_inline_expr(
+                expr.result_expr, inlineable
+            )
             new_iter, iter_changed = self._try_inline_expr(expr.iterable, inlineable)
             new_filter = None
             filter_changed = False
             if expr.filter:
-                new_filter, filter_changed = self._try_inline_expr(expr.filter, inlineable)
+                new_filter, filter_changed = self._try_inline_expr(
+                    expr.filter, inlineable
+                )
             if result_changed or iter_changed or filter_changed:
-                new_lc = HIRListComprehension(new_result, expr.variable, new_iter, filter=new_filter)
+                new_lc = HIRListComprehension(
+                    new_result, expr.variable, new_iter, filter=new_filter
+                )
                 new_lc.ir_type = expr.ir_type
                 return new_lc, True
             return expr, False
@@ -426,7 +435,9 @@ class Inlining(Pass):
         elif isinstance(expr, HIRCallExpr):
             new_function = self._substitute_params(expr.function, param_map)
             new_args = [self._substitute_params(a, param_map) for a in expr.arguments]
-            if new_function is not expr.function or any(a is not old for a, old in zip(new_args, expr.arguments)):
+            if new_function is not expr.function or any(
+                a is not old for a, old in zip(new_args, expr.arguments)
+            ):
                 new_call = HIRCallExpr(new_function, new_args)
                 new_call.ir_type = expr.ir_type
                 return new_call
@@ -452,9 +463,16 @@ class Inlining(Pass):
         elif isinstance(expr, HIRIfExpr):
             new_cond = self._substitute_params(expr.condition, param_map)
             new_cons = self._substitute_params(expr.consequence, param_map)
-            new_alt = self._substitute_params(expr.alternative, param_map) if expr.alternative else None
-            if (new_cond is not expr.condition or new_cons is not expr.consequence
-                    or new_alt is not expr.alternative):
+            new_alt = (
+                self._substitute_params(expr.alternative, param_map)
+                if expr.alternative
+                else None
+            )
+            if (
+                new_cond is not expr.condition
+                or new_cons is not expr.consequence
+                or new_alt is not expr.alternative
+            ):
                 new_expr = HIRIfExpr(new_cond, new_cons, new_alt)
                 new_expr.ir_type = expr.ir_type
                 return new_expr
@@ -479,9 +497,10 @@ class Inlining(Pass):
         # 其他类型（字面量等）直接返回
         return expr
 
+
 class DeadCodeElimination(Pass):
     """死代码消除
-    
+
     移除未使用的 let 绑定和无副作用的表达式语句。
     采用反向扫描：从块的最后一个表达式（结果）出发，
     收集所有被使用的变量，未被使用且无副作用的绑定被移除。
@@ -491,8 +510,21 @@ class DeadCodeElimination(Pass):
 
     # 纯操作符（无副作用）
     PURE_BINOPS = {
-        "+", "-", "*", "/", "%", "==", "!=", "<", ">", "<=", ">=",
-        "&&", "||", "++", "::",
+        "+",
+        "-",
+        "*",
+        "/",
+        "%",
+        "==",
+        "!=",
+        "<",
+        ">",
+        "<=",
+        ">=",
+        "&&",
+        "||",
+        "++",
+        "::",
     }
     PURE_UNARYOPS = {"-", "!", "~"}
 
@@ -611,7 +643,7 @@ class DeadCodeElimination(Pass):
 
     def _eliminate_block(self, block):
         """消除一个 BlockExpr 中的死代码
-        
+
         策略：
         1. 最后一个表达式是块的值，总是保留
         2. 从后往前扫描，收集被使用的变量名
@@ -754,11 +786,15 @@ class DeadCodeElimination(Pass):
             return any(self._has_side_effect(e) for e in expr.exprs)
         # If：两个分支任一有副作用
         if isinstance(expr, HIRIfExpr):
-            return self._has_side_effect(expr.consequence) or self._has_side_effect(expr.alternative)
+            return self._has_side_effect(expr.consequence) or self._has_side_effect(
+                expr.alternative
+            )
         # 纯二元运算
         if isinstance(expr, HIRBinaryOp):
             if expr.op in self.PURE_BINOPS:
-                return self._has_side_effect(expr.left) or self._has_side_effect(expr.right)
+                return self._has_side_effect(expr.left) or self._has_side_effect(
+                    expr.right
+                )
             return True  # 未知操作符，保守认为有副作用
         # 纯一元运算
         if isinstance(expr, HIRUnaryOp):
@@ -766,11 +802,18 @@ class DeadCodeElimination(Pass):
                 return self._has_side_effect(expr.operand)
             return True
         # 字面量：无副作用
-        if isinstance(expr, (
-            HIRIntLiteral, HIRFloatLiteral, HIRStringLiteral,
-            HIRBoolLiteral, HIRCharLiteral, HIRUnitLiteral,
-            HIRIdentifier,
-        )):
+        if isinstance(
+            expr,
+            (
+                HIRIntLiteral,
+                HIRFloatLiteral,
+                HIRStringLiteral,
+                HIRBoolLiteral,
+                HIRCharLiteral,
+                HIRUnitLiteral,
+                HIRIdentifier,
+            ),
+        ):
             return False
         # 列表/元组/映射：检查子表达式
         if isinstance(expr, HIRListExpr):
@@ -778,12 +821,17 @@ class DeadCodeElimination(Pass):
         if isinstance(expr, HIRTupleExpr):
             return any(self._has_side_effect(e) for e in expr.elements)
         if isinstance(expr, HIRMapExpr):
-            return any(self._has_side_effect(k) or self._has_side_effect(v) for k, v in expr.entries)
+            return any(
+                self._has_side_effect(k) or self._has_side_effect(v)
+                for k, v in expr.entries
+            )
         # 字段/索引访问：纯操作
         if isinstance(expr, HIRFieldExpr):
             return self._has_side_effect(expr.object)
         if isinstance(expr, HIRIndexExpr):
-            return self._has_side_effect(expr.object) or self._has_side_effect(expr.index)
+            return self._has_side_effect(expr.object) or self._has_side_effect(
+                expr.index
+            )
         # Lambda 本身无副作用（调用才有）
         if isinstance(expr, HIRLambda):
             return False
@@ -800,7 +848,9 @@ class DeadCodeElimination(Pass):
             return any(self._has_side_effect(s) for s in expr.stages)
         # 列表推导式
         if isinstance(expr, HIRListComprehension):
-            return self._has_side_effect(expr.result_expr) or self._has_side_effect(expr.iterable)
+            return self._has_side_effect(expr.result_expr) or self._has_side_effect(
+                expr.iterable
+            )
         # let 声明：取决于 value
         if isinstance(expr, HIRLetDecl):
             return self._has_side_effect(expr.value)
@@ -891,10 +941,10 @@ class CommonSubexprElimination(Pass):
         # 延迟导入，避免循环依赖
         from ir_nodes import (
             MIRBinOp,
-            MIRUnaryOp,
             MIRFieldAccess,
             MIRIndexAccess,
             MIRTupleBuild,
+            MIRUnaryOp,
         )
 
         if isinstance(instr, MIRBinOp):
@@ -930,19 +980,19 @@ class CommonSubexprElimination(Pass):
 
         # 延迟导入
         from ir_nodes import (
+            MIRADTBuild,
             MIRBinOp,
-            MIRUnaryOp,
             MIRCall,
+            MIRClosureCreate,
             MIRFieldAccess,
             MIRIndexAccess,
-            MIRListBuild,
             MIRListAppend,
-            MIRTupleBuild,
+            MIRListBuild,
             MIRMapBuild,
-            MIRADTBuild,
-            MIRClosureCreate,
-            MIRStore,
             MIRPhi,
+            MIRStore,
+            MIRTupleBuild,
+            MIRUnaryOp,
         )
 
         if isinstance(instr, MIRBinOp):
@@ -957,8 +1007,7 @@ class CommonSubexprElimination(Pass):
 
         elif isinstance(instr, MIRCall):
             instr.args = [
-                replacements[a] if a in replacements else a
-                for a in instr.args
+                replacements[a] if a in replacements else a for a in instr.args
             ]
             if instr.callee in replacements:
                 instr.callee = replacements[instr.callee]
@@ -975,8 +1024,7 @@ class CommonSubexprElimination(Pass):
 
         elif isinstance(instr, MIRListBuild):
             instr.elements = [
-                replacements[e] if e in replacements else e
-                for e in instr.elements
+                replacements[e] if e in replacements else e for e in instr.elements
             ]
 
         elif isinstance(instr, MIRListAppend):
@@ -987,8 +1035,7 @@ class CommonSubexprElimination(Pass):
 
         elif isinstance(instr, MIRTupleBuild):
             instr.elements = [
-                replacements[e] if e in replacements else e
-                for e in instr.elements
+                replacements[e] if e in replacements else e for e in instr.elements
             ]
 
         elif isinstance(instr, MIRMapBuild):
@@ -1002,14 +1049,12 @@ class CommonSubexprElimination(Pass):
 
         elif isinstance(instr, MIRADTBuild):
             instr.fields = [
-                replacements[f] if f in replacements else f
-                for f in instr.fields
+                replacements[f] if f in replacements else f for f in instr.fields
             ]
 
         elif isinstance(instr, MIRClosureCreate):
             instr.captures = [
-                replacements[c] if c in replacements else c
-                for c in instr.captures
+                replacements[c] if c in replacements else c for c in instr.captures
             ]
 
         elif isinstance(instr, MIRStore):
@@ -1027,7 +1072,7 @@ class CommonSubexprElimination(Pass):
         if not replacements:
             return
 
-        from ir_nodes import MIRBranch, MIRSwitch, MIRReturn, MIRMatchJump
+        from ir_nodes import MIRBranch, MIRMatchJump, MIRReturn, MIRSwitch
 
         if isinstance(terminator, MIRBranch):
             if terminator.condition in replacements:
@@ -1091,6 +1136,7 @@ class PassManager:
         if self._verbose:
             print(msg, file=sys.stderr)
             import traceback
+
             traceback.print_exc(file=sys.stderr)
         else:
             warnings.warn(msg, stacklevel=3)

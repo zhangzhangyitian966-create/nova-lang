@@ -13,22 +13,6 @@ from typing import Dict, List, Tuple
 # 确保项目根目录和 ir 目录在路径上
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "ir"))
-from ir_nodes import (
-    INT_TYPE,
-    UNIT_TYPE,
-    LIRBinOp,
-    LIRBranch,
-    LIRCall,
-    LIRFunction,
-    LIRJump,
-    LIRLabel,
-    LIRLoadConst,
-    LIRModule,
-    LIRPanic,
-    LIRReturn,
-    LIRUnaryOp,
-)
-
 from backend.x86_64 import (
     CALLEE_SAVED,
     R8,
@@ -54,6 +38,21 @@ from backend.x86_64 import (
     XMM6,
     XMM7,
     X86_64Emitter,
+)
+from ir_nodes import (
+    INT_TYPE,
+    UNIT_TYPE,
+    LIRBinOp,
+    LIRBranch,
+    LIRCall,
+    LIRFunction,
+    LIRJump,
+    LIRLabel,
+    LIRLoadConst,
+    LIRModule,
+    LIRPanic,
+    LIRReturn,
+    LIRUnaryOp,
 )
 
 # ============================================================
