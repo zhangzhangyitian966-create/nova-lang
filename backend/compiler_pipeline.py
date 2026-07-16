@@ -46,8 +46,26 @@ class NovaCompilerPipeline:
         from nova.lexer import Lexer
         from nova.parser import Parser
         from nova.type_checker import TypeChecker
+        from nova.errors import LexerError, ErrorCollector
 
-        tokens = Lexer(source).tokenize()
+        lexer = Lexer(source)
+        tokens = lexer.tokenize()
+
+        # 检查词法错误
+        if lexer.errors:
+            collector = ErrorCollector()
+            for err_msg in lexer.errors:
+                # 从错误消息中提取行号和列号
+                line = -1
+                col = -1
+                import re
+                m = re.search(r'行:(\d+), 列:(\d+)', err_msg)
+                if m:
+                    line = int(m.group(1))
+                    col = int(m.group(2))
+                collector.add(LexerError(err_msg, line, col, source=source))
+            collector.raise_all()
+
         ast = Parser(tokens).parse()
         TypeChecker().check_program(ast)
 
@@ -89,8 +107,25 @@ class NovaCompilerPipeline:
         """编译到指定 IR 层的文本输出（调试用）"""
         from nova.lexer import Lexer
         from nova.parser import Parser
+        from nova.errors import LexerError, ErrorCollector
 
-        tokens = Lexer(source).tokenize()
+        lexer = Lexer(source)
+        tokens = lexer.tokenize()
+
+        # 检查词法错误
+        if lexer.errors:
+            collector = ErrorCollector()
+            for err_msg in lexer.errors:
+                import re
+                line = -1
+                col = -1
+                m = re.search(r'行:(\d+), 列:(\d+)', err_msg)
+                if m:
+                    line = int(m.group(1))
+                    col = int(m.group(2))
+                collector.add(LexerError(err_msg, line, col, source=source))
+            collector.raise_all()
+
         ast = Parser(tokens).parse()
 
         if level == "hir":

@@ -263,7 +263,19 @@ class Evaluator:
 
     def _builtin_filter(self, *args):
         pred_fn, lst = args[0], args[1]
-        return [item for item in lst if self._call_fn(pred_fn, [item]) is True]
+        result = []
+        for item in lst:
+            val = self._call_fn(pred_fn, [item])
+            # 兼容 Python 原生 bool 和 Nova Bool ADT 类型
+            if isinstance(val, bool):
+                if val:
+                    result.append(item)
+            elif isinstance(val, NovaADTValue) and val.type_name == "Bool":
+                if val.variant_name == "True":
+                    result.append(item)
+            else:
+                raise RuntimeError_("filter 谓词必须返回 Bool 类型")
+        return result
 
     def _builtin_map(self, *args):
         map_fn, lst = args[0], args[1]
@@ -1001,6 +1013,8 @@ class Evaluator:
                     if idx not in target:
                         raise RuntimeError_(f"键不存在: {idx}")
                     return target[idx]
+                elif isinstance(target, str):
+                    return NovaChar(target[idx])
                 else:
                     return target[idx]
             except IndexError:

@@ -189,6 +189,30 @@ class TestLexer(unittest.TestCase):
         self.assertEqual(len(lexer.errors), 1)
         self.assertIn("非法字符 '@'", lexer.errors[0])
 
+    def test_left_arrow_token(self):
+        """<- 应该被识别为单一的 LEFT_ARROW token"""
+        tokens = tokenize("<-")
+        # LEFT_ARROW + EOF
+        self.assertEqual(len(tokens), 2)
+        self.assertEqual(tokens[0].type, TokenType.LEFT_ARROW)
+        self.assertEqual(tokens[0].value, "<-")
+
+    def test_left_arrow_not_lt_minus(self):
+        """<- 不应被解析为 LT + MINUS 两个 token"""
+        tokens = tokenize("<-")
+        self.assertNotEqual(tokens[0].type, TokenType.LT)
+
+    def test_lt_still_works(self):
+        """单独的 < 仍应被解析为 LT token"""
+        tokens = tokenize("<")
+        self.assertEqual(tokens[0].type, TokenType.LT)
+
+    def test_lt_gt_comparison_still_works(self):
+        """比较运算符 < 和 > 在不跟随时仍正常工作"""
+        tokens = tokenize("a < b")
+        lt_tokens = [t for t in tokens if t.type == TokenType.LT]
+        self.assertEqual(len(lt_tokens), 1)
+
 
 # ============================================================
 # 语法分析测试
@@ -373,6 +397,27 @@ class TestParser(unittest.TestCase):
         decl = ast.declarations[0]
         self.assertIsInstance(decl, MatchExpr)
         self.assertEqual(len(decl.arms), 2)
+
+    def test_match_negative_pattern_second_arm(self):
+        """多分支 match 中第二个分支以负数开头应能正确解析"""
+        ast = parse('match x { 1 -> "one", -1 -> "neg_one", _ -> "other" }')
+        decl = ast.declarations[0]
+        self.assertIsInstance(decl, MatchExpr)
+        self.assertEqual(len(decl.arms), 3)
+        # 第二个分支应该是负数模式 -1
+        from nova.ast_nodes import PatternInt
+        self.assertIsInstance(decl.arms[1].pattern, PatternInt)
+        self.assertEqual(decl.arms[1].pattern.value, -1)
+
+    def test_match_negative_float_pattern_second_arm(self):
+        """多分支 match 中第二个分支以负浮点数开头应能正确解析"""
+        ast = parse('match x { 1.0 -> "one", -3.14 -> "neg_pi", _ -> "other" }')
+        decl = ast.declarations[0]
+        self.assertIsInstance(decl, MatchExpr)
+        self.assertEqual(len(decl.arms), 3)
+        from nova.ast_nodes import PatternFloat
+        self.assertIsInstance(decl.arms[1].pattern, PatternFloat)
+        self.assertAlmostEqual(decl.arms[1].pattern.value, -3.14)
 
     def test_type_def(self):
         ast = parse("type Color { Red | Green | Blue }")
@@ -824,6 +869,28 @@ class TestEvaluator(unittest.TestCase):
             }
         """, check_types=False)
         self.assertEqual(ev.env.lookup("x"), 3)
+
+    def test_match_negative_int_pattern(self):
+        """负数模式在 match 中应能正确匹配"""
+        ev = eval_source("""
+            let x = match -1 {
+                1 -> "one",
+                -1 -> "neg_one",
+                _ -> "other"
+            }
+        """, check_types=False)
+        self.assertEqual(ev.env.lookup("x"), "neg_one")
+
+    def test_match_negative_float_pattern(self):
+        """负浮点数模式在 match 中应能正确匹配"""
+        ev = eval_source("""
+            let x = match -3.14 {
+                1.0 -> "one",
+                -3.14 -> "neg_pi",
+                _ -> "other"
+            }
+        """, check_types=False)
+        self.assertEqual(ev.env.lookup("x"), "neg_pi")
 
 
 # ============================================================
@@ -1560,6 +1627,21 @@ class TestLoops(unittest.TestCase):
             let result = for i <- 10..0 step -2 { i }
         """, check_types=False)
         self.assertEqual(ev.env.lookup("result"), [10, 8, 6, 4, 2, 0])
+
+    def test_for_range_left_arrow_single_token(self):
+        """<- 作为单一 token 时，for 范围循环仍正常工作"""
+        ev = eval_source("""
+            let result = for i <- 1..3 { i }
+        """, check_types=False)
+        self.assertEqual(ev.env.lookup("result"), [1, 2, 3])
+
+    def test_comparison_lt_negative_number(self):
+        """比较表达式 x < -1 应正常工作（不被误解析为 <-）"""
+        ev = eval_source("""
+            let x = 0
+            let result = x < -1
+        """, check_types=False)
+        self.assertEqual(ev.env.lookup("result"), False)
 
     def test_while_loop(self):
         """while 计数"""

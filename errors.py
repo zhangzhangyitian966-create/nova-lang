@@ -73,6 +73,7 @@ class RelatedNote:
     line: int = -1
     column: int = -1
     severity: Severity = Severity.NOTE
+    source_code: Optional[str] = None
 
 
 # ============================================================
@@ -106,18 +107,22 @@ class NovaError(Exception):
         super().__init__(message)
 
     def add_note(self, message: str, line: int = -1, column: int = -1,
-                 span: Optional[Span] = None):
+                 span: Optional[Span] = None,
+                 source_code: Optional[str] = None):
         """添加相关注释"""
         note = RelatedNote(message=message, line=line, column=column,
-                           span=span, severity=Severity.NOTE)
+                           span=span, severity=Severity.NOTE,
+                           source_code=source_code)
         self.related_notes.append(note)
         return self
 
     def add_help(self, message: str, line: int = -1, column: int = -1,
-                 span: Optional[Span] = None):
+                 span: Optional[Span] = None,
+                 source_code: Optional[str] = None):
         """添加帮助提示"""
         note = RelatedNote(message=message, line=line, column=column,
-                           span=span, severity=Severity.HELP)
+                           span=span, severity=Severity.HELP,
+                           source_code=source_code)
         self.related_notes.append(note)
         return self
 
@@ -232,7 +237,10 @@ class NovaError(Exception):
             note_line = note.line if note.line >= 0 else (
                 note.span.line if note.span else -1
             )
-            if note_line >= 0 and self.source_code:
+            # 使用 note 自己的 source_code（如果有），否则回退到主错误的
+            note_source = note.source_code if note.source_code is not None else self.source_code
+            if note_line >= 0 and note_source:
+                note_lines = note_source.split('\n')
                 note_col = note.column if note.column >= 0 else (
                     note.span.column if note.span else 1
                 )
@@ -242,21 +250,30 @@ class NovaError(Exception):
                 parts.append("   |")
                 note_idx = max(0, note_line - 1)
                 note_start = max(0, note_idx - 0)
-                note_end = min(len(lines), note_idx + 2)
+                note_end = min(len(note_lines), note_idx + 2)
+                # 确定 note 的 span 范围
+                n_start_line = note_line
+                n_start_col = note_col
+                n_end_line = note_line
+                n_end_col = note_col
+                if note.span and note.span.end_line is not None and note.span.end_column is not None:
+                    n_start_line = note.span.line
+                    n_start_col = note.span.column
+                    n_end_line = note.span.end_line
+                    n_end_col = note.span.end_column
                 for j in range(note_start, note_end):
                     ln = j + 1
-                    lc = lines[j] if j < len(lines) else ""
+                    lc = note_lines[j] if j < len(note_lines) else ""
                     lp = f" {ln:>{max_line_num_width}} | "
                     parts.append(ANSI.colorize(lp, ANSI.DIM) + lc)
                     if j == note_idx:
                         up = f" {' ' * max_line_num_width} | "
-                        if (note.span and note.span.end_line == note.span.line
-                                and note.span.end_column is not None):
-                            ul = (
-                                " " * (note.span.column - 1)
-                                + "^" * (note.span.end_column - note.span.column)
-                            )
-                        else:
+                        ul = self._compute_underline(
+                            lc, ln,
+                            n_start_line, n_start_col, n_end_line, n_end_col
+                        )
+                        if not ul:
+                            # 退化情况：没有 span 时显示单个 caret
                             ul = " " * (note_col - 1) + "^"
                         parts.append(ANSI.colorize(up, ANSI.DIM) + ANSI.colorize(ul, ANSI.BLUE))
 
@@ -265,21 +282,31 @@ class NovaError(Exception):
     def _compute_underline(self, line_content: str, line_num: int,
                            start_line: int, start_col: int,
                            end_line: int, end_col: int) -> str:
+        """计算一行的下划线（caret）字符串。
+
+        列号是 1-indexed 且包含式的（end_col 是最后一个字符的列号）。
+        """
         if line_num < start_line or line_num > end_line:
             return ""
 
         if start_line == end_line:
+            # 单行：从 start_col 到 end_col（包含），共 end_col - start_col + 1 个 caret
             u_start = start_col - 1
-            u_end = end_col - 1
-            return " " * u_start + "^" * max(1, u_end - u_start)
+            caret_count = end_col - start_col + 1
+            return " " * u_start + "^" * max(1, caret_count)
 
         # 多行
         if line_num == start_line:
+            # 首行：从 start_col 到行尾，共 len(line) - start_col + 1 个 caret
             u_start = start_col - 1
-            return " " * u_start + "^" * max(1, len(line_content) - u_start)
+            caret_count = len(line_content) - start_col + 1
+            return " " * u_start + "^" * max(1, caret_count)
         elif line_num == end_line:
-            return "^" * max(1, end_col - 1)
+            # 末行：从第 1 列到 end_col（包含），共 end_col 个 caret
+            caret_count = end_col
+            return "^" * max(1, caret_count)
         else:
+            # 中间行：整行都是 caret
             return "^" * max(1, len(line_content))
 
 

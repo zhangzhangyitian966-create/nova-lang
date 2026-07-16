@@ -113,6 +113,9 @@ class ModuleResolver:
 
         Returns:
             绝对文件路径，如果找不到则返回 None
+
+        Raises:
+            RuntimeError_: 包导入路径尝试跳出搜索目录时抛出
         """
         # 1. 绝对路径
         if os.path.isabs(module_path):
@@ -130,9 +133,22 @@ class ModuleResolver:
             return None
 
         # 3. 包导入（std/math）
-        # 搜索所有搜索路径
+        # 搜索所有搜索路径，并确保结果在搜索目录内
+        # 防御性检查：包路径中不能包含 '..' 段
+        path_parts = module_path.replace('\\', '/').split('/')
+        if '..' in path_parts:
+            raise RuntimeError_(
+                f"非法的包导入路径: '{module_path}' "
+                f"(包路径中不能包含 '..')"
+            )
+
         for search_path in self.search_paths:
             abs_path = os.path.abspath(os.path.join(search_path, module_path))
+            # 安全检查：确保解析后的路径在 search_path 内
+            abs_search = os.path.abspath(search_path) if search_path else os.path.abspath('.')
+            # 规范化后确保路径在搜索目录内
+            if not abs_path.startswith(abs_search + os.sep) and abs_path != abs_search:
+                continue
             result = self._try_extensions(abs_path)
             if result:
                 return result
@@ -162,12 +178,27 @@ class ModuleResolver:
 
         Returns:
             包的根目录路径，或 None
+
+        Raises:
+            RuntimeError_: 包路径尝试跳出搜索目录时抛出
         """
         # 移除 .nova 扩展名（如果有）
         clean_path = module_path.removesuffix('.nova')
 
+        # 防御性检查：包路径中不能包含 '..' 段
+        path_parts = clean_path.replace('\\', '/').split('/')
+        if '..' in path_parts:
+            raise RuntimeError_(
+                f"非法的包路径: '{module_path}' "
+                f"(包路径中不能包含 '..')"
+            )
+
         for search_path in self.search_paths:
             package_path = os.path.abspath(os.path.join(search_path, clean_path))
+            # 安全检查：确保解析后的路径在 search_path 内
+            abs_search = os.path.abspath(search_path) if search_path else os.path.abspath('.')
+            if not package_path.startswith(abs_search + os.sep) and package_path != abs_search:
+                continue
             if os.path.isdir(package_path):
                 return package_path
 

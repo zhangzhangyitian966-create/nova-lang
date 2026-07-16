@@ -216,6 +216,9 @@ class NovaVM:
         # 顶层模式匹配栈基指针：顶层代码无帧，用此保存
         self._top_level_match_bases: List[int] = []
 
+        # 顶层模式匹配局部变量快照：顶层代码无帧，用此保存 match 绑定快照
+        self._top_match_snapshots: List[set] = []
+
         # 循环控制：用于 for 循环的迭代状态
         self._for_iters: List[Dict] = []
 
@@ -303,7 +306,19 @@ class NovaVM:
 
     def _builtin_filter(self, *args):
         pred_fn, lst = args[0], args[1]
-        return [item for item in lst if self._call_fn(pred_fn, [item]) is True]
+        result = []
+        for item in lst:
+            val = self._call_fn(pred_fn, [item])
+            # 兼容 Python 原生 bool 和 Nova Bool ADT 类型
+            if isinstance(val, bool):
+                if val:
+                    result.append(item)
+            elif isinstance(val, NovaADTValue) and val.type_name == "Bool":
+                if val.variant_name == "True":
+                    result.append(item)
+            else:
+                raise RuntimeError_("filter 谓词必须返回 Bool 类型")
+        return result
 
     def _builtin_map(self, *args):
         map_fn, lst = args[0], args[1]
@@ -1142,7 +1157,10 @@ class NovaVM:
             # Pop object and index, push indexed value
             obj, index = self._pop(2)
             try:
-                self.stack.append(obj[index])
+                result = obj[index]
+                if isinstance(obj, str):
+                    result = NovaChar(result)
+                self.stack.append(result)
             except IndexError:
                 raise RuntimeError_("索引越界")
             except KeyError:
@@ -1290,7 +1308,9 @@ class NovaVM:
             if self.call_stack:
                 frame = self.call_stack[-1]
                 frame.match_snapshots.append(set(frame.locals.keys()))
-            # 顶层（无函数帧）不需要快照，因为顶层本身就是全局作用域
+            else:
+                # 顶层代码：保存 globals 中当前所有已存在的键的快照
+                self._top_match_snapshots.append(set(self.globals.keys()))
 
             # 记录当前 match 的栈基指针（original subject 在栈中的位置）
             # 用于模式匹配失败时统一恢复栈，防止嵌套模式导致的栈泄漏
@@ -1313,6 +1333,13 @@ class NovaVM:
                     for key in list(frame.local_mutable):
                         if key not in snapshot:
                             frame.local_mutable.discard(key)
+            else:
+                # 顶层代码：恢复快照——删除 MATCH_START 之后新增的变量
+                if self._top_match_snapshots:
+                    snapshot = self._top_match_snapshots[-1]
+                    for key in list(self.globals.keys()):
+                        if key not in snapshot:
+                            del self.globals[key]
 
         elif opcode == Op.MATCH_TEST_INT:
             # Stack: [subject] -> [] (match success) or [subject] (match fail)
@@ -1463,6 +1490,13 @@ class NovaVM:
                     for key in list(frame.local_mutable):
                         if key not in snapshot:
                             frame.local_mutable.discard(key)
+            else:
+                # 顶层代码：恢复快照并弹出
+                if self._top_match_snapshots:
+                    snapshot = self._top_match_snapshots.pop()
+                    for key in list(self.globals.keys()):
+                        if key not in snapshot:
+                            del self.globals[key]
             # 清理当前 match 的栈基指针
             bases = self._current_match_bases()
             if bases:

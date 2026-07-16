@@ -25,7 +25,7 @@ from nova.lexer import Lexer
 from nova.parser import Parser
 from nova.type_checker import TypeChecker
 from nova.c_codegen import CCodeGen
-from nova.errors import NovaError
+from nova.errors import NovaError, LexerError, ErrorCollector
 
 NOVA_VERSION = "0.4.0"
 
@@ -92,7 +92,23 @@ class NovaCompiler:
 
         # 2. 前端处理: Lexer -> Parser -> Type Checker
         try:
-            tokens = Lexer(source).tokenize()
+            lexer = Lexer(source)
+            tokens = lexer.tokenize()
+
+            # 检查词法错误
+            if lexer.errors:
+                import re
+                collector = ErrorCollector()
+                for err_msg in lexer.errors:
+                    line = -1
+                    col = -1
+                    m = re.search(r'行:(\d+), 列:(\d+)', err_msg)
+                    if m:
+                        line = int(m.group(1))
+                        col = int(m.group(2))
+                    collector.add(LexerError(err_msg, line, col, source=source))
+                collector.raise_all()
+
             ast = Parser(tokens).parse()
             TypeChecker().check_program(ast)
         except NovaError as e:
@@ -229,7 +245,23 @@ class NovaCompiler:
             source = f.read()
 
         try:
-            tokens = Lexer(source).tokenize()
+            lexer = Lexer(source)
+            tokens = lexer.tokenize()
+
+            # 检查词法错误
+            if lexer.errors:
+                import re
+                collector = ErrorCollector()
+                for err_msg in lexer.errors:
+                    line = -1
+                    col = -1
+                    m = re.search(r'行:(\d+), 列:(\d+)', err_msg)
+                    if m:
+                        line = int(m.group(1))
+                        col = int(m.group(2))
+                    collector.add(LexerError(err_msg, line, col, source=source))
+                collector.raise_all()
+
             ast = Parser(tokens).parse()
             TypeChecker().check_program(ast)
             print("类型检查通过。")
@@ -247,7 +279,23 @@ class NovaCompiler:
             source = f.read()
 
         try:
-            tokens = Lexer(source).tokenize()
+            lexer = Lexer(source)
+            tokens = lexer.tokenize()
+
+            # 检查词法错误
+            if lexer.errors:
+                import re
+                collector = ErrorCollector()
+                for err_msg in lexer.errors:
+                    line = -1
+                    col = -1
+                    m = re.search(r'行:(\d+), 列:(\d+)', err_msg)
+                    if m:
+                        line = int(m.group(1))
+                        col = int(m.group(2))
+                    collector.add(LexerError(err_msg, line, col, source=source))
+                collector.raise_all()
+
             ast = Parser(tokens).parse()
             TypeChecker().check_program(ast)
             gen = CCodeGen()

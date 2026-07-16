@@ -22,7 +22,7 @@ from nova.lexer import Lexer
 from nova.parser import Parser
 from nova.type_checker import TypeChecker
 from nova.evaluator import Evaluator
-from nova.errors import NovaError
+from nova.errors import NovaError, LexerError, ErrorCollector
 
 
 def run_source(source: str, check_types: bool = True, capture_output: bool = False, use_vm: bool = True):
@@ -42,6 +42,20 @@ def run_source(source: str, check_types: bool = True, capture_output: bool = Fal
         # 1. 词法分析
         lexer = Lexer(source)
         tokens = lexer.tokenize()
+
+        # 检查词法错误
+        if lexer.errors:
+            collector = ErrorCollector()
+            import re
+            for err_msg in lexer.errors:
+                line = -1
+                col = -1
+                m = re.search(r'行:(\d+), 列:(\d+)', err_msg)
+                if m:
+                    line = int(m.group(1))
+                    col = int(m.group(2))
+                collector.add(LexerError(err_msg, line, col, source=source))
+            collector.raise_all()
 
         # 2. 语法分析
         parser = Parser(tokens)
@@ -101,7 +115,24 @@ def dump_bytecode_file(filepath: str):
     from nova.lexer import Lexer
     from nova.parser import Parser
 
-    tokens = Lexer(source).tokenize()
+    lexer = Lexer(source)
+    tokens = lexer.tokenize()
+
+    # 检查词法错误
+    if lexer.errors:
+        from nova.errors import LexerError, ErrorCollector
+        collector = ErrorCollector()
+        import re
+        for err_msg in lexer.errors:
+            line = -1
+            col = -1
+            m = re.search(r'行:(\d+), 列:(\d+)', err_msg)
+            if m:
+                line = int(m.group(1))
+                col = int(m.group(2))
+            collector.add(LexerError(err_msg, line, col, source=source))
+        collector.raise_all()
+
     ast = Parser(tokens).parse()
     compiler = BytecodeCompiler()
     bytecode = compiler.compile(ast)
@@ -165,6 +196,21 @@ def run_repl():
             # 尝试词法分析
             lexer = Lexer(source)
             tokens = lexer.tokenize()
+
+            # 检查词法错误
+            if lexer.errors:
+                from nova.errors import LexerError, ErrorCollector
+                collector = ErrorCollector()
+                import re
+                for err_msg in lexer.errors:
+                    line = -1
+                    col = -1
+                    m = re.search(r'行:(\d+), 列:(\d+)', err_msg)
+                    if m:
+                        line = int(m.group(1))
+                        col = int(m.group(2))
+                    collector.add(LexerError(err_msg, line, col, source=source))
+                collector.raise_all()
 
             # 尝试语法分析
             parser = Parser(tokens)
@@ -291,7 +337,23 @@ def main():
         except FileNotFoundError:
             print(f"错误: 文件 '{sys.argv[2]}' 不存在", file=sys.stderr)
             sys.exit(1)
-        tokens = Lexer(source).tokenize()
+        lexer = Lexer(source)
+        tokens = lexer.tokenize()
+
+        # 检查词法错误
+        if lexer.errors:
+            collector = ErrorCollector()
+            import re
+            for err_msg in lexer.errors:
+                line = -1
+                col = -1
+                m = re.search(r'行:(\d+), 列:(\d+)', err_msg)
+                if m:
+                    line = int(m.group(1))
+                    col = int(m.group(2))
+                collector.add(LexerError(err_msg, line, col, source=source))
+            collector.raise_all()
+
         ast = Parser(tokens).parse()
         checker = TypeChecker()
         checker.check_program(ast)

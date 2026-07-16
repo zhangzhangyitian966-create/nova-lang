@@ -467,9 +467,8 @@ class Parser:
         if self._match(TokenType.IN):
             # for x in list_expr { body }
             iterable = self._parse_expression()
-        elif self._match(TokenType.LT):
+        elif self._match(TokenType.LEFT_ARROW):
             # for i <- start..end [step n] { body }
-            self._expect(TokenType.MINUS)  # 消耗 '-' 构成 '<-'
             start_expr = self._parse_expression()
             self._expect(TokenType.RANGE)
             end_expr = self._parse_expression()
@@ -525,7 +524,7 @@ class Parser:
         if self._peek_type() != TokenType.RBRACE:
             arms.append(self._parse_match_arm())
             # 支持用逗号分隔或直接换行的分支
-            while self._peek_type() == TokenType.COMMA or self._peek_type() in (TokenType.IDENT, TokenType.UNDERSCORE, TokenType.INT, TokenType.FLOAT, TokenType.STRING, TokenType.BOOL, TokenType.LPAREN, TokenType.LBRACKET):
+            while self._peek_type() == TokenType.COMMA or self._peek_type() in (TokenType.IDENT, TokenType.UNDERSCORE, TokenType.INT, TokenType.FLOAT, TokenType.STRING, TokenType.BOOL, TokenType.LPAREN, TokenType.LBRACKET, TokenType.MINUS):
                 if self._peek_type() == TokenType.COMMA:
                     self._advance()
                 arms.append(self._parse_match_arm())
@@ -971,9 +970,8 @@ class Parser:
 
         if self._match(TokenType.IN):
             iterable = self._parse_expression()
-        elif self._match(TokenType.LT):
+        elif self._match(TokenType.LEFT_ARROW):
             # 范围: var <- start..end
-            self._expect(TokenType.MINUS)  # 消耗 '-' 构成 '<-'
             start_expr = self._parse_expression()
             self._expect(TokenType.RANGE)
             end_expr = self._parse_expression()

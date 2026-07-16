@@ -70,6 +70,7 @@ class TokenType(Enum):
     PIPE_GT = auto()    # |> (管道操作符)
     ARROW = auto()      # ->
     FAT_ARROW = auto()  # =>
+    LEFT_ARROW = auto() # <-
     QUESTION = auto()   # ? (错误传播)
     ASSIGN = auto()     # =
 
@@ -412,6 +413,10 @@ class Lexer:
             if ch == '<' and next_ch == '=':
                 self._advance()
                 return Token(TokenType.LTE, "<=", start_line, start_col,
+                             end_line=self.line, end_col=self.column - 1)
+            if ch == '<' and next_ch == '-':
+                self._advance()
+                return Token(TokenType.LEFT_ARROW, "<-", start_line, start_col,
                              end_line=self.line, end_col=self.column - 1)
             if ch == '>' and next_ch == '=':
                 self._advance()

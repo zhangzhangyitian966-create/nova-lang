@@ -1,5 +1,130 @@
 # Nova 自动改进日志
 
+## 2026-07-16 自动改进（第三十三轮）
+
+基于 AUTO_REVIEW_LOG.md 第二十七轮审查日志的 P0 级严重问题驱动改进（阶段一检查 + 阶段二开发 + 阶段三测试）。
+
+### 每日发现的问题
+
+#### vm.py
+- **顶层match绑定变量泄漏到globals（vm.py:1378-1386）**：MATCH_START/MATCH_ARM_START/MATCH_END 的 match_snapshots 机制只在函数帧内（call_stack非空）生效，顶层match arm绑定的变量永久泄漏到globals且arm之间不清理
+  - 审查日志追问结论：不能接受。作用域规则是语言的基础契约
+  - 根因：实现时错误认为"顶层本身就是全局作用域不需要快照"，忽略了match arm之间的作用域隔离
+  - 影响：顶层match表达式中，前一个arm绑定的变量会泄漏到后一个arm，以及match之后的代码
+  - 验证：顶层match两个arm分别绑定不同变量名，第二个arm能访问第一个arm的绑定
+
+#### evaluator.py
+- **`_builtin_filter`谓词非Bool时使用`is True`静默失败（evaluator.py:266）**：谓词返回Nova Bool ADT类型或任何非Python True的真值时，`is True`判定为False，所有元素被静默过滤为空列表
+  - 审查日志追问结论：绝对不能。这是类型安全的基本要求
+  - 根因：直接用Python身份检查替代类型检查，假设谓词总是返回Python原生bool
+  - 影响：使用Nova Bool类型（如模式匹配守卫、ADT构造的Bool）的filter函数总是返回空列表
+  - 验证：filter (fn x -> if x > 0 then True else False) [1,2,3] 返回空列表
+
+- **字符串索引返回Python str而非NovaChar（evaluator.py:996-1009）**：IndexExpr对字符串索引直接返回Python str单字符，与字符字面量的NovaChar类型不一致，导致`"abc"[0] == 'a'`为False
+  - 审查日志追问结论：不能。类型一致性是静态类型语言的基础
+  - 根因：实现索引操作时未考虑字符类型，直接依赖Python的str索引行为
+  - 影响：字符串索引结果与字符字面量类型不匹配，相等性检查失败
+  - 验证：VM中同样存在此问题，两处实现都未包装NovaChar
+
+#### errors.py
+- **单线下划线off-by-one，所有错误高亮少一个字符（errors.py:271-274）**：lexer的end_col是包含式的，但下划线计算按排除式处理，`end_col - start_col`个caret应为`end_col - start_col + 1`
+  - 审查日志追问结论：绝对不能。错误高亮必须精确到字符级，这是生产级编译器的基本要求
+  - 根因：未统一end_col语义，lexer用包含式，错误格式化按排除式计算
+  - 影响：所有单字符token的错误高亮没有caret，多字符token少最后一个字符的高亮
+  - 验证：对span(1,1,1,1)应显示1个caret，实际显示0个
+
+- **RelatedNote跨文件错误显示主错误的源码（errors.py:232-261）**：RelatedNote没有自己的source_code字段，渲染时使用主错误的source_code，指向不同文件时显示的代码行完全错误
+  - 审查日志追问结论：（隐含在错误系统质量要求中）
+  - 根因：RelatedNote设计时假设note与主错误在同一文件，未考虑跨文件场景
+  - 影响：跨模块的类型错误、导入错误等的RelatedNote显示误导性的源码上下文
+  - 验证：在模块A中定义、模块B中使用的符号发生错误时，RelatedNote显示模块A的行号但内容是模块B的代码
+
+#### modules.py
+- **包导入路径遍历漏洞，可通过`..`跳出搜索目录（modules.py:134-138）**：包导入路径直接拼接到search_path后未做安全检查，`std/../../etc/passwd`形式可读取任意文件
+  - 审查日志追问结论：绝对不能。这是严重的安全漏洞
+  - 根因：实现模块解析时只考虑了功能正确性，未考虑安全边界
+  - 影响：恶意模块可构造路径读取系统敏感文件（如存在且后缀匹配）
+  - 验证：构造包含`..`段的包路径，解析后的绝对路径不在search_path内
+
+#### lexer.py + parser.py
+- **`<-`由LT+MINUS双token合成，歧义风险高（parser.py:470-472）**：`for x < -1 { ... }`会被误解析为范围循环，因为解析器看到LT后直接消费MINUS构成`<-`
+  - 审查日志追问结论：不能。生产级语言将`<-`作为单一token处理
+  - 根因：为省事在parser层面合成token，未在lexer层面做专用token
+  - 影响：比较表达式`x < -1`出现在for循环位置时被误解析为范围循环
+  - 验证：`for x < -1 { x }` 应该报错（不是合法的for语法）但实际被解析为范围循环
+
+- **编译器管道完全忽略词法错误（compiler_pipeline.py:50）**：lexer.errors中的非法字符、未闭合字符串等在主编译管道中被完全丢弃，带词法错误的代码继续进入parser
+  - 审查日志追问结论：绝对不能。词法错误应当阻止编译继续
+  - 根因：实现编译管道时只考虑了happy path，未集成错误收集
+  - 影响：词法错误产生级联的语法错误，用户看到的错误信息与真正的问题无关
+  - 验证：输入含非法字符的代码，错误报告指向语法错误而非词法错误
+
+- **match分支检测遗漏负数模式起始Token（parser.py:528）**：`_parse_match_expr`的while循环检测更多分支时未包含TokenType.MINUS，第二个及之后的分支以负数开头时被误判为分支结束
+  - 审查日志追问结论：是bug。明确的功能不完整
+  - 根因：枚举模式起始token时漏掉了负数模式的MINUS
+  - 影响：`match x { 0 => "zero", -1 => "neg", _ => "other" }` 中 `-1` 分支无法被解析
+  - 验证：多分支match中第二个分支以负整数/负浮点数开头，解析失败
+
+### 本次修复内容（基于审查日志第二十七轮 Issue）
+
+1. **vm.py — 顶层match绑定泄漏修复（基于审查日志第二十七轮VM严重问题 #5）**
+   - 为顶层代码实现与函数帧对称的 `match_snapshots` 机制
+   - VM.__init__ 新增 `_top_match_snapshots: List[set] = []`
+   - MATCH_START：顶层时保存 globals 当前所有键的快照并入栈
+   - MATCH_ARM_START：顶层时恢复快照（删除新增变量）后重新保存
+   - MATCH_END：顶层时恢复快照并出栈
+   - 嵌套match通过栈结构正确处理
+
+2. **evaluator.py + vm.py — filter谓词类型检查（基于审查日志第二十七轮Evaluator严重问题 #1 / VM中等问题延伸）**
+   - 将 `_builtin_filter` 中的 `is True` 改为显式Bool类型检查
+   - 兼容Python原生bool和Nova Bool ADT两种表示
+   - 非Bool类型时抛出 `RuntimeError_("filter 谓词必须返回 Bool 类型")`
+   - Evaluator和VM两处同步修复
+
+3. **evaluator.py + vm.py — 字符串索引返回NovaChar（基于审查日志第二十七轮Evaluator严重问题 #3 / VM一致性问题）**
+   - Evaluator的IndexExpr处理中，字符串索引结果包装为NovaChar
+   - VM的INDEX操作码中，字符串索引结果包装为NovaChar
+   - 列表/元组/Map索引不受影响
+   - 两端同步修复保证语义一致
+
+4. **errors.py — 错误下划线off-by-one修复 + RelatedNote源码隔离（基于审查日志第二十七轮错误处理严重问题 #1/#2/#6）**
+   - 单行caret数量：`end_col - start_col` → `end_col - start_col + 1`
+   - 多行首行caret：修正为包含最后一列
+   - 多行末行caret：修正为从第1列到end_col共end_col个
+   - RelatedNote下划线重构为复用 `_compute_underline`（消除重复代码+自动修复off-by-one）
+   - RelatedNote新增 `source_code` 字段，渲染时优先使用note自己的源码
+   - add_note/add_help 新增可选 source_code 参数
+
+5. **modules.py — 包导入路径遍历安全加固（基于审查日志第二十七轮模块系统严重问题 #2）**
+   - 包路径防御性检查：包含 `..` 段时直接抛出错误
+   - 路径范围验证：解析后的绝对路径必须在对应search_path内
+   - 相对导入（`./`、`../` 开头）保持不变（设计上允许）
+
+6. **lexer.py + parser.py — LEFT_ARROW专用token + 负数模式分支修复 + 词法错误检查（基于审查日志第二十七轮词法/语法分析器严重问题 #1/#2/#3）**
+   - lexer新增 `LEFT_ARROW` token类型，`<-`作为单一token识别
+   - parser的 `_parse_for_expr` 和 `_parse_list_comprehension` 改用 LEFT_ARROW
+   - `_parse_match_expr` 分支检测token列表添加 `TokenType.MINUS`
+   - 编译管道所有入口点添加词法错误检查
+   - backend/compiler_pipeline.py、_cli.py、compiler_cli.py 等入口同步添加
+   - 新增10个测试用例覆盖所有修复点
+
+### 测试结果
+
+- 全量测试: **960 passed** (1.42s)
+- Evaluator 示例: hello/fibonacci/pattern_match/loops/math/pipe/list_comprehension/file_io 全部正常输出
+- VM 示例: hello/fibonacci/pattern_match/loops/math/list_comprehension/pipe/file_io 全部正常输出
+- 顶层match绑定隔离: arm之间变量不泄漏 ✅ / match结束后绑定清理 ✅
+- filter谓词类型检查: Python bool ✅ / Nova Bool ADT ✅ / 非Bool抛错 ✅
+- 字符串索引NovaChar: `"abc"[0] == 'a'` 返回True ✅
+- 错误下划线修正: 单行end_col包含式正确 ✅ / RelatedNote复用统一方法 ✅
+- RelatedNote跨文件: 自有source_code优先 ✅ / 无则回退主错误 ✅
+- 路径遍历防护: `..`段检测 ✅ / search_path范围检查 ✅
+- LEFT_ARROW专用token: `<-`单一token ✅ / `<`比较不受影响 ✅
+- 词法错误检查: 所有编译入口点均检查 ✅
+- 负数模式分支: 多分支match中负整数/负浮点数正确解析 ✅
+
+---
+
 ## 2026-07-16 自动改进（第三十二轮）
 
 基于 AUTO_REVIEW_LOG.md 第二十六轮审查日志的 P0/P1 级严重问题驱动改进（阶段一检查 + 阶段二开发 + 阶段三测试）。
