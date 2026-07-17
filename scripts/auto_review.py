@@ -59,6 +59,7 @@ TEST_TIMEOUT = 120
 # 工具函数
 # ============================================================
 
+
 def log(msg, level="INFO"):
     timestamp = datetime.datetime.now().strftime("%H:%M:%S")
     print(f"[{timestamp}] [{level}] {msg}", flush=True)
@@ -96,6 +97,7 @@ def count_lines(content):
 # 阶段 1: 项目初始化
 # ============================================================
 
+
 def phase1_init():
     """检查项目是否存在，不存在则克隆"""
     log("=" * 60)
@@ -117,7 +119,8 @@ def phase1_init():
             os.chmod(credential_file, 0o600)
             subprocess.run(
                 ["git", "config", "--global", "credential.helper", "store"],
-                check=False, capture_output=True
+                check=False,
+                capture_output=True,
             )
             log("Git credential 已配置")
         except Exception as e:
@@ -132,7 +135,9 @@ def phase1_init():
     try:
         result = subprocess.run(
             ["git", "clone", repo_url, str(PROJECT_DIR)],
-            capture_output=True, text=True, timeout=120
+            capture_output=True,
+            text=True,
+            timeout=120,
         )
         if result.returncode != 0:
             log(f"克隆失败: {result.stderr}", "ERROR")
@@ -151,6 +156,7 @@ def phase1_init():
 # 阶段 2: 同步远程
 # ============================================================
 
+
 def phase2_sync():
     """Git pull 同步最新代码"""
     log("=" * 60)
@@ -161,7 +167,9 @@ def phase2_sync():
         result = subprocess.run(
             ["git", "pull", "--rebase", "origin", "main"],
             cwd=str(PROJECT_DIR),
-            capture_output=True, text=True, timeout=60
+            capture_output=True,
+            text=True,
+            timeout=60,
         )
         if result.returncode != 0:
             log(f"git pull 失败: {result.stderr}", "WARN")
@@ -182,8 +190,10 @@ def phase2_sync():
 # 阶段 3: AST 级代码质量分析
 # ============================================================
 
+
 class CodeIssue:
     """代码问题"""
+
     def __init__(self, severity, issue_type, file, line, message, snippet=""):
         self.severity = severity
         self.issue_type = issue_type
@@ -199,7 +209,7 @@ class CodeIssue:
             "file": self.file,
             "line": self.line,
             "message": self.message,
-            "snippet": self.snippet
+            "snippet": self.snippet,
         }
 
 
@@ -222,8 +232,14 @@ class ASTAnalyzer(ast.NodeVisitor):
         snippet = ""
         if 0 < line <= len(self.source_lines):
             snippet = self.source_lines[line - 1].strip()
-        rel_path = self.filepath.relative_to(PROJECT_DIR) if self.filepath.is_absolute() else self.filepath
-        self.issues.append(CodeIssue(severity, issue_type, rel_path, line, message, snippet))
+        rel_path = (
+            self.filepath.relative_to(PROJECT_DIR)
+            if self.filepath.is_absolute()
+            else self.filepath
+        )
+        self.issues.append(
+            CodeIssue(severity, issue_type, rel_path, line, message, snippet)
+        )
 
     def get_line_snippet(self, lineno):
         if 0 < lineno <= len(self.source_lines):
@@ -254,13 +270,18 @@ class ASTAnalyzer(ast.NodeVisitor):
         self.class_method_count[node.name] = method_count
 
         if method_count > CLASS_METHODS_THRESHOLD:
-            self.add_issue(SEV_MEDIUM, "class_too_large", node.lineno,
-                           f"类 '{node.name}' 方法过多 ({method_count} > {CLASS_METHODS_THRESHOLD})")
+            self.add_issue(
+                SEV_MEDIUM,
+                "class_too_large",
+                node.lineno,
+                f"类 '{node.name}' 方法过多 ({method_count} > {CLASS_METHODS_THRESHOLD})",
+            )
 
         # 检查 docstring
         if not ast.get_docstring(node):
-            self.add_issue(SEV_LOW, "no_docstring", node.lineno,
-                           f"类 '{node.name}' 缺少文档字符串")
+            self.add_issue(
+                SEV_LOW, "no_docstring", node.lineno, f"类 '{node.name}' 缺少文档字符串"
+            )
 
         self.generic_visit(node)
         self.current_class = None
@@ -278,28 +299,46 @@ class ASTAnalyzer(ast.NodeVisitor):
         # 计算函数长度
         func_lines = node.end_lineno - node.lineno + 1 if node.end_lineno else 0
         if func_lines > FUNCTION_LENGTH_THRESHOLD:
-            self.add_issue(SEV_MEDIUM, "function_too_long", node.lineno,
-                           f"函数 '{node.name}' 过长 ({func_lines} 行 > {FUNCTION_LENGTH_THRESHOLD} 行)")
+            self.add_issue(
+                SEV_MEDIUM,
+                "function_too_long",
+                node.lineno,
+                f"函数 '{node.name}' 过长 ({func_lines} 行 > {FUNCTION_LENGTH_THRESHOLD} 行)",
+            )
 
         # 计算圈复杂度
         cc = self._calc_cyclomatic_complexity(node)
-        full_name = f"{self.current_class}.{node.name}" if self.current_class else node.name
+        full_name = (
+            f"{self.current_class}.{node.name}" if self.current_class else node.name
+        )
         self.function_complexities[full_name] = cc
 
         if cc > CC_HIGH_THRESHOLD:
-            self.add_issue(SEV_MEDIUM, "cyclomatic_complexity", node.lineno,
-                           f"函数 '{full_name}' 圈复杂度过高 (CC={cc} > {CC_HIGH_THRESHOLD})")
+            self.add_issue(
+                SEV_MEDIUM,
+                "cyclomatic_complexity",
+                node.lineno,
+                f"函数 '{full_name}' 圈复杂度过高 (CC={cc} > {CC_HIGH_THRESHOLD})",
+            )
 
         # 检查 docstring (排除 __init__ 等特殊方法的严格要求？这里统一检查)
         if not ast.get_docstring(node):
-            self.add_issue(SEV_LOW, "no_docstring", node.lineno,
-                           f"函数 '{full_name}' 缺少文档字符串")
+            self.add_issue(
+                SEV_LOW,
+                "no_docstring",
+                node.lineno,
+                f"函数 '{full_name}' 缺少文档字符串",
+            )
 
         # 检查命名规范
         if self.current_class is None:  # 顶层函数
-            if not re.match(r'^[a-z_][a-z0-9_]*$', node.name):
-                self.add_issue(SEV_LOW, "inconsistent_naming", node.lineno,
-                               f"函数名 '{node.name}' 不符合 snake_case 规范")
+            if not re.match(r"^[a-z_][a-z0-9_]*$", node.name):
+                self.add_issue(
+                    SEV_LOW,
+                    "inconsistent_naming",
+                    node.lineno,
+                    f"函数名 '{node.name}' 不符合 snake_case 规范",
+                )
 
         self.generic_visit(node)
         self.current_function = None
@@ -308,8 +347,10 @@ class ASTAnalyzer(ast.NodeVisitor):
         """计算圈复杂度"""
         cc = 1  # 基础复杂度
         for child in ast.walk(node):
-            if isinstance(child, (ast.If, ast.For, ast.While, ast.With,
-                                  ast.AsyncFor, ast.AsyncWith)):
+            if isinstance(
+                child,
+                (ast.If, ast.For, ast.While, ast.With, ast.AsyncFor, ast.AsyncWith),
+            ):
                 cc += 1
             elif isinstance(child, ast.ExceptHandler):
                 cc += 1
@@ -324,15 +365,27 @@ class ASTAnalyzer(ast.NodeVisitor):
     def visit_ExceptHandler(self, node):
         if node.type is None:
             # 裸 except
-            self.add_issue(SEV_HIGH, "bare_except", node.lineno,
-                           "裸 except 捕获所有异常，可能隐藏错误")
+            self.add_issue(
+                SEV_HIGH,
+                "bare_except",
+                node.lineno,
+                "裸 except 捕获所有异常，可能隐藏错误",
+            )
         elif isinstance(node.type, ast.Name):
             if node.type.id == "Exception":
-                self.add_issue(SEV_MEDIUM, "too_broad_exception", node.lineno,
-                               "过于宽泛的 except Exception，建议捕获具体异常类型")
+                self.add_issue(
+                    SEV_MEDIUM,
+                    "too_broad_exception",
+                    node.lineno,
+                    "过于宽泛的 except Exception，建议捕获具体异常类型",
+                )
             elif node.type.id == "BaseException":
-                self.add_issue(SEV_HIGH, "too_broad_exception", node.lineno,
-                               "except BaseException 过于宽泛，可能捕获系统级异常")
+                self.add_issue(
+                    SEV_HIGH,
+                    "too_broad_exception",
+                    node.lineno,
+                    "except BaseException 过于宽泛，可能捕获系统级异常",
+                )
         self.generic_visit(node)
 
     # ---- 调用检测 ----
@@ -341,20 +394,39 @@ class ASTAnalyzer(ast.NodeVisitor):
         func_name = self._get_call_name(node)
 
         if func_name == "eval":
-            self.add_issue(SEV_CRITICAL, "eval_usage", node.lineno,
-                           "使用 eval() 存在代码注入风险")
+            self.add_issue(
+                SEV_CRITICAL, "eval_usage", node.lineno, "使用 eval() 存在代码注入风险"
+            )
         elif func_name == "exec":
-            self.add_issue(SEV_CRITICAL, "exec_usage", node.lineno,
-                           "使用 exec() 存在代码注入风险")
-        elif func_name in ("pickle.load", "pickle.loads", "marshal.load", "marshal.loads"):
-            self.add_issue(SEV_HIGH, "unsafe_deserialization", node.lineno,
-                           f"使用 {func_name}() 存在不安全反序列化风险")
+            self.add_issue(
+                SEV_CRITICAL, "exec_usage", node.lineno, "使用 exec() 存在代码注入风险"
+            )
+        elif func_name in (
+            "pickle.load",
+            "pickle.loads",
+            "marshal.load",
+            "marshal.loads",
+        ):
+            self.add_issue(
+                SEV_HIGH,
+                "unsafe_deserialization",
+                node.lineno,
+                f"使用 {func_name}() 存在不安全反序列化风险",
+            )
         elif func_name == "subprocess.call" or func_name.endswith(".Popen"):
             # 检查 shell=True
             for kw in node.keywords:
-                if kw.arg == "shell" and isinstance(kw.value, ast.Constant) and kw.value.value is True:
-                    self.add_issue(SEV_HIGH, "subprocess_shell_true", node.lineno,
-                                   "subprocess 使用 shell=True 存在命令注入风险")
+                if (
+                    kw.arg == "shell"
+                    and isinstance(kw.value, ast.Constant)
+                    and kw.value.value is True
+                ):
+                    self.add_issue(
+                        SEV_HIGH,
+                        "subprocess_shell_true",
+                        node.lineno,
+                        "subprocess 使用 shell=True 存在命令注入风险",
+                    )
                     break
 
         self.generic_visit(node)
@@ -379,15 +451,23 @@ class ASTAnalyzer(ast.NodeVisitor):
     def visit_For(self, node):
         depth = self._count_loop_depth(node)
         if depth >= 4:
-            self.add_issue(SEV_MEDIUM, "nested_loop", node.lineno,
-                           f"深层嵌套循环 (深度={depth})，建议重构")
+            self.add_issue(
+                SEV_MEDIUM,
+                "nested_loop",
+                node.lineno,
+                f"深层嵌套循环 (深度={depth})，建议重构",
+            )
         self.generic_visit(node)
 
     def visit_While(self, node):
         depth = self._count_loop_depth(node)
         if depth >= 4:
-            self.add_issue(SEV_MEDIUM, "nested_loop", node.lineno,
-                           f"深层嵌套循环 (深度={depth})，建议重构")
+            self.add_issue(
+                SEV_MEDIUM,
+                "nested_loop",
+                node.lineno,
+                f"深层嵌套循环 (深度={depth})，建议重构",
+            )
         self.generic_visit(node)
 
     def _count_loop_depth(self, node, current_depth=0):
@@ -416,23 +496,38 @@ def line_level_analysis(filepath, source_lines):
             continue
 
         # TODO/FIXME/XXX/HACK 检测
-        if re.search(r'#\s*(TODO|FIXME|XXX|HACK|BUG|OPTIMIZE)', line, re.IGNORECASE):
-            match = re.search(r'(TODO|FIXME|XXX|HACK|BUG|OPTIMIZE)[^#\n]*', line, re.IGNORECASE)
+        if re.search(r"#\s*(TODO|FIXME|XXX|HACK|BUG|OPTIMIZE)", line, re.IGNORECASE):
+            match = re.search(
+                r"(TODO|FIXME|XXX|HACK|BUG|OPTIMIZE)[^#\n]*", line, re.IGNORECASE
+            )
             msg = match.group(0).strip() if match else "遗留注释"
-            issues.append(CodeIssue(SEV_LOW, "todo_fixme", rel_path, i,
-                                    f"遗留注释: {msg}", stripped))
+            issues.append(
+                CodeIssue(
+                    SEV_LOW, "todo_fixme", rel_path, i, f"遗留注释: {msg}", stripped
+                )
+            )
 
         # print 调试语句（排除明确的生产代码模式）
-        if re.match(r'^\s*print\s*\(', line) and 'print(' in line:
+        if re.match(r"^\s*print\s*\(", line) and "print(" in line:
             # 简单启发：排除有注释说明的、明显生产用的
-            if not re.search(r'#.*(production|intentional|required)', line, re.IGNORECASE):
-                issues.append(CodeIssue(SEV_LOW, "print_debug", rel_path, i,
-                                        "调试用 print 语句，建议使用日志系统", stripped))
+            if not re.search(
+                r"#.*(production|intentional|required)", line, re.IGNORECASE
+            ):
+                issues.append(
+                    CodeIssue(
+                        SEV_LOW,
+                        "print_debug",
+                        rel_path,
+                        i,
+                        "调试用 print 语句，建议使用日志系统",
+                        stripped,
+                    )
+                )
 
         # 魔法数字（简单启发式）
         # 跳过常见的：0, 1, -1, 2, 10, 100, 1000, 0.5, 24, 60, 等
-        if re.search(r'\b(\d+)\b', stripped):
-            nums = re.findall(r'\b(\d+)\b', stripped)
+        if re.search(r"\b(\d+)\b", stripped):
+            nums = re.findall(r"\b(\d+)\b", stripped)
             for num_str in nums:
                 num = int(num_str)
                 # 排除常见的"非魔法"数字
@@ -440,16 +535,32 @@ def line_level_analysis(filepath, source_lines):
                 if num not in common and len(str(num)) <= 5:
                     # 确保是在代码中而不是注释或字符串中
                     # 简化：检查行不只是 import/注释
-                    if not stripped.startswith(("import ", "from ", "#", "\"", "'")):
+                    if not stripped.startswith(("import ", "from ", "#", '"', "'")):
                         # 只报告每行第一个魔法数字
-                        issues.append(CodeIssue(SEV_LOW, "magic_number", rel_path, i,
-                                                f"魔法数字 {num_str}，建议定义为命名常量", stripped))
+                        issues.append(
+                            CodeIssue(
+                                SEV_LOW,
+                                "magic_number",
+                                rel_path,
+                                i,
+                                f"魔法数字 {num_str}，建议定义为命名常量",
+                                stripped,
+                            )
+                        )
                         break
 
         # sys.path hack
-        if re.search(r'sys\.path\.(append|insert)', line):
-            issues.append(CodeIssue(SEV_HIGH, "sys_path_hack", rel_path, i,
-                                    "sys.path 修改，非标准导入方式", stripped))
+        if re.search(r"sys\.path\.(append|insert)", line):
+            issues.append(
+                CodeIssue(
+                    SEV_HIGH,
+                    "sys_path_hack",
+                    rel_path,
+                    i,
+                    "sys.path 修改，非标准导入方式",
+                    stripped,
+                )
+            )
 
     return issues
 
@@ -512,12 +623,12 @@ def phase3_ast_analysis():
         for node in ast.walk(tree):
             if isinstance(node, ast.Import):
                 for alias in node.names:
-                    name = alias.asname if alias.asname else alias.name.split('.')[0]
+                    name = alias.asname if alias.asname else alias.name.split(".")[0]
                     imported_names[name] = node.lineno
             elif isinstance(node, ast.ImportFrom):
                 for alias in node.names:
                     name = alias.asname if alias.asname else alias.name
-                    if name != '*':
+                    if name != "*":
                         imported_names[name] = node.lineno
 
         if not imported_names:
@@ -536,7 +647,9 @@ def phase3_ast_analysis():
                 if isinstance(current, ast.Name):
                     used_names.add(current.id)
             # 字符串注解中的名字
-            elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            elif isinstance(
+                node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)
+            ):
                 # 检查装饰器
                 for dec in node.decorator_list:
                     for n in ast.walk(dec):
@@ -546,11 +659,20 @@ def phase3_ast_analysis():
         rel_path = filepath.relative_to(PROJECT_DIR)
         for name, lineno in imported_names.items():
             if name not in used_names:
-                all_issues.append(CodeIssue(
-                    SEV_MEDIUM, "unused_import", rel_path, lineno,
-                    f"未使用的导入: '{name}'",
-                    source_lines[lineno - 1].strip() if lineno <= len(source_lines) else ""
-                ))
+                all_issues.append(
+                    CodeIssue(
+                        SEV_MEDIUM,
+                        "unused_import",
+                        rel_path,
+                        lineno,
+                        f"未使用的导入: '{name}'",
+                        (
+                            source_lines[lineno - 1].strip()
+                            if lineno <= len(source_lines)
+                            else ""
+                        ),
+                    )
+                )
 
     # 统计
     severity_counts = defaultdict(int)
@@ -582,6 +704,7 @@ def phase3_ast_analysis():
 # ============================================================
 # 阶段 4: 架构审查
 # ============================================================
+
 
 def phase4_architecture(ast_result):
     """架构审查"""
@@ -633,7 +756,7 @@ def phase4_architecture(ast_result):
                         if node.level >= len(base_parts):
                             base = []
                         else:
-                            base = base_parts[:-node.level]
+                            base = base_parts[: -node.level]
                         if dep:
                             full_dep = ".".join(base + [dep]) if base else dep
                         else:
@@ -712,8 +835,11 @@ def phase4_architecture(ast_result):
             in_degree[dep] += 1
 
     # 上帝模块（出度 > 阈值）
-    god_modules = [(mod, out_degree[mod]) for mod in all_modules
-                   if out_degree[mod] > GOD_MODULE_OUTDEGREE]
+    god_modules = [
+        (mod, out_degree[mod])
+        for mod in all_modules
+        if out_degree[mod] > GOD_MODULE_OUTDEGREE
+    ]
     god_modules.sort(key=lambda x: -x[1])
 
     # 高被依赖模块（入度高）
@@ -761,8 +887,10 @@ def phase4_architecture(ast_result):
         "top_indegree": top_indegree,
         "top_outdegree": top_outdegree,
         "sys_path_hacks": len(sys_path_hacks),
-        "dir_distribution": {d: {"lines": l, "files": dir_files[d]}
-                             for d, l in sorted(dir_lines.items(), key=lambda x: -x[1])},
+        "dir_distribution": {
+            d: {"lines": l, "files": dir_files[d]}
+            for d, l in sorted(dir_lines.items(), key=lambda x: -x[1])
+        },
         "module_files": module_files,
         "dependency_graph": {k: list(v) for k, v in filtered_graph.items()},
     }
@@ -771,6 +899,7 @@ def phase4_architecture(ast_result):
 # ============================================================
 # 阶段 5: 测试分析
 # ============================================================
+
 
 def phase5_testing():
     """运行 pytest 测试分析"""
@@ -784,8 +913,9 @@ def phase5_testing():
         test_files.extend(PROJECT_DIR.rglob(pattern))
 
     # 排除 scripts 等目录
-    test_files = [f for f in test_files
-                  if not any(part in EXCLUDE_DIRS for part in f.parts)]
+    test_files = [
+        f for f in test_files if not any(part in EXCLUDE_DIRS for part in f.parts)
+    ]
 
     if not test_files:
         log("未找到测试文件，跳过测试分析", "WARN")
@@ -795,33 +925,77 @@ def phase5_testing():
 
     try:
         # 运行 pytest
-        cmd = [sys.executable, "-m", "pytest", str(PROJECT_DIR),
-               "-v", "--tb=short", "--timeout=120", "-x", "--no-header"]
+        cmd = [
+            sys.executable,
+            "-m",
+            "pytest",
+            str(PROJECT_DIR),
+            "-v",
+            "--tb=short",
+            "--timeout=120",
+            "-x",
+            "--no-header",
+        ]
 
         # 先检查 pytest 是否可用
-        check = subprocess.run([sys.executable, "-m", "pytest", "--version"],
-                               capture_output=True, text=True, timeout=10)
+        check = subprocess.run(
+            [sys.executable, "-m", "pytest", "--version"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
         if check.returncode != 0:
             log("pytest 未安装，尝试安装...", "WARN")
-            subprocess.run([sys.executable, "-m", "pip", "install", "pytest", "pytest-timeout",
-                           "--break-system-packages", "-q"],
-                          capture_output=True, timeout=60)
+            subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "pip",
+                    "install",
+                    "pytest",
+                    "pytest-timeout",
+                    "--break-system-packages",
+                    "-q",
+                ],
+                capture_output=True,
+                timeout=60,
+            )
 
         # 用 JSON 格式输出以便解析
-        cmd = [sys.executable, "-m", "pytest", str(PROJECT_DIR),
-               "-v", "--tb=short", "-p", "no:cacheprovider",
-               "--json-report", "--json-report-file=/tmp/pytest_report.json"]
+        cmd = [
+            sys.executable,
+            "-m",
+            "pytest",
+            str(PROJECT_DIR),
+            "-v",
+            "--tb=short",
+            "-p",
+            "no:cacheprovider",
+            "--json-report",
+            "--json-report-file=/tmp/pytest_report.json",
+        ]
 
         # 先装 pytest-json-report
-        subprocess.run([sys.executable, "-m", "pip", "install", "pytest-json-report",
-                       "--break-system-packages", "-q"],
-                       capture_output=True, timeout=60)
+        subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "pip",
+                "install",
+                "pytest-json-report",
+                "--break-system-packages",
+                "-q",
+            ],
+            capture_output=True,
+            timeout=60,
+        )
 
         result = subprocess.run(
             cmd,
             cwd=str(PROJECT_DIR),
-            capture_output=True, text=True,
-            timeout=TEST_TIMEOUT
+            capture_output=True,
+            text=True,
+            timeout=TEST_TIMEOUT,
         )
 
         # 解析 JSON 报告
@@ -847,12 +1021,16 @@ def phase5_testing():
             failed_tests = []
             for test in report_data.get("tests", []):
                 if test.get("outcome") in ("failed", "error"):
-                    failed_tests.append({
-                        "name": test.get("nodeid", ""),
-                        "outcome": test.get("outcome", ""),
-                        "message": (test.get("call", {}).get("longrepr", "")
-                                    or test.get("setup", {}).get("longrepr", ""))[:300]
-                    })
+                    failed_tests.append(
+                        {
+                            "name": test.get("nodeid", ""),
+                            "outcome": test.get("outcome", ""),
+                            "message": (
+                                test.get("call", {}).get("longrepr", "")
+                                or test.get("setup", {}).get("longrepr", "")
+                            )[:300],
+                        }
+                    )
 
             log(f"测试结果: {passed}/{total} 通过 ({pass_rate:.1f}%)")
             log(f"  通过: {passed}, 失败: {failed}, 错误: {errors}, 跳过: {skipped}")
@@ -894,6 +1072,7 @@ def phase5_testing():
 # 阶段 6: 复杂度分析
 # ============================================================
 
+
 def phase6_complexity(ast_result):
     """复杂度分析"""
     log("=" * 60)
@@ -926,14 +1105,22 @@ def phase6_complexity(ast_result):
             cc_distribution["25+ (极复杂)"] += 1
 
     log(f"总函数数: {len(all_funcs)}")
-    log(f"平均复杂度: {sum(cc for _,_,cc in all_funcs)/len(all_funcs):.2f}" if all_funcs else "无函数")
+    log(
+        f"平均复杂度: {sum(cc for _,_,cc in all_funcs)/len(all_funcs):.2f}"
+        if all_funcs
+        else "无函数"
+    )
     log("Top 10 最复杂函数:")
     for i, (fpath, fname, cc) in enumerate(top10, 1):
         log(f"  {i}. {fname} (CC={cc}) - {fpath}")
 
     return {
         "total_functions": len(all_funcs),
-        "avg_complexity": round(sum(cc for _, _, cc in all_funcs) / len(all_funcs), 2) if all_funcs else 0,
+        "avg_complexity": (
+            round(sum(cc for _, _, cc in all_funcs) / len(all_funcs), 2)
+            if all_funcs
+            else 0
+        ),
         "max_complexity": all_funcs[0][2] if all_funcs else 0,
         "top10": [{"file": f, "function": n, "complexity": c} for f, n, c in top10],
         "distribution": dict(cc_distribution),
@@ -943,6 +1130,7 @@ def phase6_complexity(ast_result):
 # ============================================================
 # 阶段 7: 报告生成与提交
 # ============================================================
+
 
 def determine_review_round():
     """确定当前是第几轮审查"""
@@ -954,7 +1142,9 @@ def determine_review_round():
     return count + 1
 
 
-def generate_report(ast_result, arch_result, test_result, complexity_result, review_round):
+def generate_report(
+    ast_result, arch_result, test_result, complexity_result, review_round
+):
     """生成 Markdown 审查报告"""
     log("=" * 60)
     log("阶段 7: 报告生成")
@@ -1001,10 +1191,12 @@ def generate_report(ast_result, arch_result, test_result, complexity_result, rev
     # 严重程度分布可视化（文本）
     lines.append("### 严重程度分布")
     lines.append("")
-    for sev, label, color in [(SEV_CRITICAL, "CRITICAL", "🔴"),
-                               (SEV_HIGH, "HIGH", "🟠"),
-                               (SEV_MEDIUM, "MEDIUM", "🟡"),
-                               (SEV_LOW, "LOW", "🟢")]:
+    for sev, label, color in [
+        (SEV_CRITICAL, "CRITICAL", "🔴"),
+        (SEV_HIGH, "HIGH", "🟠"),
+        (SEV_MEDIUM, "MEDIUM", "🟡"),
+        (SEV_LOW, "LOW", "🟢"),
+    ]:
         count = sev_counts.get(sev, 0)
         bar_len = int(count / max(total_issues, 1) * 40)
         lines.append(f"- {color} **{label}**: {count} 个")
@@ -1130,7 +1322,9 @@ def generate_report(ast_result, arch_result, test_result, complexity_result, rev
     total_lines = sum(d["lines"] for d in arch_result["dir_distribution"].values())
     for dname, dinfo in arch_result["dir_distribution"].items():
         pct = dinfo["lines"] / total_lines * 100 if total_lines else 0
-        lines.append(f"| {dname} | {dinfo['files']} | {dinfo['lines']:,} | {pct:.1f}% |")
+        lines.append(
+            f"| {dname} | {dinfo['files']} | {dinfo['lines']:,} | {pct:.1f}% |"
+        )
     lines.append("")
 
     # ---- 测试分析 ----
@@ -1176,8 +1370,16 @@ def generate_report(ast_result, arch_result, test_result, complexity_result, rev
     lines.append("")
     lines.append("| 复杂度区间 | 函数数 |")
     lines.append("|------------|--------|")
-    for bucket in ["1-5 (简单)", "6-10 (中等)", "11-15 (复杂)", "16-25 (高复杂)", "25+ (极复杂)"]:
-        lines.append(f"| {bucket} | {complexity_result['distribution'].get(bucket, 0)} |")
+    for bucket in [
+        "1-5 (简单)",
+        "6-10 (中等)",
+        "11-15 (复杂)",
+        "16-25 (高复杂)",
+        "25+ (极复杂)",
+    ]:
+        lines.append(
+            f"| {bucket} | {complexity_result['distribution'].get(bucket, 0)} |"
+        )
     lines.append("")
 
     lines.append("### 5.2 Top 10 最复杂函数")
@@ -1185,7 +1387,9 @@ def generate_report(ast_result, arch_result, test_result, complexity_result, rev
     lines.append("| 排名 | 函数 | 文件 | 圈复杂度 |")
     lines.append("|------|------|------|----------|")
     for i, item in enumerate(complexity_result["top10"], 1):
-        lines.append(f"| {i} | {item['function']} | `{item['file']}` | {item['complexity']} |")
+        lines.append(
+            f"| {i} | {item['function']} | `{item['file']}` | {item['complexity']} |"
+        )
     lines.append("")
 
     # ---- 改进建议 ----
@@ -1201,11 +1405,18 @@ def generate_report(ast_result, arch_result, test_result, complexity_result, rev
     if critical_issues:
         suggestions_p0.append(f"修复 {len(critical_issues)} 个 CRITICAL 级别问题")
         for issue in critical_issues[:5]:
-            suggestions_p0.append(f"  - [{issue['type']}] {issue['file']}:{issue['line']} - {issue['message']}")
+            suggestions_p0.append(
+                f"  - [{issue['type']}] {issue['file']}:{issue['line']} - {issue['message']}"
+            )
 
     # 测试全挂
-    if test_result.get("status") == "completed" and test_result.get("pass_rate", 100) < 30:
-        suggestions_p0.append(f"修复测试套件（当前通过率仅 {test_result['pass_rate']}%）")
+    if (
+        test_result.get("status") == "completed"
+        and test_result.get("pass_rate", 100) < 30
+    ):
+        suggestions_p0.append(
+            f"修复测试套件（当前通过率仅 {test_result['pass_rate']}%）"
+        )
 
     # 循环依赖
     if arch_result["cycles"]:
@@ -1217,7 +1428,9 @@ def generate_report(ast_result, arch_result, test_result, complexity_result, rev
 
     # 上帝模块
     if arch_result["god_modules"]:
-        suggestions_p1.append(f"重构 {len(arch_result['god_modules'])} 个上帝模块以降低耦合")
+        suggestions_p1.append(
+            f"重构 {len(arch_result['god_modules'])} 个上帝模块以降低耦合"
+        )
 
     # sys.path hack
     if arch_result["sys_path_hacks"] > 0:
@@ -1226,12 +1439,16 @@ def generate_report(ast_result, arch_result, test_result, complexity_result, rev
     # P2: MEDIUM 级问题
     medium_count = len(medium_issues)
     if medium_count > 0:
-        suggestions_p2.append(f"处理 {medium_count} 个 MEDIUM 级别问题（函数过长、圈复杂度、未使用导入等）")
+        suggestions_p2.append(
+            f"处理 {medium_count} 个 MEDIUM 级别问题（函数过长、圈复杂度、未使用导入等）"
+        )
 
     # P3: LOW 级问题 + 优化
     low_count = len(low_issues)
     if low_count > 0:
-        suggestions_p3.append(f"清理 {low_count} 个 LOW 级别问题（TODO、命名规范、魔法数字等）")
+        suggestions_p3.append(
+            f"清理 {low_count} 个 LOW 级别问题（TODO、命名规范、魔法数字等）"
+        )
 
     # 复杂度优化
     high_cc_count = sum(1 for f in complexity_result["top10"] if f["complexity"] > 15)
@@ -1312,17 +1529,24 @@ def git_commit_and_push(review_round):
         # 配置 git 用户
         subprocess.run(
             ["git", "config", "user.email", GIT_EMAIL],
-            cwd=str(PROJECT_DIR), capture_output=True, timeout=10
+            cwd=str(PROJECT_DIR),
+            capture_output=True,
+            timeout=10,
         )
         subprocess.run(
             ["git", "config", "user.name", GIT_NAME],
-            cwd=str(PROJECT_DIR), capture_output=True, timeout=10
+            cwd=str(PROJECT_DIR),
+            capture_output=True,
+            timeout=10,
         )
 
         # 检查是否有变更
         result = subprocess.run(
             ["git", "status", "--porcelain"],
-            cwd=str(PROJECT_DIR), capture_output=True, text=True, timeout=10
+            cwd=str(PROJECT_DIR),
+            capture_output=True,
+            text=True,
+            timeout=10,
         )
         if not result.stdout.strip():
             log("无变更，跳过 commit", "WARN")
@@ -1331,14 +1555,19 @@ def git_commit_and_push(review_round):
         # 添加文件
         subprocess.run(
             ["git", "add", "AUTO_REVIEW_LOG.md", "scripts/"],
-            cwd=str(PROJECT_DIR), capture_output=True, timeout=10
+            cwd=str(PROJECT_DIR),
+            capture_output=True,
+            timeout=10,
         )
 
         # 提交
         commit_msg = f"auto: 第 {review_round} 轮深度审查报告 (v2.0)"
         result = subprocess.run(
             ["git", "commit", "-m", commit_msg],
-            cwd=str(PROJECT_DIR), capture_output=True, text=True, timeout=30
+            cwd=str(PROJECT_DIR),
+            capture_output=True,
+            text=True,
+            timeout=30,
         )
         if result.returncode != 0:
             log(f"commit 失败: {result.stderr}", "WARN")
@@ -1348,7 +1577,10 @@ def git_commit_and_push(review_round):
         # 推送
         result = subprocess.run(
             ["git", "push", "origin", "main"],
-            cwd=str(PROJECT_DIR), capture_output=True, text=True, timeout=60
+            cwd=str(PROJECT_DIR),
+            capture_output=True,
+            text=True,
+            timeout=60,
         )
         if result.returncode != 0:
             log(f"push 失败: {result.stderr}", "ERROR")
@@ -1367,6 +1599,7 @@ def git_commit_and_push(review_round):
 # ============================================================
 # 主流程
 # ============================================================
+
 
 def main():
     log("Nova 深度自动审查系统 v2.0 启动")
@@ -1396,7 +1629,9 @@ def main():
 
         # 阶段 7: 报告生成与提交
         review_round = determine_review_round()
-        generate_report(ast_result, arch_result, test_result, complexity_result, review_round)
+        generate_report(
+            ast_result, arch_result, test_result, complexity_result, review_round
+        )
         git_commit_and_push(review_round)
 
         log("")

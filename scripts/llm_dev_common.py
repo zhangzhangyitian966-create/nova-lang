@@ -111,7 +111,7 @@ def load_state():
         try:
             with open(STATE_FILE, 'r') as f:
                 return json.load(f)
-        except:
+        except Exception:
             pass
     return {
         'cycles': 0,
@@ -127,7 +127,7 @@ def save_state(state):
     try:
         with open(STATE_FILE, 'w') as f:
             json.dump(state, f, indent=2, ensure_ascii=False)
-    except:
+    except Exception:
         pass
 
 
@@ -198,7 +198,7 @@ def generate_roadmap(tasks):
     try:
         with open(ROADMAP_FILE, 'w') as f:
             f.write(content)
-    except:
+    except Exception:
         pass
     return content
 
