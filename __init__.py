@@ -24,3 +24,9 @@ Nova 是一种现代编程语言，具有简洁的语法和强大的表达能力
 
 # REPL 辅助函数导出（供测试使用）
 from .cli import _attach_source, _count_indent, _is_incomplete
+from .lexer import Lexer
+from .lexer import Token
+from .lexer import TokenType
+from .parser import Parser
+from .evaluator import Evaluator
+from .errors import LexerError

@@ -52,19 +52,24 @@ TEST_FILES = [
 TEST_TIMEOUT = 120  # 秒
 
 # 核心模块列表（用于文档字符串修复）
+# 注意：package-dir = {"nova" = "."}，所以模块直接在项目根目录
 CORE_MODULES = [
-    "nova/__init__.py",
-    "nova/lexer.py",
-    "nova/parser.py",
-    "nova/ast_nodes.py",
-    "nova/ir.py",
-    "nova/c_codegen.py",
-    "nova/interpreter.py",
-    "nova/builtins.py",
-    "nova/errors.py",
-    "nova/utils.py",
-    "nova/type_system.py",
-    "nova/optimizer.py",
+    "__init__.py",
+    "lexer.py",
+    "parser.py",
+    "ast_nodes.py",
+    "c_codegen.py",
+    "compiler.py",
+    "evaluator.py",
+    "errors.py",
+    "environment.py",
+    "type_checker.py",
+    "vm.py",
+    "cli.py",
+    "ir/__init__.py",
+    "ir/ir_nodes.py",
+    "backend/__init__.py",
+    "backend/compiler_pipeline.py",
 ]
 
 # 严重程度等级
@@ -180,7 +185,15 @@ def stage2_sync_remote() -> None:
     """阶段 2: 同步远程"""
     print_header("阶段 2: 同步远程")
 
+    # 先配置 git 身份
+    run_cmd(f'git config user.email "{GIT_EMAIL}"', cwd=PROJECT_DIR)
+    run_cmd(f'git config user.name "{GIT_NAME}"', cwd=PROJECT_DIR)
+
     print_step("2.1", "执行 git pull --rebase...")
+
+    # 先 stash 本地变更
+    run_cmd("git stash", cwd=PROJECT_DIR, timeout=30)
+
     ret, stdout, stderr = run_cmd(
         "git pull --rebase origin main",
         cwd=PROJECT_DIR, timeout=60
@@ -188,8 +201,16 @@ def stage2_sync_remote() -> None:
 
     if ret != 0:
         print_step("2.1", f"警告: git pull 失败（可能是首次运行）: {stderr}")
+        # 恢复 stash
+        run_cmd("git stash pop", cwd=PROJECT_DIR, timeout=30)
     else:
         print_step("2.1", "同步成功")
+        # 恢复 stash
+        ret_stash, _, stderr_stash = run_cmd(
+            "git stash pop", cwd=PROJECT_DIR, timeout=30
+        )
+        if ret_stash != 0 and "No stash entries" not in stderr_stash:
+            print_step("2.1", f"警告: 恢复 stash 失败: {stderr_stash}")
 
 
 # ============================================================================
@@ -224,7 +245,7 @@ def stage3_create_backup() -> Optional[str]:
 def run_tests() -> Tuple[int, int, str]:
     """运行测试套件，返回 (passed, total, output)"""
     test_paths = " ".join(TEST_FILES)
-    cmd = f"python3 -m pytest {test_paths} --tb=line -q"
+    cmd = f"PYTHONPATH={PROJECT_DIR} python3 -m pytest {test_paths} --tb=line -q"
 
     ret, stdout, stderr = run_cmd(
         cmd, cwd=PROJECT_DIR, timeout=TEST_TIMEOUT
@@ -321,29 +342,72 @@ def discover_issues() -> List[Dict]:
 
 
 def discover_repl_import_issues() -> List[Dict]:
-    """发现 REPL 导入问题"""
+    """发现 REPL 导入问题
+
+    检查核心模块中的公共类是否在 __init__.py 中导出。
+    只添加那些确定存在且未导出的类。
+    """
     issues = []
-    init_file = PROJECT_DIR / "nova" / "__init__.py"
+    init_file = PROJECT_DIR / "__init__.py"
 
     if not init_file.exists():
         return issues
 
-    content = init_file.read_text()
+    init_content = init_file.read_text()
 
-    # 检查是否导出了主要类
-    expected_exports = ["Nova", "NovaInterpreter", "NovaCompiler"]
-    missing_exports = []
+    # 定义应该检查的模块和可能的导出类名
+    modules_to_check = [
+        ("lexer", ["Lexer", "Token", "TokenType"]),
+        ("parser", ["Parser", "ParseError"]),
+        ("evaluator", ["Evaluator", "RuntimeError_"]),
+        ("errors", ["LexerError", "ParseError", "TypeCheckError", "RuntimeError_"]),
+        ("ast_nodes", ["Program", "Expression", "Statement"]),
+        ("environment", ["Environment"]),
+        ("type_checker", ["TypeChecker"]),
+        ("compiler", ["BytecodeCompiler", "Bytecode"]),
+        ("vm", ["VM"]),
+        ("c_codegen", ["CCodeGen"]),
+    ]
 
-    for export in expected_exports:
-        if export not in content:
-            missing_exports.append(export)
+    missing_exports = []  # [(module_name, class_name)]
+
+    for module_name, class_names in modules_to_check:
+        module_path = PROJECT_DIR / f"{module_name}.py"
+        if not module_path.exists():
+            continue
+
+        try:
+            module_content = module_path.read_text()
+            tree = ast.parse(module_content)
+
+            # 找出模块中实际定义的公共类
+            defined_classes = set()
+            for node in ast.walk(tree):
+                if isinstance(node, ast.ClassDef) and not node.name.startswith("_"):
+                    defined_classes.add(node.name)
+
+            for class_name in class_names:
+                if class_name in defined_classes:
+                    # 检查是否已在 __init__.py 中导出
+                    pattern = rf"from\s+\.{module_name}\s+import\s+.*\b{class_name}\b"
+                    if not re.search(pattern, init_content):
+                        missing_exports.append((module_name, class_name))
+        except Exception:
+            continue
+
+    # 限制导出数量，避免一次添加太多
+    if len(missing_exports) > 6:
+        missing_exports = missing_exports[:6]
 
     if missing_exports:
         issues.append({
             "type": "repl_import_fix",
             "severity": "CRITICAL",
-            "file": str(init_file.relative_to(PROJECT_DIR)),
-            "description": f"__init__.py 缺少导出: {', '.join(missing_exports)}",
+            "file": "__init__.py",
+            "description": (
+                f"__init__.py 缺少 {len(missing_exports)} 个导出: "
+                + ", ".join(c for _, c in missing_exports)
+            ),
             "details": {"missing_exports": missing_exports}
         })
 
@@ -641,24 +705,23 @@ class ReplImportFixer(BaseFixer):
         if not missing:
             return False
 
-        # 构建追加内容
+        # missing 是 [(module_name, class_name), ...] 格式
         additions = []
-        for export in missing:
-            if export == "Nova":
-                additions.append("from .nova import Nova")
-            elif export == "NovaInterpreter":
-                additions.append("from .interpreter import NovaInterpreter")
-            elif export == "NovaCompiler":
-                additions.append("from .compiler import NovaCompiler")
+        for module_name, class_name in missing:
+            addition = f"from .{module_name} import {class_name}"
+            # 检查是否已存在
+            pattern = rf"from\s+\.{module_name}\s+import\s+.*\b{class_name}\b"
+            if not re.search(pattern, content):
+                additions.append(addition)
 
         if not additions:
             return False
 
-        # 检查是否已存在
-        new_content = content
+        # 追加到文件末尾（按模块分组）
+        new_content = content.rstrip() + "\n"
+        current_module = None
         for addition in additions:
-            if addition not in new_content:
-                new_content = new_content.rstrip() + "\n" + addition + "\n"
+            new_content += addition + "\n"
 
         # 验证语法
         if not ast_parse_safe(new_content):
@@ -791,7 +854,7 @@ class DocstringFixer(BaseFixer):
     display_name = "文档字符串修复器"
 
     MODULE_DOCSTRINGS = {
-        "nova/__init__.py": '''"""
+        "__init__.py": '''"""
 Nova Programming Language
 =========================
 
@@ -801,8 +864,10 @@ Nova 是一种现代编程语言，具有简洁的语法和强大的表达能力
 
 主要类:
     - Nova: 主入口类
-    - NovaInterpreter: 解释器
-    - NovaCompiler: 编译器
+    - Lexer: 词法分析器
+    - Parser: 语法分析器
+    - Evaluator: 解释器
+    - Compiler: 编译器
 
 示例:
     >>> from nova import Nova
@@ -811,7 +876,7 @@ Nova 是一种现代编程语言，具有简洁的语法和强大的表达能力
     2
 """
 ''',
-        "nova/lexer.py": '''"""
+        "lexer.py": '''"""
 Nova 词法分析器 (Lexer)
 
 将源代码文本转换为 token 流，为语法分析做准备。
@@ -823,7 +888,7 @@ Nova 词法分析器 (Lexer)
     - 位置追踪（行号、列号）
 """
 ''',
-        "nova/parser.py": '''"""
+        "parser.py": '''"""
 Nova 语法分析器 (Parser)
 
 将 token 流转换为抽象语法树 (AST)。
@@ -834,7 +899,7 @@ Nova 语法分析器 (Parser)
     - 错误恢复
 """
 ''',
-        "nova/ast_nodes.py": '''"""
+        "ast_nodes.py": '''"""
 Nova 抽象语法树节点定义
 
 定义所有 AST 节点类型，每个节点代表语法树中的一个元素。
@@ -845,19 +910,7 @@ Nova 抽象语法树节点定义
     - 声明节点 (Declaration)
 """
 ''',
-        "nova/ir.py": '''"""
-Nova 中间表示 (Intermediate Representation)
-
-将 AST 转换为三地址码 (TAC) 中间表示，为代码生成和优化做准备。
-
-IR 指令类型:
-    - 算术运算
-    - 内存操作
-    - 控制流
-    - 函数调用
-"""
-''',
-        "nova/c_codegen.py": '''"""
+        "c_codegen.py": '''"""
 Nova C 代码生成器
 
 将中间表示 (IR) 翻译为 C 源代码。
@@ -869,8 +922,21 @@ Nova C 代码生成器
     - 运行时库接口
 """
 ''',
-        "nova/interpreter.py": '''"""
-Nova 解释器
+        "compiler.py": '''"""
+Nova 编译器
+
+将 Nova 源代码编译为目标代码。
+
+编译流程:
+    1. 词法分析 (Lexer)
+    2. 语法分析 (Parser)
+    3. 类型检查 (TypeChecker)
+    4. IR 生成 (HIR -> MIR -> LIR)
+    5. 代码生成 (Backend)
+"""
+''',
+        "evaluator.py": '''"""
+Nova 解释器 (Evaluator)
 
 直接遍历 AST 执行 Nova 程序，用于快速原型和 REPL。
 
@@ -881,18 +947,7 @@ Nova 解释器
     - 内置函数支持
 """
 ''',
-        "nova/builtins.py": '''"""
-Nova 内置函数和类型
-
-提供 Nova 语言的内置功能，包括:
-    - 基本类型（int, float, string, bool, list, dict）
-    - 数学函数
-    - 字符串操作
-    - 集合操作
-    - I/O 函数
-"""
-''',
-        "nova/errors.py": '''"""
+        "errors.py": '''"""
 Nova 错误处理模块
 
 定义 Nova 语言的所有错误类型和错误报告机制。
@@ -904,20 +959,21 @@ Nova 错误处理模块
     - TypeError: 类型错误
 """
 ''',
-        "nova/utils.py": '''"""
-Nova 工具函数
+        "environment.py": '''"""
+Nova 环境管理
 
-提供通用工具函数和辅助类，包括:
-    - 位置追踪
-    - 字符串操作
-    - 文件处理
-    - 性能监控
+管理变量作用域和符号表，支持嵌套作用域。
+
+功能:
+    - 变量定义与查找
+    - 作用域嵌套
+    - 闭包支持
 """
 ''',
-        "nova/type_system.py": '''"""
-Nova 类型系统
+        "type_checker.py": '''"""
+Nova 类型检查器
 
-实现 Nova 语言的类型检查和类型推断。
+实现 Nova 语言的静态类型检查和类型推断。
 
 功能:
     - 类型表示
@@ -926,16 +982,60 @@ Nova 类型系统
     - 泛型支持
 """
 ''',
-        "nova/optimizer.py": '''"""
-Nova 优化器
+        "vm.py": '''"""
+Nova 虚拟机 (VM)
 
-对中间表示 (IR) 进行各种优化，提升生成代码的性能。
+执行 Nova 字节码的栈式虚拟机。
 
-优化项:
-    - 常量折叠
-    - 死代码消除
-    - 公共子表达式消除
-    - 内联优化
+功能:
+    - 字节码解释执行
+    - 栈操作
+    - 函数调用帧管理
+    - 垃圾回收
+"""
+''',
+        "cli.py": '''"""
+Nova 命令行接口
+
+提供 Nova 语言的命令行交互界面。
+
+功能:
+    - REPL 交互式模式
+    - 文件执行模式
+    - 编译模式
+    - 命令行参数解析
+"""
+''',
+        "ir/__init__.py": '''"""
+Nova 中间表示 (IR) 包
+
+包含 Nova 编译器的中间表示层，实现多层 IR 设计：
+- HIR (High-level IR): 高层中间表示
+- MIR (Mid-level IR): 中层中间表示
+- LIR (Low-level IR): 低层中间表示
+"""
+''',
+        "ir/ir_nodes.py": '''"""
+Nova IR 节点定义
+
+定义各层 IR 的节点类型和结构。
+"""
+''',
+        "backend/__init__.py": '''"""
+Nova 后端包
+
+包含多个代码生成后端：
+- C 后端: 生成 C 源代码
+- x86_64 后端: 生成 x86_64 机器码
+- WASM 后端: 生成 WebAssembly
+- Cranelift 后端: 使用 Cranelift 生成机器码
+- Native 后端: 原生代码生成
+"""
+''',
+        "backend/compiler_pipeline.py": '''"""
+Nova 编译器流水线
+
+管理从 AST 到目标代码的完整编译流程。
 """
 ''',
     }

@@ -130,6 +130,7 @@ def save_state(state):
             json.dump(state, f, indent=2, ensure_ascii=False)
     # TODO: 细化异常处理，避免静默吞噬
     except Exception:
+        # TODO: 细化异常处理，避免静默吞噬
         pass
 
 
@@ -201,6 +202,7 @@ def generate_roadmap(tasks):
         with open(ROADMAP_FILE, 'w') as f:
             # TODO: 细化异常处理，避免静默吞噬
             f.write(content)
+    # TODO: 细化异常处理，避免静默吞噬
     except Exception:
         pass
     return content

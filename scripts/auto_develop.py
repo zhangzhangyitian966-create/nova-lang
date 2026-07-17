@@ -682,6 +682,7 @@ class AutoDeveloper:
                 json.dump(data, f, indent=2)
         # TODO: 细化异常处理，避免静默吞噬
         except Exception:
+            # TODO: 细化异常处理，避免静默吞噬
             pass
 
     def get_next_task(self):
