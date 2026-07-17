@@ -30,3 +30,9 @@ from .lexer import TokenType
 from .parser import Parser
 from .evaluator import Evaluator
 from .errors import LexerError
+from .errors import ParseError
+from .errors import TypeCheckError
+from .errors import RuntimeError_
+from .ast_nodes import Program
+from .environment import Environment
+from .type_checker import TypeChecker
