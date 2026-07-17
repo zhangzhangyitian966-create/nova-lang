@@ -36,3 +36,6 @@ from .errors import RuntimeError_
 from .ast_nodes import Program
 from .environment import Environment
 from .type_checker import TypeChecker
+from .compiler import BytecodeCompiler
+from .compiler import Bytecode
+from .c_codegen import CCodeGen

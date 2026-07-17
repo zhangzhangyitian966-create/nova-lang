@@ -245,7 +245,8 @@ def stage3_create_backup() -> Optional[str]:
 def run_tests() -> Tuple[int, int, str]:
     """运行测试套件，返回 (passed, total, output)"""
     test_paths = " ".join(TEST_FILES)
-    cmd = f"PYTHONPATH={PROJECT_DIR} python3 -m pytest {test_paths} --tb=line -q"
+    # PYTHONPATH 指向项目父目录，因为 package-dir = {"nova" = "."}
+    cmd = f"PYTHONPATH={PROJECT_DIR.parent} python3 -m pytest {test_paths} --tb=line -q"
 
     ret, stdout, stderr = run_cmd(
         cmd, cwd=PROJECT_DIR, timeout=TEST_TIMEOUT
