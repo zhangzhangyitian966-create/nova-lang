@@ -169,6 +169,7 @@ def run_repl():
             try:
                 checker = TypeChecker()
                 checker.check_program(ast)
+            # TODO: 审查此异常处理是否合理，避免静默吞噬异常
             except Exception:
                 # TODO: 缩小异常范围，捕获更具体的异常类型
                 pass

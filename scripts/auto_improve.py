@@ -82,13 +82,19 @@ VERSION = "v3.0"
 # 工具函数
 # ============================================================================
 
-def run_cmd(cmd: str, cwd: Path = None, timeout: int = None,
-            capture: bool = True) -> Tuple[int, str, str]:
+
+def run_cmd(
+    cmd: str, cwd: Path = None, timeout: int = None, capture: bool = True
+) -> Tuple[int, str, str]:
     """运行 shell 命令，返回 (returncode, stdout, stderr)"""
     try:
         result = subprocess.run(
-            cmd, shell=True, cwd=str(cwd) if cwd else None,
-            capture_output=capture, text=True, timeout=timeout
+            cmd,
+            shell=True,
+            cwd=str(cwd) if cwd else None,
+            capture_output=capture,
+            text=True,
+            timeout=timeout,
         )
         return result.returncode, result.stdout, result.stderr
     except subprocess.TimeoutExpired:
@@ -136,6 +142,7 @@ def get_python_files(directory: Path) -> List[Path]:
 # 阶段 1: 项目初始化
 # ============================================================================
 
+
 def stage1_init_project() -> bool:
     """阶段 1: 项目初始化"""
     print_header("阶段 1: 项目初始化")
@@ -164,10 +171,7 @@ def stage1_init_project() -> bool:
     print_step("1.3", "克隆仓库...")
     clone_url = f"https://{GIT_USER}:{GIT_TOKEN}@github.com/{GIT_USER}/{GIT_REPO}"
 
-    ret, stdout, stderr = run_cmd(
-        f"git clone {clone_url} {PROJECT_DIR}",
-        timeout=120
-    )
+    ret, stdout, stderr = run_cmd(f"git clone {clone_url} {PROJECT_DIR}", timeout=120)
 
     if ret != 0:
         print_step("1.3", f"错误: 克隆失败: {stderr}")
@@ -180,6 +184,7 @@ def stage1_init_project() -> bool:
 # ============================================================================
 # 阶段 2: 同步远程
 # ============================================================================
+
 
 def stage2_sync_remote() -> None:
     """阶段 2: 同步远程"""
@@ -195,8 +200,7 @@ def stage2_sync_remote() -> None:
     run_cmd("git stash", cwd=PROJECT_DIR, timeout=30)
 
     ret, stdout, stderr = run_cmd(
-        "git pull --rebase origin main",
-        cwd=PROJECT_DIR, timeout=60
+        "git pull --rebase origin main", cwd=PROJECT_DIR, timeout=60
     )
 
     if ret != 0:
@@ -217,6 +221,7 @@ def stage2_sync_remote() -> None:
 # 阶段 3: 创建备份点
 # ============================================================================
 
+
 def stage3_create_backup() -> Optional[str]:
     """阶段 3: 创建备份点，返回标签名"""
     print_header("阶段 3: 创建备份点")
@@ -226,8 +231,7 @@ def stage3_create_backup() -> Optional[str]:
 
     print_step("3.1", f"创建备份标签: {tag_name}")
     ret, stdout, stderr = run_cmd(
-        f'git tag -a {tag_name} -m "auto improve backup"',
-        cwd=PROJECT_DIR, timeout=30
+        f'git tag -a {tag_name} -m "auto improve backup"', cwd=PROJECT_DIR, timeout=30
     )
 
     if ret != 0:
@@ -242,15 +246,14 @@ def stage3_create_backup() -> Optional[str]:
 # 阶段 4: 基线测试
 # ============================================================================
 
+
 def run_tests() -> Tuple[int, int, str]:
     """运行测试套件，返回 (passed, total, output)"""
     test_paths = " ".join(TEST_FILES)
     # PYTHONPATH 指向项目父目录，因为 package-dir = {"nova" = "."}
     cmd = f"PYTHONPATH={PROJECT_DIR.parent} python3 -m pytest {test_paths} --tb=line -q"
 
-    ret, stdout, stderr = run_cmd(
-        cmd, cwd=PROJECT_DIR, timeout=TEST_TIMEOUT
-    )
+    ret, stdout, stderr = run_cmd(cmd, cwd=PROJECT_DIR, timeout=TEST_TIMEOUT)
 
     output = stdout + stderr
 
@@ -311,6 +314,7 @@ def stage4_baseline_tests() -> Tuple[int, int]:
 # ============================================================================
 # 问题发现
 # ============================================================================
+
 
 def discover_issues() -> List[Dict]:
     """发现代码库中的问题"""
@@ -401,16 +405,18 @@ def discover_repl_import_issues() -> List[Dict]:
         missing_exports = missing_exports[:6]
 
     if missing_exports:
-        issues.append({
-            "type": "repl_import_fix",
-            "severity": "CRITICAL",
-            "file": "__init__.py",
-            "description": (
-                f"__init__.py 缺少 {len(missing_exports)} 个导出: "
-                + ", ".join(c for _, c in missing_exports)
-            ),
-            "details": {"missing_exports": missing_exports}
-        })
+        issues.append(
+            {
+                "type": "repl_import_fix",
+                "severity": "CRITICAL",
+                "file": "__init__.py",
+                "description": (
+                    f"__init__.py 缺少 {len(missing_exports)} 个导出: "
+                    + ", ".join(c for _, c in missing_exports)
+                ),
+                "details": {"missing_exports": missing_exports},
+            }
+        )
 
     return issues
 
@@ -427,17 +433,19 @@ def discover_bare_except_issues(files: List[Path]) -> List[Dict]:
 
             for match in matches:
                 # 获取行号
-                line_num = content[:match.start()].count("\n") + 1
+                line_num = content[: match.start()].count("\n") + 1
                 rel_path = str(f.relative_to(PROJECT_DIR))
 
-                issues.append({
-                    "type": "bare_except",
-                    "severity": "HIGH",
-                    "file": rel_path,
-                    "line": line_num,
-                    "description": f"裸 except 语句 (第 {line_num} 行)",
-                    "details": {"line": line_num}
-                })
+                issues.append(
+                    {
+                        "type": "bare_except",
+                        "severity": "HIGH",
+                        "file": rel_path,
+                        "line": line_num,
+                        "description": f"裸 except 语句 (第 {line_num} 行)",
+                        "details": {"line": line_num},
+                    }
+                )
         except Exception:
             continue
 
@@ -457,14 +465,16 @@ def discover_silent_exception_issues(files: List[Path]) -> List[Dict]:
                 # 匹配 except Exception: pass (单行)
                 if re.match(r"^\s*except\s+(\w+\.)*Exception\s*:\s*pass\s*$", line):
                     rel_path = str(f.relative_to(PROJECT_DIR))
-                    issues.append({
-                        "type": "too_broad_exception",
-                        "severity": "HIGH",
-                        "file": rel_path,
-                        "line": i + 1,
-                        "description": f"静默异常吞噬 (第 {i+1} 行)",
-                        "details": {"line": i + 1, "single_line": True}
-                    })
+                    issues.append(
+                        {
+                            "type": "too_broad_exception",
+                            "severity": "HIGH",
+                            "file": rel_path,
+                            "line": i + 1,
+                            "description": f"静默异常吞噬 (第 {i+1} 行)",
+                            "details": {"line": i + 1, "single_line": True},
+                        }
+                    )
                     continue
 
                 # 匹配多行: except Exception: 后面跟着只有 pass 的块
@@ -475,19 +485,31 @@ def discover_silent_exception_issues(files: List[Path]) -> List[Dict]:
                         if re.match(r"^\s+pass\s*$", next_line):
                             # 确认这是一个只有 pass 的块
                             # 检查再下一行缩进是否回到 except 级别
-                            if i + 2 >= len(lines) or not re.match(
-                                r"^\s{" + str(len(next_line) - len(next_line.lstrip())) + r",}\S",
-                                lines[i + 2]
-                            ) if i + 2 < len(lines) else True:
+                            if (
+                                i + 2 >= len(lines)
+                                or not re.match(
+                                    r"^\s{"
+                                    + str(len(next_line) - len(next_line.lstrip()))
+                                    + r",}\S",
+                                    lines[i + 2],
+                                )
+                                if i + 2 < len(lines)
+                                else True
+                            ):
                                 rel_path = str(f.relative_to(PROJECT_DIR))
-                                issues.append({
-                                    "type": "too_broad_exception",
-                                    "severity": "HIGH",
-                                    "file": rel_path,
-                                    "line": i + 1,
-                                    "description": f"静默异常吞噬 (第 {i+1} 行)",
-                                    "details": {"line": i + 1, "single_line": False}
-                                })
+                                issues.append(
+                                    {
+                                        "type": "too_broad_exception",
+                                        "severity": "HIGH",
+                                        "file": rel_path,
+                                        "line": i + 1,
+                                        "description": f"静默异常吞噬 (第 {i+1} 行)",
+                                        "details": {
+                                            "line": i + 1,
+                                            "single_line": False,
+                                        },
+                                    }
+                                )
 
         except Exception:
             continue
@@ -510,18 +532,18 @@ def discover_docstring_issues() -> List[Dict]:
             tree = ast.parse(content)
 
             # 检查模块级文档字符串
-            has_docstring = (
-                ast.get_docstring(tree) is not None
-            )
+            has_docstring = ast.get_docstring(tree) is not None
 
             if not has_docstring and content.strip():
-                issues.append({
-                    "type": "no_docstring",
-                    "severity": "LOW",
-                    "file": module_path,
-                    "description": f"模块缺少文档字符串",
-                    "details": {}
-                })
+                issues.append(
+                    {
+                        "type": "no_docstring",
+                        "severity": "LOW",
+                        "file": module_path,
+                        "description": f"模块缺少文档字符串",
+                        "details": {},
+                    }
+                )
         except Exception:
             continue
 
@@ -557,12 +579,36 @@ def discover_import_order_issues(files: List[Path]) -> List[Dict]:
             local = []
 
             stdlib_modules = {
-                "os", "sys", "re", "json", "math", "time", "datetime",
-                "collections", "typing", "pathlib", "subprocess", "io",
-                "ast", "enum", "functools", "itertools", "struct",
-                "hashlib", "random", "string", "tempfile", "shutil",
-                "argparse", "logging", "traceback", "warnings",
-                "copy", "abc", "dataclasses", "contextlib",
+                "os",
+                "sys",
+                "re",
+                "json",
+                "math",
+                "time",
+                "datetime",
+                "collections",
+                "typing",
+                "pathlib",
+                "subprocess",
+                "io",
+                "ast",
+                "enum",
+                "functools",
+                "itertools",
+                "struct",
+                "hashlib",
+                "random",
+                "string",
+                "tempfile",
+                "shutil",
+                "argparse",
+                "logging",
+                "traceback",
+                "warnings",
+                "copy",
+                "abc",
+                "dataclasses",
+                "contextlib",
             }
 
             for idx, imp, original in imports:
@@ -591,17 +637,19 @@ def discover_import_order_issues(files: List[Path]) -> List[Dict]:
                     continue
 
                 rel_path = str(f.relative_to(PROJECT_DIR))
-                issues.append({
-                    "type": "import_order",
-                    "severity": "LOW",
-                    "file": rel_path,
-                    "description": "导入顺序不符合规范",
-                    "details": {
-                        "stdlib_count": len(stdlib),
-                        "third_party_count": len(third_party),
-                        "local_count": len(local)
+                issues.append(
+                    {
+                        "type": "import_order",
+                        "severity": "LOW",
+                        "file": rel_path,
+                        "description": "导入顺序不符合规范",
+                        "details": {
+                            "stdlib_count": len(stdlib),
+                            "third_party_count": len(third_party),
+                            "local_count": len(local),
+                        },
                     }
-                })
+                )
 
         except Exception:
             continue
@@ -629,22 +677,23 @@ def discover_code_style_issues(files: List[Path]) -> List[Dict]:
 
             # 检查尾随空格
             trailing_space_count = sum(
-                1 for line in lines
-                if line.rstrip() != line and line.strip()
+                1 for line in lines if line.rstrip() != line and line.strip()
             )
 
             if style_issues >= 3 or trailing_space_count >= 5:
                 rel_path = str(f.relative_to(PROJECT_DIR))
-                issues.append({
-                    "type": "code_style",
-                    "severity": "LOW",
-                    "file": rel_path,
-                    "description": "代码风格需要优化",
-                    "details": {
-                        "long_lines": style_issues,
-                        "trailing_spaces": trailing_space_count
+                issues.append(
+                    {
+                        "type": "code_style",
+                        "severity": "LOW",
+                        "file": rel_path,
+                        "description": "代码风格需要优化",
+                        "details": {
+                            "long_lines": style_issues,
+                            "trailing_spaces": trailing_space_count,
+                        },
                     }
-                })
+                )
 
         except Exception:
             continue
@@ -655,6 +704,7 @@ def discover_code_style_issues(files: List[Path]) -> List[Dict]:
 # ============================================================================
 # 修复器基类
 # ============================================================================
+
 
 class BaseFixer:
     """修复器基类"""
@@ -685,6 +735,7 @@ class BaseFixer:
 # ============================================================================
 # 修复器 1: REPL 导入修复
 # ============================================================================
+
 
 class ReplImportFixer(BaseFixer):
     """修复 REPL 导入问题"""
@@ -736,6 +787,7 @@ class ReplImportFixer(BaseFixer):
 # 修复器 2: 裸 except 修复
 # ============================================================================
 
+
 class BareExceptFixer(BaseFixer):
     """修复裸 except 语句"""
 
@@ -779,6 +831,7 @@ class BareExceptFixer(BaseFixer):
 # 修复器 3: 静默异常修复
 # ============================================================================
 
+
 class SilentExceptionFixer(BaseFixer):
     """标记静默异常吞噬"""
 
@@ -821,7 +874,7 @@ class SilentExceptionFixer(BaseFixer):
                 f"{indent_str}    pass",
             ]
 
-            lines[line_num:line_num + 1] = new_lines
+            lines[line_num : line_num + 1] = new_lines
         else:
             # 多行: 在 pass 前添加 TODO 注释
             if line_num + 1 >= len(lines):
@@ -847,6 +900,7 @@ class SilentExceptionFixer(BaseFixer):
 # ============================================================================
 # 修复器 4: 文档字符串修复
 # ============================================================================
+
 
 class DocstringFixer(BaseFixer):
     """补充核心模块文档字符串"""
@@ -1091,6 +1145,7 @@ Nova {module_name} 模块
 # 修复器 5: 导入顺序修复
 # ============================================================================
 
+
 class ImportSortFixer(BaseFixer):
     """整理导入顺序"""
 
@@ -1117,12 +1172,37 @@ class ImportSortFixer(BaseFixer):
         imports = []  # (start_line, end_line, import_lines, is_from, module)
         i = 0
         stdlib_modules = {
-            "os", "sys", "re", "json", "math", "time", "datetime",
-            "collections", "typing", "pathlib", "subprocess", "io",
-            "ast", "enum", "functools", "itertools", "struct",
-            "hashlib", "random", "string", "tempfile", "shutil",
-            "argparse", "logging", "traceback", "warnings",
-            "copy", "abc", "dataclasses", "contextlib", "textwrap",
+            "os",
+            "sys",
+            "re",
+            "json",
+            "math",
+            "time",
+            "datetime",
+            "collections",
+            "typing",
+            "pathlib",
+            "subprocess",
+            "io",
+            "ast",
+            "enum",
+            "functools",
+            "itertools",
+            "struct",
+            "hashlib",
+            "random",
+            "string",
+            "tempfile",
+            "shutil",
+            "argparse",
+            "logging",
+            "traceback",
+            "warnings",
+            "copy",
+            "abc",
+            "dataclasses",
+            "contextlib",
+            "textwrap",
         }
 
         while i < len(lines):
@@ -1154,22 +1234,31 @@ class ImportSortFixer(BaseFixer):
                     i += 1
                     continue
                 # 检查是否是续行（缩进的 import 内容）
-                if lines[i] and (lines[i][0].isspace() and next_stripped and not next_stripped.startswith("import") and not next_stripped.startswith("from")):
+                if lines[i] and (
+                    lines[i][0].isspace()
+                    and next_stripped
+                    and not next_stripped.startswith("import")
+                    and not next_stripped.startswith("from")
+                ):
                     # 可能是续行或者是别的东西，保守起见停止
-                    if "(" in import_lines[-1] or import_lines[-1].rstrip().endswith("\\"):
+                    if "(" in import_lines[-1] or import_lines[-1].rstrip().endswith(
+                        "\\"
+                    ):
                         import_lines.append(lines[i])
                         i += 1
                         continue
                     break
                 break
 
-            imports.append({
-                "start": start,
-                "end": i - 1,
-                "lines": import_lines,
-                "is_from": is_from,
-                "module": module,
-            })
+            imports.append(
+                {
+                    "start": start,
+                    "end": i - 1,
+                    "lines": import_lines,
+                    "is_from": is_from,
+                    "module": module,
+                }
+            )
 
         if not imports:
             return False
@@ -1219,7 +1308,7 @@ class ImportSortFixer(BaseFixer):
         last_line = max(imp["end"] for imp in imports)
 
         # 替换
-        new_lines = lines[:first_line] + sorted_imports + lines[last_line + 1:]
+        new_lines = lines[:first_line] + sorted_imports + lines[last_line + 1 :]
         new_content = "\n".join(new_lines)
 
         # 验证语法
@@ -1234,6 +1323,7 @@ class ImportSortFixer(BaseFixer):
 # 修复器 6: 代码风格修复
 # ============================================================================
 
+
 class FormatFixer(BaseFixer):
     """统一代码风格（使用 black）"""
 
@@ -1247,13 +1337,13 @@ class FormatFixer(BaseFixer):
         """检查 black 是否可用，不可用则尝试安装"""
         try:
             import black
+
             return True
         except ImportError:
             # 尝试安装
             print("    正在安装 black...")
             ret, _, _ = run_cmd(
-                "pip install black --break-system-packages -q",
-                timeout=60
+                "pip install black --break-system-packages -q", timeout=60
             )
             return ret == 0
 
@@ -1270,6 +1360,7 @@ class FormatFixer(BaseFixer):
 
         try:
             import black
+
             content = full_path.read_text()
 
             try:
@@ -1295,6 +1386,7 @@ class FormatFixer(BaseFixer):
 # 修复器管理器
 # ============================================================================
 
+
 class FixerManager:
     """修复器管理器"""
 
@@ -1319,9 +1411,7 @@ class FixerManager:
         """按修复器分组问题"""
         groups = {}
         for issue in issues:
-            fixer = self.get_fixer_for(
-                issue["type"], issue.get("severity", "LOW")
-            )
+            fixer = self.get_fixer_for(issue["type"], issue.get("severity", "LOW"))
             if fixer:
                 key = fixer.name
                 if key not in groups:
@@ -1333,6 +1423,7 @@ class FixerManager:
 # ============================================================================
 # 阶段 5: 审查驱动的自动修复
 # ============================================================================
+
 
 def git_rollback() -> bool:
     """Git 回滚：恢复所有变更"""
@@ -1368,8 +1459,7 @@ def stage5_auto_fix(baseline_passed: int, baseline_total: int) -> Dict:
 
     print_step("5.1", f"共发现 {len(issues)} 个问题:")
     for issue_type, stats in sorted(
-        issue_stats.items(),
-        key=lambda x: SEVERITY_ORDER.get(x[1]["severity"], 99)
+        issue_stats.items(), key=lambda x: SEVERITY_ORDER.get(x[1]["severity"], 99)
     ):
         print(f"        - {issue_type}: {stats['count']} 个 ({stats['severity']})")
 
@@ -1381,8 +1471,12 @@ def stage5_auto_fix(baseline_passed: int, baseline_total: int) -> Dict:
 
     # 按修复器顺序执行
     fixer_order = [
-        "repl_import", "bare_except", "silent_exception",
-        "docstring", "import_sort", "format"
+        "repl_import",
+        "bare_except",
+        "silent_exception",
+        "docstring",
+        "import_sort",
+        "format",
     ]
 
     results = {
@@ -1397,14 +1491,15 @@ def stage5_auto_fix(baseline_passed: int, baseline_total: int) -> Dict:
 
         fixer_issues = groups[fixer_name]
         fixer = fixer_manager.get_fixer_for(
-            fixer_issues[0]["type"],
-            fixer_issues[0].get("severity", "LOW")
+            fixer_issues[0]["type"], fixer_issues[0].get("severity", "LOW")
         )
 
         if not fixer:
             continue
 
-        print(f"\n    ┌─ {fixer.display_name} ────────────────────────────────────────┐")
+        print(
+            f"\n    ┌─ {fixer.display_name} ────────────────────────────────────────┐"
+        )
         print(f"    │ 待修复: {len(fixer_issues)} 个问题")
 
         # 批量修复
@@ -1428,7 +1523,9 @@ def stage5_auto_fix(baseline_passed: int, baseline_total: int) -> Dict:
         passed, total_tests, output = run_tests()
 
         if passed >= baseline_passed:
-            print(f"    │ 测试通过: {passed}/{total_tests} (基线: {baseline_passed}/{baseline_total})")
+            print(
+                f"    │ 测试通过: {passed}/{total_tests} (基线: {baseline_passed}/{baseline_total})"
+            )
             print(f"    └──────────────────────────────────────────────────────┘")
             results["fixers"][fixer.name] = {
                 "display_name": fixer.display_name,
@@ -1439,7 +1536,9 @@ def stage5_auto_fix(baseline_passed: int, baseline_total: int) -> Dict:
                 "tests_total": total_tests,
             }
         else:
-            print(f"    │ 测试失败: {passed}/{total_tests} (基线: {baseline_passed}/{baseline_total})")
+            print(
+                f"    │ 测试失败: {passed}/{total_tests} (基线: {baseline_passed}/{baseline_total})"
+            )
             print(f"    │ 执行回滚...")
             git_rollback()
             print(f"    │ 回滚完成")
@@ -1461,6 +1560,7 @@ def stage5_auto_fix(baseline_passed: int, baseline_total: int) -> Dict:
 # 阶段 6: 最终验证测试
 # ============================================================================
 
+
 def stage6_final_tests(baseline_passed: int, baseline_total: int) -> Tuple[int, int]:
     """阶段 6: 最终验证测试"""
     print_header("阶段 6: 最终验证测试")
@@ -1474,7 +1574,9 @@ def stage6_final_tests(baseline_passed: int, baseline_total: int) -> Tuple[int, 
     if passed >= baseline_passed:
         print_step("6.1", "无回归 ✓")
     else:
-        print_step("6.1", f"警告: 发现回归 (减少了 {baseline_passed - passed} 个通过测试)")
+        print_step(
+            "6.1", f"警告: 发现回归 (减少了 {baseline_passed - passed} 个通过测试)"
+        )
 
     return passed, total
 
@@ -1482,6 +1584,7 @@ def stage6_final_tests(baseline_passed: int, baseline_total: int) -> Tuple[int, 
 # ============================================================================
 # 阶段 7: 报告生成与提交
 # ============================================================================
+
 
 def generate_report(
     baseline_passed: int,
@@ -1496,7 +1599,8 @@ def generate_report(
 
     # 统计
     total_fixed = sum(
-        f["fixed"] for f in fix_results.get("fixers", {}).values()
+        f["fixed"]
+        for f in fix_results.get("fixers", {}).values()
         if f["status"] == "success"
     )
     total_attempted = sum(
@@ -1528,9 +1632,13 @@ def generate_report(
     lines.append("")
     lines.append(f"| 阶段 | 通过数 | 总数 | 通过率 |")
     lines.append(f"|------|--------|------|--------|")
-    baseline_rate = (baseline_passed / baseline_total * 100) if baseline_total > 0 else 0
+    baseline_rate = (
+        (baseline_passed / baseline_total * 100) if baseline_total > 0 else 0
+    )
     final_rate = (final_passed / final_total * 100) if final_total > 0 else 0
-    lines.append(f"| 基线 | {baseline_passed} | {baseline_total} | {baseline_rate:.1f}% |")
+    lines.append(
+        f"| 基线 | {baseline_passed} | {baseline_total} | {baseline_rate:.1f}% |"
+    )
     lines.append(f"| 最终 | {final_passed} | {final_total} | {final_rate:.1f}% |")
     diff = final_passed - baseline_passed
     diff_str = f"+{diff}" if diff > 0 else str(diff)
@@ -1602,9 +1710,12 @@ def stage7_report_and_commit(
     # 生成报告
     print_step("7.1", "生成改进报告...")
     report = generate_report(
-        baseline_passed, baseline_total,
-        final_passed, final_total,
-        fix_results, backup_tag
+        baseline_passed,
+        baseline_total,
+        final_passed,
+        final_total,
+        fix_results,
+        backup_tag,
     )
 
     # 替换轮次
@@ -1634,11 +1745,14 @@ def stage7_report_and_commit(
 
     # 统计修复数量
     total_fixed = sum(
-        f["fixed"] for f in fix_results.get("fixers", {}).values()
+        f["fixed"]
+        for f in fix_results.get("fixers", {}).values()
         if f["status"] == "success"
     )
 
-    commit_msg = f"auto: 第 {round_num} 轮自动改进 - 修复 {total_fixed} 个问题 ({VERSION})"
+    commit_msg = (
+        f"auto: 第 {round_num} 轮自动改进 - 修复 {total_fixed} 个问题 ({VERSION})"
+    )
 
     # add
     ret, _, stderr = run_cmd("git add -A", cwd=PROJECT_DIR, timeout=30)
@@ -1648,8 +1762,7 @@ def stage7_report_and_commit(
 
     # commit
     ret, _, stderr = run_cmd(
-        f'git commit -m "{commit_msg}"',
-        cwd=PROJECT_DIR, timeout=30
+        f'git commit -m "{commit_msg}"', cwd=PROJECT_DIR, timeout=30
     )
     if ret != 0:
         print_step("7.3", f"警告: git commit 失败: {stderr}")
@@ -1659,10 +1772,7 @@ def stage7_report_and_commit(
 
     # push
     print_step("7.3", "推送至远程...")
-    ret, stdout, stderr = run_cmd(
-        "git push origin main",
-        cwd=PROJECT_DIR, timeout=60
-    )
+    ret, stdout, stderr = run_cmd("git push origin main", cwd=PROJECT_DIR, timeout=60)
 
     if ret != 0:
         print_step("7.3", f"警告: git push 失败: {stderr}")
@@ -1674,6 +1784,7 @@ def stage7_report_and_commit(
 # ============================================================================
 # 主函数
 # ============================================================================
+
 
 def main():
     """主函数"""
@@ -1703,21 +1814,23 @@ def main():
         fix_results = stage5_auto_fix(baseline_passed, baseline_total)
 
         # 阶段 6: 最终验证
-        final_passed, final_total = stage6_final_tests(
-            baseline_passed, baseline_total
-        )
+        final_passed, final_total = stage6_final_tests(baseline_passed, baseline_total)
 
         # 阶段 7: 报告与提交
         stage7_report_and_commit(
-            baseline_passed, baseline_total,
-            final_passed, final_total,
-            fix_results, backup_tag
+            baseline_passed,
+            baseline_total,
+            final_passed,
+            final_total,
+            fix_results,
+            backup_tag,
         )
 
         # 总结
         elapsed = (datetime.now() - start_time).total_seconds()
         total_fixed = sum(
-            f["fixed"] for f in fix_results.get("fixers", {}).values()
+            f["fixed"]
+            for f in fix_results.get("fixers", {}).values()
             if f["status"] == "success"
         )
 
@@ -1725,7 +1838,9 @@ def main():
         print("=" * 70)
         print(f"  执行完成! 总耗时: {elapsed:.1f} 秒")
         print(f"  修复问题数: {total_fixed}")
-        print(f"  测试结果: {final_passed}/{final_total} (基线: {baseline_passed}/{baseline_total})")
+        print(
+            f"  测试结果: {final_passed}/{final_total} (基线: {baseline_passed}/{baseline_total})"
+        )
         print("=" * 70)
 
     except Exception as e:

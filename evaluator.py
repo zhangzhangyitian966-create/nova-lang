@@ -520,6 +520,7 @@ class Evaluator:
             main_fn = self.env.lookup("main")
             if callable(main_fn) or isinstance(main_fn, (NovaClosure, BuiltinFn)):
                 self._call_fn(main_fn, [])
+        # TODO: 审查此异常处理是否合理，避免静默吞噬异常
         except NameError:
             pass  # 没有 main 函数时忽略
 
@@ -821,6 +822,7 @@ class Evaluator:
                 results.append(result)
             except BreakSignal:
                 break
+            # TODO: 审查此异常处理是否合理，避免静默吞噬异常
             except ContinueSignal:
                 pass
             finally:

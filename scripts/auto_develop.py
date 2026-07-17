@@ -667,6 +667,7 @@ class AutoDeveloper:
                     data = json.load(f)
                     self.completed_tasks = data.get("completed", [])
                     self.failed_tasks = data.get("failed", [])
+            # TODO: 审查此异常处理是否合理，避免静默吞噬异常
             except Exception:
                 # TODO: 细化异常处理，避免静默吞噬
                 pass

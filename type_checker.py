@@ -631,6 +631,7 @@ class TypeChecker:
                     idx = int(expr.field)
                     if 0 <= idx < len(target_ty.elements):
                         return target_ty.elements[idx]
+                # TODO: 审查此异常处理是否合理，避免静默吞噬异常
                 except ValueError:
                     pass
                 raise TypeCheckError(f"元组索引 '{expr.field}' 越界")

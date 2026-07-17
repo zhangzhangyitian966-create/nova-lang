@@ -1008,6 +1008,7 @@ def phase5_testing():
         if report_file.exists():
             try:
                 report_data = json.loads(report_file.read_text())
+            # TODO: 审查此异常处理是否合理，避免静默吞噬异常
             except json.JSONDecodeError:
                 pass
 

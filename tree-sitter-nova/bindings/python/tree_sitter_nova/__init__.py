@@ -18,8 +18,12 @@ except ImportError:
 
 # Try to locate the compiled shared library
 _possible_paths = [
-    os.path.join(os.path.dirname(__file__), "..", "..", "build", "Release", "tree_sitter_nova.so"),
-    os.path.join(os.path.dirname(__file__), "..", "..", "build", "Debug", "tree_sitter_nova.so"),
+    os.path.join(
+        os.path.dirname(__file__), "..", "..", "build", "Release", "tree_sitter_nova.so"
+    ),
+    os.path.join(
+        os.path.dirname(__file__), "..", "..", "build", "Debug", "tree_sitter_nova.so"
+    ),
     os.path.join(os.path.dirname(__file__), "..", "..", "tree_sitter_nova.so"),
     os.path.join(os.path.dirname(__file__), "..", "..", "tree_sitter_nova.dylib"),
 ]
