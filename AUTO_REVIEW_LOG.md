@@ -5906,3 +5906,275 @@
 ---
 
 *本报告由 Nova Auto Review v2.0 自动生成*
+
+---
+
+# 第 602 轮 Nova 深度审查报告 (v2.0)
+
+> 生成时间: 2026-07-17 10:16:49
+> 审查版本: v0.3.0
+
+## 1. 审查概览
+
+| 指标 | 数值 |
+|------|------|
+| 扫描文件数 | 33 |
+| 代码行数 | 19,232 |
+| 函数总数 | 995 |
+| 类总数 | 271 |
+| 发现问题数 | **1003** |
+| CRITICAL | 0 |
+| HIGH | 19 |
+| MEDIUM | 148 |
+| LOW | 836 |
+
+### 严重程度分布
+
+- 🔴 **CRITICAL**: 0 个
+- 🟠 **HIGH**: 19 个
+- 🟡 **MEDIUM**: 148 个
+- 🟢 **LOW**: 836 个
+
+## 2. 代码质量审查
+
+### 2.1 问题类型分布
+
+| 问题类型 | 数量 | 严重级别 |
+|----------|------|----------|
+| no_docstring | 479 | LOW |
+| magic_number | 268 | LOW |
+| print_debug | 82 | LOW |
+| unused_import | 76 | MEDIUM |
+| cyclomatic_complexity | 36 | MEDIUM |
+| sys_path_hack | 19 | HIGH |
+| function_too_long | 18 | MEDIUM |
+| class_too_large | 11 | MEDIUM |
+| inconsistent_naming | 7 | LOW |
+| too_broad_exception | 7 | MEDIUM |
+
+### 2.2 高优先级问题 (CRITICAL + HIGH)
+
+1. **[HIGH] sys_path_hack**
+   - 文件: `backend/compiler_pipeline.py:10`
+   - 描述: sys.path 修改，非标准导入方式
+   - 代码: `sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))`
+
+2. **[HIGH] sys_path_hack**
+   - 文件: `backend/compiler_pipeline.py:11`
+   - 描述: sys.path 修改，非标准导入方式
+   - 代码: `sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "ir"))`
+
+3. **[HIGH] sys_path_hack**
+   - 文件: `backend/cranelift_backend.py:17`
+   - 描述: sys.path 修改，非标准导入方式
+   - 代码: `sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))`
+
+4. **[HIGH] sys_path_hack**
+   - 文件: `backend/lir_c_backend.py:19`
+   - 描述: sys.path 修改，非标准导入方式
+   - 代码: `sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))`
+
+5. **[HIGH] sys_path_hack**
+   - 文件: `backend/lir_c_backend.py:20`
+   - 描述: sys.path 修改，非标准导入方式
+   - 代码: `sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "ir"))`
+
+6. **[HIGH] sys_path_hack**
+   - 文件: `backend/native_backend.py:14`
+   - 描述: sys.path 修改，非标准导入方式
+   - 代码: `sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))`
+
+7. **[HIGH] sys_path_hack**
+   - 文件: `backend/native_backend.py:15`
+   - 描述: sys.path 修改，非标准导入方式
+   - 代码: `sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "ir"))`
+
+8. **[HIGH] sys_path_hack**
+   - 文件: `backend/native_backend.py:509`
+   - 描述: sys.path 修改，非标准导入方式
+   - 代码: `sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))`
+
+9. **[HIGH] sys_path_hack**
+   - 文件: `backend/wasm_backend.py:12`
+   - 描述: sys.path 修改，非标准导入方式
+   - 代码: `sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))`
+
+10. **[HIGH] sys_path_hack**
+   - 文件: `compiler_cli.py:24`
+   - 描述: sys.path 修改，非标准导入方式
+   - 代码: `sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))`
+
+11. **[HIGH] sys_path_hack**
+   - 文件: `ir/hir_lowering.py:12`
+   - 描述: sys.path 修改，非标准导入方式
+   - 代码: `sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))`
+
+12. **[HIGH] sys_path_hack**
+   - 文件: `nova.py:22`
+   - 描述: sys.path 修改，非标准导入方式
+   - 代码: `sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))`
+
+13. **[HIGH] sys_path_hack**
+   - 文件: `tests/test_backends.py:10`
+   - 描述: sys.path 修改，非标准导入方式
+   - 代码: `sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))`
+
+14. **[HIGH] sys_path_hack**
+   - 文件: `tests/test_c_codegen.py:11`
+   - 描述: sys.path 修改，非标准导入方式
+   - 代码: `sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))`
+
+15. **[HIGH] sys_path_hack**
+   - 文件: `tests/test_ir.py:12`
+   - 描述: sys.path 修改，非标准导入方式
+   - 代码: `sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))`
+
+16. **[HIGH] sys_path_hack**
+   - 文件: `tests/test_ir.py:13`
+   - 描述: sys.path 修改，非标准导入方式
+   - 代码: `sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'ir'))`
+
+17. **[HIGH] sys_path_hack**
+   - 文件: `tests/test_native_backend.py:6`
+   - 描述: sys.path 修改，非标准导入方式
+   - 代码: `sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))`
+
+18. **[HIGH] sys_path_hack**
+   - 文件: `tests/test_native_backend.py:7`
+   - 描述: sys.path 修改，非标准导入方式
+   - 代码: `sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'ir'))`
+
+19. **[HIGH] sys_path_hack**
+   - 文件: `tests/test_nova.py:18`
+   - 描述: sys.path 修改，非标准导入方式
+   - 代码: `sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))`
+
+### 2.3 各模块问题统计 (Top 10)
+
+| 模块 | 问题数 |
+|------|--------|
+| tests | 489 |
+| (root) | 274 |
+| backend | 158 |
+| ir | 79 |
+| tree-sitter-nova | 3 |
+
+## 3. 架构审查
+
+### 3.1 模块概览
+
+- 模块总数: **33**
+- 平均依赖数: **1.48**
+- 循环依赖: **0** 个
+- sys.path hack: **19** 处
+
+### 3.2 循环依赖
+
+✅ 未发现循环依赖
+
+### 3.3 耦合度分析
+
+#### 高被依赖模块 (入度 Top 10)
+
+| 模块 | 入度 (被依赖数) |
+|------|----------------|
+| ast_nodes | 8 |
+| errors | 7 |
+| lexer | 6 |
+| parser | 4 |
+| compiler | 3 |
+| environment | 3 |
+| c_codegen | 2 |
+| backend.compiler_pipeline | 2 |
+| evaluator | 2 |
+| nova | 2 |
+
+#### 高依赖模块 (出度 Top 10)
+
+| 模块 | 出度 (依赖数) |
+|------|--------------|
+| tests.test_backends | 10 |
+| tests.test_nova | 8 |
+| nova | 5 |
+| tests.test_c_codegen | 3 |
+| evaluator | 3 |
+| tests.test_ir | 3 |
+| parser | 3 |
+| tests.test_native_backend | 2 |
+| compiler_cli | 2 |
+| vm | 2 |
+
+### 3.5 代码量分布
+
+| 目录 | 文件数 | 行数 | 占比 |
+|------|--------|------|------|
+| (root) | 14 | 8,410 | 43.7% |
+| ir | 6 | 4,546 | 23.6% |
+| tests | 5 | 3,636 | 18.9% |
+| backend | 7 | 2,563 | 13.3% |
+| tree-sitter-nova | 1 | 77 | 0.4% |
+
+## 4. 测试分析
+
+- 测试总数: **403**
+- 通过数: ✅ 403
+- 失败数: ❌ 0
+- 错误数: ⚠️  0
+- 跳过数: ⏭️  0
+- 通过率: **100.0%**
+- 耗时: 0s
+
+## 5. 复杂度分析
+
+- 函数总数: **995**
+- 平均圈复杂度: **3.2**
+- 最高复杂度: **111**
+
+### 5.1 复杂度分布
+
+| 复杂度区间 | 函数数 |
+|------------|--------|
+| 1-5 (简单) | 878 |
+| 6-10 (中等) | 65 |
+| 11-15 (复杂) | 16 |
+| 16-25 (高复杂) | 15 |
+| 25+ (极复杂) | 21 |
+
+### 5.2 Top 10 最复杂函数
+
+| 排名 | 函数 | 文件 | 圈复杂度 |
+|------|------|------|----------|
+| 1 | NovaVM._execute_instruction | `vm.py` | 111 |
+| 2 | TypeChecker.check_expr | `type_checker.py` | 68 |
+| 3 | MIRLowering._lower_expr | `ir/mir_lowering.py` | 55 |
+| 4 | Inlining._try_inline_expr | `ir/pass_manager.py` | 54 |
+| 5 | LIRCBackend._compile_instr | `backend/lir_c_backend.py` | 42 |
+| 6 | CCodeGen._infer_c_type_from_expr | `c_codegen.py` | 42 |
+| 7 | SSAVerifier._get_used_ssa | `ir/pass_manager.py` | 39 |
+| 8 | NativeCodeGen._compile_body | `backend/native_backend.py` | 38 |
+| 9 | Evaluator.eval_expr | `evaluator.py` | 38 |
+| 10 | LIRLowering._lower_instruction | `ir/lir_lowering.py` | 38 |
+
+## 6. 改进建议
+
+### P0 - 立即修复
+
+✅ 无 P0 级问题
+
+### P1 - 高优先级
+
+- 修复 19 个 HIGH 级别问题
+- 移除 sys.path hack，改用标准包结构
+
+### P2 - 中优先级
+
+- 处理 148 个 MEDIUM 级别问题（函数过长、圈复杂度、未使用导入等）
+
+### P3 - 低优先级 / 优化
+
+- 清理 836 个 LOW 级别问题（TODO、命名规范、魔法数字等）
+- 重构 Top 10 复杂函数中 10 个 CC>15 的函数
+
+---
+
+*本报告由 Nova Auto Review v2.0 自动生成*
