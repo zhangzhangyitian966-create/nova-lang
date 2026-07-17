@@ -10,13 +10,10 @@ Cranelift 本身是 Rust 库，Python 无法直接调用。我们采用两种策
 import os
 import platform
 import subprocess
-import sys
 import tempfile
 from typing import Dict, List
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-
-from ir.ir_nodes import (
+from ..ir.ir_nodes import (
     IRType,
     LIRBinOp,
     LIRBranch,

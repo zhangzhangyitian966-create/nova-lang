@@ -10,7 +10,7 @@ Nova 编程语言 - 语法分析器（Parser）
 
 from typing import List, Optional
 
-from ast_nodes import (
+from .ast_nodes import (
     AliasDef,
     Assignment,
     BinaryOp,
@@ -68,8 +68,8 @@ from ast_nodes import (
     VariantDef,
     WhileExpr,
 )
-from errors import ParseError
-from lexer import Token, TokenType
+from .errors import ParseError
+from .lexer import Token, TokenType
 
 
 class Parser:

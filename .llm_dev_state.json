@@ -1,5 +1,5 @@
 {
-  "cycles": 12,
+  "cycles": 13,
   "completed_tasks": [
     "dce_pass",
     "wasmgc_storereg",
@@ -26,10 +26,24 @@
     "fix_c_backend_branch",
     "ssa_verifier_pipeline",
     "fix_mir_ssa",
-    "review_cycle_12"
+    "review_cycle_12",
+    "refactor_sys_path",
+    "mir_type_propagation"
   ],
   "failed_tasks": [],
   "task_history": [
+    {
+      "cycle": 13,
+      "task_id": "refactor_sys_path",
+      "status": "completed",
+      "details": "消除 sys.path hack，标准化包结构：修复 pyproject.toml flat-layout 配置，将 25 个文件的所有内部导入改为相对导入，删除全部 20 处 sys.path.insert；将 nova.py 重命名为 cli.py 解决包名与文件名冲突；顺带修复了被 sys.path hack 长期隐藏的 MIRInstruction 缺少 @dataclass 装饰器导致 result_type 为 Field 对象的预存 bug。工程治理第一优先级任务，为所有后续开发奠定干净的包结构基础。"
+    },
+    {
+      "cycle": 13,
+      "task_id": "mir_type_propagation",
+      "status": "completed",
+      "details": "修复 MIR/LIR 类型传递，消除 UNIT_TYPE 占位：mir_lowering.py 中 28 处 + lir_lowering.py 中 2 处全部修复。新增 ssa_types 字典跟踪 SSA 值类型，Phi 节点从 source SSA 推断类型，for/list 循环辅助变量正确设置为 INT_TYPE/BOOL_TYPE，模式匹配比较设置为 BOOL_TYPE，list_length 返回 INT_TYPE，list_get 从列表类型提取元素类型，ADT 字段访问从 type_defs 查找字段类型。类型信息现在正确贯穿 HIR→MIR→LIR 整个编译管线。"
+    },
     {
       "cycle": 12,
       "task_id": "review_cycle_12",
@@ -181,7 +195,7 @@
       "details": "C 后端接入 IR 管线第一步：新建 backend/lir_c_backend.py 实现 LIRCBackend 类，支持 20+ 种 LIR 指令的 C 代码生成（常量加载、运算、控制流、函数调用、列表/映射/元组/ADT 构建、字段/索引访问、全局变量、panic）；同时完善 LIRBranch 指令结构（补充 true_target/false_target 字段），修复 wasm/cranelift 后端的硬编码分支目标问题"
     }
   ],
-  "current_cycle": 12,
+  "current_cycle": 13,
   "baseline_tests": 403,
   "current_tests": 403,
   "last_review_cycle": 12,
@@ -233,7 +247,7 @@
       "priority": 84,
       "category": "ir",
       "estimated": "4-6 小时",
-      "status": "pending",
+      "status": "completed",
       "depends_on": [
         "fix_mir_ssa"
       ],
@@ -291,7 +305,7 @@
       "priority": 88,
       "category": "engineering",
       "estimated": "1-2 天",
-      "status": "pending",
+      "status": "completed",
       "depends_on": [],
       "reason": "最普遍的技术债（20 处），是架构腐烂的信号。SSA 修复已基本完成，现在是推进工程治理的最佳时机。包结构标准化后，所有后续开发都将受益 [优先级调整: 85 → 88]"
     },

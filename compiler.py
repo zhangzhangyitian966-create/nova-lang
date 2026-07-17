@@ -15,7 +15,7 @@ Nova 编程语言 - 字节码编译器
 
 from typing import Any, Dict, List
 
-from ast_nodes import (
+from .ast_nodes import (
     AliasDef,
     Assignment,
     BinaryOp,

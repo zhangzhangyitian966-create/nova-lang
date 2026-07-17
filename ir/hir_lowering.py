@@ -5,13 +5,7 @@ AST -> HIR 降级器
 这是编译管道的第一步，接收 AST 产出 HIR Module。
 """
 
-import os
-import sys
-
-# 确保能正确导入 ast_nodes
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-
-from ast_nodes import (
+from ..ast_nodes import (
     AliasDef,
     Assignment,
     BinaryOp,
@@ -57,7 +51,7 @@ from ast_nodes import (
     UnitLiteral,
     WhileExpr,
 )
-from ir_nodes import (
+from .ir_nodes import (
     HIRAliasDecl,
     HIRAssignExpr,
     HIRBinaryOp,

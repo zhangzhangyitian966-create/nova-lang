@@ -142,7 +142,7 @@ class ReviewerAgent(BaseAgent):
                 'title': '修复 REPL 测试导入问题',
                 'severity': 'HIGH',
                 'description': '8 个 REPL 测试失败，原因是 _is_incomplete 等函数未从 __init__.py 导出',
-                'file': '__init__.py, nova.py',
+                'file': '__init__.py, cli.py',
                 'type': 'bug_fix',
                 'estimated_effort': '中',
             },

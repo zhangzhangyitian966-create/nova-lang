@@ -15,18 +15,14 @@ Nova 编程语言 - 主入口
 - nova.py --dump-bytecode file.nova  编译并打印字节码
 """
 
-import os
 import sys
 
-# 确保导入路径正确
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from .parser import Parser
 
-from parser import Parser
-
-from errors import NovaError
-from evaluator import Evaluator
-from lexer import Lexer
-from type_checker import TypeChecker
+from .errors import NovaError
+from .evaluator import Evaluator
+from .lexer import Lexer
+from .type_checker import TypeChecker
 
 
 def run_source(
@@ -63,8 +59,8 @@ def run_source(
 
         # 4. 执行
         if use_vm:
-            from compiler import BytecodeCompiler
-            from vm import NovaVM
+            from .compiler import BytecodeCompiler
+            from .vm import NovaVM
 
             compiler = BytecodeCompiler()
             bytecode = compiler.compile(ast)
@@ -101,10 +97,10 @@ def dump_bytecode_file(filepath: str):
         print(f"错误: 文件 '{filepath}' 不存在", file=sys.stderr)
         sys.exit(1)
 
-    from parser import Parser
+    from .parser import Parser
 
-    from compiler import BytecodeCompiler, dump_bytecode
-    from lexer import Lexer
+    from .compiler import BytecodeCompiler, dump_bytecode
+    from .lexer import Lexer
 
     tokens = Lexer(source).tokenize()
     ast = Parser(tokens).parse()
@@ -134,7 +130,7 @@ def run_repl():
     print('输入 "exit" 或按 Ctrl+D 退出')
     print()
 
-    from environment import Environment
+    from .environment import Environment
 
     evaluator = Evaluator(check_types=False)
     buffer = ""

@@ -21,7 +21,7 @@ import math
 import os
 from typing import Any, Callable, Dict, List
 
-from ast_nodes import (
+from .ast_nodes import (
     AliasDef,
     Assignment,
     BinaryOp,
@@ -67,8 +67,8 @@ from ast_nodes import (
     UnitLiteral,
     WhileExpr,
 )
-from environment import Environment
-from errors import BreakSignal, ContinueSignal, RuntimeError_
+from .environment import Environment
+from .errors import BreakSignal, ContinueSignal, RuntimeError_
 
 # ============================================================
 # 运行时值

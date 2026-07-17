@@ -12,14 +12,7 @@ Nova LIR → C 代码生成后端
 - 支持寄存器/栈位之间的数据移动
 """
 
-import os
-import sys
-
-# 确保 ir/ 目录在路径上
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "ir"))
-
-from ir.ir_nodes import (
+from ..ir.ir_nodes import (
     UNIT_TYPE,
     LIRBinOp,
     LIRBranch,

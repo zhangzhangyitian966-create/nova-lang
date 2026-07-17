@@ -5,7 +5,10 @@ HIR -> MIR 降级器
 这是编译管道的第二步。
 """
 
-from ir_nodes import (
+from .ir_nodes import (
+    BOOL_TYPE,
+    INT_TYPE,
+    STRING_TYPE,
     UNIT_TYPE,
     HIRADTConstructor,
     HIRAssignExpr,
@@ -85,10 +88,13 @@ class MIRLowering:
         self.functions = {}
         self.all_blocks = []
         self.loop_stack = []  # 循环栈: [(header_label, exit_label), ...]
+        self.ssa_types = {}  # SSA 名 -> 类型映射，用于 Phi 节点类型推断
+        self.type_defs = {}  # ADT 类型定义
 
     def lower(self, hir_module):
         mir_module = MIRModule(name=hir_module.name)
         mir_module.type_defs = hir_module.type_defs
+        self.type_defs = hir_module.type_defs
 
         for decl in hir_module.declarations:
             if isinstance(decl, HIRLetDecl):
@@ -116,6 +122,8 @@ class MIRLowering:
         ssa = self._new_ssa()
         instr.result_name = ssa
         self.current_block.instructions.append(instr)
+        # 记录 SSA 类型，用于 Phi 节点等的类型推断
+        self.ssa_types[ssa] = instr.result_type
         return ssa
 
     def _replace_ssa_in_instr(self, instr, old_ssa, new_ssa):
@@ -218,6 +226,7 @@ class MIRLowering:
         self.block_counter = 0
         self.env = {}
         self.all_blocks = []
+        self.ssa_types = {}
 
         mir_fn = MIRFunction(hir_fn.name, [], hir_fn.return_type)
 
@@ -230,6 +239,7 @@ class MIRLowering:
             ssa_name = self._new_ssa()
             param_list.append((name, ty, ssa_name))
             self.env[name] = ssa_name
+            self.ssa_types[ssa_name] = ty
 
         mir_fn.params = param_list
 
@@ -280,7 +290,7 @@ class MIRLowering:
             return self._emit(instr)
 
         if isinstance(hir_expr, HIRUnitLiteral):
-            instr = MIRConst(UNIT_TYPE)
+            instr = MIRConst(hir_expr.ir_type)
             instr.value = None
             instr.const_type = "unit"
             return self._emit(instr)
@@ -515,11 +525,18 @@ class MIRLowering:
 
             # 只有当至少有两个不同来源时才需要 Phi
             if len(phi_sources) >= 2:
-                instr = MIRPhi(UNIT_TYPE)  # 类型简化，后续类型检查会处理
+                # 从第一个 source 的 SSA 类型推断 Phi 类型（SSA 保证所有来源类型一致）
+                phi_type = UNIT_TYPE
+                for _, src_ssa in phi_sources:
+                    if src_ssa in self.ssa_types:
+                        phi_type = self.ssa_types[src_ssa]
+                        break
+                instr = MIRPhi(phi_type)
                 instr.sources = phi_sources
                 instr.result_name = self._new_ssa()
                 merge_block.instructions.append(instr)
                 self.env[name] = instr.result_name
+                self.ssa_types[instr.result_name] = phi_type
 
         # --- 表达式结果 Phi（if 表达式本身的值）---
         result_phi_sources = []
@@ -644,11 +661,18 @@ class MIRLowering:
 
             # 至少两个不同来源才需要 Phi
             if len(phi_sources) >= 2:
-                instr = MIRPhi(UNIT_TYPE)
+                # 从第一个 source 的 SSA 类型推断 Phi 类型
+                phi_type = UNIT_TYPE
+                for _, src_ssa in phi_sources:
+                    if src_ssa in self.ssa_types:
+                        phi_type = self.ssa_types[src_ssa]
+                        break
+                instr = MIRPhi(phi_type)
                 instr.sources = phi_sources
                 instr.result_name = self._new_ssa()
                 merge_block.instructions.append(instr)
                 self.env[name] = instr.result_name
+                self.ssa_types[instr.result_name] = phi_type
 
         # --- 表达式结果 Phi（match 表达式本身的值）---
         result_phi_sources = []
@@ -676,7 +700,7 @@ class MIRLowering:
         对于绑定模式和通配符模式，由于总是匹配成功，
         直接在 block 中做绑定/什么都不做，调用方会跳 match_target。
         """
-        from ir_nodes import (
+        from .ir_nodes import (
             HIRBindPattern,
             HIRBoolPattern,
             HIRCharPattern,
@@ -719,7 +743,7 @@ class MIRLowering:
             const_instr.const_type = const_type_map[type(pattern)]
             const_ssa = self._emit(const_instr)
 
-            cmp_instr = MIRBinOp(UNIT_TYPE)  # 结果类型应为 Bool，简化处理
+            cmp_instr = MIRBinOp(BOOL_TYPE)  # 比较结果为布尔类型
             cmp_instr.op = "=="
             cmp_instr.left = value_ssa
             cmp_instr.right = const_ssa
@@ -731,19 +755,19 @@ class MIRLowering:
         if isinstance(pattern, HIRConstructorPattern):
             # 构造器模式：比较 variant tag，匹配成功后递归绑定字段
             # 1. 先比较 variant 名称（通过 ADT 标签访问）
-            tag_instr = MIRFieldAccess(UNIT_TYPE)
+            tag_instr = MIRFieldAccess(STRING_TYPE)  # tag 是 variant 名称（字符串）
             tag_instr.object = value_ssa
             tag_instr.field_name = "tag"
             tag_instr.field_index = 0
             tag_ssa = self._emit(tag_instr)
 
             # 生成 variant 名常量做比较
-            tag_const = MIRConst(UNIT_TYPE)
+            tag_const = MIRConst(STRING_TYPE)
             tag_const.value = pattern.variant_name
             tag_const.const_type = "string"
             tag_const_ssa = self._emit(tag_const)
 
-            tag_cmp = MIRBinOp(UNIT_TYPE)
+            tag_cmp = MIRBinOp(BOOL_TYPE)  # 比较结果为布尔类型
             tag_cmp.op = "=="
             tag_cmp.left = tag_ssa
             tag_cmp.right = tag_const_ssa
@@ -768,8 +792,18 @@ class MIRLowering:
                 field_pat = pattern.field_patterns[j]
                 field_name = f"field{j}"
 
+                # 从 ADT 定义中查找字段类型
+                field_type = UNIT_TYPE
+                if pattern.type_name in self.type_defs:
+                    td = self.type_defs[pattern.type_name]
+                    for variant in td.variants:
+                        if variant.name == pattern.variant_name:
+                            if j < len(variant.fields):
+                                field_type = variant.fields[j][1]
+                            break
+
                 # 提取字段值
-                field_instr = MIRFieldAccess(UNIT_TYPE)
+                field_instr = MIRFieldAccess(field_type)
                 field_instr.object = value_ssa
                 field_instr.field_name = field_name
                 field_instr.field_index = j + 1  # tag 在 index 0
@@ -837,13 +871,13 @@ class MIRLowering:
         iter_ssa = self._lower_expr(hir_expr.iterable, block)
 
         # 调用 list_length 获取长度
-        len_instr = MIRCall(UNIT_TYPE)
+        len_instr = MIRCall(INT_TYPE)  # list_length 返回整数
         len_instr.callee = "list_length"
         len_instr.args = [iter_ssa or ""]
         len_ssa = self._emit(len_instr)
 
         # 索引变量初始值 0
-        idx_init_instr = MIRConst(UNIT_TYPE)
+        idx_init_instr = MIRConst(INT_TYPE)  # 索引是整数
         idx_init_instr.value = 0
         idx_init_instr.const_type = "int"
         idx_init_ssa = self._emit(idx_init_instr)
@@ -855,14 +889,15 @@ class MIRLowering:
         self.current_block = header_block
 
         # 索引变量的 Phi（先占位，body 处理完后补充 source）
-        idx_phi = MIRPhi(UNIT_TYPE)
+        idx_phi = MIRPhi(INT_TYPE)  # 索引是整数类型
         idx_phi.result_name = self._new_ssa()
         idx_phi.sources = []  # 稍后填充
         header_block.instructions.append(idx_phi)
         idx_phi_ssa = idx_phi.result_name
+        self.ssa_types[idx_phi_ssa] = INT_TYPE
 
         # 比较 i < len
-        cmp_instr = MIRBinOp(UNIT_TYPE)
+        cmp_instr = MIRBinOp(BOOL_TYPE)  # 比较结果为布尔类型
         cmp_instr.op = "<"
         cmp_instr.left = idx_phi_ssa
         cmp_instr.right = len_ssa
@@ -877,7 +912,12 @@ class MIRLowering:
         self.current_block = body_block
 
         # 获取当前元素: list_get(iter, i)
-        get_instr = MIRCall(UNIT_TYPE)
+        # 元素类型从可迭代对象的列表类型中提取
+        elem_type = UNIT_TYPE
+        iter_type = hir_expr.iterable.ir_type
+        if iter_type.kind.name == "LIST" and iter_type.params:
+            elem_type = iter_type.params[0]
+        get_instr = MIRCall(elem_type)
         get_instr.callee = "list_get"
         get_instr.args = [iter_ssa or "", idx_phi_ssa]
         elem_ssa = self._emit(get_instr)
@@ -888,10 +928,10 @@ class MIRLowering:
         self._lower_expr(hir_expr.body, body_block)
 
         # 索引递增: i = i + 1
-        inc_instr = MIRBinOp(UNIT_TYPE)
+        inc_instr = MIRBinOp(INT_TYPE)  # 索引递增结果为整数
         inc_instr.op = "+"
         inc_instr.left = idx_phi_ssa
-        inc_right = MIRConst(UNIT_TYPE)
+        inc_right = MIRConst(INT_TYPE)  # 常量 1 是整数
         inc_right.value = 1
         inc_right.const_type = "int"
         inc_right_ssa = self._emit(inc_right)
@@ -953,13 +993,13 @@ class MIRLowering:
         iter_ssa = self._lower_expr(hir_expr.iterable, block)
 
         # 调用 list_length 获取长度
-        len_instr = MIRCall(UNIT_TYPE)
+        len_instr = MIRCall(INT_TYPE)  # list_length 返回整数
         len_instr.callee = "list_length"
         len_instr.args = [iter_ssa or ""]
         len_ssa = self._emit(len_instr)
 
         # 索引变量初始值 0
-        idx_init_instr = MIRConst(UNIT_TYPE)
+        idx_init_instr = MIRConst(INT_TYPE)  # 索引是整数
         idx_init_instr.value = 0
         idx_init_instr.const_type = "int"
         idx_init_ssa = self._emit(idx_init_instr)
@@ -971,11 +1011,12 @@ class MIRLowering:
         self.current_block = header_block
 
         # 索引 Phi（先占位，稍后填充 sources）
-        idx_phi = MIRPhi(UNIT_TYPE)
+        idx_phi = MIRPhi(INT_TYPE)  # 索引是整数类型
         idx_phi.result_name = self._new_ssa()
         idx_phi.sources = []
         header_block.instructions.append(idx_phi)
         idx_phi_ssa = idx_phi.result_name
+        self.ssa_types[idx_phi_ssa] = INT_TYPE
 
         # 列表 Phi（循环携带的列表值）
         list_phi = MIRPhi(hir_expr.ir_type)
@@ -983,9 +1024,10 @@ class MIRLowering:
         list_phi.sources = []
         header_block.instructions.append(list_phi)
         list_phi_ssa = list_phi.result_name
+        self.ssa_types[list_phi_ssa] = hir_expr.ir_type
 
         # 比较 i < len
-        cmp_instr = MIRBinOp(UNIT_TYPE)
+        cmp_instr = MIRBinOp(BOOL_TYPE)  # 比较结果为布尔类型
         cmp_instr.op = "<"
         cmp_instr.left = idx_phi_ssa
         cmp_instr.right = len_ssa
@@ -1000,7 +1042,12 @@ class MIRLowering:
         self.current_block = body_block
 
         # 获取当前元素: list_get(iter, i)
-        get_instr = MIRCall(UNIT_TYPE)
+        # 元素类型从可迭代对象的列表类型中提取
+        elem_type = UNIT_TYPE
+        iter_type = hir_expr.iterable.ir_type
+        if iter_type.kind.name == "LIST" and iter_type.params:
+            elem_type = iter_type.params[0]
+        get_instr = MIRCall(elem_type)
         get_instr.callee = "list_get"
         get_instr.args = [iter_ssa or "", idx_phi_ssa]
         elem_ssa = self._emit(get_instr)
@@ -1035,10 +1082,10 @@ class MIRLowering:
             new_list_ssa = self._emit(append_instr)
 
             # 索引递增
-            inc_instr_t = MIRBinOp(UNIT_TYPE)
+            inc_instr_t = MIRBinOp(INT_TYPE)  # 索引递增结果为整数
             inc_instr_t.op = "+"
             inc_instr_t.left = idx_phi_ssa
-            inc_const_t = MIRConst(UNIT_TYPE)
+            inc_const_t = MIRConst(INT_TYPE)  # 常量 1 是整数
             inc_const_t.value = 1
             inc_const_t.const_type = "int"
             inc_const_ssa_t = self._emit(inc_const_t)
@@ -1050,10 +1097,10 @@ class MIRLowering:
             # --- filter 为假：跳过 append，索引仍然递增 ---
             self.current_block = filter_false_block
 
-            inc_instr_f = MIRBinOp(UNIT_TYPE)
+            inc_instr_f = MIRBinOp(INT_TYPE)  # 索引递增结果为整数
             inc_instr_f.op = "+"
             inc_instr_f.left = idx_phi_ssa
-            inc_const_f = MIRConst(UNIT_TYPE)
+            inc_const_f = MIRConst(INT_TYPE)  # 常量 1 是整数
             inc_const_f.value = 1
             inc_const_f.const_type = "int"
             inc_const_ssa_f = self._emit(inc_const_f)
@@ -1087,10 +1134,10 @@ class MIRLowering:
             new_list_ssa = self._emit(append_instr)
 
             # 索引递增
-            inc_instr = MIRBinOp(UNIT_TYPE)
+            inc_instr = MIRBinOp(INT_TYPE)  # 索引递增结果为整数
             inc_instr.op = "+"
             inc_instr.left = idx_phi_ssa
-            inc_const = MIRConst(UNIT_TYPE)
+            inc_const = MIRConst(INT_TYPE)  # 常量 1 是整数
             inc_const.value = 1
             inc_const.const_type = "int"
             inc_const_ssa = self._emit(inc_const)
@@ -1194,7 +1241,12 @@ class MIRLowering:
                 # 循环中新定义的变量，入口边没有值，跳过（理论上不应该出现）
                 continue
 
-            phi_instr = MIRPhi(UNIT_TYPE)  # 类型简化，后续类型检查会处理
+            # 从入口边的 SSA 类型推断 Phi 类型
+            phi_type = UNIT_TYPE
+            if pre_ssa in self.ssa_types:
+                phi_type = self.ssa_types[pre_ssa]
+
+            phi_instr = MIRPhi(phi_type)
             phi_instr.sources = [
                 (block.label, pre_ssa),  # 入口边：循环前的值
                 (body_block.label, body_ssa),  # 回边：循环体末尾的值
@@ -1202,6 +1254,7 @@ class MIRLowering:
             phi_instr.result_name = self._new_ssa()
             header_block.instructions.insert(phi_offset, phi_instr)
             phi_offset += 1
+            self.ssa_types[phi_instr.result_name] = phi_type
 
             # 6. 替换 header 和 body 中对旧 SSA 的引用为 Phi 结果
             phi_result = phi_instr.result_name

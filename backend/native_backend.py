@@ -7,13 +7,9 @@ Nova 自研原生代码生成后端
 
 import os
 import struct
-import sys
 from typing import Dict, List, Tuple
 
-# 确保项目根目录和 ir 目录在路径上
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "ir"))
-from backend.x86_64 import (
+from .x86_64 import (
     CALLEE_SAVED,
     R8,
     R9,
@@ -39,7 +35,7 @@ from backend.x86_64 import (
     XMM7,
     X86_64Emitter,
 )
-from ir_nodes import (
+from ..ir.ir_nodes import (
     INT_TYPE,
     UNIT_TYPE,
     LIRBinOp,
@@ -506,10 +502,9 @@ class SimpleNativeCompiler:
     def compile_source(self, source: str, output_path: str) -> str:
         """将 Nova 源码编译为 x86_64 ELF"""
         # 1. 前端解析（复用现有）
-        sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-        from parser import Parser
+        from ..parser import Parser
 
-        from lexer import Lexer
+        from ..lexer import Lexer
 
         tokens = Lexer(source).tokenize()
         ast = Parser(tokens).parse()

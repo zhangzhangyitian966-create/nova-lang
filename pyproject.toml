@@ -45,17 +45,16 @@ all = [
 ]
 
 [project.scripts]
-nova = "nova.nova:main"
+nova = "nova.cli:main"
 
 [project.urls]
 Homepage = "https://github.com/nova-lang/nova"
 Documentation = "https://github.com/nova-lang/nova#readme"
 Repository = "https://github.com/nova-lang/nova"
 
-[tool.setuptools.packages.find]
-where = ["."]
-include = ["nova*"]
-exclude = ["tests*", "examples*", "runtime*", "tree-sitter-nova*", "templates*", "__pycache__*"]
+[tool.setuptools]
+packages = ["nova", "nova.ir", "nova.backend"]
+package-dir = {"nova" = "."}
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

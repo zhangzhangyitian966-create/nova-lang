@@ -5,7 +5,7 @@ MIR -> LIR 降级器
 这是编译管道的第三步，输出用于 Cranelift 和 WasmGC 后端。
 """
 
-from ir_nodes import (
+from .ir_nodes import (
     BOOL_TYPE,
     INT_TYPE,
     UNIT_TYPE,
@@ -65,6 +65,7 @@ class LIRLowering:
 
     def __init__(self):
         self.ssa_to_loc = {}
+        self.ssa_types = {}  # SSA 名 -> 类型映射
         self.loc_counter = 0
         self.functions = {}
 
@@ -94,6 +95,7 @@ class LIRLowering:
 
     def _lower_function(self, mir_fn):
         self.ssa_to_loc = {}
+        self.ssa_types = {}
         self.loc_counter = 0
 
         lir_fn = LIRFunction(
@@ -105,6 +107,7 @@ class LIRLowering:
         for param_name, param_type, ssa_name in mir_fn.params:
             loc = self._new_loc()
             self.ssa_to_loc[ssa_name] = loc
+            self.ssa_types[ssa_name] = param_type
             lir_fn.params.append((loc, param_type))
 
         # 第一阶段：为所有 Phi 节点分配目标位置
@@ -116,6 +119,7 @@ class LIRLowering:
                 if isinstance(instr, MIRPhi) and instr.result_name:
                     loc = self._new_loc()
                     self.ssa_to_loc[instr.result_name] = loc
+                    self.ssa_types[instr.result_name] = instr.result_type
                     phi_list.append(
                         (instr.result_name, instr.result_type, instr.sources)
                     )
@@ -197,6 +201,7 @@ class LIRLowering:
         if instr.result_name:
             loc = self._new_loc()
             self.ssa_to_loc[instr.result_name] = loc
+            self.ssa_types[instr.result_name] = instr.result_type
 
         if isinstance(instr, MIRConst):
             lir = LIRLoadConst()
@@ -387,7 +392,8 @@ class LIRLowering:
         if isinstance(term, MIRReturn):
             lir = LIRReturn()
             if term.value and term.value in self.ssa_to_loc:
-                lir.src_locs = [(self.ssa_to_loc.get(term.value, ""), UNIT_TYPE)]
+                ret_type = self.ssa_types.get(term.value, UNIT_TYPE)
+                lir.src_locs = [(self.ssa_to_loc.get(term.value, ""), ret_type)]
             return lir
 
         if isinstance(term, MIRSwitch):
@@ -399,7 +405,8 @@ class LIRLowering:
         if isinstance(term, MIRMatchJump):
             lir = LIRJump(target=term.default_target)
             if term.value:
-                lir.src_locs = [(self.ssa_to_loc.get(term.value, ""), UNIT_TYPE)]
+                val_type = self.ssa_types.get(term.value, UNIT_TYPE)
+                lir.src_locs = [(self.ssa_to_loc.get(term.value, ""), val_type)]
             return lir
 
         if isinstance(term, MIRPanic):

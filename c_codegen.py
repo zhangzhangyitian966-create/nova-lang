@@ -10,7 +10,7 @@ Nova 编程语言 - C 代码生成器
 
 from typing import Dict, List, Optional, Set, Tuple
 
-from ast_nodes import (
+from .ast_nodes import (
     AliasDef,
     Assignment,
     BinaryOp,

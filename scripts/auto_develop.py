@@ -94,7 +94,7 @@ def git_restore():
     """安全回滚 - 只回滚源码，保留脚本自身"""
     # 只回滚已追踪的文件，但保留 scripts/ 目录
     run_cmd(["git", "checkout", "--", "ir/", "backend/", "runtime/", "tests/", "*.py"])
-    run_cmd(["git", "checkout", "--", "nova.py", "lexer.py", "parser.py", "evaluator.py",
+    run_cmd(["git", "checkout", "--", "cli.py", "lexer.py", "parser.py", "evaluator.py",
              "compiler.py", "vm.py", "c_codegen.py", "type_checker.py",
              "ast_nodes.py", "errors.py", "environment.py", "compiler_cli.py"])
 

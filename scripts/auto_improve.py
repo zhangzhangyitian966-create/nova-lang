@@ -213,7 +213,7 @@ class ReplImportFixer(BaseFixer):
         
         export_code = '''
 # REPL 辅助函数导出（供测试使用）
-from .nova import _is_incomplete, _count_indent, _attach_source
+from .cli import _is_incomplete, _count_indent, _attach_source
 '''
         new_content = content.rstrip() + "\n" + export_code
         
@@ -561,7 +561,7 @@ class DocstringFixer(BaseFixer):
         'vm.py': '虚拟机 - 栈式字节码执行引擎',
         'evaluator.py': '解释器 - AST 遍历解释执行',
         'c_codegen.py': 'C 代码生成器 - 将 AST 编译为 C 源代码',
-        'nova.py': 'Nova 主入口 - REPL 和命令行接口',
+        'cli.py': 'Nova 主入口 - REPL 和命令行接口',
         'compiler_cli.py': '编译器 CLI - 编译命令行工具',
         'errors.py': '错误定义 - 所有错误类型和格式化',
         'environment.py': '环境 - 作用域链和变量绑定管理',
@@ -784,7 +784,7 @@ class FixerManager:
         
         # 4. 缺少文档字符串
         core_modules = ['lexer.py', 'parser.py', 'type_checker.py', 'compiler.py',
-                       'vm.py', 'evaluator.py', 'c_codegen.py', 'nova.py',
+                       'vm.py', 'evaluator.py', 'c_codegen.py', 'cli.py',
                        'compiler_cli.py', 'errors.py', 'environment.py', 'ast_nodes.py']
         for filepath in get_python_files():
             filename = os.path.basename(filepath)

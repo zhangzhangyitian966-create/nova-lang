@@ -5,13 +5,10 @@ Nova WasmGC 后端
 
 import os
 import subprocess
-import sys
 import tempfile
 from typing import Dict, List
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-
-from ir.ir_nodes import (
+from ..ir.ir_nodes import (
     INT_TYPE,
     IRType,
     LIRBinOp,

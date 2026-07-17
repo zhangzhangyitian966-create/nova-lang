@@ -19,8 +19,8 @@ import math
 import os
 from typing import Any, Callable, Dict, List
 
-from compiler import Bytecode, FunctionBlock, Instruction, Op
-from errors import RuntimeError_
+from .compiler import Bytecode, FunctionBlock, Instruction, Op
+from .errors import RuntimeError_
 
 # ============================================================
 # 运行时值

@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from enum import Enum, auto
 from typing import List, Optional
 
-from errors import LexerError
+from .errors import LexerError
 
 # ============================================================
 # Token 类型枚举

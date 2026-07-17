@@ -4,16 +4,13 @@ Nova C 代码生成器测试
 
 import unittest
 import os
-import sys
 import tempfile
 import subprocess
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
-
-from lexer import Lexer
-from parser import Parser
-from type_checker import TypeChecker
-from c_codegen import CCodeGen, C_KEYWORDS
+from nova.lexer import Lexer
+from nova.parser import Parser
+from nova.type_checker import TypeChecker
+from nova.c_codegen import CCodeGen, C_KEYWORDS
 
 
 def compile_to_c(source: str) -> str:

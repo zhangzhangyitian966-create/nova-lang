@@ -20,15 +20,12 @@ import subprocess
 import sys
 from typing import Optional
 
-# 确保导入路径正确
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from .parser import Parser
 
-from parser import Parser
-
-from c_codegen import CCodeGen
-from errors import NovaError
-from lexer import Lexer
-from type_checker import TypeChecker
+from .c_codegen import CCodeGen
+from .errors import NovaError
+from .lexer import Lexer
+from .type_checker import TypeChecker
 
 NOVA_VERSION = "0.2.0"
 
@@ -246,7 +243,7 @@ class NovaCompiler:
 
     def compile_wasm(self, source_path: str, output_name: str = None):
         """编译为 WebAssembly (WasmGC)"""
-        from backend.compiler_pipeline import BACKEND_WASM, NovaCompilerPipeline
+        from .backend.compiler_pipeline import BACKEND_WASM, NovaCompilerPipeline
 
         if not os.path.isfile(source_path):
             print(f"错误: 文件 '{source_path}' 不存在", file=sys.stderr)
@@ -271,7 +268,7 @@ class NovaCompiler:
 
     def emit_ir(self, source_path: str, level: str = "lir"):
         """输出 IR（调试用）"""
-        from backend.compiler_pipeline import NovaCompilerPipeline
+        from .backend.compiler_pipeline import NovaCompilerPipeline
 
         if not os.path.isfile(source_path):
             print(f"错误: 文件 '{source_path}' 不存在", file=sys.stderr)
