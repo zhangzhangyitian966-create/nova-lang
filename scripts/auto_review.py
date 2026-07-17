@@ -924,18 +924,22 @@ def phase5_testing():
     log(f"找到 {len(test_files)} 个测试文件")
 
     try:
-        # 运行 pytest
-        cmd = [
+        # 确保 nova 包可用（安装开发模式）
+        install_cmd = [
             sys.executable,
             "-m",
-            "pytest",
+            "pip",
+            "install",
+            "-e",
             str(PROJECT_DIR),
-            "-v",
-            "--tb=short",
-            "--timeout=120",
-            "-x",
-            "--no-header",
+            "--break-system-packages",
+            "-q",
         ]
+        subprocess.run(
+            install_cmd,
+            capture_output=True,
+            timeout=60,
+        )
 
         # 先检查 pytest 是否可用
         check = subprocess.run(
