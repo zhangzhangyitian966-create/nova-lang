@@ -668,6 +668,7 @@ class AutoDeveloper:
                     self.completed_tasks = data.get("completed", [])
                     self.failed_tasks = data.get("failed", [])
             except Exception:
+                # TODO: 细化异常处理，避免静默吞噬
                 pass
 
     def save_progress(self):
@@ -679,6 +680,7 @@ class AutoDeveloper:
         try:
             with open(PROGRESS_FILE, "w") as f:
                 json.dump(data, f, indent=2)
+        # TODO: 细化异常处理，避免静默吞噬
         except Exception:
             pass
 
