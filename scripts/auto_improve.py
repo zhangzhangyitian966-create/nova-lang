@@ -101,8 +101,25 @@ def git_restore():
     run_cmd(["git", "clean", "-fd"])
 
 
+def ensure_pytest():
+    """确保 pytest 已安装"""
+    try:
+        import pytest
+        return True
+    except ImportError:
+        run_cmd([sys.executable, "-m", "pip", "install", "pytest", "--quiet", "--break-system-packages"])
+        try:
+            import pytest
+            return True
+        except ImportError:
+            return False
+
+
 def run_tests():
     """运行测试，返回 (是否通过, 描述, 通过数, 失败数)"""
+    if not ensure_pytest():
+        return False, "pytest not available", 0, 0
+    
     try:
         cmd = [sys.executable, "-m", "pytest"] + TEST_FILES + ["--tb=line", "-q"]
         stdout, stderr, rc = run_cmd(cmd, timeout=120)
@@ -335,7 +352,7 @@ class UnusedImportFixer(BaseFixer):
             from pyflakes.reporter import Reporter
             import io
         except ImportError:
-            run_cmd([sys.executable, "-m", "pip", "install", "pyflakes", "--quiet"])
+            run_cmd([sys.executable, "-m", "pip", "install", "pyflakes", "--quiet", "--break-system-packages"])
             try:
                 from pyflakes.api import check
                 from pyflakes.reporter import Reporter
@@ -612,7 +629,7 @@ class ImportSortFixer(BaseFixer):
         try:
             import isort
         except ImportError:
-            run_cmd([sys.executable, "-m", "pip", "install", "isort", "--quiet"])
+            run_cmd([sys.executable, "-m", "pip", "install", "isort", "--quiet", "--break-system-packages"])
             try:
                 import isort
             except ImportError:
@@ -662,7 +679,7 @@ class FormatFixer(BaseFixer):
         try:
             import black
         except ImportError:
-            run_cmd([sys.executable, "-m", "pip", "install", "black", "--quiet"])
+            run_cmd([sys.executable, "-m", "pip", "install", "black", "--quiet", "--break-system-packages"])
             try:
                 import black
             except ImportError:
