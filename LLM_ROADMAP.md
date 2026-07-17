@@ -1,7 +1,7 @@
 # Nova LLM 智能开发路线图
 
-**更新时间**: 2026-07-16 17:00:00
-**上次评审**: 第 9 轮（路线图评审）
+**更新时间**: 2026-07-17 05:00:00
+**上次评审**: 第 12 轮（路线图评审）
 
 本路线图由 LLM 智能开发系统动态维护。
 
@@ -11,7 +11,7 @@
 |------|------|------|--------|------|------|
 | ✅ | C 后端接入统一 IR 管线 | hard | 95 | 2-3 天 | - |
 | ✅ | C 后端 LIR 代码生成基础框架 | medium | 92 | 1 天 | - |
-| ⏳ | 统一 C 后端（LIR 路径功能对齐） | hard | 78 | 2-3 天 | fix_match_lowering, fix_mir_ssa |
+| ⏳ | 统一 C 后端（LIR 路径功能对齐） | hard | 82 | 2-3 天 | fix_match_lowering, fix_mir_ssa |
 
 ## 🔧 IR 降级 / 正确性
 
@@ -26,8 +26,11 @@
 | ✅ | SSA 分支环境隔离 + 汇合点 Phi 插入 | medium | 88 | 4-6 小时 | fix_match_lowering, fix_mir_loop_vars |
 | ✅ | 修复 while 循环 SSA Phi 插入 | medium | 90 | 4-6 小时 | fix_mir_ssa_branch_env |
 | ✅ | 修复赋值表达式 SSA 语义 | medium | 88 | 3-5 小时 | fix_while_phi |
-| ⏳ | 修复 MIR SSA 构建正确性（循环 Phi + 完整 SSA） | hard | 85 | 2-3 天 | fix_mir_ssa_branch_env |
+| ✅ | 修复 MIR SSA 构建正确性 | hard | 85 | 2-3 天 | fix_match_lowering, fix_mir_loop_vars |
 | ✅ | 实现 MIR SSA 验证 Pass | medium | 86 | 4-6 小时 | fix_while_phi, fix_assign_ssa |
+| ⏳ | 修复 MIR/LIR 类型传递（消除 UNIT_TYPE 占位） | medium | 84 | 4-6 小时 | fix_mir_ssa |
+| ⏳ | for 循环 SSA 规范化（去除 hack 式替换） | medium | 76 | 3-5 小时 | fix_mir_ssa |
+| ⏳ | LIR switch/match 降级补全 | medium | 70 | 3-5 小时 | fix_mir_ssa |
 
 ## 🚀 优化 Pass
 
@@ -45,14 +48,14 @@
 | ✅ | 补充 WasmGC StoreReg 实现 | easy | 65 | 1 小时 | - |
 | ✅ | 修复 LIR C 后端条件分支 | easy | 72 | 30 分钟 | - |
 | ⏳ | 修复 Wasm 后端 Label 实现 | medium | 65 | 3-5 小时 | fix_while_phi |
-| ⏳ | 实现原生后端函数调用 ABI | hard | 40 | 3-5 天 | fix_mir_ssa |
+| ⏳ | 实现原生后端函数调用 ABI | hard | 25 | 3-5 天 | fix_mir_ssa |
 
 ## 🛠️ 工程质量
 
 | 状态 | 任务 | 难度 | 优先级 | 预计 | 依赖 |
 |------|------|------|--------|------|------|
 | ✅ | 修复 Pass 管理器静默错误吞噬 | easy | 70 | 30 分钟 | - |
-| ⏳ | 消除 sys.path hack，标准化包结构 | medium | 85 | 1-2 天 | - |
+| ⏳ | 消除 sys.path hack，标准化包结构 | medium | 88 | 1-2 天 | - |
 | ⏳ | 统一跨 IR 层字段命名 | medium | 80 | 1 天 | refactor_sys_path |
 | ⏳ | 引入 IR Visitor 模式消除重复遍历 | medium | 75 | 6-8 小时 | unify_ir_naming |
 
@@ -64,9 +67,10 @@
 
 ---
 
-**进度**: 18/27 (67%)
-**已完成**: 18
+**进度**: 19/32 (59%)
+**已完成**: 19
 **进行中**: 0
-**待开发**: 9
+**待开发**: 12
+**已废弃**: 1
 
-> 注：第9轮评审后任务池从 25 个扩展到 27 个（新增 3 个高价值任务：while 循环 Phi、赋值 SSA 化、C 后端条件分支修复）。第11轮完成 3 个任务（赋值 SSA 化 + C 后端分支修复 + SSA 验证器接管道），进度从 59% 提升到 67%。
+> 注：第12轮评审后任务池从 27 个扩展到 32 个（新增 3 个 IR 相关任务、1 个后端标记 deprecated）。第12轮是评审轮，无新功能开发。SSA 修复系列任务（分支环境隔离→while Phi→赋值 SSA→验证器）全部完成，标志着 MIR 层核心正确性基本打牢。下一阶段（第13-15轮）聚焦工程治理 + 后端整合。

@@ -1,5 +1,5 @@
 {
-  "cycles": 11,
+  "cycles": 12,
   "completed_tasks": [
     "dce_pass",
     "wasmgc_storereg",
@@ -24,10 +24,18 @@
     "mir_ssa_verifier",
     "fix_assign_ssa",
     "fix_c_backend_branch",
-    "ssa_verifier_pipeline"
+    "ssa_verifier_pipeline",
+    "fix_mir_ssa",
+    "review_cycle_12"
   ],
   "failed_tasks": [],
   "task_history": [
+    {
+      "cycle": 12,
+      "task_id": "review_cycle_12",
+      "status": "completed",
+      "details": "第12轮路线图评审：完成第10-11轮回顾（SSA修复二+三：循环Phi+赋值SSA+验证器接管道）、四维评估、问题总结、下阶段方向规划（第13-15轮：工程治理→后端整合→优化提升）、任务池更新（新增4个任务、调整3个优先级、1个标记deprecated、1个标记完成）"
+    },
     {
       "cycle": 11,
       "task_id": "fix_assign_ssa",
@@ -173,10 +181,10 @@
       "details": "C 后端接入 IR 管线第一步：新建 backend/lir_c_backend.py 实现 LIRCBackend 类，支持 20+ 种 LIR 指令的 C 代码生成（常量加载、运算、控制流、函数调用、列表/映射/元组/ADT 构建、字段/索引访问、全局变量、panic）；同时完善 LIRBranch 指令结构（补充 true_target/false_target 字段），修复 wasm/cranelift 后端的硬编码分支目标问题"
     }
   ],
-  "current_cycle": 11,
+  "current_cycle": 12,
   "baseline_tests": 403,
   "current_tests": 403,
-  "last_review_cycle": 9,
+  "last_review_cycle": 12,
   "tasks": [
     {
       "id": "fix_match_lowering",
@@ -210,12 +218,54 @@
       "priority": 85,
       "category": "ir",
       "estimated": "2-4 天",
-      "status": "pending",
+      "status": "completed",
       "depends_on": [
         "fix_match_lowering",
         "fix_mir_loop_vars"
       ],
-      "reason": "SSA 是所有经典优化的基础。当前 MIR SSA 有明显缺陷（赋值直接覆盖 env、循环头无 Phi），但先修 match 和循环变量这些更直观的正确性问题，再系统性修复 SSA [优先级调整: 88 → 85]"
+      "reason": "SSA 是所有经典优化的基础。已通过拆分子任务渐进式完成：分支环境隔离（第8轮）→ while 循环 Phi（第10轮）→ 赋值 SSA 化（第11轮）→ SSA 验证器（第10-11轮）。核心 SSA 构建基本完成，剩余边缘场景可后续迭代"
+    },
+    {
+      "id": "mir_type_propagation",
+      "name": "修复 MIR/LIR 类型传递（消除 UNIT_TYPE 占位）",
+      "description": "当前 MIR 和 LIR 降级中大量指令的 result_type 使用 UNIT_TYPE 占位，类型信息丢失。需要修复类型从 HIR → MIR → LIR 的正确传递，确保每条指令都有准确的类型信息",
+      "difficulty": "medium",
+      "priority": 84,
+      "category": "ir",
+      "estimated": "4-6 小时",
+      "status": "pending",
+      "depends_on": [
+        "fix_mir_ssa"
+      ],
+      "reason": "深度审计发现 MIR/LIR 降级中类型信息大量丢失（UNIT_TYPE 占位），导致后端各自做类型猜测。类型是编译器的基础，没有正确的类型信息，后续优化和代码生成都建立在不稳固的基础上"
+    },
+    {
+      "id": "for_loop_ssa_normalize",
+      "name": "for 循环 SSA 规范化（去除 hack 式替换）",
+      "description": "当前 for 循环的循环变量 SSA 更新使用手动字符串替换（_replace_ssa_in_block），不够健壮。需要重构为与 while 循环一致的 env 快照 + Phi 插入模式，确保 for 循环和列表推导式的 SSA 语义正确",
+      "difficulty": "medium",
+      "priority": 76,
+      "category": "ir",
+      "estimated": "3-5 小时",
+      "status": "pending",
+      "depends_on": [
+        "fix_mir_ssa"
+      ],
+      "reason": "for 循环目前使用 hack 式的 SSA 字符串替换，而 while 循环使用更健壮的 env 快照模式。两者模式不一致导致维护成本高，且 for 循环的替换方式在复杂嵌套场景下可能出错"
+    },
+    {
+      "id": "lir_switch_match_lowering",
+      "name": "LIR switch/match 降级补全",
+      "description": "当前 MIRSwitch 和 MIRMatchJump 降级为简单的条件跳转，丢失了 switch/match 的多分支语义。需要完善 LIR 层的多分支指令支持，确保各后端能正确生成高效的分支代码",
+      "difficulty": "medium",
+      "priority": 70,
+      "category": "ir",
+      "estimated": "3-5 小时",
+      "status": "pending",
+      "depends_on": [
+        "fix_mir_ssa"
+      ],
+      "reason": "MIR 层已有完整的 switch/match 支持，但降级到 LIR 时退化为简单 if-else，丢失了优化机会。完善后各后端可以基于 switch 语义生成更高效的代码（如跳转表）"
     },
     {
       "id": "mir_ssa_verifier",
@@ -236,14 +286,14 @@
     {
       "id": "refactor_sys_path",
       "name": "消除 sys.path hack，标准化包结构",
-      "description": "重构为标准 Python 包结构，所有导入使用包路径（from nova.ir.ir_nodes import ...），消除 19 处 sys.path.insert，添加完整的 __init__.py 导出",
+      "description": "重构为标准 Python 包结构，所有导入使用包路径（from nova.ir.ir_nodes import ...），消除 20 处 sys.path.insert，添加完整的 __init__.py 导出",
       "difficulty": "medium",
-      "priority": 85,
+      "priority": 88,
       "category": "engineering",
       "estimated": "1-2 天",
       "status": "pending",
       "depends_on": [],
-      "reason": "最普遍的技术债（19 处），导致导入顺序问题、调试困难、包工具无法使用。MIR 正确性修复完成后，用一轮专门做工程治理"
+      "reason": "最普遍的技术债（20 处），是架构腐烂的信号。SSA 修复已基本完成，现在是推进工程治理的最佳时机。包结构标准化后，所有后续开发都将受益 [优先级调整: 85 → 88]"
     },
     {
       "id": "unify_ir_naming",
@@ -278,7 +328,7 @@
       "name": "统一 C 后端（LIR 路径功能对齐）",
       "description": "将 c_codegen.py 中已实现但 lir_c_backend.py 缺失的功能迁移过来：ADT 代码生成、match 编译、闭包实现、列表推导式，待功能对齐后废弃旧的 AST→C 路径",
       "difficulty": "hard",
-      "priority": 78,
+      "priority": 82,
       "category": "architecture",
       "estimated": "2-3 天",
       "status": "pending",
@@ -286,7 +336,7 @@
         "fix_match_lowering",
         "fix_mir_ssa"
       ],
-      "reason": "目前有两套 C 代码生成路径（AST 路径功能完整，LIR 路径仅阶段一），功能重叠增加维护成本。MIR 层正确性修复后，统一到 LIR→C 路径可以让所有后端共享 IR 优化成果"
+      "reason": "目前有两套 C 代码生成路径（AST 路径功能完整，LIR 路径仅阶段一），功能重叠增加维护成本。SSA 基础打好后，统一到 LIR→C 路径可以让所有后端共享 IR 优化成果 [优先级调整: 78 → 82]"
     },
     {
       "id": "fix_wasm_label",
@@ -308,14 +358,14 @@
       "name": "实现原生后端函数调用 ABI",
       "description": "实现 System V AMD64 ABI 参数传递和 call 地址回填",
       "difficulty": "hard",
-      "priority": 40,
+      "priority": 25,
       "category": "backend",
       "estimated": "3-5 天",
-      "status": "pending",
+      "status": "deprecated",
       "depends_on": [
         "fix_mir_ssa"
       ],
-      "reason": "原生后端整体完成度低（代码生成器质量差、寄存器分配摆设、无跳转回填），项目已有 C 后端和 Cranelift 后端两个更可行路径，自研 x86_64 优先级进一步降低"
+      "reason": "原生后端整体完成度极低（代码生成器骨架、无寄存器分配、无跳转回填），项目已有 C 后端、Cranelift 后端和 Wasm 后端三个更可行路径，自研 x86_64 投入产出比太低。保留任务但标记为 deprecated，待其他后端成熟后再评估 [优先级调整: 40 → 25, 状态: pending → deprecated]"
     },
     {
       "id": "licm_pass",
