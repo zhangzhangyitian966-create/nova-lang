@@ -267,7 +267,12 @@ class LIRLowering:
 
         elif isinstance(instr, MIRCall):
             lir = LIRCall()
-            lir.func_name = instr.callee
+            lir.callee = instr.callee  # 使用统一命名
+            # 传递参数位置信息（从 ssa_to_loc 映射）
+            lir.arg_locs = [
+                (self.ssa_to_loc.get(arg_ssa, ""), self.ssa_types.get(arg_ssa, UNIT_TYPE))
+                for arg_ssa in instr.args
+            ]
             lir.arg_count = len(instr.args)
             if instr.result_name:
                 lir.dst_loc = (

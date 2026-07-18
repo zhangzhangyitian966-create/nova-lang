@@ -438,11 +438,34 @@ class HIRLambda(HIRExpr):
 
 @dataclass
 class HIRCallExpr(HIRExpr):
-    """HIR 函数调用"""
+    """HIR 函数调用
+
+    字段命名说明（跨 IR 层统一）:
+    - function / callee: 被调用函数（callee 为统一命名别名）
+    - arguments / args: 参数列表（args 为统一命名别名）
+    """
 
     function: HIRExpr
     arguments: List[HIRExpr]
     ir_type: NovaType = field(default_factory=lambda: NovaType(IRType.TYPE_VAR))
+
+    @property
+    def callee(self) -> HIRExpr:
+        """统一命名别名：被调用函数"""
+        return self.function
+
+    @callee.setter
+    def callee(self, value: HIRExpr):
+        self.function = value
+
+    @property
+    def args(self) -> List[HIRExpr]:
+        """统一命名别名：参数列表"""
+        return self.arguments
+
+    @args.setter
+    def args(self, value: List[HIRExpr]):
+        self.arguments = value
 
 
 @dataclass
@@ -625,10 +648,24 @@ class MIRGlobal:
 
 @dataclass
 class MIRInstruction:
-    """MIR 指令基类"""
+    """MIR 指令基类
+
+    字段命名说明（跨 IR 层统一）:
+    - result_type / ir_type: 指令结果类型（ir_type 为统一命名别名）
+    - result_name: SSA 结果名
+    """
 
     result_type: NovaType = field(default_factory=lambda: NovaType(IRType.UNIT))
     result_name: str = ""  # SSA 名，由 lowering 分配
+
+    @property
+    def ir_type(self) -> NovaType:
+        """统一命名别名：指令结果类型"""
+        return self.result_type
+
+    @ir_type.setter
+    def ir_type(self, value: NovaType):
+        self.result_type = value
 
 
 @dataclass
@@ -925,10 +962,38 @@ class LIRUnaryOp(LIRInstr):
 
 @dataclass
 class LIRCall(LIRInstr):
-    """LIR 函数调用"""
+    """LIR 函数调用
+
+    字段命名说明（跨 IR 层统一）:
+    - func_name / callee: 被调用函数名（callee 为统一命名别名）
+    - arg_count / args: 参数数量（args 为统一命名别名，返回 arg_locs 长度）
+    - arg_locs: 参数位置列表（每个参数的寄存器/栈位置 + 类型）
+    """
 
     func_name: str = ""
     arg_count: int = 0
+    arg_locs: List[Tuple[str, NovaType]] = field(
+        default_factory=list
+    )  # [(reg/stack, type), ...]
+
+    @property
+    def callee(self) -> str:
+        """统一命名别名：被调用函数名"""
+        return self.func_name
+
+    @callee.setter
+    def callee(self, value: str):
+        self.func_name = value
+
+    @property
+    def args(self) -> List[Tuple[str, NovaType]]:
+        """统一命名别名：参数位置列表"""
+        return self.arg_locs
+
+    @args.setter
+    def args(self, value: List[Tuple[str, NovaType]]):
+        self.arg_locs = value
+        self.arg_count = len(value)
 
 
 @dataclass

@@ -1,6 +1,8 @@
 {
-  "cycles": 13,
+  "cycles": 14,
   "completed_tasks": [
+    "unify_ir_naming",
+    "for_loop_ssa_normalize",
     "dce_pass",
     "wasmgc_storereg",
     "fix_break_continue",
@@ -32,6 +34,18 @@
   ],
   "failed_tasks": [],
   "task_history": [
+    {
+      "cycle": 14,
+      "task_id": "unify_ir_naming",
+      "status": "completed",
+      "details": "统一跨 IR 层字段命名：HIRCallExpr 添加 callee/args property 别名（对应 function/arguments）；MIRInstruction 添加 ir_type property 别名（对应 result_type）；LIRCall 添加 callee/arg_locs 字段和 property 别名（对应 func_name/arg_count），新增 arg_locs 传递参数位置信息；lir_lowering.py 中 MIRCall→LIRCall 降级时现在传递完整的参数位置和类型信息。采用渐进式策略（property 别名），保持完全向后兼容，同时为后续代码统一命名奠定基础。"
+    },
+    {
+      "cycle": 14,
+      "task_id": "for_loop_ssa_normalize",
+      "status": "completed",
+      "details": "for 循环 SSA 规范化：重构 _lower_for_expr 和 _lower_list_comprehension，采用与 while 循环一致的 env 快照 + Phi 插入策略。自动检测循环体内被修改的变量，在 header 块开头插入 Phi 节点（入口边 + 所有回边），替换 header 和 body 中的旧 SSA 引用为 Phi 结果。修复了 for 循环和列表推导式中循环体内变量赋值跨迭代不传播的正确性 bug。工程治理 + 正确性修复双重收益。"
+    },
     {
       "cycle": 13,
       "task_id": "refactor_sys_path",
@@ -195,7 +209,7 @@
       "details": "C 后端接入 IR 管线第一步：新建 backend/lir_c_backend.py 实现 LIRCBackend 类，支持 20+ 种 LIR 指令的 C 代码生成（常量加载、运算、控制流、函数调用、列表/映射/元组/ADT 构建、字段/索引访问、全局变量、panic）；同时完善 LIRBranch 指令结构（补充 true_target/false_target 字段），修复 wasm/cranelift 后端的硬编码分支目标问题"
     }
   ],
-  "current_cycle": 13,
+  "current_cycle": 14,
   "baseline_tests": 403,
   "current_tests": 403,
   "last_review_cycle": 12,
@@ -261,7 +275,7 @@
       "priority": 76,
       "category": "ir",
       "estimated": "3-5 小时",
-      "status": "pending",
+      "status": "completed",
       "depends_on": [
         "fix_mir_ssa"
       ],
@@ -317,7 +331,7 @@
       "priority": 80,
       "category": "engineering",
       "estimated": "1 天",
-      "status": "pending",
+      "status": "completed",
       "depends_on": [
         "refactor_sys_path"
       ],

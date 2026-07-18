@@ -1,6 +1,6 @@
 # Nova LLM 智能开发路线图
 
-**更新时间**: 2026-07-17 17:00:00
+**更新时间**: 2026-07-18 05:00:00
 **上次评审**: 第 12 轮（路线图评审）
 
 本路线图由 LLM 智能开发系统动态维护。
@@ -29,7 +29,7 @@
 | ✅ | 修复 MIR SSA 构建正确性 | hard | 85 | 2-3 天 | fix_match_lowering, fix_mir_loop_vars |
 | ✅ | 实现 MIR SSA 验证 Pass | medium | 86 | 4-6 小时 | fix_while_phi, fix_assign_ssa |
 | ✅ | 修复 MIR/LIR 类型传递（消除 UNIT_TYPE 占位） | medium | 84 | 4-6 小时 | fix_mir_ssa |
-| ⏳ | for 循环 SSA 规范化（去除 hack 式替换） | medium | 76 | 3-5 小时 | fix_mir_ssa |
+| ✅ | for 循环 SSA 规范化（去除 hack 式替换） | medium | 76 | 3-5 小时 | fix_mir_ssa |
 | ⏳ | LIR switch/match 降级补全 | medium | 70 | 3-5 小时 | fix_mir_ssa |
 
 ## 🚀 优化 Pass
@@ -56,7 +56,7 @@
 |------|------|------|--------|------|------|
 | ✅ | 修复 Pass 管理器静默错误吞噬 | easy | 70 | 30 分钟 | - |
 | ✅ | 消除 sys.path hack，标准化包结构 | medium | 88 | 1-2 天 | - |
-| ⏳ | 统一跨 IR 层字段命名 | medium | 80 | 1 天 | refactor_sys_path |
+| ✅ | 统一跨 IR 层字段命名 | medium | 80 | 1 天 | refactor_sys_path |
 | ⏳ | 引入 IR Visitor 模式消除重复遍历 | medium | 75 | 6-8 小时 | unify_ir_naming |
 
 ## 🧪 测试完善
@@ -67,10 +67,10 @@
 
 ---
 
-**进度**: 21/32 (66%)
-**已完成**: 21
+**进度**: 23/32 (72%)
+**已完成**: 23
 **进行中**: 0
-**待开发**: 10
+**待开发**: 8
 **已废弃**: 1
 
-> 注：第13轮完成 2 个工程治理任务（包结构标准化 + 类型传递修复）。工程治理开局顺利，技术债最高的两个问题已解决。下一阶段（第14轮）继续推进命名统一和 Visitor 模式。
+> 注：第14轮完成 2 个任务（统一跨 IR 层字段命名 + for 循环 SSA 规范化）。工程治理第二阶段完成：命名统一打基础，for 循环 SSA 与 while 循环策略统一，修复了循环体内变量赋值跨迭代不传播的正确性 bug。下一阶段（第15轮）推进 Visitor 模式和/或 LIR switch/match 降级补全。
