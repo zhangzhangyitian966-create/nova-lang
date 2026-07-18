@@ -1,3 +1,8 @@
+"""
+Nova test_native_backend 模块
+
+本模块是 Nova 编程语言的组成部分。
+"""
 import unittest
 import os
 import struct
