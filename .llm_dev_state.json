@@ -1,5 +1,5 @@
 {
-  "cycles": 14,
+  "cycles": 15,
   "completed_tasks": [
     "unify_ir_naming",
     "for_loop_ssa_normalize",
@@ -30,10 +30,17 @@
     "fix_mir_ssa",
     "review_cycle_12",
     "refactor_sys_path",
-    "mir_type_propagation"
+    "mir_type_propagation",
+    "review_cycle_15"
   ],
   "failed_tasks": [],
   "task_history": [
+    {
+      "cycle": 15,
+      "task_id": "review_cycle_15",
+      "status": "completed",
+      "details": "第15轮路线图评审：完成第13-14轮回顾（工程治理一+二：包结构标准化+类型传递修复+命名统一+for循环SSA规范化）、四维评估、问题总结、下阶段方向规划（第16-18轮：SSA加固→Visitor重构→后端整合）、任务池更新（新增5个任务、调整3个优先级、补充依赖关系）"
+    },
     {
       "cycle": 14,
       "task_id": "unify_ir_naming",
@@ -93,126 +100,12 @@
       "task_id": "mir_ssa_verifier",
       "status": "completed",
       "details": "实现基础版 SSA 验证器 Pass（SSAVerifier）：支持 5 项检查（基本块终结指令、SSA 单赋值、使用前定义、Phi 节点位置、Phi source 块前驱验证）；手动测试验证了正确和错误场景，能正确检测未定义 SSA 名等问题"
-    },
-    {
-      "cycle": 9,
-      "task_id": "review_cycle_9",
-      "status": "completed",
-      "details": "第9轮路线图评审：完成第7-8轮回顾、四维评估、问题总结、下阶段方向规划（第10-12轮聚焦SSA修复→工程治理→后端整合）、任务池更新（新增3个任务、调整2个优先级、补充依赖关系）"
-    },
-    {
-      "cycle": 8,
-      "task_id": "fix_mir_ssa_branch_env",
-      "status": "completed",
-      "details": "SSA 分支环境隔离 + 汇合点 Phi 插入：修复 _lower_if_expr 和 _lower_match_expr 中的 env 全局污染问题，每个分支/arm 在独立 env 上下文中运行；在 merge 块为所有被分支修改的变量自动创建 Phi 节点。这是 SSA 构建修复的第一步，覆盖最常见的 if/match 分支场景。"
-    },
-    {
-      "cycle": 7,
-      "task_id": "fix_match_lowering",
-      "status": "completed",
-      "details": "完善 MIR match 降级：从'所有 arm 无条件顺序跳转'的假实现，改为级联比较（if-elseif 链）的真正模式匹配。支持 5 种常量模式（Int/Float/String/Bool/Char）、通配符模式（_）、绑定模式（x）；每个 arm 独立环境避免变量泄漏；支持 guard 条件的 fall-through 语义；新增 _emit_pattern_const 辅助方法"
-    },
-    {
-      "cycle": 7,
-      "task_id": "fix_mir_loop_vars",
-      "status": "completed",
-      "details": "修复 MIR 循环变量绑定：(1) for 循环：从'直接把 iterable 当布尔值判断'改为'索引迭代 + list_length + idx < len 条件'，循环变量正确绑定到当前元素（iter[idx]）而非整个 iterable；(2) 列表推导式：同样修复循环变量绑定，修复 Phi 节点来源错误（从 header_block 改为最后更新 list 的块）；两者均在循环头插入 idx 的 Phi 节点，支持循环变量 SSA 更新"
-    },
-    {
-      "cycle": 6,
-      "task_id": "review_cycle_6",
-      "status": "completed",
-      "details": "第6轮路线图评审：完成第4-5轮回顾、四维评估、问题总结、下阶段方向规划、任务池重构（新增5个任务、调整4个优先级、补充依赖关系）"
-    },
-    {
-      "cycle": 5,
-      "task_id": "c_backend_pipeline",
-      "status": "completed",
-      "details": "C 后端接入统一 IR 管线：修改 compiler_pipeline.py，将 C 后端从直接使用 CCodeGen(ast) 改为使用 LIRCBackend(lir_module)，C 后端现在走完整的 HIR→MIR→LIR 优化管线；同时修复了 LIRInstr 基类缺少 @dataclass 装饰器导致 src_locs/dst_loc 为 Field 对象的 bug"
-    },
-    {
-      "cycle": 5,
-      "task_id": "fix_phi_lowering",
-      "status": "completed",
-      "details": "修复 LIR Phi 节点降级：从'只取第一个 source 生成 LIRLoadReg'改为正确的'前驱块末尾拷贝'模式——两阶段处理：先为所有 Phi 分配目标位置，再在每个前驱块的终结指令前插入 LIRLoadReg 拷贝指令，确保控制流汇合时值选择语义正确；新增 _get_successor_blocks 辅助方法获取终结指令的后继块"
-    },
-    {
-      "cycle": 5,
-      "task_id": "cse_pass",
-      "status": "completed",
-      "details": "实现 MIR 层公共子表达式消除 Pass (CSE)：基于值编号的局部 CSE，支持 MIRBinOp（含可交换运算处理）、MIRUnaryOp、MIRFieldAccess、MIRIndexAccess、MIRTupleBuild 五类纯运算指令；包含完整的操作数替换逻辑（12种指令类型 + 4种终结指令），消除重复计算后自动更新所有引用"
-    },
-    {
-      "cycle": 1,
-      "task_id": "dce_pass",
-      "status": "completed",
-      "details": "实现了完整的死代码消除 Pass，包括反向扫描、使用变量收集、副作用判断，支持 20+ 种 HIR 节点递归消除"
-    },
-    {
-      "cycle": 1,
-      "task_id": "wasmgc_storereg",
-      "status": "completed",
-      "details": "实现了 WasmGC 后端 LIRStoreReg → local.set 代码生成"
-    },
-    {
-      "cycle": 1,
-      "task_id": "fix_break_continue",
-      "status": "completed",
-      "details": "实现了 MIR 层循环栈追踪，break/continue 正确降级为 MIRJump 到 exit/header 块"
-    },
-    {
-      "cycle": 2,
-      "task_id": "fix_native_test",
-      "status": "completed",
-      "details": "修复了 native_backend.py 的导入路径（nova.backend.x86_64 → backend.x86_64），解锁 38 个原生后端测试"
-    },
-    {
-      "cycle": 2,
-      "task_id": "fix_list_comprehension",
-      "status": "completed",
-      "details": "实现了列表推导式 MIR 降级：从空 stub 改为 for 循环 + MIRListAppend + Phi 节点合并的 CFG 结构，新增 MIRListAppend 和 LIRListAppend 指令"
-    },
-    {
-      "cycle": 2,
-      "task_id": "inlining_pass",
-      "status": "completed",
-      "details": "重写了 Inlining Pass：修复字段名 bug（fn_expr→function, args→arguments, stmts→exprs），实现真正的函数内联（参数替换、递归遍历 20+ 表达式类型）"
-    },
-    {
-      "cycle": 2,
-      "task_id": "fix_dce_field_names",
-      "status": "completed",
-      "details": "修复了 DeadCodeElimination 中大量字段名不匹配的 bug：callee→function, args→arguments, items→elements, pairs→entries, collection→object, scrutinee→value, expr→result_expr, left/right→stages"
-    },
-    {
-      "cycle": 3,
-      "task_id": "review_cycle_3",
-      "status": "completed",
-      "details": "第3轮路线图评审：完成三轮回顾、四维评估、问题总结、下阶段方向规划、任务池重构"
-    },
-    {
-      "cycle": 4,
-      "task_id": "fix_pass_error_handling",
-      "status": "completed",
-      "details": "修复 Pass 管理器 3 处静默错误吞噬：新增 _record_pass_failure 方法记录失败统计，支持 verbose 模式输出详细堆栈，默认模式通过 warnings.warn 发出警告；新增 set_verbose() 和 get_failure_stats() 公共 API"
-    },
-    {
-      "cycle": 4,
-      "task_id": "fix_lir_mapbuild",
-      "status": "completed",
-      "details": "修复 MIRMapBuild 错误降级为 LIRBuildList 的 bug：新增 LIRBuildMap 指令节点（entry_count 字段），修复 lir_lowering.py 中的降级逻辑，在 wasm_backend 和 cranelift_backend 中添加 LIRBuildMap 支持（调用 nova_map_new）"
-    },
-    {
-      "cycle": 4,
-      "task_id": "c_backend_lir_start",
-      "status": "completed",
-      "details": "C 后端接入 IR 管线第一步：新建 backend/lir_c_backend.py 实现 LIRCBackend 类，支持 20+ 种 LIR 指令的 C 代码生成（常量加载、运算、控制流、函数调用、列表/映射/元组/ADT 构建、字段/索引访问、全局变量、panic）；同时完善 LIRBranch 指令结构（补充 true_target/false_target 字段），修复 wasm/cranelift 后端的硬编码分支目标问题"
     }
   ],
-  "current_cycle": 14,
+  "current_cycle": 15,
   "baseline_tests": 403,
   "current_tests": 403,
-  "last_review_cycle": 12,
+  "last_review_cycle": 15,
   "tasks": [
     {
       "id": "fix_match_lowering",
@@ -282,18 +175,73 @@
       "reason": "for 循环目前使用 hack 式的 SSA 字符串替换，而 while 循环使用更健壮的 env 快照模式。两者模式不一致导致维护成本高，且 for 循环的替换方式在复杂嵌套场景下可能出错"
     },
     {
+      "id": "extract_loop_ssa",
+      "name": "提取循环 SSA 通用方法（消除三重重复）",
+      "description": "将 _lower_for_expr、_lower_while_expr、_lower_list_comprehension 中重复的 SSA Phi 插入逻辑提取为通用方法 _insert_loop_phis(pre_env, header_block, latch_blocks, latch_envs)，消除约 200 行重复代码",
+      "difficulty": "medium",
+      "priority": 88,
+      "category": "engineering",
+      "estimated": "3-5 小时",
+      "status": "pending",
+      "depends_on": [
+        "for_loop_ssa_normalize"
+      ],
+      "reason": "深度代码审计发现循环 SSA 构建在三个地方重复了几乎相同的逻辑（约200行），维护成本高且容易出现一处修了另一处忘修的情况。提取通用方法是工程治理的核心任务，也是修复列表推导式 SSA bug 的前置条件。[新增任务]"
+    },
+    {
+      "id": "fix_listcomp_ssa_latch",
+      "name": "修复列表推导式 latch 块 SSA 替换不完整",
+      "description": "修复 _lower_list_comprehension 中第 1258-1263 行的 pass 占位：当前只手动处理了 filter_block 和 filter_false_block，没有遍历所有 latch 块进行 SSA 替换。当循环体内有额外回边（如 break/continue）时，Phi 节点的 SSA 替换不完整",
+      "difficulty": "medium",
+      "priority": 85,
+      "category": "ir",
+      "estimated": "2-4 小时",
+      "status": "pending",
+      "depends_on": [
+        "extract_loop_ssa"
+      ],
+      "reason": "深度代码审计发现的已知 SSA 正确性 bug：列表推导式的 latch 块 SSA 替换有 pass 占位注释，明确说明'本应做但没做'。带 filter 的列表推导式中，如果循环体修改了外部变量，可能产生未定义的 SSA 名引用。[新增任务]"
+    },
+    {
+      "id": "fix_constant_folding_class",
+      "name": "修复 ConstantFolding 的 __class__ 突变问题",
+      "description": "ConstantFolding 中使用 expr.__class__ = HIRIntLiteral 直接修改对象类，这是危险的 Python 黑魔法。当字段布局不同时会导致属性访问异常。改为创建新节点并替换引用",
+      "difficulty": "easy",
+      "priority": 70,
+      "category": "engineering",
+      "estimated": "1-2 小时",
+      "status": "pending",
+      "depends_on": [],
+      "reason": "深度代码审计发现的代码质量问题：__class__ 直接突变是危险的实现方式，可能导致难以调试的属性错误。低成本高收益的代码质量修复。[新增任务]"
+    },
+    {
+      "id": "ssa_verifier_tests",
+      "name": "为 SSA 验证器编写完整测试",
+      "description": "为 SSAVerifier 编写专项测试用例，覆盖：基本块终结指令检查、SSA 单赋值检查、使用前定义检查、Phi 节点位置检查、Phi source 块前驱验证。同时添加循环 SSA 正确性的端到端测试",
+      "difficulty": "easy",
+      "priority": 78,
+      "category": "test",
+      "estimated": "2-3 小时",
+      "status": "pending",
+      "depends_on": [
+        "mir_ssa_verifier",
+        "extract_loop_ssa"
+      ],
+      "reason": "SSA 验证器已上线但完全没有测试覆盖，无法防止回归。添加测试后可以确保 SSA 构建的正确性在后续开发中不被破坏，是质量保障的基础设施。[新增任务]"
+    },
+    {
       "id": "lir_switch_match_lowering",
       "name": "LIR switch/match 降级补全",
       "description": "当前 MIRSwitch 和 MIRMatchJump 降级为简单的条件跳转，丢失了 switch/match 的多分支语义。需要完善 LIR 层的多分支指令支持，确保各后端能正确生成高效的分支代码",
       "difficulty": "medium",
-      "priority": 70,
+      "priority": 60,
       "category": "ir",
       "estimated": "3-5 小时",
       "status": "pending",
       "depends_on": [
         "fix_mir_ssa"
       ],
-      "reason": "MIR 层已有完整的 switch/match 支持，但降级到 LIR 时退化为简单 if-else，丢失了优化机会。完善后各后端可以基于 switch 语义生成更高效的代码（如跳转表）"
+      "reason": "MIR 层已有完整的 switch/match 支持，但降级到 LIR 时退化为简单 if-else，丢失了优化机会。完善后各后端可以基于 switch 语义生成更高效的代码（如跳转表）。[优先级调整: 70 → 60，优先级相对低于 SSA 加固和 Visitor 重构]"
     },
     {
       "id": "mir_ssa_verifier",
@@ -342,36 +290,52 @@
       "name": "引入 IR Visitor 模式消除重复遍历",
       "description": "定义 HIRVisitor/HIRTransformer 基类，重构 ConstantFolding、Inlining、DeadCodeElimination 等 Pass 继承自 Visitor，消除 6 个重复的递归遍历方法（约 500 行重复代码）",
       "difficulty": "medium",
-      "priority": 75,
+      "priority": 82,
       "category": "engineering",
       "estimated": "6-8 小时",
       "status": "pending",
       "depends_on": [
-        "unify_ir_naming"
+        "unify_ir_naming",
+        "fix_constant_folding_class"
       ],
-      "reason": "Pass 管理器中有 6 个方法重复实现了 HIR 表达式的递归匹配，约 500 行重复代码。引入 Visitor 模式后，每个 Pass 只需关注自身逻辑，大幅降低维护成本"
+      "reason": "Pass 管理器中有 6 个方法重复实现了 HIR 表达式的递归匹配，约 500 行重复代码。引入 Visitor 模式后，每个 Pass 只需关注自身逻辑，大幅降低维护成本。[优先级调整: 75 → 82，提升为第17轮核心任务]"
     },
     {
       "id": "unify_c_backend",
       "name": "统一 C 后端（LIR 路径功能对齐）",
       "description": "将 c_codegen.py 中已实现但 lir_c_backend.py 缺失的功能迁移过来：ADT 代码生成、match 编译、闭包实现、列表推导式，待功能对齐后废弃旧的 AST→C 路径",
       "difficulty": "hard",
-      "priority": 82,
+      "priority": 80,
       "category": "architecture",
       "estimated": "2-3 天",
       "status": "pending",
       "depends_on": [
         "fix_match_lowering",
-        "fix_mir_ssa"
+        "fix_mir_ssa",
+        "refactor_visitor_pattern"
       ],
-      "reason": "目前有两套 C 代码生成路径（AST 路径功能完整，LIR 路径仅阶段一），功能重叠增加维护成本。SSA 基础打好后，统一到 LIR→C 路径可以让所有后端共享 IR 优化成果 [优先级调整: 78 → 82]"
+      "reason": "目前有两套 C 代码生成路径（AST 路径功能完整，LIR 路径仅阶段一），功能重叠增加维护成本。SSA 基础打好后，统一到 LIR→C 路径可以让所有后端共享 IR 优化成果。[优先级调整: 82 → 80，依赖 Visitor 重构后再推进，列为第18轮任务]"
+    },
+    {
+      "id": "unify_backend_mappings",
+      "name": "统一后端类型/操作符映射表",
+      "description": "提取共享的内置函数映射表、操作符映射表、类型映射表到公共模块（如 backend/common.py），消除 C/Wasm/Cranelift 三个后端的重复映射代码（约150行）",
+      "difficulty": "easy",
+      "priority": 68,
+      "category": "engineering",
+      "estimated": "2-3 小时",
+      "status": "pending",
+      "depends_on": [
+        "unify_ir_naming"
+      ],
+      "reason": "深度代码审计发现三个后端各自维护了类型映射表、操作符映射表、内置函数名映射表，结构完全相同（约150行重复）。提取到公共模块可降低维护成本，减少一处改了另一处忘改的 bug。[新增任务]"
     },
     {
       "id": "fix_wasm_label",
       "name": "修复 Wasm 后端 Label 实现",
       "description": "将 Wasm 后端的 LIRLabel 从错误的 (block) 实现改为正确的结构化控制流：循环用 loop、向前跳转用 block、正确处理 br/br_if 的嵌套层级",
       "difficulty": "medium",
-      "priority": 65,
+      "priority": 62,
       "category": "backend",
       "estimated": "3-5 小时",
       "status": "pending",
@@ -379,7 +343,7 @@
         "fix_mir_ssa",
         "fix_while_phi"
       ],
-      "reason": "深度审计发现 Wasm 后端将 LIRLabel 实现为 Wasm block，但 block 只能向前跳出不能跳入，循环回跳完全失效。需要重构为结构化控制流"
+      "reason": "深度审计发现 Wasm 后端将 LIRLabel 实现为 Wasm block，但 block 只能向前跳出不能跳入，循环回跳完全失效。需要重构为结构化控制流。[优先级调整: 65 → 62]"
     },
     {
       "id": "native_call_abi",
@@ -407,7 +371,8 @@
       "depends_on": [
         "fix_mir_ssa",
         "cse_pass",
-        "mir_ssa_verifier"
+        "mir_ssa_verifier",
+        "ssa_verifier_tests"
       ],
       "reason": "高级优化，依赖 SSA、循环分析和验证机制。当前阶段优先级低，先打好基础"
     },
