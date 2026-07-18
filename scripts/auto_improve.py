@@ -66,10 +66,26 @@ CORE_MODULES = [
     "type_checker.py",
     "vm.py",
     "cli.py",
+    "compiler_cli.py",
+    "__main__.py",
     "ir/__init__.py",
     "ir/ir_nodes.py",
+    "ir/hir_lowering.py",
+    "ir/mir_lowering.py",
+    "ir/lir_lowering.py",
+    "ir/pass_manager.py",
     "backend/__init__.py",
     "backend/compiler_pipeline.py",
+    "backend/cranelift_backend.py",
+    "backend/lir_c_backend.py",
+    "backend/native_backend.py",
+    "backend/wasm_backend.py",
+    "backend/x86_64.py",
+    "tests/test_nova.py",
+    "tests/test_c_codegen.py",
+    "tests/test_ir.py",
+    "tests/test_backends.py",
+    "tests/test_native_backend.py",
 ]
 
 # 严重程度等级
@@ -247,8 +263,22 @@ def stage3_create_backup() -> Optional[str]:
 # ============================================================================
 
 
+def ensure_pytest() -> bool:
+    """确保 pytest 可用，不可用则安装"""
+    try:
+        import pytest
+        return True
+    except ImportError:
+        print_step("dep", "安装 pytest...")
+        ret, _, _ = run_cmd("pip install pytest --break-system-packages -q", timeout=60)
+        return ret == 0
+
+
 def run_tests() -> Tuple[int, int, str]:
     """运行测试套件，返回 (passed, total, output)"""
+    if not ensure_pytest():
+        return 0, 0, "pytest not available"
+
     test_paths = " ".join(TEST_FILES)
     # PYTHONPATH 指向项目父目录，因为 package-dir = {"nova" = "."}
     cmd = f"PYTHONPATH={PROJECT_DIR.parent} python3 -m pytest {test_paths} --tb=line -q"
@@ -453,70 +483,90 @@ def discover_bare_except_issues(files: List[Path]) -> List[Dict]:
 
 
 def discover_silent_exception_issues(files: List[Path]) -> List[Dict]:
-    """发现静默异常吞噬 (except Exception: pass)"""
+    """发现静默异常吞噬 (except X: pass 或 except X as e: pass)"""
     issues = []
 
     for f in files:
-        try:
-            content = f.read_text()
-            lines = content.split("\n")
+        # 跳过测试文件和 scripts 目录
+        rel_path = str(f.relative_to(PROJECT_DIR))
+        if rel_path.startswith("tests/") or rel_path.startswith("scripts/"):
+            continue
 
-            for i, line in enumerate(lines):
-                # 匹配 except Exception: pass (单行)
-                if re.match(r"^\s*except\s+(\w+\.)*Exception\s*:\s*pass\s*$", line):
-                    rel_path = str(f.relative_to(PROJECT_DIR))
+        try:
+            content_f = f.read_text()
+            lines_f = content_f.split("\n")
+
+            for j, line_j in enumerate(lines_f):
+                # 跳过已有 TODO 注释标记的（前一行有 TODO）
+                has_todo = False
+                if j > 0:
+                    prev = lines_f[j - 1].strip()
+                    if prev.startswith("#") and "TODO" in prev:
+                        has_todo = True
+                if has_todo:
+                    continue
+
+                # 匹配单行: except X: pass
+                if re.match(r"^\s*except\s+\S.*:\s*pass\s*$", line_j):
                     issues.append(
                         {
                             "type": "too_broad_exception",
                             "severity": "HIGH",
                             "file": rel_path,
-                            "line": i + 1,
-                            "description": f"静默异常吞噬 (第 {i+1} 行)",
-                            "details": {"line": i + 1, "single_line": True},
+                            "line": j + 1,
+                            "description": f"静默异常吞噬 (第 {j+1} 行)",
+                            "details": {"line": j + 1, "single_line": True},
                         }
                     )
                     continue
 
-                # 匹配多行: except Exception: 后面跟着只有 pass 的块
-                if re.match(r"^\s*except\s+(\w+\.)*Exception\s*:\s*$", line):
+                # 匹配多行: except X: 后面跟着只有 pass 的块
+                if re.match(r"^\s*except\s+\S.*:\s*$", line_j):
                     # 检查下一行是否只有 pass
-                    if i + 1 < len(lines):
-                        next_line = lines[i + 1]
+                    if j + 1 < len(lines_f):
+                        next_line = lines_f[j + 1]
                         if re.match(r"^\s+pass\s*$", next_line):
-                            # 确认这是一个只有 pass 的块
-                            # 检查再下一行缩进是否回到 except 级别
-                            if (
-                                i + 2 >= len(lines)
-                                or not re.match(
-                                    r"^\s{"
-                                    + str(len(next_line) - len(next_line.lstrip()))
-                                    + r",}\S",
-                                    lines[i + 2],
-                                )
-                                if i + 2 < len(lines)
-                                else True
-                            ):
-                                rel_path = str(f.relative_to(PROJECT_DIR))
+                            pass_indent = len(next_line) - len(next_line.lstrip())
+                            if j + 2 >= len(lines_f):
                                 issues.append(
                                     {
                                         "type": "too_broad_exception",
                                         "severity": "HIGH",
                                         "file": rel_path,
-                                        "line": i + 1,
-                                        "description": f"静默异常吞噬 (第 {i+1} 行)",
+                                        "line": j + 1,
+                                        "description": f"静默异常吞噬 (第 {j+1} 行)",
                                         "details": {
-                                            "line": i + 1,
+                                            "line": j + 1,
                                             "single_line": False,
                                         },
                                     }
                                 )
+                            else:
+                                next_next = lines_f[j + 2]
+                                next_next_indent = (
+                                    len(next_next) - len(next_next.lstrip())
+                                    if next_next.strip()
+                                    else 999
+                                )
+                                if next_next_indent <= pass_indent:
+                                    issues.append(
+                                        {
+                                            "type": "too_broad_exception",
+                                            "severity": "HIGH",
+                                            "file": rel_path,
+                                            "line": j + 1,
+                                            "description": f"静默异常吞噬 (第 {j+1} 行)",
+                                            "details": {
+                                                "line": j + 1,
+                                                "single_line": False,
+                                            },
+                                        }
+                                    )
 
         except Exception:
             continue
 
     return issues
-
-
 def discover_docstring_issues() -> List[Dict]:
     """发现缺少文档字符串的核心模块"""
     issues = []
@@ -609,6 +659,8 @@ def discover_import_order_issues(files: List[Path]) -> List[Dict]:
                 "abc",
                 "dataclasses",
                 "contextlib",
+                "textwrap",
+                "unittest",
             }
 
             for idx, imp, original in imports:
@@ -855,13 +907,11 @@ class SilentExceptionFixer(BaseFixer):
             return False
 
         line = lines[line_num]
-        indent = len(line) - len(line.lstrip())
-        indent_str = " " * indent
 
         if single_line:
             # 单行: except Exception: pass -> 拆成多行并添加 TODO
             # 提取缩进
-            match = re.match(r"^(\s*)(except\s+(\w+\.)*Exception\s*:)\s*pass\s*$", line)
+            match = re.match(r"^(\s*)(except\s+.*:)\s*pass\s*$", line)
             if not match:
                 return False
 
