@@ -216,9 +216,10 @@ class CodeIssue:
 class ASTAnalyzer(ast.NodeVisitor):
     """AST 分析器"""
 
-    def __init__(self, filepath, source_lines):
+    def __init__(self, filepath, source_lines, tree):
         self.filepath = filepath
         self.source_lines = source_lines
+        self.tree = tree
         self.issues = []
         self.imports = set()  # 模块级 import
         self.function_count = 0
@@ -227,6 +228,16 @@ class ASTAnalyzer(ast.NodeVisitor):
         self.current_function = None
         self.current_class = None
         self.class_method_count = defaultdict(int)
+
+    def analyze_module_level(self):
+        """模块级分析（docstring 等）"""
+        if not ast.get_docstring(self.tree):
+            self.add_issue(
+                SEV_LOW,
+                "no_docstring",
+                1,
+                "模块缺少文档字符串 (module docstring)",
+            )
 
     def add_issue(self, severity, issue_type, line, message):
         snippet = ""
@@ -281,6 +292,15 @@ class ASTAnalyzer(ast.NodeVisitor):
         if not ast.get_docstring(node):
             self.add_issue(
                 SEV_LOW, "no_docstring", node.lineno, f"类 '{node.name}' 缺少文档字符串"
+            )
+
+        # 检查命名规范 (PascalCase)
+        if not re.match(r"^[A-Z][a-zA-Z0-9]*$", node.name):
+            self.add_issue(
+                SEV_LOW,
+                "inconsistent_naming",
+                node.lineno,
+                f"类名 '{node.name}' 不符合 PascalCase 规范",
             )
 
         self.generic_visit(node)
@@ -413,8 +433,12 @@ class ASTAnalyzer(ast.NodeVisitor):
                 node.lineno,
                 f"使用 {func_name}() 存在不安全反序列化风险",
             )
-        elif func_name == "subprocess.call" or func_name.endswith(".Popen"):
-            # 检查 shell=True
+        elif func_name.startswith("subprocess.") and func_name not in (
+            "subprocess.DEVNULL",
+            "subprocess.PIPE",
+            "subprocess.STDOUT",
+        ):
+            # 检查 shell=True (subprocess.run, subprocess.call, subprocess.check_output, subprocess.Popen 等)
             for kw in node.keywords:
                 if (
                     kw.arg == "shell"
@@ -425,7 +449,7 @@ class ASTAnalyzer(ast.NodeVisitor):
                         SEV_HIGH,
                         "subprocess_shell_true",
                         node.lineno,
-                        "subprocess 使用 shell=True 存在命令注入风险",
+                        f"{func_name} 使用 shell=True 存在命令注入风险",
                     )
                     break
 
@@ -594,7 +618,8 @@ def phase3_ast_analysis():
             log(f"解析失败 {filepath.name}: {e}", "WARN")
             continue
 
-        analyzer = ASTAnalyzer(filepath, source_lines)
+        analyzer = ASTAnalyzer(filepath, source_lines, tree)
+        analyzer.analyze_module_level()
         analyzer.visit(tree)
 
         all_issues.extend(analyzer.issues)
@@ -1142,9 +1167,17 @@ def determine_review_round():
     if not REPORT_FILE.exists():
         return 1
     content = REPORT_FILE.read_text()
-    # 数分隔符
-    count = content.count("---")
-    return count + 1
+    # 精确匹配标题行中的审查报告轮次（# 第 N 轮 ... 审查报告）
+    rounds = re.findall(r"^# 第\s*(\d+)\s*轮.*审查报告", content, re.MULTILINE)
+    if rounds:
+        max_round = max(int(r) for r in rounds)
+        return max_round + 1
+    # 回退：匹配 "第 N 轮审查" 格式
+    rounds2 = re.findall(r"第\s*(\d+)\s*轮.*审查", content)
+    if rounds2:
+        max_round = max(int(r) for r in rounds2)
+        return max_round + 1
+    return 1
 
 
 def generate_report(
