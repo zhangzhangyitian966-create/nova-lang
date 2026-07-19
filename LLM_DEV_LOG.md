@@ -4,6 +4,124 @@
 
 ---
 
+## 2026-07-19 05:00 第16轮开发（SSA 加固 + 代码质量清理）
+
+### 本轮概览
+- **轮次**: 第 16 轮（普通轮）
+- **基线测试**: 403/403 通过
+- **完成任务**: 4 个（其中 1 个为顺带修复）
+- **测试结果**: 418/418 通过（新增 15 个 SSA 验证器测试）
+- **路线图进度**: 23/37 (62%) → 27/37 (73%)
+
+### 任务选择理由
+
+参考了第 15 轮评审规划的"第 16-18 轮：SSA 加固 → Visitor 重构 → 后端整合"路线，严格执行第 16 轮计划。
+
+**为什么选这 3 个核心任务**：
+1. **extract_loop_ssa**（优先级 88）：优先级最高的 pending 工程任务，消除约 150 行重复代码，是修复列表推导式 SSA bug 的前置条件，也是第 15 轮评审明确的第 16 轮核心任务。
+2. **fix_constant_folding_class**（优先级 70）：是 refactor_visitor_pattern 的前置依赖（Visitor 需要返回新节点模式），工作量小（1-2h），可在同一轮完成，为第 17 轮 Visitor 重构铺路。
+3. **ssa_verifier_tests**（优先级 78）：SSA 验证器上线但零测试覆盖，等于没上线。在做 SSA 重构的同时补测试，形成"重构 + 测试保障"的良性组合。
+
+**参考的日志发现**：
+- AUTO_REVIEW_LOG：循环 SSA 构建三重重复（约 200 行），是技术债重灾区
+- AUTO_IMPROVE_LOG：ConstantFolding __class__ 突变是已知危险实现
+- 第 15 轮评审报告：明确规划第 16 轮做 SSA 加固
+
+---
+
+### 任务详情
+
+#### 任务 1：extract_loop_ssa — 提取循环 SSA 通用方法 ✅
+
+**为什么选这个任务**：
+- 第 15 轮评审将其列为第 16 轮一号任务
+- 三个循环方法（while/for/list_comprehension）各自实现了几乎相同的 SSA Phi 插入逻辑，约 150 行重复代码
+- 维护成本是 3 倍，容易出现"一处修了另一处忘修"的情况（已发生：列表推导式的 latch 块替换就漏掉了）
+- 是修复列表推导式 SSA bug 的前置条件
+
+**完成内容**：
+- 新增通用方法 `_insert_loop_phis(pre_env, entry_block_label, header_block, latch_blocks, phi_offset, exclude_vars)`
+- 统一 latch_blocks 数据结构为 `(block_obj, env_dict)` 二元组
+- 重构 `_lower_while_expr`：从 40 行 SSA 代码 → 调用通用方法（10 行）
+- 重构 `_lower_for_expr`：从 45 行 SSA 代码 → 调用通用方法（10 行）
+- 重构 `_lower_list_comprehension`：从 65 行 SSA 代码 → 调用通用方法（10 行）
+- 消除约 **120 行** 重复代码
+
+**价值**：维护成本降为 1/3，后续修改循环 SSA 逻辑只需改一处。
+
+---
+
+#### 任务 2：fix_listcomp_ssa_latch — 修复列表推导式 latch 块 SSA 替换 ✅（顺带修复）
+
+**为什么顺带修复**：
+在提取通用方法的过程中自然修复了这个 bug。原代码中列表推导式的 SSA 替换有 `pass` 占位注释，明确说明"latch_blocks 只存了标签，没有块引用...所以我们直接在这里处理已知的块"，只硬编码处理了 `filter_block` 和 `filter_false_block`。
+
+通用方法 `_insert_loop_phis` 自动遍历所有 `latch_blocks`（包含块引用）进行 SSA 替换，彻底解决了这个问题。
+
+**修复内容**：
+- 消除了带 filter 的列表推导式中循环体修改外部变量可能产生未定义 SSA 名引用的隐患
+- 无论将来有多少回边路径（break/continue 等），都能正确替换
+
+---
+
+#### 任务 3：fix_constant_folding_class — 修复 ConstantFolding __class__ 突变 ✅
+
+**为什么选这个任务**：
+- 是 `refactor_visitor_pattern` 的前置依赖（Visitor 模式的 Transformer 需要返回新节点，而不是就地修改）
+- `__class__` 直接赋值 + `del` 属性是危险的 Python 黑魔法，字段布局变化时会导致难以调试的 bug
+- 工作量小（1-2 小时），低成本高收益
+
+**完成内容**：
+- 将 `_fold_expr` 从"就地修改"模式（修改传入对象，返回 bool）改为"返回新节点"模式（返回 `(new_expr, changed)`）
+- 消除了 2 处 `expr.__class__ = HIRIntLiteral/HIRFloatLiteral` 的黑魔法
+- 消除了 `del expr.op/left/right` 的属性删除操作
+- `run()` 方法相应调整，使用返回值替换旧节点
+- 与 `Inlining._try_inline_expr` 的代码风格保持一致
+
+**价值**：代码更安全、更易维护，为第 17 轮 Visitor 模式重构铺平道路。
+
+---
+
+#### 任务 4：ssa_verifier_tests — SSA 验证器完整测试 ✅
+
+**为什么选这个任务**：
+- SSA 验证器已上线 5 轮但零测试覆盖，无法防止回归
+- 在做 SSA 重构的同时补测试，用测试验证重构正确性
+- 是第 15 轮评审规划的第 16 轮任务之一
+
+**完成内容**：
+- 新增 `tests/test_ssa_verifier.py`，共 **15 个测试用例**
+- 覆盖全部 5 项检查：
+  - 基本块终结指令检查（2 个：正例+反例）
+  - SSA 单赋值检查（2 个：正例+反例）
+  - 使用前定义检查（3 个：正例+指令中未定义+Phi source 未定义）
+  - Phi 节点位置检查（2 个：正例+反例）
+  - Phi source 块前驱验证（2 个：正例+反例）
+- 端到端集成测试（4 个：简单函数、let 绑定、嵌套算术、多函数模块）
+- **顺带修复**：SSAVerifier 不识别函数参数 SSA 名的 bug（将函数参数加入 `all_defs`）
+
+**价值**：SSA 验证器从"裸奔"变为"有质量保障"，后续 SSA 相关重构有了安全网。
+
+---
+
+### 测试前后对比
+
+| 指标 | 开发前 | 开发后 | 变化 |
+|------|--------|--------|------|
+| 总测试数 | 403 | 418 | +15 |
+| 通过率 | 100% | 100% | 持平 |
+| 路线图完成 | 23/37 (62%) | 27/37 (73%) | +11% |
+| 循环 SSA 重复代码 | ~150 行 | ~30 行（调用通用方法） | -80% |
+
+### 下一步计划（第 17 轮）
+
+按照第 15 轮评审规划，第 17 轮核心任务：
+
+1. **refactor_visitor_pattern**（优先级 82）：引入 HIRVisitor/HIRTransformer 基类，重构 ConstantFolding、Inlining、DeadCodeElimination 等 Pass，消除约 400 行重复的遍历代码
+2. 视情况推进 **unify_backend_mappings**（优先级 68）：统一后端类型/操作符映射表
+
+---
+
 ## 2026-07-18 17:00 第15轮评审（路线图评审）
 
 ### 评审概览

@@ -1,5 +1,5 @@
 {
-  "cycles": 15,
+  "cycles": 16,
   "completed_tasks": [
     "unify_ir_naming",
     "for_loop_ssa_normalize",
@@ -31,10 +31,38 @@
     "review_cycle_12",
     "refactor_sys_path",
     "mir_type_propagation",
-    "review_cycle_15"
+    "review_cycle_15",
+    "extract_loop_ssa",
+    "fix_constant_folding_class",
+    "ssa_verifier_tests",
+    "fix_listcomp_ssa_latch"
   ],
   "failed_tasks": [],
   "task_history": [
+    {
+      "cycle": 16,
+      "task_id": "fix_listcomp_ssa_latch",
+      "status": "completed",
+      "details": "修复列表推导式 latch 块 SSA 替换不完整 bug：在提取循环 SSA 通用方法（extract_loop_ssa）时一并修复。原代码有 pass 占位注释，只硬编码处理 filter_block/filter_false_block，通用方法 _insert_loop_phis 自动遍历所有 latch_blocks 进行 SSA 替换，确保所有回边路径的 SSA 引用都被正确替换。消除了带 filter 的列表推导式中循环体修改外部变量可能产生未定义 SSA 名引用的隐患。"
+    },
+    {
+      "cycle": 16,
+      "task_id": "extract_loop_ssa",
+      "status": "completed",
+      "details": "提取循环 SSA Phi 插入通用方法 _insert_loop_phis：将 _lower_while_expr、_lower_for_expr、_lower_list_comprehension 中重复的 SSA Phi 插入逻辑（约 150 行）提取为通用方法。统一 latch_blocks 数据结构为 (block_obj, env_dict) 二元组，修复了列表推导式中 latch 块 SSA 替换不完整的 pass 占位 bug（之前只硬编码处理 filter_block/filter_false_block，现在通用方法遍历所有 latch 块）。三个循环方法的 SSA 构建逻辑从各自维护改为调用通用方法，维护成本降为 1/3。"
+    },
+    {
+      "cycle": 16,
+      "task_id": "fix_constant_folding_class",
+      "status": "completed",
+      "details": "修复 ConstantFolding 的 __class__ 突变问题：将 _fold_expr 从就地修改模式（__class__ 赋值 + del 属性）改为返回新节点模式（返回 new_expr, changed），与 Inlining Pass 风格一致。消除了 Python 黑魔法，提升代码健壮性和可维护性，同时为后续 Visitor 模式重构铺平道路（Visitor 需要返回新节点的变换模式）。"
+    },
+    {
+      "cycle": 16,
+      "task_id": "ssa_verifier_tests",
+      "status": "completed",
+      "details": "为 SSAVerifier 编写完整专项测试（15 个测试用例），覆盖全部 5 项检查：基本块终结指令检查、SSA 单赋值检查、使用前定义检查、Phi 节点位置检查、Phi source 块前驱验证。包含正反例测试（正确通过 + 错误检测）和 4 个端到端集成测试。顺带修复了 SSAVerifier 不识别函数参数 SSA 名的 bug（将函数参数加入 all_defs）。新增测试从 0 覆盖提升到核心功能全覆盖。"
+    },
     {
       "cycle": 15,
       "task_id": "review_cycle_15",
@@ -102,9 +130,9 @@
       "details": "实现基础版 SSA 验证器 Pass（SSAVerifier）：支持 5 项检查（基本块终结指令、SSA 单赋值、使用前定义、Phi 节点位置、Phi source 块前驱验证）；手动测试验证了正确和错误场景，能正确检测未定义 SSA 名等问题"
     }
   ],
-  "current_cycle": 15,
+  "current_cycle": 16,
   "baseline_tests": 403,
-  "current_tests": 403,
+  "current_tests": 418,
   "last_review_cycle": 15,
   "tasks": [
     {
@@ -182,7 +210,7 @@
       "priority": 88,
       "category": "engineering",
       "estimated": "3-5 小时",
-      "status": "pending",
+      "status": "completed",
       "depends_on": [
         "for_loop_ssa_normalize"
       ],
@@ -196,7 +224,7 @@
       "priority": 85,
       "category": "ir",
       "estimated": "2-4 小时",
-      "status": "pending",
+      "status": "completed",
       "depends_on": [
         "extract_loop_ssa"
       ],
@@ -210,7 +238,7 @@
       "priority": 70,
       "category": "engineering",
       "estimated": "1-2 小时",
-      "status": "pending",
+      "status": "completed",
       "depends_on": [],
       "reason": "深度代码审计发现的代码质量问题：__class__ 直接突变是危险的实现方式，可能导致难以调试的属性错误。低成本高收益的代码质量修复。[新增任务]"
     },
@@ -222,7 +250,7 @@
       "priority": 78,
       "category": "test",
       "estimated": "2-3 小时",
-      "status": "pending",
+      "status": "completed",
       "depends_on": [
         "mir_ssa_verifier",
         "extract_loop_ssa"

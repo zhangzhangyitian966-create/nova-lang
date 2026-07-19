@@ -60,51 +60,61 @@ class ConstantFolding(Pass):
         changed = False
         for decl in hir_module.declarations:
             if isinstance(decl, HIRFnDecl):
-                changed |= self._fold_fn(decl.fn_def)
+                new_body, body_changed = self._fold_expr(decl.fn_def.body)
+                if body_changed:
+                    decl.fn_def.body = new_body
+                    changed = True
             elif isinstance(decl, HIRLetDecl):
-                changed |= self._fold_expr(decl.value)
+                new_value, val_changed = self._fold_expr(decl.value)
+                if val_changed:
+                    decl.value = new_value
+                    changed = True
         return changed
 
-    def _fold_fn(self, fn):
-        return self._fold_expr(fn.body)
-
     def _fold_expr(self, expr):
+        """
+        折叠表达式中的常量，返回 (new_expr, changed)。
+
+        采用返回新节点的方式而非就地修改，避免 __class__ 突变的危险做法。
+        """
         if not isinstance(expr, HIRBinaryOp):
-            return False
+            return expr, False
 
-        changed = False
-        if isinstance(expr.left, HIRBinaryOp):
-            changed |= self._fold_expr(expr.left)
-        if isinstance(expr.right, HIRBinaryOp):
-            changed |= self._fold_expr(expr.right)
+        # 递归折叠子表达式
+        new_left, left_changed = self._fold_expr(expr.left)
+        new_right, right_changed = self._fold_expr(expr.right)
+        changed = left_changed or right_changed
 
+        # 如果子表达式有变化，创建新的二元运算节点
+        if changed:
+            expr = HIRBinaryOp(expr.op, new_left, new_right)
+            expr.ir_type = (
+                new_left.ir_type
+                if hasattr(new_left, "ir_type")
+                else expr.ir_type
+            )
+
+        # int 常量折叠
         if isinstance(expr.left, HIRIntLiteral) and isinstance(
             expr.right, HIRIntLiteral
         ):
             result = self._eval_int_binop(expr.op, expr.left.value, expr.right.value)
             if result is not None:
-                expr.__class__ = HIRIntLiteral
-                expr.value = result
-                expr.ir_type = INT_TYPE
-                del expr.op
-                del expr.left
-                del expr.right
-                return True
+                new_literal = HIRIntLiteral(result)
+                new_literal.ir_type = INT_TYPE
+                return new_literal, True
 
+        # float 常量折叠
         if isinstance(expr.left, HIRFloatLiteral) and isinstance(
             expr.right, HIRFloatLiteral
         ):
             result = self._eval_float_binop(expr.op, expr.left.value, expr.right.value)
             if result is not None:
-                expr.__class__ = HIRFloatLiteral
-                expr.value = result
-                expr.ir_type = FLOAT_TYPE
-                del expr.op
-                del expr.left
-                del expr.right
-                return True
+                new_literal = HIRFloatLiteral(result)
+                new_literal.ir_type = FLOAT_TYPE
+                return new_literal, True
 
-        return changed
+        return expr, changed
 
     def _eval_int_binop(self, op, left, right):
         ops = {
@@ -1130,6 +1140,11 @@ class SSAVerifier(Pass):
         """验证单个函数的 SSA 性质"""
         # 1. 收集所有定义的 SSA 名
         all_defs = {}  # ssa_name -> (block_label, instr_index)
+
+        # 1.1 函数参数也是 SSA 定义（在入口块之前就已定义）
+        for param_name, param_type, ssa_name in mir_fn.params:
+            if ssa_name:
+                all_defs[ssa_name] = ("<params>", -1)
 
         # 构建块名 -> 块对象的映射
         block_map = {}

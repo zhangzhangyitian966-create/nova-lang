@@ -955,48 +955,19 @@ class MIRLowering:
         # 弹出循环上下文
         self.loop_stack.pop()
 
-        # 2. 找出循环中被修改的变量（比较 pre_env 和当前 env）
-        # 排除循环变量（每次迭代新绑定，不在 pre_env 中）
-        modified_vars = {}
-        for name, ssa_val in self.env.items():
-            if name not in pre_env or pre_env[name] != ssa_val:
-                # 跳过循环变量（每次迭代新绑定的）
-                if name == hir_expr.variable:
-                    continue
-                modified_vars[name] = ssa_val
+        # 2. 使用通用方法插入循环 Phi 节点
+        latch_blocks = [(body_block, dict(self.env))]
+        phi_results = self._insert_loop_phis(
+            pre_env=pre_env,
+            entry_block_label=block.label,
+            header_block=header_block,
+            latch_blocks=latch_blocks,
+            phi_offset=1,  # idx_phi 在位置 0
+            exclude_vars={hir_expr.variable},
+        )
 
-        # 3. 在 header 块开头为每个被修改的变量插入 Phi 节点
-        # 注意：idx_phi 已经在 header 开头了，新的 Phi 插在它后面
-        phi_offset = 1  # 从第 1 个位置开始（idx_phi 在位置 0）
-        for var_name, body_ssa in modified_vars.items():
-            pre_ssa = pre_env.get(var_name)
-            if pre_ssa is None:
-                # 循环中新定义的变量，入口边没有值，跳过
-                continue
-
-            # 从入口边的 SSA 类型推断 Phi 类型
-            phi_type = UNIT_TYPE
-            if pre_ssa in self.ssa_types:
-                phi_type = self.ssa_types[pre_ssa]
-
-            phi_instr = MIRPhi(phi_type)
-            phi_instr.sources = [
-                (block.label, pre_ssa),  # 入口边：循环前的值
-                (body_block.label, body_ssa),  # 回边：循环体末尾的值
-            ]
-            phi_instr.result_name = self._new_ssa()
-            header_block.instructions.insert(phi_offset, phi_instr)
-            phi_offset += 1
-            self.ssa_types[phi_instr.result_name] = phi_type
-
-            # 4. 替换 header 和 body 中对旧 SSA 的引用为 Phi 结果
-            phi_result = phi_instr.result_name
-            # header 中对 pre_ssa 的引用替换为 phi_result
-            self._replace_ssa_in_block(header_block, pre_ssa, phi_result, skip_phi=True)
-            # body 中对 pre_ssa 的引用替换为 phi_result
-            self._replace_ssa_in_block(body_block, pre_ssa, phi_result, skip_phi=False)
-
-            # 更新 env 中的值为 Phi 结果
+        # 更新 env 中的值为 Phi 结果
+        for var_name, phi_result in phi_results.items():
             self.env[var_name] = phi_result
 
         # 填充 idx_phi 的 sources
@@ -1008,6 +979,91 @@ class MIRLowering:
         self.all_blocks.extend([header_block, body_block, exit_block])
         self.current_block = exit_block
         return None
+
+    def _insert_loop_phis(
+        self,
+        pre_env,
+        entry_block_label,
+        header_block,
+        latch_blocks,
+        phi_offset=0,
+        exclude_vars=None,
+    ):
+        """
+        循环 SSA Phi 插入通用方法。
+
+        为循环中被修改的变量在 header 块开头插入 Phi 节点，
+        并替换 header 和所有 latch 块中的旧 SSA 引用。
+
+        参数:
+            pre_env: 循环前的 env 快照（dict: var_name -> ssa_name）
+            entry_block_label: 循环入口块的标签（Phi 入口边的来源）
+            header_block: 循环头基本块（MIRBasicBlock）
+            latch_blocks: 回边块列表，每个元素为 (block_obj, latch_env_dict)
+                - block_obj: MIRBasicBlock，该回边的基本块
+                - latch_env_dict: dict，该回边路径末尾的 env 快照
+            phi_offset: 在 header_block.instructions 中插入 Phi 的起始偏移
+            exclude_vars: 排除的变量名集合（如循环变量，不参与 Phi 插入）
+
+        返回:
+            dict: {var_name: phi_result_ssa}，更新后的变量到 Phi 结果的映射
+
+        副作用:
+            - 在 header_block 中插入 Phi 节点
+            - 替换 header 和所有 latch 块中的旧 SSA 引用
+            - 更新 self.ssa_types
+        """
+        if exclude_vars is None:
+            exclude_vars = set()
+
+        # 1. 找出所有回边中被修改的变量
+        modified_vars = set()
+        for _, latch_env in latch_blocks:
+            for name, ssa_val in latch_env.items():
+                if name in exclude_vars:
+                    continue
+                pre_ssa = pre_env.get(name)
+                if pre_ssa is None or pre_ssa != ssa_val:
+                    modified_vars.add(name)
+
+        # 2. 在 header 块开头为每个被修改的变量插入 Phi 节点
+        current_offset = phi_offset
+        phi_results = {}  # var_name -> phi_result_ssa
+
+        for var_name in modified_vars:
+            pre_ssa = pre_env.get(var_name)
+            if pre_ssa is None:
+                # 循环中新定义的变量，入口边没有值，跳过
+                continue
+
+            # 从入口边的 SSA 类型推断 Phi 类型
+            phi_type = UNIT_TYPE
+            if pre_ssa in self.ssa_types:
+                phi_type = self.ssa_types[pre_ssa]
+
+            phi_instr = MIRPhi(phi_type)
+            # 收集所有 source：入口边 + 所有回边
+            phi_sources = [(entry_block_label, pre_ssa)]  # 入口边
+            for latch_block, latch_env in latch_blocks:
+                latch_ssa = latch_env.get(var_name, pre_ssa)
+                phi_sources.append((latch_block.label, latch_ssa))
+            phi_instr.sources = phi_sources
+            phi_instr.result_name = self._new_ssa()
+            header_block.instructions.insert(current_offset, phi_instr)
+            current_offset += 1
+            self.ssa_types[phi_instr.result_name] = phi_type
+
+            phi_result = phi_instr.result_name
+            phi_results[var_name] = phi_result
+
+            # 3. 替换 header 和所有 latch 块中对旧 SSA 的引用为 Phi 结果
+            # header 中替换（跳过 Phi 节点自身）
+            self._replace_ssa_in_block(header_block, pre_ssa, phi_result, skip_phi=True)
+            # 所有 latch 块中替换
+            for latch_block, _ in latch_blocks:
+                self._replace_ssa_in_block(latch_block, pre_ssa, phi_result, skip_phi=False)
+
+        return phi_results
 
     def _lower_list_comprehension(self, hir_expr, block):
         """
@@ -1122,8 +1178,11 @@ class MIRLowering:
         self.env[hir_expr.variable] = elem_ssa
 
         # 收集所有回边块及其对应的值
-        # latch_blocks: [(block_label, {var_name: ssa_val}), ...]
+        # latch_blocks: [(block_obj, {var_name: ssa_val}), ...]
         latch_blocks = []
+        # 每个 latch 块对应的索引递增 SSA 和列表值 SSA
+        latch_inc_ssas = []
+        latch_list_ssas = []
 
         if hir_expr.filter is not None:
             # 有 filter：先判断 filter 条件
@@ -1157,9 +1216,10 @@ class MIRLowering:
 
             filter_block.terminator = MIRJump(header_block.label)
 
-            # 记录 filter_true 分支的 env 快照
-            filter_true_env = dict(self.env)
-            latch_blocks.append((filter_block.label, filter_true_env, inc_ssa_t, new_list_ssa))
+            # 记录 filter_true 分支
+            latch_blocks.append((filter_block, dict(self.env)))
+            latch_inc_ssas.append(inc_ssa_t)
+            latch_list_ssas.append(new_list_ssa)
 
             # --- filter 为假：跳过 append，索引仍然递增 ---
             self.current_block = filter_false_block
@@ -1178,9 +1238,10 @@ class MIRLowering:
 
             self.all_blocks.extend([filter_block, filter_false_block])
 
-            # 记录 filter_false 分支的 env 快照
-            filter_false_env = dict(self.env)
-            latch_blocks.append((filter_false_block.label, filter_false_env, inc_ssa_f, list_phi_ssa))
+            # 记录 filter_false 分支
+            latch_blocks.append((filter_false_block, dict(self.env)))
+            latch_inc_ssas.append(inc_ssa_f)
+            latch_list_ssas.append(list_phi_ssa)
         else:
             # 无 filter：直接计算 result_expr 并 append
             result_ssa = self._lower_expr(hir_expr.result_expr, body_block)
@@ -1204,84 +1265,41 @@ class MIRLowering:
             if body_block.terminator is None:
                 body_block.terminator = MIRJump(header_block.label)
 
-            # 记录 body 分支的 env 快照
-            body_env = dict(self.env)
-            latch_blocks.append((body_block.label, body_env, inc_ssa, new_list_ssa))
+            # 记录 body 分支
+            latch_blocks.append((body_block, dict(self.env)))
+            latch_inc_ssas.append(inc_ssa)
+            latch_list_ssas.append(new_list_ssa)
 
         # 弹出循环上下文
         self.loop_stack.pop()
 
-        # 5. 找出循环中被修改的变量（比较 pre_env 和当前 env）
-        # 排除循环变量（每次迭代新绑定，不在 pre_env 中）
-        modified_vars = set()
-        for _, latch_env, _, _ in latch_blocks:
-            for name, ssa_val in latch_env.items():
-                if name == hir_expr.variable:
-                    continue
-                pre_ssa = pre_env.get(name)
-                if pre_ssa is None or pre_ssa != ssa_val:
-                    modified_vars.add(name)
+        # 5. 使用通用方法插入循环 Phi 节点
+        phi_results = self._insert_loop_phis(
+            pre_env=pre_env,
+            entry_block_label=block.label,
+            header_block=header_block,
+            latch_blocks=latch_blocks,
+            phi_offset=2,  # idx_phi 在 0，list_phi 在 1
+            exclude_vars={hir_expr.variable},
+        )
 
-        # 6. 在 header 块开头为每个被修改的变量插入 Phi 节点
-        # 注意：idx_phi 和 list_phi 已经在 header 中了，新的 Phi 插在它们后面
-        phi_offset = 2  # 从第 2 个位置开始（idx_phi 在 0，list_phi 在 1）
-        for var_name in modified_vars:
-            pre_ssa = pre_env.get(var_name)
-            if pre_ssa is None:
-                # 循环中新定义的变量，入口边没有值，跳过
-                continue
-
-            # 从入口边的 SSA 类型推断 Phi 类型
-            phi_type = UNIT_TYPE
-            if pre_ssa in self.ssa_types:
-                phi_type = self.ssa_types[pre_ssa]
-
-            phi_instr = MIRPhi(phi_type)
-            # 收集所有回边的值
-            phi_sources = [(block.label, pre_ssa)]  # 入口边
-            for latch_label, latch_env, _, _ in latch_blocks:
-                latch_ssa = latch_env.get(var_name, pre_ssa)
-                phi_sources.append((latch_label, latch_ssa))
-            phi_instr.sources = phi_sources
-            phi_instr.result_name = self._new_ssa()
-            header_block.instructions.insert(phi_offset, phi_instr)
-            phi_offset += 1
-            self.ssa_types[phi_instr.result_name] = phi_type
-
-            # 7. 替换 header 和所有 body/latch 块中对旧 SSA 的引用为 Phi 结果
-            phi_result = phi_instr.result_name
-            # header 中替换
-            self._replace_ssa_in_block(header_block, pre_ssa, phi_result, skip_phi=True)
-            # body 中替换
-            self._replace_ssa_in_block(body_block, pre_ssa, phi_result, skip_phi=False)
-            # 所有 latch 块中替换
-            for _, _, _, _ in latch_blocks:
-                # 这里我们需要替换所有 latch 块中的引用
-                # 但 latch_blocks 只存了标签，没有块引用
-                # 我们通过 all_blocks 来查找（但 all_blocks 还没加新块）
-                # 所以我们直接在这里处理已知的块
-                pass
-            # 替换 filter_block 和 filter_false_block（如果有的话）
-            if hir_expr.filter is not None:
-                self._replace_ssa_in_block(filter_block, pre_ssa, phi_result, skip_phi=False)
-                self._replace_ssa_in_block(filter_false_block, pre_ssa, phi_result, skip_phi=False)
-
-            # 更新 env 中的值为 Phi 结果（使用第一个 latch 块的值，因为所有路径应该收敛到同一个 Phi）
+        # 更新 env 中的值为 Phi 结果
+        for var_name, phi_result in phi_results.items():
             self.env[var_name] = phi_result
 
         # 填充 idx_phi 的 sources
         idx_phi_sources = [(block.label, idx_init_ssa)]
-        for latch_label, _, inc_ssa_val, _ in latch_blocks:
-            idx_phi_sources.append((latch_label, inc_ssa_val))
+        for (latch_block, _), inc_ssa_val in zip(latch_blocks, latch_inc_ssas):
+            idx_phi_sources.append((latch_block.label, inc_ssa_val))
         idx_phi.sources = idx_phi_sources
 
         # 填充 list_phi 的 sources
         list_phi_sources = [(block.label, list_init_ssa)]
-        for latch_label, _, _, list_val_ssa in latch_blocks:
-            list_phi_sources.append((latch_label, list_val_ssa))
+        for (latch_block, _), list_val_ssa in zip(latch_blocks, latch_list_ssas):
+            list_phi_sources.append((latch_block.label, list_val_ssa))
         list_phi.sources = list_phi_sources
 
-        # 5. exit 块：列表 Phi 的值就是结果
+        # 6. exit 块：列表 Phi 的值就是结果
         # 结果值就是 list_phi_ssa（header 中的 Phi）。
         # 由于 header 支配 exit，exit 可以引用 list_phi_ssa。
 
@@ -1343,43 +1361,19 @@ class MIRLowering:
         # 弹出循环上下文
         self.loop_stack.pop()
 
-        # 4. 找出循环中被修改的变量（比较 pre_env 和当前 env）
-        modified_vars = {}
-        for name, ssa_val in self.env.items():
-            if name not in pre_env or pre_env[name] != ssa_val:
-                modified_vars[name] = ssa_val
+        # 4. 使用通用方法插入循环 Phi 节点
+        latch_blocks = [(body_block, dict(self.env))]
+        phi_results = self._insert_loop_phis(
+            pre_env=pre_env,
+            entry_block_label=block.label,
+            header_block=header_block,
+            latch_blocks=latch_blocks,
+            phi_offset=0,
+            exclude_vars=set(),
+        )
 
-        # 5. 在 header 块开头为每个被修改的变量插入 Phi 节点
-        phi_offset = 0
-        for var_name, body_ssa in modified_vars.items():
-            pre_ssa = pre_env.get(var_name)
-            if pre_ssa is None:
-                # 循环中新定义的变量，入口边没有值，跳过（理论上不应该出现）
-                continue
-
-            # 从入口边的 SSA 类型推断 Phi 类型
-            phi_type = UNIT_TYPE
-            if pre_ssa in self.ssa_types:
-                phi_type = self.ssa_types[pre_ssa]
-
-            phi_instr = MIRPhi(phi_type)
-            phi_instr.sources = [
-                (block.label, pre_ssa),  # 入口边：循环前的值
-                (body_block.label, body_ssa),  # 回边：循环体末尾的值
-            ]
-            phi_instr.result_name = self._new_ssa()
-            header_block.instructions.insert(phi_offset, phi_instr)
-            phi_offset += 1
-            self.ssa_types[phi_instr.result_name] = phi_type
-
-            # 6. 替换 header 和 body 中对旧 SSA 的引用为 Phi 结果
-            phi_result = phi_instr.result_name
-            # header 中对 pre_ssa 的引用替换为 phi_result
-            self._replace_ssa_in_block(header_block, pre_ssa, phi_result, skip_phi=True)
-            # body 中对 pre_ssa 的引用替换为 phi_result
-            self._replace_ssa_in_block(body_block, pre_ssa, phi_result, skip_phi=False)
-
-            # 更新 env 中的值为 Phi 结果
+        # 更新 env 中的值为 Phi 结果
+        for var_name, phi_result in phi_results.items():
             self.env[var_name] = phi_result
 
         self.all_blocks.extend([header_block, body_block, exit_block])
