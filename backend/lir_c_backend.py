@@ -38,6 +38,7 @@ from ..ir.ir_nodes import (
     LIRStoreReg,
     LIRUnaryOp,
 )
+from .common import mangle_builtin_name
 
 
 class LIRCBackend:
@@ -499,47 +500,8 @@ class LIRCBackend:
         return "NovaValue*"
 
     def _mangle_fn_name(self, name: str) -> str:
-        """函数名修饰（加 nova_fn_ 前缀，避免与 C 关键字冲突）"""
-        # 特殊的内置函数直接映射
-        builtins = {
-            "print": "nova_print",
-            "println": "nova_println",
-            "int_to_str": "nova_int_to_str",
-            "float_to_str": "nova_float_to_str",
-            "str_to_int": "nova_str_to_int",
-            "str_len": "nova_string_length",
-            "string_split": "nova_string_split",
-            "sqrt": "nova_sqrt",
-            "pow": "nova_pow",
-            "sin": "nova_sin",
-            "cos": "nova_cos",
-            "tan": "nova_tan",
-            "log": "nova_log",
-            "log10": "nova_log10",
-            "exp": "nova_exp",
-            "floor": "nova_floor",
-            "ceil": "nova_ceil",
-            "round": "nova_round",
-            "abs": "nova_abs",
-            "min": "nova_min",
-            "max": "nova_max",
-            "pi": "nova_pi",
-            "filter": "nova_list_filter",
-            "map": "nova_list_map",
-            "sum": "nova_list_sum",
-            "head": "nova_list_head",
-            "tail": "nova_list_tail",
-            "list_length": "nova_list_length",
-            "json_parse": "nova_json_parse",
-            "json_stringify": "nova_json_stringify",
-            "read_line": "nova_read_line",
-            "read_file": "nova_read_file",
-            "write_file": "nova_write_file",
-            "file_exists": "nova_file_exists",
-        }
-        if name in builtins:
-            return builtins[name]
-        return f"nova_fn_{name}"
+        """函数名修饰（内置函数使用共享映射表，用户函数加 nova_fn_ 前缀）"""
+        return mangle_builtin_name(name)
 
     def _map_binop(self, op: str) -> str:
         """二元运算符映射"""

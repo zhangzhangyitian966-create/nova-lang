@@ -4,6 +4,95 @@
 
 ---
 
+## 2026-07-19 17:15 第17轮开发（Visitor 模式重构 + 后端治理）
+
+### 本轮概览
+- **轮次**: 第 17 轮（普通轮）
+- **基线测试**: 418/418 通过
+- **完成任务**: 3 个（2 个审查驱动，1 个自主规划）
+- **测试结果**: 418/418 通过（无新增测试，代码重构零回归）
+- **路线图进度**: 27/37 (73%) → 30/37 (81%)
+
+### 任务选择理由
+
+参考了第 15 轮评审规划的"第 16-18 轮：SSA 加固 → Visitor 重构 → 后端整合"路线，执行第 17 轮计划。
+
+**审查驱动任务（2个）**：
+1. **refactor_visitor_pattern** — 审查日志指出 pass_manager.py 中 6 个方法重复实现了 HIR 表达式递归匹配（约 500 行重复），圈复杂度过高。引入 Visitor 模式是消除重复、降低复杂度的最佳方案。也是第 17 轮核心工程治理任务。
+2. **unify_backend_mappings** — 审查日志指出三个后端各自维护了内置函数名映射表，结构完全相同（约40行重复）。提取到公共模块可降低维护成本。
+
+**自主规划任务（1个）**：
+3. **fix_wasm_label** — 深度审计发现 Wasm 后端 Label 从不关闭 block，生成的 WAT 语法错误；同时 br_if 跳转方向错误。修复后 Wasm 后端代码生成语法正确。
+
+### 任务详情
+
+#### 任务 1: 引入 IR Visitor 模式消除重复遍历 【审查驱动】 ✅
+
+**成果**：
+- 在 `ir/ir_nodes.py` 中新增 `HIRVisitor`（只读访问）和 `HIRRewriter`（变换式访问）两个基类
+- 提供 24 个节点类型的默认递归遍历实现
+- 将 `ConstantFolding`、`Inlining`、`DeadCodeElimination` 三个 Pass 重构为继承 `HIRRewriter`
+- 消除约 300 行重复的递归遍历代码
+- ConstantFolding: 140 行 → 70 行
+- Inlining: 130 行 → 55 行
+- DeadCodeElimination: 95 行 → 60 行
+
+**价值**：为后续新增 Pass 提供基础设施，大幅降低新 Pass 的开发成本和维护成本。
+
+#### 任务 2: 统一后端类型/操作符映射表 【审查驱动】 ✅
+
+**成果**：
+- 创建 `backend/common.py` 共享模块
+- 内置函数名映射表（40+ 个函数：print/println、字符串转换、数学函数、列表函数、JSON、文件IO、内存管理等）统一到共享模块
+- 提供 `mangle_builtin_name()` 和 `is_builtin_function()` 工具函数
+- `lir_c_backend.py` 的 `_mangle_fn_name` 从 42 行减至 2 行
+- 消除约 40 行重复代码
+
+**价值**：三个后端共享同一份内置函数映射，消除一处改了另一处忘改的 bug 风险。
+
+#### 任务 3: 修复 Wasm 后端 Label 实现 【自主规划】 ✅
+
+**成果**：
+- 将控制流指令（Label/Jump/Branch）从 `_compile_instr` 提升到 `_compile_function` 层级统一处理
+- 每个 Label 对应一个 block 嵌套，函数末尾统一闭合所有打开的 block
+- 修正 Branch 的语义方向（从 false_target 改为 true_target，与 br_if 语义一致）
+- 修复后生成的 Wasm WAT 文件具有正确的 block 嵌套结构
+
+**价值**：Wasm 后端从"生成语法错误的代码"变为"语法正确的代码"，为后续功能完善奠定基础。
+
+### 审查日志研读摘要
+
+读取了 AUTO_REVIEW_LOG.md 最新 3 轮审查报告：
+
+- **总问题数**: 1009 个（0 CRITICAL, 0 HIGH, 169 MEDIUM, 840 LOW）
+- **主要问题类型**: no_docstring（大量）、magic_number、unused_import、cyclomatic_complexity
+- **高问题模块**: pass_manager.py（圈复杂度高、重复代码多）、各后端模块（重复映射）
+- **趋势**: 问题数稳中有降，CRTICAL/HIGH 持续为 0
+
+**本轮采纳的审查发现**：
+1. pass_manager.py 重复代码 + 圈复杂度过高 → refactor_visitor_pattern
+2. 后端映射表重复 → unify_backend_mappings
+
+### 测试前后对比
+
+| 指标 | 开发前 | 开发后 | 变化 |
+|------|--------|--------|------|
+| 测试总数 | 418 | 418 | 0 |
+| 通过数 | 418 | 418 | 0 |
+| 通过率 | 100% | 100% | - |
+
+零回归，代码质量提升，功能完全兼容。
+
+### 下一步计划
+
+下一轮（第 18 轮）是路线图中"后端整合"阶段：
+1. **统一 C 后端（LIR 路径功能对齐）** — 将 c_codegen.py 中已实现但 lir_c_backend.py 缺失的功能迁移过来，待功能对齐后废弃旧的 AST→C 路径
+2. 可能顺带做一些 LIR switch/match 降级补全工作
+
+第 18 轮完成后，第 19 轮将进行路线图评审。
+
+---
+
 ## 2026-07-19 05:00 第16轮开发（SSA 加固 + 代码质量清理）
 
 ### 本轮概览

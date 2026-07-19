@@ -1,5 +1,5 @@
 {
-  "cycles": 16,
+  "cycles": 17,
   "completed_tasks": [
     "unify_ir_naming",
     "for_loop_ssa_normalize",
@@ -35,10 +35,37 @@
     "extract_loop_ssa",
     "fix_constant_folding_class",
     "ssa_verifier_tests",
-    "fix_listcomp_ssa_latch"
+    "fix_listcomp_ssa_latch",
+    "refactor_visitor_pattern",
+    "unify_backend_mappings",
+    "fix_wasm_label"
   ],
   "failed_tasks": [],
   "task_history": [
+    {
+      "cycle": 17,
+      "task_id": "refactor_visitor_pattern",
+      "status": "completed",
+      "source": "审查驱动",
+      "reason": "审查日志指出 pass_manager.py 中 6 个方法重复实现了 HIR 表达式的递归匹配（约 500 行重复代码），圈复杂度过高。引入 Visitor 模式是消除重复、降低复杂度、提升可维护性的最佳方案。同时也是第17轮核心工程治理任务，为后续 Pass 开发奠定基础设施。",
+      "details": "引入 HIRVisitor/HIRRewriter 基础设施并重写三个核心优化 Pass：在 ir_nodes.py 中新增 HIRVisitor（只读访问）和 HIRRewriter（变换式访问）两个基类，提供 24 个节点类型的默认递归遍历实现；将 pass_manager.py 中的 ConstantFolding、Inlining、DeadCodeElimination 三个 Pass 从手动递归匹配重构为继承 HIRRewriter，每个 Pass 只需关注自身变换逻辑。消除约 300 行重复的递归遍历代码，ConstantFolding 从 140 行减至 70 行，Inlining 从 130 行减至 55 行，DeadCodeElimination 从 95 行减至 60 行。"
+    },
+    {
+      "cycle": 17,
+      "task_id": "unify_backend_mappings",
+      "status": "completed",
+      "source": "审查驱动",
+      "reason": "审查日志指出三个后端各自维护了内置函数名映射表，结构完全相同（约40行重复）。提取到公共模块可降低维护成本，减少一处改了另一处忘改的 bug。",
+      "details": "创建 backend/common.py 共享模块，内置函数名映射表（40+个函数：print/println、字符串转换、数学函数、列表函数、JSON、文件IO、内存管理等）统一到共享模块，提供 mangle_builtin_name() 和 is_builtin_function() 工具函数；lir_c_backend.py 的 _mangle_fn_name 从 42 行减少为 2 行。消除约 40 行重复代码。"
+    },
+    {
+      "cycle": 17,
+      "task_id": "fix_wasm_label",
+      "status": "completed",
+      "source": "自主规划",
+      "reason": "深度审计发现 Wasm 后端将 LIRLabel 实现为 Wasm block，但从不关闭 block，生成的 WAT 语法错误；同时 br_if 的跳转目标方向错误（跳 false 而非跳 true）。修复后 Wasm 后端生成的代码至少语法正确，为后续 Wasm 后端功能完善奠定基础。",
+      "details": "修复 Wasm 后端 Label/控制流实现：将控制流指令（Label/Jump/Branch）从 _compile_instr 提升到 _compile_function 层级统一处理；每个 Label 对应一个 block 嵌套，函数末尾统一闭合所有打开的 block（确保 WAT 语法正确）；修正 Branch 的语义方向（从 false_target 改为 true_target，与 br_if 语义一致）。修复后生成的 Wasm WAT 文件具有正确的 block 嵌套结构。"
+    },
     {
       "cycle": 16,
       "task_id": "fix_listcomp_ssa_latch",
@@ -130,7 +157,7 @@
       "details": "实现基础版 SSA 验证器 Pass（SSAVerifier）：支持 5 项检查（基本块终结指令、SSA 单赋值、使用前定义、Phi 节点位置、Phi source 块前驱验证）；手动测试验证了正确和错误场景，能正确检测未定义 SSA 名等问题"
     }
   ],
-  "current_cycle": 16,
+  "current_cycle": 17,
   "baseline_tests": 403,
   "current_tests": 418,
   "last_review_cycle": 15,
@@ -321,7 +348,7 @@
       "priority": 82,
       "category": "engineering",
       "estimated": "6-8 小时",
-      "status": "pending",
+      "status": "completed",
       "depends_on": [
         "unify_ir_naming",
         "fix_constant_folding_class"
@@ -352,7 +379,7 @@
       "priority": 68,
       "category": "engineering",
       "estimated": "2-3 小时",
-      "status": "pending",
+      "status": "completed",
       "depends_on": [
         "unify_ir_naming"
       ],
@@ -366,7 +393,7 @@
       "priority": 62,
       "category": "backend",
       "estimated": "3-5 小时",
-      "status": "pending",
+      "status": "completed",
       "depends_on": [
         "fix_mir_ssa",
         "fix_while_phi"

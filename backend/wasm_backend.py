@@ -236,24 +236,48 @@ class WasmGCBackend:
         result_str = f"(result {ret_ty})" if ret_ty else ""
 
         self._emit(f"(func $nova_{name} {params_str} {result_str}")
-        self._emit("{")
+        self._emit("(")
 
         self.indent_level += 1
 
-        # 编译指令
+        # 预扫描收集所有标签名，用于 block 嵌套
+        label_names = []
         for instr in func.body:
-            self._compile_instr(instr, func)
+            if isinstance(instr, LIRLabel):
+                label_names.append(instr.name)
+
+        # 编译指令（每个 Label 对应一个 block 嵌套）
+        open_blocks = 0
+        for instr in func.body:
+            if isinstance(instr, LIRLabel):
+                # 开一个 block 对应这个标签
+                self._emit(f"(block $block_{instr.name}")
+                self.indent_level += 1
+                open_blocks += 1
+            elif isinstance(instr, LIRJump):
+                # 无条件跳转：br 到目标 block
+                self._emit(f"(br $block_{instr.target})")
+            elif isinstance(instr, LIRBranch):
+                # 条件分支：条件为真时跳到 true_target，否则继续
+                if instr.src_locs:
+                    self._emit(f"(local.get ${instr.src_locs[0][0]})")
+                # br_if 条件为真时跳转，所以跳 true_target
+                self._emit(f"(br_if $block_{instr.true_target})")
+            else:
+                self._compile_instr(instr, func)
+
+        # 闭合所有打开的 block
+        for _ in range(open_blocks):
+            self.indent_level -= 1
+            self._emit(")")
 
         self.indent_level -= 1
         self._emit(")")
         self._emit("")
 
     def _compile_instr(self, instr: LIRInstr, func: LIRFunction):
-        if isinstance(instr, LIRLabel):
-            self._emit(f"(block $block_{instr.name}")
-            self.indent_level += 1
-
-        elif isinstance(instr, LIRLoadConst):
+        """编译非控制流指令"""
+        if isinstance(instr, LIRLoadConst):
             self._emit_load_const(instr)
 
         elif isinstance(instr, LIRBinOp):
@@ -275,15 +299,6 @@ class WasmGCBackend:
 
         elif isinstance(instr, LIRReturn):
             self._emit("(return)")
-
-        elif isinstance(instr, LIRJump):
-            self._emit(f"(br $block_{instr.target})")
-
-        elif isinstance(instr, LIRBranch):
-            if instr.src_locs:
-                self._emit(f"(local.get ${instr.src_locs[0][0]})")
-            false_target = instr.false_target or "block_false"
-            self._emit(f"(br_if $block_{false_target})")
 
         elif isinstance(instr, LIRBuildList):
             self._emit(f"(i32.const {instr.count})")

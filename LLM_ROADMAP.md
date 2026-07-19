@@ -1,6 +1,6 @@
 # Nova LLM 智能开发路线图
 
-**更新时间**: 2026-07-19 05:00:00
+**更新时间**: 2026-07-19 17:15:00
 **上次评审**: 第 15 轮（路线图评审）
 
 本路线图由 LLM 智能开发系统动态维护。
@@ -49,7 +49,7 @@
 |------|------|------|--------|------|------|
 | ✅ | 补充 WasmGC StoreReg 实现 | easy | 65 | 1 小时 | - |
 | ✅ | 修复 LIR C 后端条件分支 | easy | 72 | 30 分钟 | - |
-| ⏳ | 修复 Wasm 后端 Label 实现 | medium | 62 | 3-5 小时 | fix_while_phi |
+| ✅ | 修复 Wasm 后端 Label 实现 | medium | 62 | 3-5 小时 | fix_while_phi |
 | ⏳ | 实现原生后端函数调用 ABI | hard | 25 | 3-5 天 | fix_mir_ssa |
 
 ## 🛠️ 工程质量
@@ -60,8 +60,8 @@
 | ✅ | 消除 sys.path hack，标准化包结构 | medium | 88 | 1-2 天 | - |
 | ✅ | 统一跨 IR 层字段命名 | medium | 80 | 1 天 | refactor_sys_path |
 | ✅ | 修复 ConstantFolding 的 __class__ 突变问题 | easy | 70 | 1-2 小时 | - |
-| ⏳ | 引入 IR Visitor 模式消除重复遍历 | medium | 82 | 6-8 小时 | unify_ir_naming, fix_constant_folding_class |
-| ⏳ | 统一后端类型/操作符映射表 | easy | 68 | 2-3 小时 | unify_ir_naming |
+| ✅ | 引入 IR Visitor 模式消除重复遍历 | medium | 82 | 6-8 小时 | unify_ir_naming, fix_constant_folding_class |
+| ✅ | 统一后端类型/操作符映射表 | easy | 68 | 2-3 小时 | unify_ir_naming |
 
 ## 🧪 测试完善
 
@@ -72,10 +72,10 @@
 
 ---
 
-**进度**: 27/37 (73%)
-**已完成**: 27
+**进度**: 30/37 (81%)
+**已完成**: 30
 **进行中**: 0
-**待开发**: 9
+**待开发**: 6
 **已废弃**: 1
 
-> 注：第16轮完成 4 个任务（提取循环SSA通用方法、修复列表推导latch块SSA替换、修复ConstantFolding __class__突变、SSA验证器测试）。其中列表推导式latch块bug是在提取通用方法时一并修复的。顺带修复 SSAVerifier 不识别函数参数 SSA 名 bug。下阶段（第17-18轮）聚焦：Visitor重构→后端整合。
+> 注：第17轮完成 3 个任务（Visitor模式重构、后端映射统一、Wasm Label修复）。其中 Visitor 模式重构是第17轮核心工程治理任务，消除约300行重复代码。下阶段（第18轮）聚焦：C 后端 LIR 功能对齐。

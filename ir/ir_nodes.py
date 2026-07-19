@@ -599,6 +599,426 @@ class HIRAssignExpr(HIRExpr):
 
 
 # ============================================================
+# HIR Visitor / Rewriter 基础设施
+# ============================================================
+
+
+class HIRVisitor:
+    """HIR 只读访问者基类
+
+    遍历 HIR 表达式树，对每个节点调用对应的 visit_* 方法。
+    默认实现递归访问所有子节点。
+    子类只需重写感兴趣的节点类型的 visit_* 方法。
+
+    使用方式：
+        visitor = MyVisitor()
+        visitor.visit(expr)
+    """
+
+    def visit(self, expr):
+        """访问表达式，自动分派到对应的 visit_* 方法"""
+        method_name = "visit_" + type(expr).__name__
+        visitor = getattr(self, method_name, self.generic_visit)
+        return visitor(expr)
+
+    def generic_visit(self, expr):
+        """默认访问：递归访问所有子表达式"""
+        # 字面量和标识符：无子表达式
+        if isinstance(
+            expr,
+            (
+                HIRIntLiteral,
+                HIRFloatLiteral,
+                HIRStringLiteral,
+                HIRBoolLiteral,
+                HIRCharLiteral,
+                HIRUnitLiteral,
+                HIRIdentifier,
+                HIRBreakExpr,
+                HIRContinueExpr,
+            ),
+        ):
+            return
+        # 二元运算
+        elif isinstance(expr, HIRBinaryOp):
+            self.visit(expr.left)
+            self.visit(expr.right)
+        # 一元运算
+        elif isinstance(expr, HIRUnaryOp):
+            self.visit(expr.operand)
+        # 函数调用
+        elif isinstance(expr, HIRCallExpr):
+            self.visit(expr.function)
+            for arg in expr.arguments:
+                self.visit(arg)
+        # If
+        elif isinstance(expr, HIRIfExpr):
+            self.visit(expr.condition)
+            self.visit(expr.consequence)
+            if expr.alternative:
+                self.visit(expr.alternative)
+        # Block
+        elif isinstance(expr, HIRBlockExpr):
+            for sub in expr.exprs:
+                self.visit(sub)
+        # Let 声明
+        elif isinstance(expr, HIRLetDecl):
+            self.visit(expr.value)
+        # 赋值
+        elif isinstance(expr, HIRAssignExpr):
+            self.visit(expr.target)
+            self.visit(expr.value)
+        # 列表/元组
+        elif isinstance(expr, (HIRListExpr, HIRTupleExpr)):
+            for item in expr.elements:
+                self.visit(item)
+        # Map
+        elif isinstance(expr, HIRMapExpr):
+            for key, val in expr.entries:
+                self.visit(key)
+                self.visit(val)
+        # 字段/索引访问
+        elif isinstance(expr, HIRFieldExpr):
+            self.visit(expr.object)
+        elif isinstance(expr, HIRIndexExpr):
+            self.visit(expr.object)
+            self.visit(expr.index)
+        # 管道
+        elif isinstance(expr, HIRPipeExpr):
+            for stage in expr.stages:
+                self.visit(stage)
+        # Match
+        elif isinstance(expr, HIRMatchExpr):
+            self.visit(expr.value)
+            for arm in expr.arms:
+                if arm.guard:
+                    self.visit(arm.guard)
+                self.visit(arm.body)
+        # For
+        elif isinstance(expr, HIRForExpr):
+            self.visit(expr.iterable)
+            self.visit(expr.body)
+            if expr.step:
+                self.visit(expr.step)
+        # While
+        elif isinstance(expr, HIRWhileExpr):
+            self.visit(expr.condition)
+            self.visit(expr.body)
+        # Lambda
+        elif isinstance(expr, HIRLambda):
+            self.visit(expr.body)
+        # ADT 构造器
+        elif isinstance(expr, HIRADTConstructor):
+            for field in expr.fields:
+                self.visit(field)
+        # Unwrap
+        elif isinstance(expr, HIRUnwrapExpr):
+            self.visit(expr.operand)
+        # 列表推导式
+        elif isinstance(expr, HIRListComprehension):
+            self.visit(expr.result_expr)
+            self.visit(expr.iterable)
+            if expr.filter:
+                self.visit(expr.filter)
+
+
+class HIRRewriter:
+    """HIR 变换式访问者基类
+
+    遍历 HIR 表达式树并返回变换后的新树。
+    默认实现递归重建所有子节点，保持结构不变。
+    子类重写感兴趣的 rewrite_* 方法，返回新节点。
+
+    返回约定：rewrite_* 方法返回 (new_expr, changed)
+    - new_expr: 变换后的表达式
+    - changed: bool，是否发生了变化
+
+    使用方式：
+        rewriter = MyRewriter()
+        new_expr, changed = rewriter.rewrite(expr)
+    """
+
+    def rewrite(self, expr):
+        """变换表达式，自动分派到对应的 rewrite_* 方法"""
+        method_name = "rewrite_" + type(expr).__name__
+        rewriter = getattr(self, method_name, self.generic_rewrite)
+        return rewriter(expr)
+
+    def generic_rewrite(self, expr):
+        """默认变换：递归变换所有子节点，有变化则创建新节点"""
+        # 叶子节点：直接返回
+        if isinstance(
+            expr,
+            (
+                HIRIntLiteral,
+                HIRFloatLiteral,
+                HIRStringLiteral,
+                HIRBoolLiteral,
+                HIRCharLiteral,
+                HIRUnitLiteral,
+                HIRIdentifier,
+                HIRBreakExpr,
+                HIRContinueExpr,
+            ),
+        ):
+            return expr, False
+
+        # 二元运算
+        elif isinstance(expr, HIRBinaryOp):
+            new_left, left_changed = self.rewrite(expr.left)
+            new_right, right_changed = self.rewrite(expr.right)
+            if left_changed or right_changed:
+                new_expr = HIRBinaryOp(expr.op, new_left, new_right)
+                new_expr.ir_type = expr.ir_type
+                return new_expr, True
+            return expr, False
+
+        # 一元运算
+        elif isinstance(expr, HIRUnaryOp):
+            new_operand, op_changed = self.rewrite(expr.operand)
+            if op_changed:
+                new_expr = HIRUnaryOp(expr.op, new_operand)
+                new_expr.ir_type = expr.ir_type
+                return new_expr, True
+            return expr, False
+
+        # 函数调用
+        elif isinstance(expr, HIRCallExpr):
+            new_function, fn_changed = self.rewrite(expr.function)
+            new_args = []
+            args_changed = False
+            for arg in expr.arguments:
+                new_arg, arg_changed = self.rewrite(arg)
+                new_args.append(new_arg)
+                args_changed |= arg_changed
+            if fn_changed or args_changed:
+                new_call = HIRCallExpr(new_function, new_args)
+                new_call.ir_type = expr.ir_type
+                return new_call, True
+            return expr, False
+
+        # If
+        elif isinstance(expr, HIRIfExpr):
+            new_cond, cond_changed = self.rewrite(expr.condition)
+            new_cons, cons_changed = self.rewrite(expr.consequence)
+            new_alt = None
+            alt_changed = False
+            if expr.alternative:
+                new_alt, alt_changed = self.rewrite(expr.alternative)
+            if cond_changed or cons_changed or alt_changed:
+                new_expr = HIRIfExpr(new_cond, new_cons, new_alt)
+                new_expr.ir_type = expr.ir_type
+                return new_expr, True
+            return expr, False
+
+        # Block
+        elif isinstance(expr, HIRBlockExpr):
+            new_exprs = []
+            block_changed = False
+            for sub in expr.exprs:
+                new_sub, sub_changed = self.rewrite(sub)
+                new_exprs.append(new_sub)
+                block_changed |= sub_changed
+            if block_changed:
+                new_block = HIRBlockExpr(new_exprs)
+                new_block.ir_type = expr.ir_type
+                return new_block, True
+            return expr, False
+
+        # Let 声明
+        elif isinstance(expr, HIRLetDecl):
+            new_value, val_changed = self.rewrite(expr.value)
+            if val_changed:
+                new_let = HIRLetDecl(expr.name, expr.ir_type, new_value, is_mutable=expr.is_mutable)
+                return new_let, True
+            return expr, False
+
+        # 赋值
+        elif isinstance(expr, HIRAssignExpr):
+            new_target, target_changed = self.rewrite(expr.target)
+            new_value, val_changed = self.rewrite(expr.value)
+            if target_changed or val_changed:
+                new_assign = HIRAssignExpr(new_target, new_value)
+                new_assign.ir_type = expr.ir_type
+                return new_assign, True
+            return expr, False
+
+        # 列表
+        elif isinstance(expr, HIRListExpr):
+            new_elems = []
+            list_changed = False
+            for e in expr.elements:
+                new_e, e_changed = self.rewrite(e)
+                new_elems.append(new_e)
+                list_changed |= e_changed
+            if list_changed:
+                new_list = HIRListExpr(new_elems)
+                new_list.ir_type = expr.ir_type
+                return new_list, True
+            return expr, False
+
+        # 元组
+        elif isinstance(expr, HIRTupleExpr):
+            new_elems = []
+            tup_changed = False
+            for e in expr.elements:
+                new_e, e_changed = self.rewrite(e)
+                new_elems.append(new_e)
+                tup_changed |= e_changed
+            if tup_changed:
+                new_tup = HIRTupleExpr(new_elems)
+                new_tup.ir_type = expr.ir_type
+                return new_tup, True
+            return expr, False
+
+        # Map
+        elif isinstance(expr, HIRMapExpr):
+            new_entries = []
+            map_changed = False
+            for key, val in expr.entries:
+                new_key, key_changed = self.rewrite(key)
+                new_val, val_changed = self.rewrite(val)
+                new_entries.append((new_key, new_val))
+                map_changed |= key_changed or val_changed
+            if map_changed:
+                new_map = HIRMapExpr(new_entries)
+                new_map.ir_type = expr.ir_type
+                return new_map, True
+            return expr, False
+
+        # 字段访问
+        elif isinstance(expr, HIRFieldExpr):
+            new_obj, obj_changed = self.rewrite(expr.object)
+            if obj_changed:
+                new_field = HIRFieldExpr(new_obj, expr.field_name)
+                new_field.ir_type = expr.ir_type
+                return new_field, True
+            return expr, False
+
+        # 索引访问
+        elif isinstance(expr, HIRIndexExpr):
+            new_obj, obj_changed = self.rewrite(expr.object)
+            new_idx, idx_changed = self.rewrite(expr.index)
+            if obj_changed or idx_changed:
+                new_idx_expr = HIRIndexExpr(new_obj, new_idx)
+                new_idx_expr.ir_type = expr.ir_type
+                return new_idx_expr, True
+            return expr, False
+
+        # 管道
+        elif isinstance(expr, HIRPipeExpr):
+            new_stages = []
+            pipe_changed = False
+            for s in expr.stages:
+                new_s, s_changed = self.rewrite(s)
+                new_stages.append(new_s)
+                pipe_changed |= s_changed
+            if pipe_changed:
+                new_pipe = HIRPipeExpr(new_stages)
+                new_pipe.ir_type = expr.ir_type
+                return new_pipe, True
+            return expr, False
+
+        # Match
+        elif isinstance(expr, HIRMatchExpr):
+            new_val, val_changed = self.rewrite(expr.value)
+            new_arms = []
+            arms_changed = False
+            for arm in expr.arms:
+                new_guard = None
+                guard_changed = False
+                if arm.guard:
+                    new_guard, guard_changed = self.rewrite(arm.guard)
+                new_body, body_changed = self.rewrite(arm.body)
+                if guard_changed or body_changed:
+                    arms_changed = True
+                    new_arm = HIRMatchArm(arm.pattern, new_body, guard=new_guard)
+                    new_arms.append(new_arm)
+                else:
+                    new_arms.append(arm)
+            if val_changed or arms_changed:
+                new_match = HIRMatchExpr(new_val, new_arms)
+                new_match.ir_type = expr.ir_type
+                return new_match, True
+            return expr, False
+
+        # For
+        elif isinstance(expr, HIRForExpr):
+            new_iter, iter_changed = self.rewrite(expr.iterable)
+            new_body, body_changed = self.rewrite(expr.body)
+            new_step = None
+            step_changed = False
+            if expr.step:
+                new_step, step_changed = self.rewrite(expr.step)
+            if iter_changed or body_changed or step_changed:
+                new_for = HIRForExpr(expr.variable, new_iter, new_body, step=new_step)
+                new_for.ir_type = expr.ir_type
+                return new_for, True
+            return expr, False
+
+        # While
+        elif isinstance(expr, HIRWhileExpr):
+            new_cond, cond_changed = self.rewrite(expr.condition)
+            new_body, body_changed = self.rewrite(expr.body)
+            if cond_changed or body_changed:
+                new_while = HIRWhileExpr(new_cond, new_body)
+                new_while.ir_type = expr.ir_type
+                return new_while, True
+            return expr, False
+
+        # Lambda
+        elif isinstance(expr, HIRLambda):
+            new_body, body_changed = self.rewrite(expr.body)
+            if body_changed:
+                new_lambda = HIRLambda(expr.params, new_body)
+                new_lambda.ir_type = expr.ir_type
+                return new_lambda, True
+            return expr, False
+
+        # ADT 构造器
+        elif isinstance(expr, HIRADTConstructor):
+            new_fields = []
+            fields_changed = False
+            for f in expr.fields:
+                new_f, f_changed = self.rewrite(f)
+                new_fields.append(new_f)
+                fields_changed |= f_changed
+            if fields_changed:
+                new_adt = HIRADTConstructor(expr.type_name, expr.variant_name, new_fields)
+                new_adt.ir_type = expr.ir_type
+                return new_adt, True
+            return expr, False
+
+        # Unwrap
+        elif isinstance(expr, HIRUnwrapExpr):
+            new_operand, op_changed = self.rewrite(expr.operand)
+            if op_changed:
+                new_unwrap = HIRUnwrapExpr(new_operand)
+                new_unwrap.ir_type = expr.ir_type
+                return new_unwrap, True
+            return expr, False
+
+        # 列表推导式
+        elif isinstance(expr, HIRListComprehension):
+            new_result, result_changed = self.rewrite(expr.result_expr)
+            new_iter, iter_changed = self.rewrite(expr.iterable)
+            new_filter = None
+            filter_changed = False
+            if expr.filter:
+                new_filter, filter_changed = self.rewrite(expr.filter)
+            if result_changed or iter_changed or filter_changed:
+                new_lc = HIRListComprehension(
+                    new_result, expr.variable, new_iter, filter=new_filter
+                )
+                new_lc.ir_type = expr.ir_type
+                return new_lc, True
+            return expr, False
+
+        # 兜底：未知类型直接返回
+        return expr, False
+
+
+# ============================================================
 # MIR (Mid-Level IR) 节点 - SSA + CFG
 # ============================================================
 
