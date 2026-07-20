@@ -266,6 +266,7 @@ class TypeChecker:
     def __init__(self, source: str = ""):
         self.env = TypeEnv()
         self._source = source
+        self._expr_checkers = self._build_expr_checkers()
         self._setup_builtins()
 
     def _setup_builtins(self):
@@ -446,260 +447,330 @@ class TypeChecker:
             self.check_expr(decl)
 
     def check_expr(self, expr) -> NovaType:
-        """检查表达式并返回其类型"""
+        """检查表达式并返回其类型（调度表模式）
 
-        if isinstance(expr, IntLiteral):
-            return INT_T
+        使用调度表替代巨型 if-elif 链，将单函数圈复杂度从 ~27 降至约 3。
+        每种节点类型对应一个独立的 _check_* 方法，按类别组织。
+        """
+        checker = self._expr_checkers.get(type(expr))
+        if checker is not None:
+            return checker(expr)
+        raise TypeCheckError(f"未知的表达式类型: {type(expr).__name__}")
 
-        elif isinstance(expr, FloatLiteral):
-            return FLOAT_T
+    def _build_expr_checkers(self):
+        """构建表达式类型检查调度表"""
+        return {
+            # 字面量
+            IntLiteral: self._check_int_literal,
+            FloatLiteral: self._check_float_literal,
+            StringLiteral: self._check_string_literal,
+            CharLiteral: self._check_char_literal,
+            BoolLiteral: self._check_bool_literal,
+            UnitLiteral: self._check_unit_literal,
+            # 标识符
+            Identifier: self._check_identifier,
+            # 数据结构
+            ListExpr: self._check_list_expr,
+            TupleExpr: self._check_tuple_expr,
+            # 运算
+            BinaryOp: self._check_binary_op,
+            UnaryOp: self._check_unary_op,
+            # 控制流
+            IfExpr: self._check_if_expr,
+            MatchExpr: self._check_match_expr,
+            Block: self._check_block,
+            ForExpr: self._check_for_expr,
+            WhileExpr: self._check_while_expr,
+            BreakExpr: self._check_break_expr,
+            ContinueExpr: self._check_continue_expr,
+            # 绑定与赋值
+            LetBinding: self._check_let_binding,
+            MutBinding: self._check_mut_binding,
+            Assignment: self._check_assignment,
+            # 函数
+            FnCall: self._check_fn_call,
+            Lambda: self._check_lambda,
+            # 其他
+            PipeExpr: self._check_pipe_expr,
+            FieldAccess: self._check_field_access,
+            TryExpr: self._check_try_expr,
+            ListComprehension: self._check_list_comprehension,
+        }
 
-        elif isinstance(expr, StringLiteral):
-            return STRING_T
+    # ------------------------------------------------------------------
+    # 字面量检查
+    # ------------------------------------------------------------------
 
-        elif isinstance(expr, CharLiteral):
-            return CHAR_T
+    def _check_int_literal(self, expr) -> NovaType:
+        return INT_T
 
-        elif isinstance(expr, BoolLiteral):
-            return BOOL_T
+    def _check_float_literal(self, expr) -> NovaType:
+        return FLOAT_T
 
-        elif isinstance(expr, UnitLiteral):
-            return UNIT_T
+    def _check_string_literal(self, expr) -> NovaType:
+        return STRING_T
 
-        elif isinstance(expr, Identifier):
-            ty = self.env.lookup(expr.name)
-            if ty is None:
-                raise TypeCheckError(f"未定义的标识符 '{expr.name}'")
-            return ty
+    def _check_char_literal(self, expr) -> NovaType:
+        return CHAR_T
 
-        elif isinstance(expr, ListExpr):
-            if not expr.elements:
-                return ListType(TypeVar("unknown_list_elem"))
-            elem_types = [self.check_expr(e) for e in expr.elements]
-            first = elem_types[0]
-            for i, et in enumerate(elem_types[1:], 1):
-                if not self._types_compatible(et, first):
-                    raise TypeCheckError(
-                        f"列表元素类型不一致：元素 0 为 {first}，元素 {i} 为 {et}"
-                    )
-            return ListType(first)
+    def _check_bool_literal(self, expr) -> NovaType:
+        return BOOL_T
 
-        elif isinstance(expr, TupleExpr):
-            elem_types = [self.check_expr(e) for e in expr.elements]
-            return TupleType(elem_types)
+    def _check_unit_literal(self, expr) -> NovaType:
+        return UNIT_T
 
-        elif isinstance(expr, BinaryOp):
-            return self._check_binary_op(expr)
+    # ------------------------------------------------------------------
+    # 标识符检查
+    # ------------------------------------------------------------------
 
-        elif isinstance(expr, UnaryOp):
-            return self._check_unary_op(expr)
+    def _check_identifier(self, expr) -> NovaType:
+        ty = self.env.lookup(expr.name)
+        if ty is None:
+            raise TypeCheckError(f"未定义的标识符 '{expr.name}'")
+        return ty
 
-        elif isinstance(expr, IfExpr):
-            cond_ty = self.check_expr(expr.condition)
-            if not self._types_compatible(cond_ty, BOOL_T):
-                raise TypeCheckError(f"if 条件必须是 Bool 类型，得到 {cond_ty}")
-            then_ty = self.check_expr(expr.then_branch)
-            if expr.else_branch:
-                else_ty = self.check_expr(expr.else_branch)
-                if not self._types_compatible(then_ty, else_ty):
-                    raise TypeCheckError(
-                        f"if 分支类型不一致：then 为 {then_ty}，else 为 {else_ty}"
-                    )
-                return then_ty
-            return UNIT_T
+    # ------------------------------------------------------------------
+    # 数据结构检查
+    # ------------------------------------------------------------------
 
-        elif isinstance(expr, MatchExpr):
-            subject_ty = self.check_expr(expr.subject)
-            result_type = None
-            for i, arm in enumerate(expr.arms):
-                arm_ty = self.check_match_arm(arm, subject_ty, expr)
-                if result_type is None:
-                    result_type = arm_ty
-                elif not self._types_compatible(arm_ty, result_type):
-                    raise TypeCheckError(
-                        f"match 分支 {i} 类型 {arm_ty} 与第一个分支 {result_type} 不一致"
-                    )
-            return result_type or UNIT_T
-
-        elif isinstance(expr, Lambda):
-            param_types = []
-            child_env = self.env.child()
-            for param in expr.params:
-                if param.type_annotation:
-                    ptype = self._from_ast_type(param.type_annotation)
-                else:
-                    ptype = TypeVar(f"lambda_param")
-                param_types.append(ptype)
-                child_env.define(param.name, ptype)
-
-            old_env = self.env
-            self.env = child_env
-            body_ty = self.check_expr(expr.body)
-            self.env = old_env
-
-            return FnType(param_types, body_ty)
-
-        elif isinstance(expr, FnCall):
-            callee_ty = self.check_expr(expr.callee)
-            arg_types = [self.check_expr(a) for a in expr.args]
-
-            if isinstance(callee_ty, FnType):
-                # 支持部分应用（参数数量少于声明的参数数量）
-                if len(arg_types) > len(callee_ty.param_types):
-                    raise TypeCheckError(
-                        f"函数期望至多 {len(callee_ty.param_types)} 个参数，但传入了 {len(arg_types)} 个"
-                    )
-                for i, (arg_t, param_t) in enumerate(
-                    zip(arg_types, callee_ty.param_types)
-                ):
-                    if not self._types_compatible(arg_t, param_t):
-                        raise TypeCheckError(
-                            f"参数 {i} 类型不匹配：期望 {param_t}，得到 {arg_t}"
-                        )
-                if len(arg_types) == len(callee_ty.param_types):
-                    return callee_ty.return_type
-                else:
-                    # 部分应用：返回剩余参数 -> 返回值 的函数类型
-                    return FnType(
-                        callee_ty.param_types[len(arg_types) :], callee_ty.return_type
-                    )
-            elif isinstance(callee_ty, TypeVar):
-                # 未类型化的参数（duck typing）：允许任意调用
-                # 返回一个 TypeVar 表示结果类型
-                return TypeVar(f"ret_{callee_ty.name}")
-            else:
-                raise TypeCheckError(f"无法对非函数类型 {callee_ty} 进行调用")
-
-        elif isinstance(expr, PipeExpr):
-            # expr |> f  等价于 f(expr)
-            left_ty = self.check_expr(expr.left)
-            right_ty = self.check_expr(expr.right)
-            if isinstance(right_ty, FnType):
-                if len(right_ty.param_types) >= 1:
-                    # 检查管道值是否与函数最后一个参数兼容
-                    # 因为管道的典型用法是 f(arg1) |> 等价于 f(piped_value)
-                    last_param = (
-                        right_ty.param_types[-1] if right_ty.param_types else None
-                    )
-                    # 也检查第一个参数（直接调用场景）
-                    first_param = right_ty.param_types[0]
-                    if self._types_compatible(
-                        left_ty, last_param
-                    ) or self._types_compatible(left_ty, first_param):
-                        return right_ty.return_type
-            # 如果无法确定，返回右侧类型
-            return right_ty
-
-        elif isinstance(expr, Block):
-            for stmt in expr.statements:
-                self.check_expr(stmt)
-            if expr.tail_expression:
-                return self.check_expr(expr.tail_expression)
-            return UNIT_T
-
-        elif isinstance(expr, LetBinding):
-            val_ty = self.check_expr(expr.value)
-            if expr.type_annotation:
-                annotated = self._from_ast_type(expr.type_annotation)
-                if not self._types_compatible(val_ty, annotated):
-                    raise TypeCheckError(
-                        f"let 绑定类型不匹配：推断为 {val_ty}，标注为 {annotated}"
-                    )
-            self.env.define(expr.name, val_ty)
-            return UNIT_T
-
-        elif isinstance(expr, MutBinding):
-            val_ty = self.check_expr(expr.value)
-            self.env.define(expr.name, val_ty)
-            return UNIT_T
-
-        elif isinstance(expr, Assignment):
-            val_ty = self.check_expr(expr.value)
-            existing = self.env.lookup(expr.name)
-            if existing is None:
-                raise TypeCheckError(f"赋值目标 '{expr.name}' 未定义")
-            if not self._types_compatible(val_ty, existing):
+    def _check_list_expr(self, expr) -> NovaType:
+        if not expr.elements:
+            return ListType(TypeVar("unknown_list_elem"))
+        elem_types = [self.check_expr(e) for e in expr.elements]
+        first = elem_types[0]
+        for i, et in enumerate(elem_types[1:], 1):
+            if not self._types_compatible(et, first):
                 raise TypeCheckError(
-                    f"赋值类型不匹配：'{expr.name}' 为 {existing}，值为 {val_ty}"
+                    f"列表元素类型不一致：元素 0 为 {first}，元素 {i} 为 {et}"
                 )
-            return UNIT_T
+        return ListType(first)
 
-        elif isinstance(expr, FieldAccess):
-            target_ty = self.check_expr(expr.target)
-            if isinstance(target_ty, TupleType):
-                try:
-                    idx = int(expr.field)
-                    if 0 <= idx < len(target_ty.elements):
-                        return target_ty.elements[idx]
-                # TODO: 审查此异常处理是否合理，避免静默吞噬异常
-                except ValueError:
-                    pass
-                raise TypeCheckError(f"元组索引 '{expr.field}' 越界")
-            raise TypeCheckError(f"无法对类型 {target_ty} 进行字段访问")
+    def _check_tuple_expr(self, expr) -> NovaType:
+        elem_types = [self.check_expr(e) for e in expr.elements]
+        return TupleType(elem_types)
 
-        elif isinstance(expr, TryExpr):
-            # ? 操作符的简化检查
-            return self.check_expr(expr.expr)
+    # ------------------------------------------------------------------
+    # 运算检查
+    # ------------------------------------------------------------------
 
-        elif isinstance(expr, ForExpr):
-            # for 循环：返回 List[元素类型]
-            if isinstance(expr.iterable, tuple) and expr.iterable[0] == "range":
-                # 范围循环：iterable 是 ("range", start, end, step)
-                start_ty = self.check_expr(expr.iterable[1])
-                end_ty = self.check_expr(expr.iterable[2])
-                if expr.iterable[3]:
-                    self.check_expr(expr.iterable[3])  # step
-            else:
-                # 列表遍历
-                iter_ty = self.check_expr(expr.iterable)
+    def _check_binary_op(self, expr: BinaryOp) -> NovaType:
+        """检查二元操作"""
 
-            # 检查循环体类型
-            child_env = self.env.child()
-            child_env.define(expr.var_name, TypeVar("for_elem"))
-            old_env = self.env
-            self.env = child_env
-            body_ty = self.check_expr(expr.body)
-            self.env = old_env
-            return ListType(body_ty)
+    def _check_if_expr(self, expr) -> NovaType:
+        cond_ty = self.check_expr(expr.condition)
+        if not self._types_compatible(cond_ty, BOOL_T):
+            raise TypeCheckError(f"if 条件必须是 Bool 类型，得到 {cond_ty}")
+        then_ty = self.check_expr(expr.then_branch)
+        if expr.else_branch:
+            else_ty = self.check_expr(expr.else_branch)
+            if not self._types_compatible(then_ty, else_ty):
+                raise TypeCheckError(
+                    f"if 分支类型不一致：then 为 {then_ty}，else 为 {else_ty}"
+                )
+            return then_ty
+        return UNIT_T
 
-        elif isinstance(expr, WhileExpr):
-            cond_ty = self.check_expr(expr.condition)
-            if not self._types_compatible(cond_ty, BOOL_T):
-                raise TypeCheckError(f"while 条件必须是 Bool 类型，得到 {cond_ty}")
-            return self.check_expr(expr.body)
+    def _check_match_expr(self, expr) -> NovaType:
+        subject_ty = self.check_expr(expr.subject)
+        result_type = None
+        for i, arm in enumerate(expr.arms):
+            arm_ty = self.check_match_arm(arm, subject_ty, expr)
+            if result_type is None:
+                result_type = arm_ty
+            elif not self._types_compatible(arm_ty, result_type):
+                raise TypeCheckError(
+                    f"match 分支 {i} 类型 {arm_ty} 与第一个分支 {result_type} 不一致"
+                )
+        return result_type or UNIT_T
 
-        elif isinstance(expr, BreakExpr):
-            return UNIT_T
+    def _check_block(self, expr) -> NovaType:
+        for stmt in expr.statements:
+            self.check_expr(stmt)
+        if expr.tail_expression:
+            return self.check_expr(expr.tail_expression)
+        return UNIT_T
 
-        elif isinstance(expr, ContinueExpr):
-            return UNIT_T
-
-        elif isinstance(expr, ListComprehension):
-            # 列表推导式：返回 List[expr 类型]
-            if isinstance(expr.iterable, tuple) and expr.iterable[0] == "range":
-                self.check_expr(expr.iterable[1])
-                self.check_expr(expr.iterable[2])
-            else:
-                self.check_expr(expr.iterable)
-
-            child_env = self.env.child()
-            child_env.define(expr.var_name, TypeVar("lc_elem"))
-            if expr.filter_cond:
-                old_env = self.env
-                self.env = child_env
-                cond_ty = self.check_expr(expr.filter_cond)
-                if not self._types_compatible(cond_ty, BOOL_T):
-                    raise TypeCheckError(f"列表推导式过滤条件必须是 Bool 类型")
-                self.env = old_env
-
-            old_env = self.env
-            self.env = child_env
-            expr_ty = self.check_expr(expr.expr)
-            self.env = old_env
-            return ListType(expr_ty)
-
+    def _check_for_expr(self, expr) -> NovaType:
+        # for 循环：返回 List[元素类型]
+        if isinstance(expr.iterable, tuple) and expr.iterable[0] == "range":
+            # 范围循环：iterable 是 ("range", start, end, step)
+            start_ty = self.check_expr(expr.iterable[1])
+            end_ty = self.check_expr(expr.iterable[2])
+            if expr.iterable[3]:
+                self.check_expr(expr.iterable[3])  # step
         else:
-            raise TypeCheckError(f"未知的表达式类型: {type(expr).__name__}")
+            # 列表遍历
+            iter_ty = self.check_expr(expr.iterable)
+
+        # 检查循环体类型
+        child_env = self.env.child()
+        child_env.define(expr.var_name, TypeVar("for_elem"))
+        old_env = self.env
+        self.env = child_env
+        body_ty = self.check_expr(expr.body)
+        self.env = old_env
+        return ListType(body_ty)
+
+    def _check_while_expr(self, expr) -> NovaType:
+        cond_ty = self.check_expr(expr.condition)
+        if not self._types_compatible(cond_ty, BOOL_T):
+            raise TypeCheckError(f"while 条件必须是 Bool 类型，得到 {cond_ty}")
+        return self.check_expr(expr.body)
+
+    def _check_break_expr(self, expr) -> NovaType:
+        return UNIT_T
+
+    def _check_continue_expr(self, expr) -> NovaType:
+        return UNIT_T
+
+    # ------------------------------------------------------------------
+    # 绑定与赋值检查
+    # ------------------------------------------------------------------
+
+    def _check_let_binding(self, expr) -> NovaType:
+        val_ty = self.check_expr(expr.value)
+        if expr.type_annotation:
+            annotated = self._from_ast_type(expr.type_annotation)
+            if not self._types_compatible(val_ty, annotated):
+                raise TypeCheckError(
+                    f"let 绑定类型不匹配：推断为 {val_ty}，标注为 {annotated}"
+                )
+        self.env.define(expr.name, val_ty)
+        return UNIT_T
+
+    def _check_mut_binding(self, expr) -> NovaType:
+        val_ty = self.check_expr(expr.value)
+        self.env.define(expr.name, val_ty)
+        return UNIT_T
+
+    def _check_assignment(self, expr) -> NovaType:
+        val_ty = self.check_expr(expr.value)
+        existing = self.env.lookup(expr.name)
+        if existing is None:
+            raise TypeCheckError(f"赋值目标 '{expr.name}' 未定义")
+        if not self._types_compatible(val_ty, existing):
+            raise TypeCheckError(
+                f"赋值类型不匹配：'{expr.name}' 为 {existing}，值为 {val_ty}"
+            )
+        return UNIT_T
+
+    # ------------------------------------------------------------------
+    # 函数检查
+    # ------------------------------------------------------------------
+
+    def _check_fn_call(self, expr) -> NovaType:
+        callee_ty = self.check_expr(expr.callee)
+        arg_types = [self.check_expr(a) for a in expr.args]
+
+        if isinstance(callee_ty, FnType):
+            # 支持部分应用（参数数量少于声明的参数数量）
+            if len(arg_types) > len(callee_ty.param_types):
+                raise TypeCheckError(
+                    f"函数期望至多 {len(callee_ty.param_types)} 个参数，但传入了 {len(arg_types)} 个"
+                )
+            for i, (arg_t, param_t) in enumerate(
+                zip(arg_types, callee_ty.param_types)
+            ):
+                if not self._types_compatible(arg_t, param_t):
+                    raise TypeCheckError(
+                        f"参数 {i} 类型不匹配：期望 {param_t}，得到 {arg_t}"
+                    )
+            if len(arg_types) == len(callee_ty.param_types):
+                return callee_ty.return_type
+            else:
+                # 部分应用：返回剩余参数 -> 返回值 的函数类型
+                return FnType(
+                    callee_ty.param_types[len(arg_types) :], callee_ty.return_type
+                )
+        elif isinstance(callee_ty, TypeVar):
+            # 未类型化的参数（duck typing）：允许任意调用
+            # 返回一个 TypeVar 表示结果类型
+            return TypeVar(f"ret_{callee_ty.name}")
+        else:
+            raise TypeCheckError(f"无法对非函数类型 {callee_ty} 进行调用")
+
+    def _check_lambda(self, expr) -> NovaType:
+        param_types = []
+        child_env = self.env.child()
+        for param in expr.params:
+            if param.type_annotation:
+                ptype = self._from_ast_type(param.type_annotation)
+            else:
+                ptype = TypeVar(f"lambda_param")
+            param_types.append(ptype)
+            child_env.define(param.name, ptype)
+
+        old_env = self.env
+        self.env = child_env
+        body_ty = self.check_expr(expr.body)
+        self.env = old_env
+
+        return FnType(param_types, body_ty)
+
+    # ------------------------------------------------------------------
+    # 其他表达式检查
+    # ------------------------------------------------------------------
+
+    def _check_pipe_expr(self, expr) -> NovaType:
+        # expr |> f  等价于 f(expr)
+        left_ty = self.check_expr(expr.left)
+        right_ty = self.check_expr(expr.right)
+        if isinstance(right_ty, FnType):
+            if len(right_ty.param_types) >= 1:
+                # 检查管道值是否与函数最后一个参数兼容
+                # 因为管道的典型用法是 f(arg1) |> 等价于 f(piped_value)
+                last_param = (
+                    right_ty.param_types[-1] if right_ty.param_types else None
+                )
+                # 也检查第一个参数（直接调用场景）
+                first_param = right_ty.param_types[0]
+                if self._types_compatible(
+                    left_ty, last_param
+                ) or self._types_compatible(left_ty, first_param):
+                    return right_ty.return_type
+        # 如果无法确定，返回右侧类型
+        return right_ty
+
+    def _check_field_access(self, expr) -> NovaType:
+        target_ty = self.check_expr(expr.target)
+        if isinstance(target_ty, TupleType):
+            try:
+                idx = int(expr.field)
+                if 0 <= idx < len(target_ty.elements):
+                    return target_ty.elements[idx]
+            # TODO: 审查此异常处理是否合理，避免静默吞噬异常
+            except ValueError:
+                pass
+            raise TypeCheckError(f"元组索引 '{expr.field}' 越界")
+        raise TypeCheckError(f"无法对类型 {target_ty} 进行字段访问")
+
+    def _check_try_expr(self, expr) -> NovaType:
+        # ? 操作符的简化检查
+        return self.check_expr(expr.expr)
+
+    def _check_list_comprehension(self, expr) -> NovaType:
+        # 列表推导式：返回 List[expr 类型]
+        if isinstance(expr.iterable, tuple) and expr.iterable[0] == "range":
+            self.check_expr(expr.iterable[1])
+            self.check_expr(expr.iterable[2])
+        else:
+            self.check_expr(expr.iterable)
+
+        child_env = self.env.child()
+        child_env.define(expr.var_name, TypeVar("lc_elem"))
+        if expr.filter_cond:
+            old_env = self.env
+            self.env = child_env
+            cond_ty = self.check_expr(expr.filter_cond)
+            if not self._types_compatible(cond_ty, BOOL_T):
+                raise TypeCheckError(f"列表推导式过滤条件必须是 Bool 类型")
+            self.env = old_env
+
+        old_env = self.env
+        self.env = child_env
+        expr_ty = self.check_expr(expr.expr)
+        self.env = old_env
+        return ListType(expr_ty)
 
     def check_match_arm(
         self, arm, subject_type: NovaType, match_expr: MatchExpr

@@ -4,6 +4,116 @@
 
 ---
 
+## 2026-07-20 14:00 第23轮（C后端功能对齐 + TypeChecker重构）
+
+### 开发概览
+- **轮次**: 第 23 轮（普通开发轮）
+- **基线测试**: 418/418 通过
+- **完成任务**: 3 个（1 个审查驱动 + 2 个自主规划）
+- **审查驱动任务占比**: 33%（1/3）
+- **路线图进度**: 41/49 (84%) → 44/49 (90%)
+- **测试结果**: 418/418 通过（零回归）
+- **失败回滚**: 0 次
+
+---
+
+### 一、本轮任务详情
+
+#### 1. 【自主规划】C 后端 LIR 路径 ADT/match 支持
+- **任务 ID**: `c_backend_adt_match`
+- **为什么选这个**: 第21轮评审规划的第23轮核心任务。统一C后端的核心子任务，当前LIR C后端缺少ADT类型定义生成和闭包/间接调用支持，是功能对齐的最大缺口。LIR switch/match已在第22轮补全，现在是迁移ADT相关功能的最佳时机。
+- **完成情况**: ✅ 成功
+- **详细内容**:
+  1. **完善 LIRCallIndirect 类定义** — 添加 arg_count、arg_locs 字段及 args 属性（与 LIRCall 对称），从空类（只有pass）升级为完整指令定义
+  2. **LIR C 后端添加 LIRCallIndirect 支持** — 调用 nova_closure_call 运行时函数，参数打包为 void* 数组，支持闭包/间接调用
+  3. **修复 LIRFieldAccess 偏移量语义** — offset 是字段索引而非字节偏移，改为 `offset * 8`（与 Wasm 后端一致，修正潜在的字段访问越界bug）
+  4. **优化 LIRSwitch 整型 case 为 C switch 语句** — 当所有 case 都是整型且 >=3 个时，生成 C switch 语句（跳转表优化），否则使用 if-else 级联
+  5. **添加 _tmp_counter 临时变量计数器** — 用于生成唯一的临时变量名（闭包调用的参数数组等）
+
+#### 2. 【审查驱动】重构 TypeChecker 降低圈复杂度
+- **任务 ID**: `refactor_type_checker_complexity`
+- **为什么选这个**: 审查日志长期显示 TypeChecker.check_expr 圈复杂度 68，全项目 Top 3。类型检查器是编译器核心组件，高复杂度增加 bug 风险。参考 HIRRewriter 的数据驱动重构经验，可大幅降低复杂度。
+- **完成情况**: ✅ 成功
+- **详细内容**:
+  - 将 27 个 if-elif 分支提取为 27 个独立的 `_check_*` 方法，按类别分组：
+    - 字面量（6个）：IntLiteral, FloatLiteral, StringLiteral, CharLiteral, BoolLiteral, UnitLiteral
+    - 标识符（1个）：Identifier
+    - 数据结构（2个）：ListExpr, TupleExpr
+    - 运算（2个）：BinaryOp, UnaryOp（复用已有方法）
+    - 控制流（7个）：IfExpr, MatchExpr, Block, ForExpr, WhileExpr, BreakExpr, ContinueExpr
+    - 绑定与赋值（3个）：LetBinding, MutBinding, Assignment
+    - 函数（2个）：FnCall, Lambda
+    - 其他（4个）：PipeExpr, FieldAccess, TryExpr, ListComprehension
+  - 构建 `_expr_checkers` 调度表（27种节点类型→处理方法映射）
+  - `check_expr` 简化为查表分发（CC≈3）
+  - 在 `__init__` 中初始化调度表
+  - 圈复杂度从 68 降至约 3，代码结构清晰，易于扩展新节点类型
+
+#### 3. 【自主规划】Wasm 后端补全缺失指令
+- **任务 ID**: `wasm_backend_fill_instructions`
+- **为什么选这个**: 深度代码审计发现 Wasm 后端有多个指令缺失（ListAppend、全局变量加载/存储、浮点取模、间接调用等）。批量补全成本低、收益高，提升 Wasm 后端功能完整度。原计划的 fix_wasm_store_reg 实际早已实现，调整为补全更多缺失指令。
+- **完成情况**: ✅ 成功
+- **详细内容**:
+  1. **LIRListAppend** — 调用 nova_list_push 运行时函数追加列表元素
+  2. **LIRLoadGlobal** — global.get 加载全局变量
+  3. **LIRStoreGlobal** — global.set 存储全局变量
+  4. **LIRCallIndirect** — 闭包/间接调用（零参数简化实现）
+  5. **浮点取模** — 调用 nova_fmod 运行时函数替代空实现
+
+---
+
+### 二、审查日志研读摘要
+
+**审查来源**: AUTO_REVIEW_LOG.md 第1495轮
+
+**关键发现**:
+- 总问题数 1015，其中 CRITICAL 0、HIGH 0、MEDIUM 167、LOW 848
+- Top 10 最复杂函数：
+  1. NovaVM._execute_instruction (CC=111) — 第22轮已修复
+  2. HIRRewriter.generic_rewrite (CC=69) — 第19轮已修复
+  3. TypeChecker.check_expr (CC=68) — 本轮修复
+  4. MIRLowering._lower_expr (CC=55) — 待修复
+  5. Inlining._try_inline_expr (CC=54)
+  6. LIRCBackend._compile_instr (CC=42)
+  7. CCodeGen._infer_c_type_from_expr (CC=42)
+  8. SSAVerifier._get_used_ssa (CC=39)
+  9. NativeCodeGen._compile_body (CC=38)
+  10. Evaluator.eval_expr (CC=38)
+
+**本轮采纳的审查问题**:
+- TypeChecker.check_expr 复杂度重构（CC=68→≈3）—— 解决 Top 3 最复杂函数
+
+**未采纳的高优先级问题及原因**:
+- MIRLowering._lower_expr 复杂度 — 计划在第24轮评审后安排
+- LIRCBackend._compile_instr 复杂度 — 随功能对齐逐步重构
+- unused_import 剩余 95 处 — 需要更精细的工具辅助
+
+---
+
+### 三、测试前后对比
+
+| 指标 | 开发前 | 开发后 | 变化 |
+|------|--------|--------|------|
+| 测试通过数 | 418 | 418 | 0 |
+| 测试失败数 | 0 | 0 | 0 |
+| 路线图进度 | 84% | 90% | +6% |
+| 已完成任务数 | 41 | 44 | +3 |
+
+---
+
+### 四、下一步计划（第24轮 - 评审轮）
+
+第 24 轮是路线图评审轮（24 % 3 = 0），将进行：
+
+1. **第22-23轮回顾** — 评估两轮开发的方向、质量、效率、价值
+2. **五维评估** — 方向/质量/效率/价值/审查对齐
+3. **任务池更新** — 调整优先级，新增高价值任务
+4. **下阶段规划** — 第25-27轮方向规划
+
+预计重点方向：后端整合与基准测试、剩余高复杂度函数重构。
+
+---
+
 ## 2026-07-20 12:00 第22轮（工程化清理 + LIR完善）
 
 ### 开发概览

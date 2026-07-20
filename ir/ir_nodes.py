@@ -1227,9 +1227,26 @@ class LIRCall(LIRInstr):
 
 @dataclass
 class LIRCallIndirect(LIRInstr):
-    """LIR 间接调用"""
+    """LIR 间接调用（闭包调用/函数指针调用）
 
-    pass
+    通过闭包或函数指针调用函数，参数在 src_locs 中，
+    第一个 src_loc 是闭包/函数指针对象，后续是参数。
+    """
+
+    arg_count: int = 0
+    arg_locs: List[Tuple[str, NovaType]] = field(
+        default_factory=list
+    )  # [(reg/stack, type), ...]
+
+    @property
+    def args(self) -> List[Tuple[str, NovaType]]:
+        """统一命名别名：参数位置列表"""
+        return self.arg_locs
+
+    @args.setter
+    def args(self, value: List[Tuple[str, NovaType]]):
+        self.arg_locs = value
+        self.arg_count = len(value)
 
 
 @dataclass

@@ -21,6 +21,7 @@ from ..ir.ir_nodes import (
     LIRBuildMap,
     LIRBuildTuple,
     LIRCall,
+    LIRCallIndirect,
     LIRFieldAccess,
     LIRFunction,
     LIRIndex,
@@ -55,6 +56,7 @@ class LIRCBackend:
         self._indent_level = 0
         self._string_literals = []  # 收集字符串常量
         self._string_counter = 0
+        self._tmp_counter_value = 0  # 临时变量计数器
 
     def compile(self, lir_module: LIRModule) -> str:
         """编译 LIR 模块为 C 源代码字符串"""
@@ -62,6 +64,7 @@ class LIRCBackend:
         self._indent_level = 0
         self._string_literals = []
         self._string_counter = 0
+        self._tmp_counter_value = 0
 
         # 1. 输出头文件
         self._emit_header()
@@ -298,6 +301,11 @@ class LIRCBackend:
             self._compile_call(instr, dst)
             return
 
+        # 间接调用（闭包/函数指针）
+        if isinstance(instr, LIRCallIndirect):
+            self._compile_call_indirect(instr, dst)
+            return
+
         # 控制流
         if isinstance(instr, LIRJump):
             self._emit(f"goto {instr.target};")
@@ -357,8 +365,9 @@ class LIRCBackend:
         if isinstance(instr, LIRFieldAccess):
             if instr.src_locs and dst:
                 src = self._loc_var_name(instr.src_locs[0][0])
-                offset = instr.offset
-                self._emit(f"{dst} = *(NovaValue*)((char*){src} + {offset});")
+                # offset 是字段索引，每个字段 8 字节（NovaValue 大小）
+                byte_offset = instr.offset * 8
+                self._emit(f"{dst} = *(NovaValue*)((char*){src} + {byte_offset});")
             return
 
         # 索引访问
@@ -445,8 +454,9 @@ class LIRCBackend:
     def _compile_switch(self, instr: LIRSwitch):
         """编译 switch 多分支跳转
 
-        生成 if-else if 级联（通用方案，支持任意类型的 case 值）。
-        对于整型 case，后续可优化为跳转表。
+        策略：
+        - 整型 case 且数量 >= 3：使用 C switch 语句（跳转表优化）
+        - 其他情况（字符串、布尔、浮点等）：使用 if-else if 级联
         """
         if not instr.src_locs or not instr.cases:
             # 没有值或没有 case，直接跳 default
@@ -456,22 +466,42 @@ class LIRCBackend:
 
         cond_val = self._loc_var_name(instr.src_locs[0][0])
 
-        for i, (case_val, target) in enumerate(instr.cases):
-            if isinstance(case_val, str):
-                # 字符串比较
-                self._emit(
-                    f'if (nova_str_eq({cond_val}, "{case_val}")) goto {target};'
-                )
-            elif isinstance(case_val, bool):
-                # 布尔比较
-                self._emit(f"if ({cond_val} == {'1' if case_val else '0'}) goto {target};")
-            else:
-                # 数值比较（int, float 等）
-                self._emit(f"if ({cond_val} == {case_val}) goto {target};")
+        # 判断是否所有 case 都是整型（可使用 switch）
+        all_int_cases = all(
+            isinstance(v, int) and not isinstance(v, bool)
+            for v, _ in instr.cases
+        )
 
-        # default 分支
-        if instr.default_target:
-            self._emit(f"goto {instr.default_target};")
+        if all_int_cases and len(instr.cases) >= 3:
+            # 整型 case 较多：使用 C switch 语句
+            self._emit(f"switch ((int64_t){cond_val}) {{")
+            self._indent_level += 1
+            for case_val, target in instr.cases:
+                self._emit(f"case {case_val}: goto {target};")
+            if instr.default_target:
+                self._emit(f"default: goto {instr.default_target};")
+            self._indent_level -= 1
+            self._emit("}")
+        else:
+            # 使用 if-else if 级联
+            for i, (case_val, target) in enumerate(instr.cases):
+                if isinstance(case_val, str):
+                    # 字符串比较
+                    self._emit(
+                        f'if (nova_str_eq({cond_val}, "{case_val}")) goto {target};'
+                    )
+                elif isinstance(case_val, bool):
+                    # 布尔比较
+                    self._emit(
+                        f"if ({cond_val} == {'1' if case_val else '0'}) goto {target};"
+                    )
+                else:
+                    # 数值比较（int, float 等）
+                    self._emit(f"if ({cond_val} == {case_val}) goto {target};")
+
+            # default 分支
+            if instr.default_target:
+                self._emit(f"goto {instr.default_target};")
 
     def _compile_call(self, instr: LIRCall, dst: str):
         """编译函数调用"""
@@ -489,9 +519,46 @@ class LIRCBackend:
         else:
             self._emit(f"{c_name}({args_str});")
 
+    def _compile_call_indirect(self, instr: LIRCallIndirect, dst: str):
+        """编译间接调用（闭包/函数指针调用）
+
+        使用 nova_closure_call 运行时函数，将参数打包为 void* 数组。
+        第一个 src_loc 是闭包对象，后续是参数。
+        """
+        if not instr.src_locs or len(instr.src_locs) < 1:
+            return
+
+        closure = self._loc_var_name(instr.src_locs[0][0])
+        arg_count = instr.arg_count
+
+        # 构建参数数组
+        args_array = f"nova_args_{self._tmp_counter()}"
+        self._emit(f"void* {args_array}[{max(arg_count, 1)}];")
+
+        for i in range(arg_count):
+            if i + 1 < len(instr.src_locs):
+                arg_var = self._loc_var_name(instr.src_locs[i + 1][0])
+                self._emit(f"{args_array}[{i}] = (void*){arg_var};")
+
+        if dst:
+            self._emit(
+                f"{dst} = (NovaValue*)nova_closure_call((NovaClosure*){closure}, "
+                f"{args_array}, {arg_count});"
+            )
+        else:
+            self._emit(
+                f"nova_closure_call((NovaClosure*){closure}, "
+                f"{args_array}, {arg_count});"
+            )
+
     # ------------------------------------------------------------------
     # 辅助方法
     # ------------------------------------------------------------------
+
+    def _tmp_counter(self) -> int:
+        """生成唯一的临时变量序号"""
+        self._tmp_counter_value += 1
+        return self._tmp_counter_value
 
     def _emit(self, line: str):
         """输出一行代码"""

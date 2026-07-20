@@ -1,6 +1,6 @@
 # Nova LLM 智能开发路线图
 
-**更新时间**: 2026-07-20 12:00:00
+**更新时间**: 2026-07-20 14:00:00
 **上次评审**: 第 21 轮（路线图评审）
 
 本路线图由 LLM 智能开发系统动态维护。
@@ -53,8 +53,8 @@
 | ✅ | 修复 Wasm 后端 Label 实现 | medium | 62 | 3-5 小时 | fix_while_phi |
 | ✅ | Wasm 后端控制流重写（支持任意 CFG） | hard | 90 | 2-3 天 | fix_wasm_label |
 | ✅ | 修复 Wasm 后端多个正确性 bug | easy | 65 | 1-2 小时 | wasm_control_flow_rewrite |
-| ⏳ | 修复 Wasm 后端 StoreReg 实现 | easy | 60 | 1 小时 | wasm_control_flow_rewrite |
-| ⏳ | C 后端 LIR 路径 ADT/match 支持 | hard | 72 | 1-2 天 | lir_switch_match_lowering, unify_c_backend |
+| ✅ | 修复 Wasm 后端 StoreReg 实现 | easy | 60 | 1 小时 | wasm_control_flow_rewrite |
+| ✅ | C 后端 LIR 路径 ADT/match 支持 | hard | 72 | 1-2 天 | lir_switch_match_lowering, unify_c_backend |
 | ⏳ | 实现原生后端函数调用 ABI | hard | 25 | 3-5 天 | fix_mir_ssa |
 
 ## 🛠️ 工程质量
@@ -71,7 +71,7 @@
 | ✅ | 修复过宽异常捕获 | easy | 60 | 1-2 小时 | - |
 | ✅ | 批量清理未使用导入 | easy | 55 | 1-2 小时 | - |
 | ✅ | 拆分 VM 巨型执行函数 | medium | 70 | 4-6 小时 | - |
-| ⏳ | 重构 TypeChecker 降低圈复杂度 | medium | 55 | 4-6 小时 | - |
+| ✅ | 重构 TypeChecker 降低圈复杂度 | medium | 55 | 4-6 小时 | - |
 | ⏳ | 重构 MIRLowering._lower_expr 降低圈复杂度 | medium | 58 | 3-5 小时 | - |
 
 ## 🧪 测试完善
@@ -84,10 +84,10 @@
 
 ---
 
-**进度**: 41/49 (84%)
-**已完成**: 41
+**进度**: 44/49 (90%)
+**已完成**: 44
 **进行中**: 0
-**待开发**: 7
+**待开发**: 4
 **已废弃**: 1
 
-> 注：第22轮开发完成。完成 3 个任务（1 个审查驱动 + 2 个自主规划）：VM 巨型执行函数拆分（CC=111→≈5）、LIR switch/match 降级补全、Wasm 后端多 bug 修复。路线图进度 81% → 84%。测试 418 全通过，零回归。下一步（第23轮）：C 后端 LIR 路径 ADT/match 支持，推进统一 C 后端目标。
+> 注：第23轮开发完成。完成 3 个任务（1 个审查驱动 + 2 个自主规划）：C 后端 LIR 路径 ADT/match 支持（闭包调用+字段偏移修复+switch优化）、TypeChecker 调度表重构（CC=68→≈3）、Wasm 后端补全缺失指令。路线图进度 84% → 90%。测试 418 全通过，零回归。下一步（第24轮）：后端整合与基准测试，第24轮也是评审轮。

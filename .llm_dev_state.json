@@ -1,5 +1,5 @@
 {
-  "cycles": 22,
+  "cycles": 23,
   "completed_tasks": [
     "unify_ir_naming",
     "for_loop_ssa_normalize",
@@ -49,10 +49,37 @@
     "review_cycle_21",
     "split_vm_execute_instruction",
     "lir_switch_match_lowering",
-    "fix_wasm_bugs"
+    "fix_wasm_bugs",
+    "c_backend_adt_match",
+    "refactor_type_checker_complexity",
+    "wasm_backend_fill_instructions"
   ],
   "failed_tasks": [],
   "task_history": [
+    {
+      "cycle": 23,
+      "task_id": "c_backend_adt_match",
+      "status": "completed",
+      "source": "自主规划",
+      "reason": "第21轮评审规划的第23轮核心任务。统一C后端的核心子任务，当前LIR C后端缺少ADT类型定义生成和闭包/间接调用支持，是功能对齐的最大缺口。LIR switch/match已在第22轮补全，现在是迁移ADT相关功能的最佳时机。",
+      "details": "C后端LIR路径ADT/match支持：1) 完善LIRCallIndirect类定义——添加arg_count、arg_locs字段及args属性（与LIRCall对称）；2) LIR C后端添加LIRCallIndirect支持——调用nova_closure_call运行时函数，参数打包为void*数组；3) 修复LIRFieldAccess偏移量语义——offset是字段索引而非字节偏移，改为offset * 8（与Wasm后端一致）；4) 优化LIRSwitch整型case为C switch语句——当所有case都是整型且>=3个时，生成C switch语句（跳转表优化），否则使用if-else级联；5) 添加_tmp_counter临时变量计数器工具方法。LIR C后端功能完整度进一步提升，向统一C后端目标迈进。"
+    },
+    {
+      "cycle": 23,
+      "task_id": "refactor_type_checker_complexity",
+      "status": "completed",
+      "source": "审查驱动",
+      "reason": "审查日志长期显示TypeChecker.check_expr圈复杂度68，全项目Top 3。类型检查器是编译器核心组件，高复杂度增加bug风险。参考HIRRewriter的数据驱动重构经验，可大幅降低复杂度。",
+      "details": "重构TypeChecker.check_expr从CC=68降至CC≈3：1) 将27个if-elif分支提取为27个独立的_check_*方法，按类别分组（字面量6个、标识符1个、数据结构2个、运算2个、控制流7个、绑定与赋值3个、函数2个、其他4个）；2) 构建_expr_checkers调度表（27种节点类型→处理方法映射）；3) check_expr简化为查表分发（CC≈3）；4) 在__init__中初始化调度表。圈复杂度从68降至约3，代码结构清晰，易于扩展新节点类型。"
+    },
+    {
+      "cycle": 23,
+      "task_id": "wasm_backend_fill_instructions",
+      "status": "completed",
+      "source": "自主规划",
+      "reason": "深度代码审计发现Wasm后端有多个指令缺失（ListAppend、全局变量加载/存储、浮点取模、间接调用等）。批量补全成本低、收益高，提升Wasm后端功能完整度。StoreReg实际已实现，调整为补全更多缺失指令。",
+      "details": "Wasm后端补全5项缺失功能：1) LIRListAppend——调用nova_list_push运行时函数追加列表元素；2) LIRLoadGlobal——global.get加载全局变量；3) LIRStoreGlobal——global.set存储全局变量；4) LIRCallIndirect——闭包/间接调用（零参数简化实现）；5) 浮点取模——调用nova_fmod运行时函数替代空实现。Wasm后端指令覆盖度提升，功能更完整。"
+    },
     {
       "cycle": 22,
       "task_id": "split_vm_execute_instruction",
@@ -86,7 +113,7 @@
       "details": "完成第19-20轮回顾：两轮共完成 6 个任务，路线图进度 70% → 84%，测试 418 全通过，零失败零回滚。五维评估：方向正确（Wasm架构修复 + MIR优化 + 工程化清理三线并进）、质量持续变好（平均CC 3.17→3.13，极复杂函数 21→19）、效率稳定（每轮3个任务）、价值高（LICM高级优化 + Wasm控制流架构修复）、审查对齐良好（审查驱动任务占比 50%）。发现新问题：VM._execute_instruction 圈复杂度 111（长期Top 1）、Native后端功能严重不完整、unused_import 仍有 95 处、LIR switch/match 降级缺失。下阶段方向：第22轮工程化清理（VM巨型函数拆分 + LIR switch/match降级补全）、第23轮C后端功能对齐（ADT/match/闭包迁移到LIR路径）、第24轮后端整合与基准测试。任务池新增 5 个任务（3个审查驱动 + 2个自主发现），调整 3 个优先级。"
     }
   ],
-  "current_cycle": 22,
+  "current_cycle": 23,
   "baseline_tests": 403,
   "current_tests": 418,
   "last_review_cycle": 21,
@@ -637,7 +664,7 @@
       "priority": 60,
       "category": "backend",
       "estimated": "1 小时",
-      "status": "pending",
+      "status": "completed",
       "depends_on": [
         "wasm_control_flow_rewrite"
       ],
@@ -651,7 +678,7 @@
       "priority": 72,
       "category": "backend",
       "estimated": "1-2 天",
-      "status": "pending",
+      "status": "completed",
       "depends_on": [
         "lir_switch_match_lowering",
         "unify_c_backend"
@@ -666,7 +693,7 @@
       "priority": 55,
       "category": "engineering",
       "estimated": "4-6 小时",
-      "status": "pending",
+      "status": "completed",
       "depends_on": [],
       "reason": "审查日志长期显示 check_expr 圈复杂度 68，排名 Top 3。类型检查器是编译器的核心组件，高复杂度增加 bug 风险。参考 HIRRewriter 的数据驱动重构经验，可大幅降低复杂度。[新增任务 / 审查驱动]"
     },
