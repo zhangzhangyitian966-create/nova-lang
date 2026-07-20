@@ -12,17 +12,35 @@ from .ir_nodes import (
     FLOAT_TYPE,
     INT_TYPE,
     HIRADTConstructor,
+    HIRAssignExpr,
     HIRBinaryOp,
     HIRBlockExpr,
     HIRBoolLiteral,
     HIRCallExpr,
+    HIRCharLiteral,
+    HIRFieldExpr,
     HIRFnDecl,
+    HIRForExpr,
     HIRIdentifier,
+    HIRIfExpr,
+    HIRIndexExpr,
     HIRIntLiteral,
     HIRFloatLiteral,
+    HIRLambda,
     HIRLetDecl,
+    HIRListComprehension,
+    HIRListExpr,
+    HIRMapExpr,
+    HIRMatchExpr,
+    HIRPipeExpr,
     HIRRewriter,
+    HIRStringLiteral,
+    HIRTupleExpr,
+    HIRUnaryOp,
+    HIRUnitLiteral,
+    HIRUnwrapExpr,
     HIRVisitor,
+    HIRWhileExpr,
 )
 
 
@@ -403,21 +421,19 @@ def _has_side_effect_expr(expr, pure_binops, pure_unaryops):
     if isinstance(expr, HIRCallExpr):
         return True
     # 赋值有副作用
-    if isinstance(expr, HIRIdentifier) and False:
-        pass  # 标识符无副作用
-    if hasattr(expr, 'target') and hasattr(expr, 'value') and type(expr).__name__ == 'HIRAssignExpr':
+    if isinstance(expr, HIRAssignExpr):
         return True
     # Unwrap 可能 panic
-    if type(expr).__name__ == 'HIRUnwrapExpr':
+    if isinstance(expr, HIRUnwrapExpr):
         return True
     # For/While 循环体可能有副作用
-    if type(expr).__name__ in ('HIRForExpr', 'HIRWhileExpr'):
+    if isinstance(expr, (HIRForExpr, HIRWhileExpr)):
         return True
     # 块：检查其中是否有副作用
     if isinstance(expr, HIRBlockExpr):
         return any(_has_side_effect_expr(e, pure_binops, pure_unaryops) for e in expr.exprs)
     # If：两个分支任一有副作用
-    if type(expr).__name__ == 'HIRIfExpr':
+    if isinstance(expr, HIRIfExpr):
         return _has_side_effect_expr(expr.consequence, pure_binops, pure_unaryops) or _has_side_effect_expr(expr.alternative, pure_binops, pure_unaryops)
     # 纯二元运算
     if isinstance(expr, HIRBinaryOp):
@@ -425,7 +441,7 @@ def _has_side_effect_expr(expr, pure_binops, pure_unaryops):
             return _has_side_effect_expr(expr.left, pure_binops, pure_unaryops) or _has_side_effect_expr(expr.right, pure_binops, pure_unaryops)
         return True  # 未知操作符，保守认为有副作用
     # 纯一元运算
-    if type(expr).__name__ == 'HIRUnaryOp':
+    if isinstance(expr, HIRUnaryOp):
         if expr.op in pure_unaryops:
             return _has_side_effect_expr(expr.operand, pure_binops, pure_unaryops)
         return True
@@ -436,30 +452,31 @@ def _has_side_effect_expr(expr, pure_binops, pure_unaryops):
             HIRIntLiteral,
             HIRFloatLiteral,
             HIRBoolLiteral,
+            HIRStringLiteral,
+            HIRCharLiteral,
+            HIRUnitLiteral,
             HIRIdentifier,
         ),
     ):
         return False
-    if type(expr).__name__ in ('HIRStringLiteral', 'HIRCharLiteral', 'HIRUnitLiteral'):
-        return False
     # 列表/元组/映射：检查子表达式
-    if type(expr).__name__ in ('HIRListExpr', 'HIRTupleExpr'):
+    if isinstance(expr, (HIRListExpr, HIRTupleExpr)):
         return any(_has_side_effect_expr(e, pure_binops, pure_unaryops) for e in expr.elements)
-    if type(expr).__name__ == 'HIRMapExpr':
+    if isinstance(expr, HIRMapExpr):
         return any(
             _has_side_effect_expr(k, pure_binops, pure_unaryops) or _has_side_effect_expr(v, pure_binops, pure_unaryops)
             for k, v in expr.entries
         )
     # 字段/索引访问：纯操作
-    if type(expr).__name__ == 'HIRFieldExpr':
+    if isinstance(expr, HIRFieldExpr):
         return _has_side_effect_expr(expr.object, pure_binops, pure_unaryops)
-    if type(expr).__name__ == 'HIRIndexExpr':
+    if isinstance(expr, HIRIndexExpr):
         return _has_side_effect_expr(expr.object, pure_binops, pure_unaryops) or _has_side_effect_expr(expr.index, pure_binops, pure_unaryops)
     # Lambda 本身无副作用（调用才有）
-    if type(expr).__name__ == 'HIRLambda':
+    if isinstance(expr, HIRLambda):
         return False
     # Match：检查 scrutinee 和所有 arm
-    if type(expr).__name__ == 'HIRMatchExpr':
+    if isinstance(expr, HIRMatchExpr):
         if _has_side_effect_expr(expr.value, pure_binops, pure_unaryops):
             return True
         return any(_has_side_effect_expr(arm.body, pure_binops, pure_unaryops) for arm in expr.arms)
@@ -467,10 +484,10 @@ def _has_side_effect_expr(expr, pure_binops, pure_unaryops):
     if isinstance(expr, HIRADTConstructor):
         return any(_has_side_effect_expr(a, pure_binops, pure_unaryops) for a in expr.fields)
     # 管道：取决于两端
-    if type(expr).__name__ == 'HIRPipeExpr':
+    if isinstance(expr, HIRPipeExpr):
         return any(_has_side_effect_expr(s, pure_binops, pure_unaryops) for s in expr.stages)
     # 列表推导式
-    if type(expr).__name__ == 'HIRListComprehension':
+    if isinstance(expr, HIRListComprehension):
         return _has_side_effect_expr(expr.result_expr, pure_binops, pure_unaryops) or _has_side_effect_expr(expr.iterable, pure_binops, pure_unaryops)
     # let 声明：取决于 value
     if isinstance(expr, HIRLetDecl):

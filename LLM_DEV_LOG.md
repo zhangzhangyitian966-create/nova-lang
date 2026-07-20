@@ -4,6 +4,115 @@
 
 ---
 
+## 2026-07-20 14:45 第25轮（MIR复杂度攻坚 + IR质量整治）
+
+### 开发概览
+- **轮次**: 第 25 轮（普通开发轮）
+- **基线测试**: 418/418 通过
+- **完成任务**: 3 个（2 个审查驱动 + 1 个自主发现）
+- **审查驱动任务占比**: 67%（2/3）
+- **测试结果**: 418/418 通过（零回归）
+- **失败回滚**: 0 次
+
+---
+
+### 一、本轮任务详情
+
+#### 1. 【审查驱动】重构 MIRLowering._lower_expr 降低圈复杂度
+- **任务 ID**: `refactor_mir_lower_expr`
+- **为什么选这个**: 审查日志显示 MIRLowering._lower_expr 圈复杂度 55，全项目 Top 4。MIR 降级是编译器核心路径，高复杂度导致新增节点类型时容易遗漏。第24轮评审规划为第25轮核心任务。参考 TypeChecker 的调度表重构经验，可大幅降低复杂度。
+- **完成情况**: ✅ 成功
+- **详细内容**:
+  - 将 `_lower_expr` 从 28 个 if-isinstance 分支（CC=55）重构为调度表模式
+  - 新增 `_build_expr_lowerers()` 构建 28 种 HIR 节点类型的 handler 映射表
+  - `_lower_expr` 简化为查表分发（CC≈5）
+  - 按类别拆分为 7 组独立方法：
+    - 字面量（6个）：IntLiteral, FloatLiteral, StringLiteral, BoolLiteral, CharLiteral, UnitLiteral
+    - 标识符（1个）：Identifier
+    - 运算（2个）：BinaryOp, UnaryOp
+    - 函数调用（1个）：CallExpr
+    - 数据结构（3个）：ListExpr, TupleExpr, MapExpr
+    - 访问（2个）：FieldExpr, IndexExpr
+    - 循环控制（2个）：BreakExpr, ContinueExpr
+    - 赋值（1个）：AssignExpr
+    - ADT（1个）：ADTConstructor
+    - Unwrap（1个）：UnwrapExpr
+    - 其他（Lambda, Block等复用已有方法）
+  - 圈复杂度从 55 降至约 5，代码结构清晰，易于扩展新节点类型
+
+#### 2. 【自主发现】修复 type_checker.py 重复定义
+- **任务 ID**: `fix_type_checker_duplicate`
+- **为什么选这个**: 深度代码审计发现 type_checker.py 中 `_check_binary_op` 有两个定义（第556行空函数 + 第854行完整实现），是第23轮 TypeChecker 调度表重构时的遗留问题。空函数虽然后续被覆盖不影响功能，但增加代码混淆度和维护成本。低成本清理。
+- **完成情况**: ✅ 成功
+- **详细内容**:
+  - 删除了 type_checker.py 第556-557行的空 `_check_binary_op` 定义（只有 docstring 无函数体）
+  - 该定义是第23轮调度表重构时的遗留代码，被下方第854行的完整实现覆盖
+  - 消除冗余代码，减少混淆
+
+#### 3. 【审查驱动】修复 Pass 管理器字符串类型比较
+- **任务 ID**: `refactor_pass_manager_type_checks`
+- **为什么选这个**: 深度代码审计发现 pass_manager.py 的 `_has_side_effect_expr` 函数中有 14 处使用 `type(expr).__name__` 字符串比较替代 `isinstance()`，是明显的代码坏味道。字符串比较无法利用 IDE 的类型检查和重构支持，且容易因类名变更而静默失效。替换为 isinstance() 是低成本高收益的质量改进。
+- **完成情况**: ✅ 成功
+- **详细内容**:
+  - 将 `_has_side_effect_expr` 中 14 处 `type(expr).__name__` 字符串比较全部替换为 `isinstance()`
+  - 新增 18 个 HIR 节点类型的导入（HIRAssignExpr, HIRUnwrapExpr, HIRForExpr, HIRWhileExpr, HIRIfExpr, HIRUnaryOp, HIRStringLiteral, HIRCharLiteral, HIRUnitLiteral, HIRListExpr, HIRTupleExpr, HIRMapExpr, HIRFieldExpr, HIRIndexExpr, HIRLambda, HIRMatchExpr, HIRPipeExpr, HIRListComprehension）
+  - 多类型判断使用 `isinstance(expr, (TypeA, TypeB))` 元组形式
+  - 合并字面量判断（将 String/Char/UnitLiteral 合并到已有的 isinstance 元组中）
+  - 删除 1 处无用死代码（`isinstance(expr, HIRIdentifier) and False`）
+  - 类型安全性大幅提升，代码更符合 Python 最佳实践
+
+---
+
+### 二、审查日志研读摘要
+
+**审查来源**: AUTO_REVIEW_LOG.md 第1495轮
+
+**关键发现**:
+- 总问题数 1015，其中 CRITICAL 0、HIGH 0、MEDIUM 167、LOW 848
+- Top 10 最复杂函数中，本轮解决了 Top 4 的 MIRLowering._lower_expr (CC=55→≈5)
+- 剩余高复杂度函数：
+  1. NovaVM._execute_instruction (CC=111) — 第22轮已修复（审查日志尚未反映）
+  2. HIRRewriter.generic_rewrite (CC=69) — 第19轮已修复
+  3. TypeChecker.check_expr (CC=68) — 第23轮已修复
+  4. ~~MIRLowering._lower_expr (CC=55)~~ — ✅ 本轮修复
+  5. Inlining._try_inline_expr (CC=54)
+  6. LIRCBackend._compile_instr (CC=42)
+  7. CCodeGen._infer_c_type_from_expr (CC=42)
+  8. SSAVerifier._get_used_ssa (CC=39)
+  9. NativeCodeGen._compile_body (CC=38)
+  10. Evaluator.eval_expr (CC=38)
+
+**本轮采纳的审查问题**:
+- MIRLowering._lower_expr 复杂度重构（CC=55→≈5）—— 解决 Top 4 最复杂函数
+- Pass 管理器字符串类型比较 —— 14 处全部替换为 isinstance()
+
+**未采纳的高优先级问题及原因**:
+- LIRCBackend._compile_instr 复杂度 — 计划在第26轮处理
+- Inlining._try_inline_expr 复杂度 — 优先级较低，待核心分发函数都重构后再处理
+- unused_import 95 处 — 主要在测试文件，优先级低
+
+---
+
+### 三、测试前后对比
+
+| 指标 | 开发前 | 开发后 | 变化 |
+|------|--------|--------|------|
+| 测试通过数 | 418 | 418 | 0 |
+| 测试失败数 | 0 | 0 | 0 |
+| 已完成任务数 | 53 | 56 | +3 |
+
+---
+
+### 四、下一步计划（第26轮）
+
+根据第24轮评审规划，第 26 轮聚焦 **MIR 基础设施统一 + 基准测试**：
+
+1. **【自主发现】统一 MIR 指令操作数 API** — 消除三处重复（mir_lowering / pass_manager / cfg_utils），降低维护成本和 bug 风险
+2. **【审查驱动】重构 LIRCBackend._compile_instr 降低复杂度** — Top 5 复杂函数（CC=42），继续推进调度表模式
+3. **【自主规划】建立后端性能基准测试框架** — 优化效果量化评估的基础设施，填补当前空白
+
+---
+
 ## 2026-07-20 14:30 第24轮评审（路线图评审）
 
 ### 评审概览

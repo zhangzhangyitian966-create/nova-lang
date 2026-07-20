@@ -1,5 +1,5 @@
 {
-  "cycles": 24,
+  "cycles": 25,
   "completed_tasks": [
     "unify_ir_naming",
     "for_loop_ssa_normalize",
@@ -53,10 +53,37 @@
     "c_backend_adt_match",
     "refactor_type_checker_complexity",
     "wasm_backend_fill_instructions",
-    "review_cycle_24"
+    "review_cycle_24",
+    "refactor_mir_lower_expr",
+    "fix_type_checker_duplicate",
+    "refactor_pass_manager_type_checks"
   ],
   "failed_tasks": [],
   "task_history": [
+    {
+      "cycle": 25,
+      "task_id": "refactor_mir_lower_expr",
+      "status": "completed",
+      "source": "审查驱动",
+      "reason": "审查日志显示 MIRLowering._lower_expr 圈复杂度 55，全项目 Top 4。MIR 降级是编译器核心路径，高复杂度导致新增节点类型时容易遗漏。参考 TypeChecker 的调度表重构经验，可大幅降低复杂度。第24轮评审规划为第25轮核心任务。",
+      "details": "将 _lower_expr 从 28 个 if-isinstance 分支（CC=55）重构为调度表模式：新增 _build_expr_lowerers() 构建 28 种 HIR 节点类型的 handler 映射表；_lower_expr 简化为查表分发（CC≈5）；按类别拆分为 7 组独立方法（字面量6个、标识符1个、运算2个、函数调用1个、控制流辅助1个、数据结构3个、访问2个、Lambda1个、循环控制2个、赋值1个、ADT1个、Unwrap1个）。圈复杂度从 55 降至约 5，代码结构清晰，易于扩展新节点类型。"
+    },
+    {
+      "cycle": 25,
+      "task_id": "fix_type_checker_duplicate",
+      "status": "completed",
+      "source": "自主发现",
+      "reason": "深度代码审计发现 type_checker.py 中 _check_binary_op 有两个定义（第556行空函数 + 第854行完整实现），是第23轮 TypeChecker 调度表重构时的遗留问题。空函数虽然后续被覆盖不影响功能，但增加代码混淆度和维护成本。低成本清理。",
+      "details": "删除了 type_checker.py 第556-557行的空 _check_binary_op 定义（只有 docstring 无函数体），该定义是第23轮调度表重构时的遗留代码，被下方第854行的完整实现覆盖。消除冗余代码，减少混淆。"
+    },
+    {
+      "cycle": 25,
+      "task_id": "refactor_pass_manager_type_checks",
+      "status": "completed",
+      "source": "审查驱动",
+      "reason": "深度代码审计发现 pass_manager.py 的 _has_side_effect_expr 函数中有 14 处使用 type(expr).__name__ 字符串比较替代 isinstance()，是明显的代码坏味道。字符串比较无法利用 IDE 的类型检查和重构支持，且容易因类名变更而静默失效。替换为 isinstance() 是低成本高收益的质量改进。",
+      "details": "将 _has_side_effect_expr 中 14 处 type(expr).__name__ 字符串比较全部替换为 isinstance()：1) 新增 18 个 HIR 节点类型的导入（HIRAssignExpr, HIRUnwrapExpr, HIRForExpr, HIRWhileExpr, HIRIfExpr 等）；2) 14 处字符串比较全部改为 isinstance()，多类型判断使用 isinstance(expr, (TypeA, TypeB)) 元组形式；3) 合并字面量判断（将 String/Char/UnitLiteral 合并到已有的 isinstance 元组中）；4) 删除 1 处无用死代码（isinstance(expr, HIRIdentifier) and False）。类型安全性大幅提升，代码更符合 Python 最佳实践。"
+    },
     {
       "cycle": 24,
       "task_id": "review_cycle_24",
@@ -122,8 +149,8 @@
       "details": "完成第19-20轮回顾：两轮共完成 6 个任务，路线图进度 70% → 84%，测试 418 全通过，零失败零回滚。五维评估：方向正确（Wasm架构修复 + MIR优化 + 工程化清理三线并进）、质量持续变好（平均CC 3.17→3.13，极复杂函数 21→19）、效率稳定（每轮3个任务）、价值高（LICM高级优化 + Wasm控制流架构修复）、审查对齐良好（审查驱动任务占比 50%）。发现新问题：VM._execute_instruction 圈复杂度 111（长期Top 1）、Native后端功能严重不完整、unused_import 仍有 95 处、LIR switch/match 降级缺失。下阶段方向：第22轮工程化清理（VM巨型函数拆分 + LIR switch/match降级补全）、第23轮C后端功能对齐（ADT/match/闭包迁移到LIR路径）、第24轮后端整合与基准测试。任务池新增 5 个任务（3个审查驱动 + 2个自主发现），调整 3 个优先级。"
     }
   ],
-  "current_cycle": 24,
-  "baseline_tests": 403,
+  "current_cycle": 25,
+  "baseline_tests": 418,
   "current_tests": 418,
   "last_review_cycle": 24,
   "tasks": [
@@ -714,7 +741,7 @@
       "priority": 75,
       "category": "engineering",
       "estimated": "3-5 小时",
-      "status": "pending",
+      "status": "completed",
       "depends_on": [],
       "reason": "审查日志显示 _lower_expr 圈复杂度 55，排名 Top 4，是当前剩余的最高复杂度核心函数之一。MIR 降级是编译器核心路径，高复杂度导致新增节点类型时容易遗漏。参考 TypeChecker 和 VM 的调度表重构经验，拆分后结构更清晰，维护成本更低。[优先级调整: 58 → 75，提升为第25轮核心任务 / 审查驱动]"
     },
@@ -783,7 +810,7 @@
       "priority": 65,
       "category": "engineering",
       "estimated": "1-2 小时",
-      "status": "pending",
+      "status": "completed",
       "depends_on": [],
       "reason": "深度代码审计发现的代码质量 bug：_check_binary_op 被定义了两次，第一个是空函数被第二个覆盖。这说明该模块维护质量下降，可能存在其他类似问题。修复成本低，但能消除潜在的维护混乱和 bug 风险。[新增任务 / 自主发现]"
     },

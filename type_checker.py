@@ -553,9 +553,6 @@ class TypeChecker:
     # 运算检查
     # ------------------------------------------------------------------
 
-    def _check_binary_op(self, expr: BinaryOp) -> NovaType:
-        """检查二元操作"""
-
     def _check_if_expr(self, expr) -> NovaType:
         cond_ty = self.check_expr(expr.condition)
         if not self._types_compatible(cond_ty, BOOL_T):

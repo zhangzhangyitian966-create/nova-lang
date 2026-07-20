@@ -90,6 +90,45 @@ class MIRLowering:
         self.loop_stack = []  # 循环栈: [(header_label, exit_label), ...]
         self.ssa_types = {}  # SSA 名 -> 类型映射，用于 Phi 节点类型推断
         self.type_defs = {}  # ADT 类型定义
+        # 表达式降级调度表：HIR 节点类型 -> 降级方法
+        self._expr_lowerers = self._build_expr_lowerers()
+
+    def _build_expr_lowerers(self):
+        """构建表达式降级调度表
+
+        将每种 HIR 节点类型映射到对应的降级方法，
+        替代原来的 if-isinstance 链，降低圈复杂度。
+        """
+        return {
+            HIRIntLiteral: self._lower_int_literal,
+            HIRFloatLiteral: self._lower_float_literal,
+            HIRStringLiteral: self._lower_string_literal,
+            HIRBoolLiteral: self._lower_bool_literal,
+            HIRCharLiteral: self._lower_char_literal,
+            HIRUnitLiteral: self._lower_unit_literal,
+            HIRIdentifier: self._lower_identifier,
+            HIRBinaryOp: self._lower_binary_op,
+            HIRUnaryOp: self._lower_unary_op,
+            HIRCallExpr: self._lower_call_expr,
+            HIRIfExpr: self._lower_if_expr,
+            HIRMatchExpr: self._lower_match_expr,
+            HIRBlockExpr: self._lower_block_expr,
+            HIRListExpr: self._lower_list_expr,
+            HIRTupleExpr: self._lower_tuple_expr,
+            HIRMapExpr: self._lower_map_expr,
+            HIRFieldExpr: self._lower_field_expr,
+            HIRIndexExpr: self._lower_index_expr,
+            HIRLambda: self._lower_lambda,
+            HIRPipeExpr: self._lower_pipe_expr,
+            HIRForExpr: self._lower_for_expr,
+            HIRWhileExpr: self._lower_while_expr,
+            HIRBreakExpr: self._lower_break_expr,
+            HIRContinueExpr: self._lower_continue_expr,
+            HIRAssignExpr: self._lower_assign_expr,
+            HIRListComprehension: self._lower_list_comprehension,
+            HIRADTConstructor: self._lower_adt_constructor,
+            HIRUnwrapExpr: self._lower_unwrap_expr,
+        }
 
     def lower(self, hir_module):
         mir_module = MIRModule(name=hir_module.name)
@@ -259,196 +298,218 @@ class MIRLowering:
 
         self.current_block = block
 
-        if isinstance(hir_expr, HIRIntLiteral):
-            instr = MIRConst(hir_expr.ir_type)
-            instr.value = hir_expr.value
-            instr.const_type = "int"
-            return self._emit(instr)
-
-        if isinstance(hir_expr, HIRFloatLiteral):
-            instr = MIRConst(hir_expr.ir_type)
-            instr.value = hir_expr.value
-            instr.const_type = "float"
-            return self._emit(instr)
-
-        if isinstance(hir_expr, HIRStringLiteral):
-            instr = MIRConst(hir_expr.ir_type)
-            instr.value = hir_expr.value
-            instr.const_type = "string"
-            return self._emit(instr)
-
-        if isinstance(hir_expr, HIRBoolLiteral):
-            instr = MIRConst(hir_expr.ir_type)
-            instr.value = hir_expr.value
-            instr.const_type = "bool"
-            return self._emit(instr)
-
-        if isinstance(hir_expr, HIRCharLiteral):
-            instr = MIRConst(hir_expr.ir_type)
-            instr.value = hir_expr.value
-            instr.const_type = "char"
-            return self._emit(instr)
-
-        if isinstance(hir_expr, HIRUnitLiteral):
-            instr = MIRConst(hir_expr.ir_type)
-            instr.value = None
-            instr.const_type = "unit"
-            return self._emit(instr)
-
-        if isinstance(hir_expr, HIRIdentifier):
-            if hir_expr.name in self.env:
-                return self.env[hir_expr.name]
-            return None
-
-        if isinstance(hir_expr, HIRBinaryOp):
-            left_ssa = self._lower_expr(hir_expr.left, block)
-            right_ssa = self._lower_expr(hir_expr.right, block)
-            instr = MIRBinOp(hir_expr.ir_type)
-            instr.op = hir_expr.op
-            instr.left = left_ssa or ""
-            instr.right = right_ssa or ""
-            return self._emit(instr)
-
-        if isinstance(hir_expr, HIRUnaryOp):
-            operand_ssa = self._lower_expr(hir_expr.operand, block)
-            instr = MIRUnaryOp(hir_expr.ir_type)
-            instr.op = hir_expr.op
-            instr.operand = operand_ssa or ""
-            return self._emit(instr)
-
-        if isinstance(hir_expr, HIRCallExpr):
-            arg_ssas = []
-            for arg in hir_expr.arguments:
-                arg_ssa = self._lower_expr(arg, block)
-                arg_ssas.append(arg_ssa or "")
-            instr = MIRCall(hir_expr.ir_type)
-            if isinstance(hir_expr.function, HIRIdentifier):
-                instr.callee = hir_expr.function.name
-            else:
-                func_ssa = self._lower_expr(hir_expr.function, block)
-                instr.callee = func_ssa or ""
-            instr.args = arg_ssas
-            return self._emit(instr)
-
-        if isinstance(hir_expr, HIRIfExpr):
-            return self._lower_if_expr(hir_expr, block)
-
-        if isinstance(hir_expr, HIRMatchExpr):
-            return self._lower_match_expr(hir_expr, block)
-
-        if isinstance(hir_expr, HIRBlockExpr):
-            result = None
-            for expr in hir_expr.exprs:
-                result = self._lower_expr(expr, block)
-            return result
-
-        if isinstance(hir_expr, HIRListExpr):
-            elem_ssas = []
-            for elem in hir_expr.elements:
-                elem_ssas.append(self._lower_expr(elem, block) or "")
-            instr = MIRListBuild(hir_expr.ir_type)
-            instr.elements = elem_ssas
-            return self._emit(instr)
-
-        if isinstance(hir_expr, HIRTupleExpr):
-            elem_ssas = []
-            for elem in hir_expr.elements:
-                elem_ssas.append(self._lower_expr(elem, block) or "")
-            instr = MIRTupleBuild(hir_expr.ir_type)
-            instr.elements = elem_ssas
-            return self._emit(instr)
-
-        if isinstance(hir_expr, HIRMapExpr):
-            entry_ssas = []
-            for key_expr, val_expr in hir_expr.entries:
-                key_ssa = self._lower_expr(key_expr, block)
-                val_ssa = self._lower_expr(val_expr, block)
-                entry_ssas.append((key_ssa or "", val_ssa or ""))
-            instr = MIRMapBuild(hir_expr.ir_type)
-            instr.entries = entry_ssas
-            return self._emit(instr)
-
-        if isinstance(hir_expr, HIRFieldExpr):
-            obj_ssa = self._lower_expr(hir_expr.object, block)
-            instr = MIRFieldAccess(hir_expr.ir_type)
-            instr.object = obj_ssa or ""
-            instr.field_name = hir_expr.field_name
-            return self._emit(instr)
-
-        if isinstance(hir_expr, HIRIndexExpr):
-            obj_ssa = self._lower_expr(hir_expr.object, block)
-            idx_ssa = self._lower_expr(hir_expr.index, block)
-            instr = MIRIndexAccess(hir_expr.ir_type)
-            instr.object = obj_ssa or ""
-            instr.index = idx_ssa or ""
-            return self._emit(instr)
-
-        if isinstance(hir_expr, HIRLambda):
-            instr = MIRClosureCreate(hir_expr.ir_type)
-            instr.fn_name = "<lambda_%d>" % self.ssa_counter
-            return self._emit(instr)
-
-        if isinstance(hir_expr, HIRPipeExpr):
-            return self._lower_pipe_expr(hir_expr, block)
-
-        if isinstance(hir_expr, HIRForExpr):
-            return self._lower_for_expr(hir_expr, block)
-
-        if isinstance(hir_expr, HIRWhileExpr):
-            return self._lower_while_expr(hir_expr, block)
-
-        if isinstance(hir_expr, HIRBreakExpr):
-            if self.loop_stack:
-                _, exit_label = self.loop_stack[-1]
-                block.terminator = MIRJump(exit_label)
-            else:
-                # 不在循环内的 break → 降级为 panic
-                block.terminator = MIRPanic("break outside loop")
-            return None
-
-        if isinstance(hir_expr, HIRContinueExpr):
-            if self.loop_stack:
-                header_label, _ = self.loop_stack[-1]
-                block.terminator = MIRJump(header_label)
-            else:
-                # 不在循环内的 continue → 降级为 panic
-                block.terminator = MIRPanic("continue outside loop")
-            return None
-
-        if isinstance(hir_expr, HIRAssignExpr):
-            val_ssa = self._lower_expr(hir_expr.value, block)
-            if isinstance(hir_expr.target, HIRIdentifier):
-                # SSA 语义：赋值产生变量的新版本，用 MIRStore 的 result_name 标识
-                # store 指令的结果就是存储后的值，类型与值的类型一致
-                instr = MIRStore(hir_expr.value.ir_type)
-                instr.name = hir_expr.target.name
-                instr.value = val_ssa or ""
-                store_ssa = self._emit(instr)
-                # 将变量绑定到新版本（store 的结果 SSA 名）
-                self.env[hir_expr.target.name] = store_ssa
-                return store_ssa
-            return val_ssa
-
-        if isinstance(hir_expr, HIRListComprehension):
-            return self._lower_list_comprehension(hir_expr, block)
-
-        if isinstance(hir_expr, HIRADTConstructor):
-            field_ssas = [self._lower_expr(f, block) or "" for f in hir_expr.fields]
-            instr = MIRADTBuild(hir_expr.ir_type)
-            instr.type_name = hir_expr.type_name
-            instr.variant_name = hir_expr.variant_name
-            instr.fields = field_ssas
-            return self._emit(instr)
-
-        if isinstance(hir_expr, HIRUnwrapExpr):
-            operand_ssa = self._lower_expr(hir_expr.operand, block)
-            instr = MIRFieldAccess(hir_expr.ir_type)
-            instr.object = operand_ssa or ""
-            instr.field_name = "value"
-            instr.field_index = 0
-            return self._emit(instr)
+        # 调度表分发：根据 HIR 节点类型查找对应的降级方法
+        lower_fn = self._expr_lowerers.get(type(hir_expr))
+        if lower_fn:
+            return lower_fn(hir_expr, block)
 
         return None
+
+    # === 字面量类 ===
+
+    def _lower_int_literal(self, hir_expr, block):
+        instr = MIRConst(hir_expr.ir_type)
+        instr.value = hir_expr.value
+        instr.const_type = "int"
+        return self._emit(instr)
+
+    def _lower_float_literal(self, hir_expr, block):
+        instr = MIRConst(hir_expr.ir_type)
+        instr.value = hir_expr.value
+        instr.const_type = "float"
+        return self._emit(instr)
+
+    def _lower_string_literal(self, hir_expr, block):
+        instr = MIRConst(hir_expr.ir_type)
+        instr.value = hir_expr.value
+        instr.const_type = "string"
+        return self._emit(instr)
+
+    def _lower_bool_literal(self, hir_expr, block):
+        instr = MIRConst(hir_expr.ir_type)
+        instr.value = hir_expr.value
+        instr.const_type = "bool"
+        return self._emit(instr)
+
+    def _lower_char_literal(self, hir_expr, block):
+        instr = MIRConst(hir_expr.ir_type)
+        instr.value = hir_expr.value
+        instr.const_type = "char"
+        return self._emit(instr)
+
+    def _lower_unit_literal(self, hir_expr, block):
+        instr = MIRConst(hir_expr.ir_type)
+        instr.value = None
+        instr.const_type = "unit"
+        return self._emit(instr)
+
+    # === 标识符 ===
+
+    def _lower_identifier(self, hir_expr, block):
+        if hir_expr.name in self.env:
+            return self.env[hir_expr.name]
+        return None
+
+    # === 运算类 ===
+
+    def _lower_binary_op(self, hir_expr, block):
+        left_ssa = self._lower_expr(hir_expr.left, block)
+        right_ssa = self._lower_expr(hir_expr.right, block)
+        instr = MIRBinOp(hir_expr.ir_type)
+        instr.op = hir_expr.op
+        instr.left = left_ssa or ""
+        instr.right = right_ssa or ""
+        return self._emit(instr)
+
+    def _lower_unary_op(self, hir_expr, block):
+        operand_ssa = self._lower_expr(hir_expr.operand, block)
+        instr = MIRUnaryOp(hir_expr.ir_type)
+        instr.op = hir_expr.op
+        instr.operand = operand_ssa or ""
+        return self._emit(instr)
+
+    # === 函数调用 ===
+
+    def _lower_call_expr(self, hir_expr, block):
+        arg_ssas = []
+        for arg in hir_expr.arguments:
+            arg_ssa = self._lower_expr(arg, block)
+            arg_ssas.append(arg_ssa or "")
+        instr = MIRCall(hir_expr.ir_type)
+        if isinstance(hir_expr.function, HIRIdentifier):
+            instr.callee = hir_expr.function.name
+        else:
+            func_ssa = self._lower_expr(hir_expr.function, block)
+            instr.callee = func_ssa or ""
+        instr.args = arg_ssas
+        return self._emit(instr)
+
+    # === 控制流（调用已有的独立方法） ===
+
+    # _lower_if_expr 已在下方定义
+    # _lower_match_expr 已在下方定义
+
+    def _lower_block_expr(self, hir_expr, block):
+        result = None
+        for expr in hir_expr.exprs:
+            result = self._lower_expr(expr, block)
+        return result
+
+    # === 数据结构构建 ===
+
+    def _lower_list_expr(self, hir_expr, block):
+        elem_ssas = []
+        for elem in hir_expr.elements:
+            elem_ssas.append(self._lower_expr(elem, block) or "")
+        instr = MIRListBuild(hir_expr.ir_type)
+        instr.elements = elem_ssas
+        return self._emit(instr)
+
+    def _lower_tuple_expr(self, hir_expr, block):
+        elem_ssas = []
+        for elem in hir_expr.elements:
+            elem_ssas.append(self._lower_expr(elem, block) or "")
+        instr = MIRTupleBuild(hir_expr.ir_type)
+        instr.elements = elem_ssas
+        return self._emit(instr)
+
+    def _lower_map_expr(self, hir_expr, block):
+        entry_ssas = []
+        for key_expr, val_expr in hir_expr.entries:
+            key_ssa = self._lower_expr(key_expr, block)
+            val_ssa = self._lower_expr(val_expr, block)
+            entry_ssas.append((key_ssa or "", val_ssa or ""))
+        instr = MIRMapBuild(hir_expr.ir_type)
+        instr.entries = entry_ssas
+        return self._emit(instr)
+
+    # === 访问类 ===
+
+    def _lower_field_expr(self, hir_expr, block):
+        obj_ssa = self._lower_expr(hir_expr.object, block)
+        instr = MIRFieldAccess(hir_expr.ir_type)
+        instr.object = obj_ssa or ""
+        instr.field_name = hir_expr.field_name
+        return self._emit(instr)
+
+    def _lower_index_expr(self, hir_expr, block):
+        obj_ssa = self._lower_expr(hir_expr.object, block)
+        idx_ssa = self._lower_expr(hir_expr.index, block)
+        instr = MIRIndexAccess(hir_expr.ir_type)
+        instr.object = obj_ssa or ""
+        instr.index = idx_ssa or ""
+        return self._emit(instr)
+
+    # === Lambda ===
+
+    def _lower_lambda(self, hir_expr, block):
+        instr = MIRClosureCreate(hir_expr.ir_type)
+        instr.fn_name = "<lambda_%d>" % self.ssa_counter
+        return self._emit(instr)
+
+    # === 循环与控制流（调用已有的独立方法） ===
+
+    # _lower_pipe_expr 已在下方定义
+    # _lower_for_expr 已在下方定义
+    # _lower_while_expr 已在下方定义
+
+    def _lower_break_expr(self, hir_expr, block):
+        if self.loop_stack:
+            _, exit_label = self.loop_stack[-1]
+            block.terminator = MIRJump(exit_label)
+        else:
+            # 不在循环内的 break → 降级为 panic
+            block.terminator = MIRPanic("break outside loop")
+        return None
+
+    def _lower_continue_expr(self, hir_expr, block):
+        if self.loop_stack:
+            header_label, _ = self.loop_stack[-1]
+            block.terminator = MIRJump(header_label)
+        else:
+            # 不在循环内的 continue → 降级为 panic
+            block.terminator = MIRPanic("continue outside loop")
+        return None
+
+    # === 赋值 ===
+
+    def _lower_assign_expr(self, hir_expr, block):
+        val_ssa = self._lower_expr(hir_expr.value, block)
+        if isinstance(hir_expr.target, HIRIdentifier):
+            # SSA 语义：赋值产生变量的新版本，用 MIRStore 的 result_name 标识
+            # store 指令的结果就是存储后的值，类型与值的类型一致
+            instr = MIRStore(hir_expr.value.ir_type)
+            instr.name = hir_expr.target.name
+            instr.value = val_ssa or ""
+            store_ssa = self._emit(instr)
+            # 将变量绑定到新版本（store 的结果 SSA 名）
+            self.env[hir_expr.target.name] = store_ssa
+            return store_ssa
+        return val_ssa
+
+    # === 列表推导式（调用已有的独立方法） ===
+
+    # _lower_list_comprehension 已在下方定义
+
+    # === ADT ===
+
+    def _lower_adt_constructor(self, hir_expr, block):
+        field_ssas = [self._lower_expr(f, block) or "" for f in hir_expr.fields]
+        instr = MIRADTBuild(hir_expr.ir_type)
+        instr.type_name = hir_expr.type_name
+        instr.variant_name = hir_expr.variant_name
+        instr.fields = field_ssas
+        return self._emit(instr)
+
+    # === Unwrap ===
+
+    def _lower_unwrap_expr(self, hir_expr, block):
+        operand_ssa = self._lower_expr(hir_expr.operand, block)
+        instr = MIRFieldAccess(hir_expr.ir_type)
+        instr.object = operand_ssa or ""
+        instr.field_name = "value"
+        instr.field_index = 0
+        return self._emit(instr)
 
     def _lower_if_expr(self, hir_expr, block):
         """降级 if 表达式。
