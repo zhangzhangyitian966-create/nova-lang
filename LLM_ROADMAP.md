@@ -1,7 +1,7 @@
 # Nova LLM 智能开发路线图
 
-**更新时间**: 2026-07-20 14:00:00
-**上次评审**: 第 21 轮（路线图评审）
+**更新时间**: 2026-07-20 14:30:00
+**上次评审**: 第 24 轮（路线图评审）
 
 本路线图由 LLM 智能开发系统动态维护。
 
@@ -11,7 +11,7 @@
 |------|------|------|--------|------|------|
 | ✅ | C 后端接入统一 IR 管线 | hard | 95 | 2-3 天 | - |
 | ✅ | C 后端 LIR 代码生成基础框架 | medium | 92 | 1 天 | - |
-| ⏳ | 统一 C 后端（LIR 路径功能对齐） | hard | 80 | 2-3 天 | fix_match_lowering, fix_mir_ssa, refactor_visitor_pattern, lir_switch_match_lowering |
+| ⏳ | 统一 C 后端（LIR 路径功能对齐） | hard | 75 | 2-3 天 | fix_match_lowering, fix_mir_ssa, refactor_visitor_pattern, lir_switch_match_lowering |
 
 ## 🔧 IR 降级 / 正确性
 
@@ -55,6 +55,7 @@
 | ✅ | 修复 Wasm 后端多个正确性 bug | easy | 65 | 1-2 小时 | wasm_control_flow_rewrite |
 | ✅ | 修复 Wasm 后端 StoreReg 实现 | easy | 60 | 1 小时 | wasm_control_flow_rewrite |
 | ✅ | C 后端 LIR 路径 ADT/match 支持 | hard | 72 | 1-2 天 | lir_switch_match_lowering, unify_c_backend |
+| ⏳ | C 后端 LIR 路径列表推导式支持 | medium | 68 | 3-5 小时 | c_backend_adt_match, unify_c_backend |
 | ⏳ | 实现原生后端函数调用 ABI | hard | 25 | 3-5 天 | fix_mir_ssa |
 
 ## 🛠️ 工程质量
@@ -72,7 +73,9 @@
 | ✅ | 批量清理未使用导入 | easy | 55 | 1-2 小时 | - |
 | ✅ | 拆分 VM 巨型执行函数 | medium | 70 | 4-6 小时 | - |
 | ✅ | 重构 TypeChecker 降低圈复杂度 | medium | 55 | 4-6 小时 | - |
-| ⏳ | 重构 MIRLowering._lower_expr 降低圈复杂度 | medium | 58 | 3-5 小时 | - |
+| ⏳ | 重构 MIRLowering._lower_expr 降低圈复杂度 | medium | 75 | 3-5 小时 | - |
+| ⏳ | 统一 MIR 指令操作数 API（消除三处重复） | medium | 70 | 4-6 小时 | refactor_mir_lower_expr |
+| ⏳ | 修复 type_checker.py 空函数和重复定义 bug | easy | 65 | 1-2 小时 | - |
 
 ## 🧪 测试完善
 
@@ -80,14 +83,14 @@
 |------|------|------|--------|------|------|
 | ✅ | 修复原生后端测试导入 | easy | 85 | 30 分钟 | |
 | ✅ | 为 SSA 验证器编写完整测试 | easy | 78 | 2-3 小时 | mir_ssa_verifier, extract_loop_ssa |
-| ⏳ | 建立后端性能基准测试框架 | medium | 45 | 3-5 小时 | unify_c_backend |
+| ⏳ | 建立后端性能基准测试框架 | medium | 60 | 3-5 小时 | unify_c_backend |
 
 ---
 
-**进度**: 44/49 (90%)
-**已完成**: 44
+**进度**: 47/53 (89%)
+**已完成**: 47
 **进行中**: 0
-**待开发**: 4
+**待开发**: 5
 **已废弃**: 1
 
-> 注：第23轮开发完成。完成 3 个任务（1 个审查驱动 + 2 个自主规划）：C 后端 LIR 路径 ADT/match 支持（闭包调用+字段偏移修复+switch优化）、TypeChecker 调度表重构（CC=68→≈3）、Wasm 后端补全缺失指令。路线图进度 84% → 90%。测试 418 全通过，零回归。下一步（第24轮）：后端整合与基准测试，第24轮也是评审轮。
+> 注：第24轮评审完成。回顾第22-23轮（6个任务：VM巨型函数拆分 + LIR switch/match降级补全 + Wasm bug修复 + C后端ADT/match支持 + TypeChecker重构 + Wasm指令补全），路线图进度 81% → 89%，测试 418 全通过，零回归。五维评估：方向正确、质量持续变好、效率稳定、价值高、审查对齐良好。新增 4 个任务（MIR操作数API统一、C后端列表推导式、type_checker空函数修复、Wasm指令补全已完成），调整 3 个优先级。下阶段（第25-27轮）：MIR复杂度攻坚 → MIR基础设施统一 → C后端整合收尾+基准测试。
