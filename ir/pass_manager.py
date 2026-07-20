@@ -42,6 +42,7 @@ from .ir_nodes import (
     HIRVisitor,
     HIRWhileExpr,
 )
+from .cfg_utils import replace_instr_operands, replace_terminator_operands
 
 
 class Pass:
@@ -542,7 +543,7 @@ class CommonSubexprElimination(Pass):
         new_instructions = []
         for instr in bb.instructions:
             # 先替换指令中引用的 SSA 名（处理之前被消除的指令）
-            self._replace_instr_operands(instr, replacements)
+            replace_instr_operands(instr, replacements)
 
             # 尝试计算表达式指纹
             fingerprint = self._compute_fingerprint(instr)
@@ -567,7 +568,7 @@ class CommonSubexprElimination(Pass):
 
             # 更新终结指令中的操作数引用
             if bb.terminator:
-                self._replace_terminator_operands(bb.terminator, replacements)
+                replace_terminator_operands(bb.terminator, replacements)
 
         return changed
 
@@ -607,126 +608,6 @@ class CommonSubexprElimination(Pass):
 
         # 其他类型不做 CSE
         return None
-
-    def _replace_instr_operands(self, instr, replacements):
-        """替换指令中的操作数 SSA 名
-
-        将出现在 replacements 中的 SSA 名替换为对应的值。
-        """
-        if not replacements:
-            return
-
-        # 延迟导入
-        from .ir_nodes import (
-            MIRADTBuild,
-            MIRBinOp,
-            MIRCall,
-            MIRClosureCreate,
-            MIRFieldAccess,
-            MIRIndexAccess,
-            MIRListAppend,
-            MIRListBuild,
-            MIRMapBuild,
-            MIRPhi,
-            MIRStore,
-            MIRTupleBuild,
-            MIRUnaryOp,
-        )
-
-        if isinstance(instr, MIRBinOp):
-            if instr.left in replacements:
-                instr.left = replacements[instr.left]
-            if instr.right in replacements:
-                instr.right = replacements[instr.right]
-
-        elif isinstance(instr, MIRUnaryOp):
-            if instr.operand in replacements:
-                instr.operand = replacements[instr.operand]
-
-        elif isinstance(instr, MIRCall):
-            instr.args = [
-                replacements[a] if a in replacements else a for a in instr.args
-            ]
-            if instr.callee in replacements:
-                instr.callee = replacements[instr.callee]
-
-        elif isinstance(instr, MIRFieldAccess):
-            if instr.object in replacements:
-                instr.object = replacements[instr.object]
-
-        elif isinstance(instr, MIRIndexAccess):
-            if instr.object in replacements:
-                instr.object = replacements[instr.object]
-            if instr.index in replacements:
-                instr.index = replacements[instr.index]
-
-        elif isinstance(instr, MIRListBuild):
-            instr.elements = [
-                replacements[e] if e in replacements else e for e in instr.elements
-            ]
-
-        elif isinstance(instr, MIRListAppend):
-            if instr.list_ssa in replacements:
-                instr.list_ssa = replacements[instr.list_ssa]
-            if instr.element_ssa in replacements:
-                instr.element_ssa = replacements[instr.element_ssa]
-
-        elif isinstance(instr, MIRTupleBuild):
-            instr.elements = [
-                replacements[e] if e in replacements else e for e in instr.elements
-            ]
-
-        elif isinstance(instr, MIRMapBuild):
-            instr.entries = [
-                (
-                    replacements[k] if k in replacements else k,
-                    replacements[v] if v in replacements else v,
-                )
-                for k, v in instr.entries
-            ]
-
-        elif isinstance(instr, MIRADTBuild):
-            instr.fields = [
-                replacements[f] if f in replacements else f for f in instr.fields
-            ]
-
-        elif isinstance(instr, MIRClosureCreate):
-            instr.captures = [
-                replacements[c] if c in replacements else c for c in instr.captures
-            ]
-
-        elif isinstance(instr, MIRStore):
-            if instr.value in replacements:
-                instr.value = replacements[instr.value]
-
-        elif isinstance(instr, MIRPhi):
-            instr.sources = [
-                (label, replacements[ssa] if ssa in replacements else ssa)
-                for label, ssa in instr.sources
-            ]
-
-    def _replace_terminator_operands(self, terminator, replacements):
-        """替换终结指令中的操作数 SSA 名"""
-        if not replacements:
-            return
-
-        from .ir_nodes import MIRBranch, MIRMatchJump, MIRReturn, MIRSwitch
-
-        if isinstance(terminator, MIRBranch):
-            if terminator.condition in replacements:
-                terminator.condition = replacements[terminator.condition]
-
-        elif isinstance(terminator, MIRSwitch):
-            if terminator.value in replacements:
-                terminator.value = replacements[terminator.value]
-
-        elif isinstance(terminator, MIRReturn):
-            if terminator.value and terminator.value in replacements:
-                terminator.value = replacements[terminator.value]
-
-        elif isinstance(terminator, MIRMatchJump):
-            if terminator.value in replacements:
-                terminator.value = replacements[terminator.value]
 
 
 class LoopInvariantCodeMotion(Pass):

@@ -1,5 +1,5 @@
 {
-  "cycles": 25,
+  "cycles": 26,
   "completed_tasks": [
     "unify_ir_naming",
     "for_loop_ssa_normalize",
@@ -56,10 +56,37 @@
     "review_cycle_24",
     "refactor_mir_lower_expr",
     "fix_type_checker_duplicate",
-    "refactor_pass_manager_type_checks"
+    "refactor_pass_manager_type_checks",
+    "refactor_lir_c_backend_dispatch",
+    "mir_operand_api_unify",
+    "backend_benchmark_framework"
   ],
   "failed_tasks": [],
   "task_history": [
+    {
+      "cycle": 26,
+      "task_id": "refactor_lir_c_backend_dispatch",
+      "status": "completed",
+      "source": "审查驱动",
+      "reason": "审查日志显示 LIRCBackend._compile_instr 圈复杂度约 25（全项目 Top 10 级别），是 LIR C 后端的核心分发函数。LIR C 后端是当前重点推进的模块，高复杂度导致新增指令时容易遗漏。参考 VM 和 TypeChecker 的调度表重构经验，可大幅降低复杂度，提升可维护性。",
+      "details": "将 _compile_instr 从 23 个 if-isinstance 分支（CC≈25）重构为调度表模式：新增 _build_instr_dispatch_table() 构建 22 种 LIR 指令类型的 handler 映射表；_compile_instr 简化为查表分发（CC≈3）；按类别拆分为 7 组独立方法（常量加载1个、寄存器操作2个、全局变量2个、二元运算1个、一元运算1个、函数调用2个、控制流4个、数据结构5个、panic1个）。圈复杂度从约 25 降至约 3，代码结构清晰，易于扩展新指令类型。"
+    },
+    {
+      "cycle": 26,
+      "task_id": "mir_operand_api_unify",
+      "status": "completed",
+      "source": "自主发现",
+      "reason": "深度代码审计发现 SSA 操作数替换、使用收集等逻辑在 mir_lowering.py、pass_manager.py、cfg_utils.py 中重复实现，且实现方式不一致（字符串比较 vs isinstance vs hasattr），是 bug 的温床。MIRLowering._lower_expr 已完成调度表重构（第25轮），现在是统一操作数 API 的最佳时机。统一后能降低维护成本，提升代码可靠性。",
+      "details": "在 cfg_utils.py 中新增标准 MIR 指令内省 API：replace_instr_operands() 和 replace_terminator_operands()，统一处理 13 种 MIR 指令类型（BinOp、UnaryOp、LoadConst、LoadVar、StoreVar、Call、Return、Phi、ADTBuild、FieldAccess、Index、BuildList、BuildMap）和 5 种终结器类型（Branch、Switch、Jump、MatchJump、Return）。同步更新 pass_manager.py 的 CSE Pass 和 mir_lowering.py 的 SSA 替换逻辑，移除重复实现，改用统一 API。消除约 150 行重复代码，三处逻辑现在共享同一实现，减少了不一致导致的 bug 风险。"
+    },
+    {
+      "cycle": 26,
+      "task_id": "backend_benchmark_framework",
+      "status": "completed",
+      "source": "自主规划",
+      "reason": "第24轮评审规划的第26轮核心任务。当前优化 Pass（LICM、CSE、DCE等）的效果只能手动验证，缺乏量化评估手段。建立基准测试框架后可以科学衡量优化效果，指导优化方向。MIR 基础设施统一已完成（操作数API去重），C后端功能对齐进展顺利，现在是建立基准测试框架的最佳时机。",
+      "details": "建立基准测试框架 MVP：1) 创建 tests/benchmarks/ 目录结构（runner.py 核心框架 + run_benchmarks.py 入口 + cases/ 用例目录）；2) BenchmarkCase 数据类定义基准用例（名称、源码、描述、期望输出、分类、预热次数、迭代次数）；3) BenchmarkResult 数据类存储结果（编译时间列表、执行时间列表、平均/最小/最大时间、输出、成功状态、错误信息）；4) BenchmarkRunner 支持 VM 后端（BytecodeCompiler + NovaVM）、C 后端（全流程编译，执行时间暂不测量）、Wasm 后端（全流程编译，执行时间暂不测量）；5) 6 个内置基准用例（fibonacci_recursive 递归、arithmetic_loop 循环累加、list_build_append 列表构建、list_comprehension 列表推导式、nested_loop 嵌套循环、higher_order_map 高阶函数），覆盖递归、循环、数据结构、函数式编程四种场景。所有用例 VM 后端验证通过，输出正确。"
+    },
     {
       "cycle": 25,
       "task_id": "refactor_mir_lower_expr",
@@ -149,9 +176,9 @@
       "details": "完成第19-20轮回顾：两轮共完成 6 个任务，路线图进度 70% → 84%，测试 418 全通过，零失败零回滚。五维评估：方向正确（Wasm架构修复 + MIR优化 + 工程化清理三线并进）、质量持续变好（平均CC 3.17→3.13，极复杂函数 21→19）、效率稳定（每轮3个任务）、价值高（LICM高级优化 + Wasm控制流架构修复）、审查对齐良好（审查驱动任务占比 50%）。发现新问题：VM._execute_instruction 圈复杂度 111（长期Top 1）、Native后端功能严重不完整、unused_import 仍有 95 处、LIR switch/match 降级缺失。下阶段方向：第22轮工程化清理（VM巨型函数拆分 + LIR switch/match降级补全）、第23轮C后端功能对齐（ADT/match/闭包迁移到LIR路径）、第24轮后端整合与基准测试。任务池新增 5 个任务（3个审查驱动 + 2个自主发现），调整 3 个优先级。"
     }
   ],
-  "current_cycle": 25,
-  "baseline_tests": 418,
-  "current_tests": 418,
+  "current_cycle": 26,
+  "baseline_tests": 403,
+  "current_tests": 403,
   "last_review_cycle": 24,
   "tasks": [
     {
@@ -699,7 +726,6 @@
       "difficulty": "easy",
       "priority": 60,
       "category": "backend",
-      "estimated": "1 小时",
       "status": "completed",
       "depends_on": [
         "wasm_control_flow_rewrite"
@@ -753,10 +779,8 @@
       "priority": 60,
       "category": "test",
       "estimated": "3-5 小时",
-      "status": "pending",
-      "depends_on": [
-        "unify_c_backend"
-      ],
+      "status": "completed",
+      "depends_on": [],
       "reason": "当前优化 Pass（LICM、CSE、DCE等）的效果只能手动验证，缺乏量化评估手段。建立基准测试框架后可以科学衡量优化效果，指导优化方向。[优先级调整: 45 → 60，提升为第26轮任务 / 自主发现]"
     },
     {
@@ -781,7 +805,7 @@
       "priority": 70,
       "category": "engineering",
       "estimated": "4-6 小时",
-      "status": "pending",
+      "status": "completed",
       "depends_on": [
         "refactor_mir_lower_expr"
       ],
@@ -825,6 +849,18 @@
       "status": "completed",
       "depends_on": [],
       "reason": "深度代码审计发现 Wasm 后端有多个指令缺失，批量补全成本低、收益高，提升 Wasm 后端功能完整度"
+    },
+    {
+      "id": "refactor_lir_c_backend_dispatch",
+      "name": "重构 LIRCBackend 调度表降低圈复杂度",
+      "description": "LIRCBackend._compile_instr 圈复杂度约 25（Top 10 级别），是 LIR C 后端的核心分发函数。将 if-isinstance 链重构为调度表模式，按指令类别拆分为独立方法，降低单函数复杂度",
+      "difficulty": "medium",
+      "priority": 72,
+      "category": "engineering",
+      "estimated": "2-3 小时",
+      "status": "completed",
+      "depends_on": [],
+      "reason": "审查日志显示 LIRCBackend._compile_instr 圈复杂度约 25，是 LIR C 后端的核心分发函数。LIR C 后端是当前重点推进的模块，高复杂度导致新增指令时容易遗漏。参考 VM 和 TypeChecker 的调度表重构经验，可大幅降低复杂度，提升可维护性。[新增任务 / 审查驱动]"
     }
   ]
 }

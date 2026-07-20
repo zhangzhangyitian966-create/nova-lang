@@ -57,6 +57,7 @@ class LIRCBackend:
         self._string_literals = []  # 收集字符串常量
         self._string_counter = 0
         self._tmp_counter_value = 0  # 临时变量计数器
+        self._instr_dispatch = self._build_instr_dispatch_table()
 
     def compile(self, lir_module: LIRModule) -> str:
         """编译 LIR 模块为 C 源代码字符串"""
@@ -238,156 +239,195 @@ class LIRCBackend:
         return ", ".join(parts)
 
     # ------------------------------------------------------------------
-    # 指令编译
+    # 指令编译（调度表模式）
     # ------------------------------------------------------------------
 
+    def _build_instr_dispatch_table(self) -> dict:
+        """构建 LIR 指令类型 → 编译方法 的调度表"""
+        return {
+            # 标签（特殊处理，不需要 dst）
+            LIRLabel: self._compile_label,
+            # 常量与加载
+            LIRLoadConst: self._compile_load_const_dispatch,
+            LIRLoadReg: self._compile_load_reg,
+            LIRStoreReg: self._compile_store_reg,
+            LIRLoadGlobal: self._compile_load_global,
+            LIRStoreGlobal: self._compile_store_global,
+            # 运算
+            LIRBinOp: self._compile_binop_dispatch,
+            LIRUnaryOp: self._compile_unary_op,
+            # 函数调用
+            LIRCall: self._compile_call_dispatch,
+            LIRCallIndirect: self._compile_call_indirect_dispatch,
+            # 控制流
+            LIRJump: self._compile_jump,
+            LIRBranch: self._compile_branch_dispatch,
+            LIRSwitch: self._compile_switch_dispatch,
+            LIRReturn: self._compile_return,
+            # 数据结构构建
+            LIRBuildList: self._compile_build_list,
+            LIRListAppend: self._compile_list_append,
+            LIRBuildTuple: self._compile_build_tuple,
+            LIRBuildMap: self._compile_build_map,
+            LIRBuildADT: self._compile_build_adt,
+            # 访问
+            LIRFieldAccess: self._compile_field_access,
+            LIRIndex: self._compile_index_access,
+            # 杂项
+            LIRPanic: self._compile_panic,
+        }
+
     def _compile_instr(self, instr: LIRInstr, fn: LIRFunction):
-        """编译单条 LIR 指令"""
+        """编译单条 LIR 指令（调度表分发）
 
-        # 标签（不缩进）
-        if isinstance(instr, LIRLabel):
-            self._indent_level -= 1
-            self._emit(f"{instr.name}:;")
-            self._indent_level += 1
-            return
+        使用类型 → 方法 的调度表模式替代长 if-isinstance 链，
+        圈复杂度从 ~25 降至 ~3，提升可维护性和可扩展性。
+        """
+        handler = self._instr_dispatch.get(type(instr))
+        if handler:
+            handler(instr)
+        else:
+            self._emit(
+                f"/* TODO: LIR instruction {type(instr).__name__} not implemented */"
+            )
 
+    # ---- 各指令类型的独立编译方法 ----
+
+    def _compile_label(self, instr: LIRLabel):
+        """编译标签（不缩进）"""
+        self._indent_level -= 1
+        self._emit(f"{instr.name}:;")
+        self._indent_level += 1
+
+    def _compile_load_const_dispatch(self, instr: LIRLoadConst):
+        """编译常量加载（调度表入口）"""
         dst = self._dst_var_name(instr) if instr.dst_loc else None
+        self._compile_load_const(instr, dst)
 
-        # 常量加载
-        if isinstance(instr, LIRLoadConst):
-            self._compile_load_const(instr, dst)
-            return
+    def _compile_load_reg(self, instr: LIRLoadReg):
+        """编译寄存器加载"""
+        dst = self._dst_var_name(instr) if instr.dst_loc else None
+        if instr.src_locs and dst:
+            src = self._loc_var_name(instr.src_locs[0][0])
+            self._emit(f"{dst} = {src};")
 
-        # 寄存器/栈位传送
-        if isinstance(instr, LIRLoadReg):
-            if instr.src_locs and dst:
-                src = self._loc_var_name(instr.src_locs[0][0])
-                self._emit(f"{dst} = {src};")
-            return
+    def _compile_store_reg(self, instr: LIRStoreReg):
+        """编译寄存器存储"""
+        dst = self._dst_var_name(instr) if instr.dst_loc else None
+        if instr.src_locs and dst:
+            src = self._loc_var_name(instr.src_locs[0][0])
+            self._emit(f"{dst} = {src};")
 
-        if isinstance(instr, LIRStoreReg):
-            if instr.src_locs and dst:
-                src = self._loc_var_name(instr.src_locs[0][0])
-                self._emit(f"{dst} = {src};")
-            return
+    def _compile_load_global(self, instr: LIRLoadGlobal):
+        """编译全局变量加载"""
+        dst = self._dst_var_name(instr) if instr.dst_loc else None
+        if dst:
+            self._emit(f"{dst} = {instr.global_name};")
 
-        # 全局变量加载/存储
-        if isinstance(instr, LIRLoadGlobal):
-            if dst:
-                self._emit(f"{dst} = {instr.global_name};")
-            return
+    def _compile_store_global(self, instr: LIRStoreGlobal):
+        """编译全局变量存储"""
+        if instr.src_locs:
+            src = self._loc_var_name(instr.src_locs[0][0])
+            self._emit(f"{instr.global_name} = {src};")
 
-        if isinstance(instr, LIRStoreGlobal):
-            if instr.src_locs:
-                src = self._loc_var_name(instr.src_locs[0][0])
-                self._emit(f"{instr.global_name} = {src};")
-            return
+    def _compile_binop_dispatch(self, instr: LIRBinOp):
+        """编译二元运算（调度表入口）"""
+        dst = self._dst_var_name(instr) if instr.dst_loc else None
+        self._compile_binop(instr, dst)
 
-        # 二元运算
-        if isinstance(instr, LIRBinOp):
-            self._compile_binop(instr, dst)
-            return
+    def _compile_unary_op(self, instr: LIRUnaryOp):
+        """编译一元运算"""
+        dst = self._dst_var_name(instr) if instr.dst_loc else None
+        if instr.src_locs and dst:
+            src = self._loc_var_name(instr.src_locs[0][0])
+            op = self._map_unary_op(instr.op)
+            self._emit(f"{dst} = {op}{src};")
 
-        # 一元运算
-        if isinstance(instr, LIRUnaryOp):
-            if instr.src_locs and dst:
-                src = self._loc_var_name(instr.src_locs[0][0])
-                op = self._map_unary_op(instr.op)
-                self._emit(f"{dst} = {op}{src};")
-            return
+    def _compile_call_dispatch(self, instr: LIRCall):
+        """编译函数调用（调度表入口）"""
+        dst = self._dst_var_name(instr) if instr.dst_loc else None
+        self._compile_call(instr, dst)
 
-        # 函数调用
-        if isinstance(instr, LIRCall):
-            self._compile_call(instr, dst)
-            return
+    def _compile_call_indirect_dispatch(self, instr: LIRCallIndirect):
+        """编译间接调用（调度表入口）"""
+        dst = self._dst_var_name(instr) if instr.dst_loc else None
+        self._compile_call_indirect(instr, dst)
 
-        # 间接调用（闭包/函数指针）
-        if isinstance(instr, LIRCallIndirect):
-            self._compile_call_indirect(instr, dst)
-            return
+    def _compile_jump(self, instr: LIRJump):
+        """编译无条件跳转"""
+        self._emit(f"goto {instr.target};")
 
-        # 控制流
-        if isinstance(instr, LIRJump):
-            self._emit(f"goto {instr.target};")
-            return
+    def _compile_branch_dispatch(self, instr: LIRBranch):
+        """编译条件跳转（调度表入口）"""
+        self._compile_branch(instr)
 
-        if isinstance(instr, LIRBranch):
-            self._compile_branch(instr)
-            return
+    def _compile_switch_dispatch(self, instr: LIRSwitch):
+        """编译 switch 多分支（调度表入口）"""
+        self._compile_switch(instr)
 
-        if isinstance(instr, LIRSwitch):
-            self._compile_switch(instr)
-            return
+    def _compile_return(self, instr: LIRReturn):
+        """编译返回指令"""
+        if instr.src_locs:
+            src = self._loc_var_name(instr.src_locs[0][0])
+            self._emit(f"return {src};")
+        else:
+            self._emit("return;")
 
-        if isinstance(instr, LIRReturn):
-            if instr.src_locs:
-                src = self._loc_var_name(instr.src_locs[0][0])
-                self._emit(f"return {src};")
-            else:
-                self._emit("return;")
-            return
+    def _compile_build_list(self, instr: LIRBuildList):
+        """编译列表构建"""
+        dst = self._dst_var_name(instr) if instr.dst_loc else None
+        if dst:
+            self._emit(f"{dst} = nova_list_new({instr.count});")
 
-        # 列表构建
-        if isinstance(instr, LIRBuildList):
-            if dst:
-                self._emit(f"{dst} = nova_list_new({instr.count});")
-            return
+    def _compile_list_append(self, instr: LIRListAppend):
+        """编译列表追加"""
+        if instr.src_locs and len(instr.src_locs) >= 2:
+            lst = self._loc_var_name(instr.src_locs[0][0])
+            elem = self._loc_var_name(instr.src_locs[1][0])
+            self._emit(f"nova_list_push({lst}, {elem});")
 
-        if isinstance(instr, LIRListAppend):
-            if instr.src_locs and len(instr.src_locs) >= 2:
-                lst = self._loc_var_name(instr.src_locs[0][0])
-                elem = self._loc_var_name(instr.src_locs[1][0])
-                self._emit(f"nova_list_push({lst}, {elem});")
-            return
+    def _compile_build_tuple(self, instr: LIRBuildTuple):
+        """编译元组构建"""
+        dst = self._dst_var_name(instr) if instr.dst_loc else None
+        if dst:
+            size = instr.count * 8
+            self._emit(f"{dst} = (NovaValue*)nova_alloc({size});")
 
-        # 元组构建
-        if isinstance(instr, LIRBuildTuple):
-            if dst:
-                size = instr.count * 8
-                self._emit(f"{dst} = (NovaValue*)nova_alloc({size});")
-            return
+    def _compile_build_map(self, instr: LIRBuildMap):
+        """编译 Map 构建"""
+        dst = self._dst_var_name(instr) if instr.dst_loc else None
+        if dst:
+            self._emit(f"{dst} = nova_map_new({instr.entry_count});")
 
-        # Map 构建
-        if isinstance(instr, LIRBuildMap):
-            if dst:
-                self._emit(f"{dst} = nova_map_new({instr.entry_count});")
-            return
+    def _compile_build_adt(self, instr: LIRBuildADT):
+        """编译 ADT 构建"""
+        dst = self._dst_var_name(instr) if instr.dst_loc else None
+        if dst:
+            tag = instr.type_tag
+            fields_size = instr.field_count * 8 + 8
+            self._emit(f"{dst} = nova_adt_new({tag}, {fields_size});")
 
-        # ADT 构建
-        if isinstance(instr, LIRBuildADT):
-            if dst:
-                tag = instr.type_tag
-                fields_size = instr.field_count * 8 + 8
-                self._emit(f"{dst} = nova_adt_new({tag}, {fields_size});")
-            return
+    def _compile_field_access(self, instr: LIRFieldAccess):
+        """编译字段访问"""
+        dst = self._dst_var_name(instr) if instr.dst_loc else None
+        if instr.src_locs and dst:
+            src = self._loc_var_name(instr.src_locs[0][0])
+            # offset 是字段索引，每个字段 8 字节（NovaValue 大小）
+            byte_offset = instr.offset * 8
+            self._emit(f"{dst} = *(NovaValue*)((char*){src} + {byte_offset});")
 
-        # 字段访问
-        if isinstance(instr, LIRFieldAccess):
-            if instr.src_locs and dst:
-                src = self._loc_var_name(instr.src_locs[0][0])
-                # offset 是字段索引，每个字段 8 字节（NovaValue 大小）
-                byte_offset = instr.offset * 8
-                self._emit(f"{dst} = *(NovaValue*)((char*){src} + {byte_offset});")
-            return
+    def _compile_index_access(self, instr: LIRIndex):
+        """编译索引访问"""
+        dst = self._dst_var_name(instr) if instr.dst_loc else None
+        if instr.src_locs and len(instr.src_locs) >= 2 and dst:
+            lst = self._loc_var_name(instr.src_locs[0][0])
+            idx = self._loc_var_name(instr.src_locs[1][0])
+            self._emit(f"{dst} = nova_list_get({lst}, {idx});")
 
-        # 索引访问
-        if isinstance(instr, LIRIndex):
-            if instr.src_locs and len(instr.src_locs) >= 2 and dst:
-                lst = self._loc_var_name(instr.src_locs[0][0])
-                idx = self._loc_var_name(instr.src_locs[1][0])
-                self._emit(f"{dst} = nova_list_get({lst}, {idx});")
-            return
-
-        # Panic
-        if isinstance(instr, LIRPanic):
-            msg = instr.message or "panic"
-            self._emit(f'nova_panic("{msg}");')
-            return
-
-        # 未知指令：输出注释，不中断编译
-        self._emit(
-            f"/* TODO: LIR instruction {type(instr).__name__} not implemented */"
-        )
+    def _compile_panic(self, instr: LIRPanic):
+        """编译 Panic 指令"""
+        msg = instr.message or "panic"
+        self._emit(f'nova_panic("{msg}");')
 
     def _compile_load_const(self, instr: LIRLoadConst, dst: str):
         """编译常量加载指令"""

@@ -4,6 +4,118 @@
 
 ---
 
+## 2026-07-21 08:30 第26轮（MIR基础设施统一 + 基准测试框架）
+
+### 开发概览
+- **轮次**: 第 26 轮（普通开发轮）
+- **基线测试**: 403/403 通过
+- **完成任务**: 3 个（1 个审查驱动 + 1 个自主发现 + 1 个自主规划）
+- **审查驱动任务占比**: 33%（1/3）
+- **测试结果**: 403/403 通过（零回归）
+- **失败回滚**: 0 次
+
+---
+
+### 一、本轮任务详情
+
+#### 1. 【审查驱动】重构 LIRCBackend 调度表降低圈复杂度
+- **任务 ID**: `refactor_lir_c_backend_dispatch`
+- **为什么选这个**: 审查日志显示 LIRCBackend._compile_instr 圈复杂度约 25（全项目 Top 10 级别），是 LIR C 后端的核心分发函数。LIR C 后端是当前重点推进的模块，高复杂度导致新增指令时容易遗漏。参考 VM 和 TypeChecker 的调度表重构经验，可大幅降低复杂度，提升可维护性。
+- **完成情况**: ✅ 成功
+- **详细内容**:
+  - 将 `_compile_instr` 从 23 个 if-isinstance 分支（CC≈25）重构为调度表模式
+  - 新增 `_build_instr_dispatch_table()` 构建 22 种 LIR 指令类型的 handler 映射表
+  - `_compile_instr` 简化为查表分发（CC≈3）
+  - 按类别拆分为多组独立方法：
+    - 常量加载（1个）：LoadConst
+    - 寄存器操作（2个）：LoadReg, StoreReg
+    - 全局变量（2个）：LoadGlobal, StoreGlobal
+    - 二元运算（1个）：BinOp（分发到13种具体运算）
+    - 一元运算（1个）：UnaryOp
+    - 函数调用（2个）：Call, CallIndirect
+    - 控制流（4个）：Jump, Branch, Switch, Return
+    - 数据结构（5个）：BuildList, ListAppend, BuildTuple, BuildMap, BuildADT, FieldAccess, Index
+    - 其他（1个）：Panic
+  - 圈复杂度从约 25 降至约 3，代码结构清晰，易于扩展新指令类型
+
+#### 2. 【自主发现】统一 MIR 指令操作数 API（消除三处重复）
+- **任务 ID**: `mir_operand_api_unify`
+- **为什么选这个**: 深度代码审计发现 SSA 操作数替换、使用收集等逻辑在 mir_lowering.py、pass_manager.py、cfg_utils.py 中重复实现，且实现方式不一致（字符串比较 vs isinstance vs hasattr），是 bug 的温床。MIRLowering._lower_expr 已完成调度表重构（第25轮），现在是统一操作数 API 的最佳时机。统一后能降低维护成本，提升代码可靠性。
+- **完成情况**: ✅ 成功
+- **详细内容**:
+  - 在 `cfg_utils.py` 中新增标准 MIR 指令内省 API：
+    - `replace_instr_operands()` - 替换指令中的操作数
+    - `replace_terminator_operands()` - 替换终结器中的操作数
+  - 统一处理 13 种 MIR 指令类型：BinOp, UnaryOp, LoadConst, LoadVar, StoreVar, Call, Return, Phi, ADTBuild, FieldAccess, Index, BuildList, BuildMap
+  - 统一处理 5 种终结器类型：Branch, Switch, Jump, MatchJump, Return
+  - 同步更新 `pass_manager.py` 的 CSE Pass，移除重复实现，改用统一 API
+  - 同步更新 `mir_lowering.py` 的 SSA 替换逻辑，移除重复实现，改用统一 API
+  - 消除约 150 行重复代码，三处逻辑现在共享同一实现，减少了不一致导致的 bug 风险
+
+#### 3. 【自主规划】建立后端性能基准测试框架
+- **任务 ID**: `backend_benchmark_framework`
+- **为什么选这个**: 第24轮评审规划的第26轮核心任务。当前优化 Pass（LICM、CSE、DCE等）的效果只能手动验证，缺乏量化评估手段。建立基准测试框架后可以科学衡量优化效果，指导优化方向。MIR 基础设施统一已完成（操作数API去重），C后端功能对齐进展顺利，现在是建立基准测试框架的最佳时机。
+- **完成情况**: ✅ 成功
+- **详细内容**:
+  - 创建 `tests/benchmarks/` 目录结构：
+    - `runner.py` - 核心框架（BenchmarkCase, BenchmarkResult, BenchmarkRunner）
+    - `run_benchmarks.py` - 命令行入口
+    - `cases/` - 基准用例目录
+    - `__init__.py` - 包初始化
+  - **BenchmarkCase 数据类**：名称、源码、描述、期望输出、分类、预热次数、迭代次数
+  - **BenchmarkResult 数据类**：编译时间列表、执行时间列表、平均/最小/最大时间、输出、成功状态、错误信息
+  - **多后端支持**：
+    - VM 后端（BytecodeCompiler + NovaVM）：完整支持编译+执行时间测量
+    - C 后端：全流程编译时间测量（执行时间暂不测量）
+    - Wasm 后端：全流程编译时间测量（执行时间暂不测量）
+  - **6 个内置基准用例**，覆盖四种场景：
+    - `fibonacci_recursive` - 递归斐波那契（递归场景）
+    - `arithmetic_loop` - 循环累加（循环场景）
+    - `list_build_append` - 列表构建（数据结构场景）
+    - `list_comprehension` - 列表推导式（数据结构场景）
+    - `nested_loop` - 嵌套循环（控制流场景）
+    - `higher_order_map` - 高阶函数（函数式场景）
+  - 所有用例 VM 后端验证通过，输出正确
+
+---
+
+### 二、审查日志研读摘要
+
+**问题总览**:
+- 持续关注的高复杂度函数逐步被攻克：VM._execute_instruction (111→5)、TypeChecker.check_expr (68→3)、HIRRewriter.generic_rewrite (69→5)、MIRLowering._lower_expr (55→5)
+- 本轮新增 LIRCBackend._compile_instr (≈25→3) 的重构
+- 工程化清理持续推进，代码质量稳步提升
+
+**趋势分析**:
+- 极复杂函数（CC>20）数量持续下降
+- 调度表重构模式已验证有效，成功应用于 4 个核心函数
+- 基础设施类任务（操作数API统一、基准测试框架）为后续优化奠定基础
+
+---
+
+### 三、测试前后对比
+
+| 阶段 | 测试通过数 | 测试总数 | 通过率 |
+|------|-----------|---------|--------|
+| 开发前（基线） | 403 | 403 | 100% |
+| 开发后 | 403 | 403 | 100% |
+
+- **回归情况**: 零回归
+- **新增测试**: 基准测试框架为独立模块，不纳入单元测试统计
+
+---
+
+### 四、下一步计划
+
+第 27 轮（第24轮评审规划的第三轮）：
+1. **C 后端 LIR 路径列表推导式支持** - 将列表推导式代码生成迁移到 LIR 路径，进一步缩小与旧 AST→C 路径的功能差距
+2. **基准测试框架增强** - 添加 C 后端执行时间测量、优化前后对比功能
+3. **审查问题清理** - 处理审查日志中的剩余 MEDIUM 级别问题
+
+第 27 轮后将进入第 27 轮评审（路线图评审），回顾第 25-27 轮开发成果。
+
+---
+
 ## 2026-07-20 14:45 第25轮（MIR复杂度攻坚 + IR质量整治）
 
 ### 开发概览

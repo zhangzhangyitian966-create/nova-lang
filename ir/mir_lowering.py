@@ -63,6 +63,7 @@ from .ir_nodes import (
     MIRTupleBuild,
     MIRUnaryOp,
 )
+from .cfg_utils import replace_instr_operands, replace_terminator_operands
 
 
 class MIRLoweringError(Exception):
@@ -165,100 +166,20 @@ class MIRLowering:
         self.ssa_types[ssa] = instr.result_type
         return ssa
 
-    def _replace_ssa_in_instr(self, instr, old_ssa, new_ssa):
-        """
-        替换一条指令中的 SSA 引用。
-        支持所有常见的指令字段。
-        """
-        # 跳过 Phi 自身的 result_name
-        if hasattr(instr, "result_name") and instr.result_name == old_ssa:
-            pass  # 不替换定义本身
-
-        # 二元运算
-        if hasattr(instr, "left") and instr.left == old_ssa:
-            instr.left = new_ssa
-        if hasattr(instr, "right") and instr.right == old_ssa:
-            instr.right = new_ssa
-
-        # 一元运算
-        if hasattr(instr, "operand") and instr.operand == old_ssa:
-            instr.operand = new_ssa
-
-        # 函数调用
-        if hasattr(instr, "callee") and instr.callee == old_ssa:
-            instr.callee = new_ssa
-        if hasattr(instr, "args"):
-            instr.args = [new_ssa if a == old_ssa else a for a in instr.args]
-
-        # 字段/索引访问
-        if hasattr(instr, "object") and instr.object == old_ssa:
-            instr.object = new_ssa
-        if hasattr(instr, "index") and instr.index == old_ssa:
-            instr.index = new_ssa
-        if hasattr(instr, "value") and instr.value == old_ssa:
-            instr.value = new_ssa
-
-        # 列表/元组/Map 构建
-        if hasattr(instr, "elements"):
-            instr.elements = [new_ssa if e == old_ssa else e for e in instr.elements]
-        if hasattr(instr, "entries"):
-            instr.entries = [
-                (new_ssa if k == old_ssa else k, new_ssa if v == old_ssa else v)
-                for k, v in instr.entries
-            ]
-        if hasattr(instr, "fields"):
-            instr.fields = {
-                k: new_ssa if v == old_ssa else v for k, v in instr.fields.items()
-            }
-
-        # 列表操作
-        if hasattr(instr, "list_ssa") and instr.list_ssa == old_ssa:
-            instr.list_ssa = new_ssa
-        if hasattr(instr, "element_ssa") and instr.element_ssa == old_ssa:
-            instr.element_ssa = new_ssa
-
-        # 全局变量加载/存储
-        if hasattr(instr, "src") and instr.src == old_ssa:
-            instr.src = new_ssa
-        if hasattr(instr, "dst") and instr.dst == old_ssa:
-            instr.dst = new_ssa
-
-        # Phi 节点的 sources
-        if hasattr(instr, "sources"):
-            instr.sources = [
-                (label, new_ssa if val == old_ssa else val)
-                for label, val in instr.sources
-            ]
-
-    def _replace_ssa_in_terminator(self, terminator, old_ssa, new_ssa):
-        """
-        替换终结指令中的 SSA 引用。
-        """
-        if terminator is None:
-            return
-
-        # 分支条件
-        if hasattr(terminator, "cond") and terminator.cond == old_ssa:
-            terminator.cond = new_ssa
-
-        # 跳转值（如 return）
-        if hasattr(terminator, "value") and terminator.value == old_ssa:
-            terminator.value = new_ssa
-
-        # 函数调用参数
-        if hasattr(terminator, "args"):
-            terminator.args = [new_ssa if a == old_ssa else a for a in terminator.args]
-
     def _replace_ssa_in_block(self, block, old_ssa, new_ssa, skip_phi=False):
         """
         替换一个基本块中所有的 SSA 引用。
         skip_phi=True 时不替换 Phi 节点（用于替换 Phi 之前的引用）。
+
+        使用 cfg_utils 中的统一操作数替换 API，
+        消除与 pass_manager.py 的重复代码。
         """
+        replacements = {old_ssa: new_ssa}
         for instr in block.instructions:
             if skip_phi and hasattr(instr, "sources"):
                 continue
-            self._replace_ssa_in_instr(instr, old_ssa, new_ssa)
-        self._replace_ssa_in_terminator(block.terminator, old_ssa, new_ssa)
+            replace_instr_operands(instr, replacements)
+        replace_terminator_operands(block.terminator, replacements)
 
     def _lower_function(self, hir_fn):
         self.ssa_counter = 0

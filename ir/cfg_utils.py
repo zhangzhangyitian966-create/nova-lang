@@ -9,13 +9,26 @@ from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Set, Tuple
 
 from .ir_nodes import (
+    MIRADTBuild,
     MIRBasicBlock,
+    MIRBinOp,
     MIRBranch,
+    MIRCall,
+    MIRClosureCreate,
+    MIRFieldAccess,
     MIRFunction,
+    MIRIndexAccess,
     MIRJump,
+    MIRListAppend,
+    MIRListBuild,
+    MIRMapBuild,
     MIRMatchJump,
+    MIRPhi,
     MIRReturn,
+    MIRStore,
     MIRSwitch,
+    MIRTupleBuild,
+    MIRUnaryOp,
 )
 
 
@@ -614,3 +627,118 @@ def get_terminator_used_ssa(terminator) -> List[str]:
     if hasattr(terminator, "value") and terminator.value:
         used.append(terminator.value)
     return used
+
+
+def replace_instr_operands(instr, replacements: Dict[str, str]):
+    """
+    替换指令中的操作数 SSA 名（统一 API）。
+
+    将出现在 replacements 字典中的 SSA 名替换为对应的值。
+    使用 isinstance 类型检查，比 hasattr 更安全可靠。
+
+    Args:
+        instr: MIR 指令对象
+        replacements: {旧SSA名: 新SSA名} 的字典
+    """
+    if not replacements:
+        return
+
+    if isinstance(instr, MIRBinOp):
+        if instr.left in replacements:
+            instr.left = replacements[instr.left]
+        if instr.right in replacements:
+            instr.right = replacements[instr.right]
+
+    elif isinstance(instr, MIRUnaryOp):
+        if instr.operand in replacements:
+            instr.operand = replacements[instr.operand]
+
+    elif isinstance(instr, MIRCall):
+        instr.args = [
+            replacements[a] if a in replacements else a for a in instr.args
+        ]
+        if instr.callee in replacements:
+            instr.callee = replacements[instr.callee]
+
+    elif isinstance(instr, MIRFieldAccess):
+        if instr.object in replacements:
+            instr.object = replacements[instr.object]
+
+    elif isinstance(instr, MIRIndexAccess):
+        if instr.object in replacements:
+            instr.object = replacements[instr.object]
+        if instr.index in replacements:
+            instr.index = replacements[instr.index]
+
+    elif isinstance(instr, MIRListBuild):
+        instr.elements = [
+            replacements[e] if e in replacements else e for e in instr.elements
+        ]
+
+    elif isinstance(instr, MIRListAppend):
+        if instr.list_ssa in replacements:
+            instr.list_ssa = replacements[instr.list_ssa]
+        if instr.element_ssa in replacements:
+            instr.element_ssa = replacements[instr.element_ssa]
+
+    elif isinstance(instr, MIRTupleBuild):
+        instr.elements = [
+            replacements[e] if e in replacements else e for e in instr.elements
+        ]
+
+    elif isinstance(instr, MIRMapBuild):
+        instr.entries = [
+            (
+                replacements[k] if k in replacements else k,
+                replacements[v] if v in replacements else v,
+            )
+            for k, v in instr.entries
+        ]
+
+    elif isinstance(instr, MIRADTBuild):
+        instr.fields = [
+            replacements[f] if f in replacements else f for f in instr.fields
+        ]
+
+    elif isinstance(instr, MIRClosureCreate):
+        instr.captures = [
+            replacements[c] if c in replacements else c for c in instr.captures
+        ]
+
+    elif isinstance(instr, MIRStore):
+        if instr.value in replacements:
+            instr.value = replacements[instr.value]
+
+    elif isinstance(instr, MIRPhi):
+        instr.sources = [
+            (label, replacements[ssa] if ssa in replacements else ssa)
+            for label, ssa in instr.sources
+        ]
+
+
+def replace_terminator_operands(terminator, replacements: Dict[str, str]):
+    """
+    替换终结指令中的操作数 SSA 名（统一 API）。
+
+    Args:
+        terminator: MIR 终结指令对象
+        replacements: {旧SSA名: 新SSA名} 的字典
+    """
+    if not replacements or terminator is None:
+        return
+
+    if isinstance(terminator, MIRBranch):
+        if terminator.condition in replacements:
+            terminator.condition = replacements[terminator.condition]
+
+    elif isinstance(terminator, MIRSwitch):
+        if terminator.value in replacements:
+            terminator.value = replacements[terminator.value]
+
+    elif isinstance(terminator, MIRReturn):
+        if terminator.value and terminator.value in replacements:
+            terminator.value = replacements[terminator.value]
+
+    elif isinstance(terminator, MIRMatchJump):
+        if terminator.value in replacements:
+            terminator.value = replacements[terminator.value]
