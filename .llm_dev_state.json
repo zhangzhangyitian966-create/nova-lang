@@ -1,5 +1,5 @@
 {
-  "cycles": 20,
+  "cycles": 21,
   "completed_tasks": [
     "unify_ir_naming",
     "for_loop_ssa_normalize",
@@ -45,10 +45,19 @@
     "clean_unused_imports",
     "fix_too_broad_exceptions",
     "mir_cfg_loop_analysis",
-    "implement_licm_pass"
+    "implement_licm_pass",
+    "review_cycle_21"
   ],
   "failed_tasks": [],
   "task_history": [
+    {
+      "cycle": 21,
+      "task_id": "review_cycle_21",
+      "status": "completed",
+      "source": "评审轮",
+      "reason": "第 21 轮路线图评审，回顾第 19-20 轮开发（Wasm控制流重写 + 工程化清理 + MIR优化深化），进行五维评估，规划第 22-24 轮方向（VM巨型函数拆分 → C后端功能对齐 → 后端整合与基准测试），更新任务池（新增 5 个任务，调整 3 个优先级，补充依赖关系）。",
+      "details": "完成第19-20轮回顾：两轮共完成 6 个任务，路线图进度 70% → 84%，测试 418 全通过，零失败零回滚。五维评估：方向正确（Wasm架构修复 + MIR优化 + 工程化清理三线并进）、质量持续变好（平均CC 3.17→3.13，极复杂函数 21→19）、效率稳定（每轮3个任务）、价值高（LICM高级优化 + Wasm控制流架构修复）、审查对齐良好（审查驱动任务占比 50%）。发现新问题：VM._execute_instruction 圈复杂度 111（长期Top 1）、Native后端功能严重不完整、unused_import 仍有 95 处、LIR switch/match 降级缺失。下阶段方向：第22轮工程化清理（VM巨型函数拆分 + LIR switch/match降级补全）、第23轮C后端功能对齐（ADT/match/闭包迁移到LIR路径）、第24轮后端整合与基准测试。任务池新增 5 个任务（3个审查驱动 + 2个自主发现），调整 3 个优先级。"
+    },
     {
       "cycle": 20,
       "task_id": "fix_too_broad_exceptions",
@@ -220,10 +229,10 @@
       "details": "实现基础版 SSA 验证器 Pass（SSAVerifier）：支持 5 项检查（基本块终结指令、SSA 单赋值、使用前定义、Phi 节点位置、Phi source 块前驱验证）；手动测试验证了正确和错误场景，能正确检测未定义 SSA 名等问题"
     }
   ],
-  "current_cycle": 20,
+  "current_cycle": 21,
   "baseline_tests": 403,
   "current_tests": 418,
-  "last_review_cycle": 18,
+  "last_review_cycle": 21,
   "tasks": [
     {
       "id": "fix_match_lowering",
@@ -352,14 +361,14 @@
       "name": "LIR switch/match 降级补全",
       "description": "当前 MIRSwitch 和 MIRMatchJump 降级为简单的条件跳转，丢失了 switch/match 的多分支语义。需要完善 LIR 层的多分支指令支持，确保各后端能正确生成高效的分支代码",
       "difficulty": "medium",
-      "priority": 55,
+      "priority": 65,
       "category": "ir",
       "estimated": "3-5 小时",
       "status": "pending",
       "depends_on": [
         "fix_mir_ssa"
       ],
-      "reason": "MIR 层已有完整的 switch/match 支持，但降级到 LIR 时退化为简单 if-else，丢失了优化机会。完善后各后端可以基于 switch 语义生成更高效的代码（如跳转表）。[优先级调整: 60 → 55，优先级低于 Wasm 控制流修复和 LICM 优化]"
+      "reason": "MIR 层已有完整的 switch/match 支持，但降级到 LIR 时退化为简单 if-else，丢失了优化机会。完善后各后端可以基于 switch 语义生成更高效的代码（如跳转表）。[优先级调整: 55 → 65，提升为第22轮核心任务]"
     },
     {
       "id": "mir_ssa_verifier",
@@ -423,16 +432,17 @@
       "name": "统一 C 后端（LIR 路径功能对齐）",
       "description": "将 c_codegen.py 中已实现但 lir_c_backend.py 缺失的功能迁移过来：ADT 代码生成、match 编译、闭包实现、列表推导式，待功能对齐后废弃旧的 AST→C 路径",
       "difficulty": "hard",
-      "priority": 75,
+      "priority": 80,
       "category": "architecture",
       "estimated": "2-3 天",
       "status": "pending",
       "depends_on": [
         "fix_match_lowering",
         "fix_mir_ssa",
-        "refactor_visitor_pattern"
+        "refactor_visitor_pattern",
+        "lir_switch_match_lowering"
       ],
-      "reason": "目前有两套 C 代码生成路径（AST 路径功能完整，LIR 路径仅阶段一），功能重叠增加维护成本。SSA 基础打好后，统一到 LIR→C 路径可以让所有后端共享 IR 优化成果。[优先级调整: 80 → 75，Wasm 后端架构缺陷优先级更高]"
+      "reason": "目前有两套 C 代码生成路径（AST 路径功能完整，LIR 路径仅阶段一），功能重叠增加维护成本。SSA 基础打好后，统一到 LIR→C 路径可以让所有后端共享 IR 优化成果。[优先级调整: 75 → 80，提升为第23轮核心任务]"
     },
     {
       "id": "unify_backend_mappings",
@@ -740,12 +750,12 @@
       "name": "拆分 VM 巨型执行函数",
       "description": "NovaVM._execute_instruction 圈复杂度 111（全项目最高），是一个 400+ 行的巨型 switch 函数。需要按指令类别拆分为多个方法（算术运算、比较、控制流、数据结构、函数调用等），降低单函数复杂度",
       "difficulty": "medium",
-      "priority": 50,
+      "priority": 70,
       "category": "engineering",
       "estimated": "4-6 小时",
       "status": "pending",
       "depends_on": [],
-      "reason": "审查日志长期显示 _execute_instruction 圈复杂度 111，是全项目最复杂的函数。虽然字节码 VM 是解释器路径，不影响编译后端，但高复杂度导致维护困难、bug 风险高。[新增任务 / 审查驱动]"
+      "reason": "审查日志长期显示 _execute_instruction 圈复杂度 111，是全项目最复杂的函数，也是唯一一个 CC>100 的函数。虽然字节码 VM 是解释器路径，不影响编译后端，但高复杂度导致维护困难、bug 风险高。按指令类别拆分后可大幅降低复杂度，提升可维护性。[优先级调整: 50 → 70，提升为第22轮核心任务 / 审查驱动]"
     },
     {
       "id": "mir_cfg_loop_analysis",
@@ -761,6 +771,73 @@
         "ssa_verifier_tests"
       ],
       "reason": "LICM 等循环优化的前置条件。没有循环分析基础设施，所有循环相关优化都无法实现。[新增任务 / 自主发现]"
+    },
+    {
+      "id": "fix_wasm_store_reg",
+      "name": "修复 Wasm 后端 StoreReg 实现",
+      "description": "WasmGC 后端的 LIRStoreReg 指令是空实现（pass 占位），需要实现为 local.set，与 LIRLoadReg（local.get）对称。这是 Wasm 后端寄存器操作的基础功能",
+      "difficulty": "easy",
+      "priority": 60,
+      "category": "backend",
+      "estimated": "1 小时",
+      "status": "pending",
+      "depends_on": [
+        "wasm_control_flow_rewrite"
+      ],
+      "reason": "深度代码审计发现 Wasm 后端 LIRStoreReg 未实现，是已知的功能缺失。实现成本极低（约 10 行代码），但补上后 Wasm 后端的寄存器操作才完整。[新增任务 / 自主发现]"
+    },
+    {
+      "id": "c_backend_adt_match",
+      "name": "C 后端 LIR 路径 ADT/match 支持",
+      "description": "将 c_codegen.py 中的 ADT 代码生成和 match 编译逻辑迁移到 lir_c_backend.py，让 LIR→C 路径支持代数数据类型和模式匹配，向统一 C 后端迈进一步",
+      "difficulty": "hard",
+      "priority": 72,
+      "category": "backend",
+      "estimated": "1-2 天",
+      "status": "pending",
+      "depends_on": [
+        "lir_switch_match_lowering",
+        "unify_c_backend"
+      ],
+      "reason": "统一 C 后端的核心子任务。当前 LIR C 后端缺少 ADT 和 match 支持，是功能对齐的最大缺口。拆分为独立任务后可渐进式推进，降低单轮工作量。[新增任务 / 自主发现]"
+    },
+    {
+      "id": "refactor_type_checker_complexity",
+      "name": "重构 TypeChecker 降低圈复杂度",
+      "description": "TypeChecker.check_expr 圈复杂度 68（全项目 Top 3），用庞大的模式匹配处理所有 AST 节点类型。需要引入数据驱动或 Visitor 模式，将每种节点类型的检查逻辑拆分为独立方法，降低单函数复杂度",
+      "difficulty": "medium",
+      "priority": 55,
+      "category": "engineering",
+      "estimated": "4-6 小时",
+      "status": "pending",
+      "depends_on": [],
+      "reason": "审查日志长期显示 check_expr 圈复杂度 68，排名 Top 3。类型检查器是编译器的核心组件，高复杂度增加 bug 风险。参考 HIRRewriter 的数据驱动重构经验，可大幅降低复杂度。[新增任务 / 审查驱动]"
+    },
+    {
+      "id": "refactor_mir_lower_expr",
+      "name": "重构 MIRLowering._lower_expr 降低圈复杂度",
+      "description": "MIRLowering._lower_expr 圈复杂度 55（全项目 Top 4），HIR→MIR 降级的主分发函数。需要按节点类别拆分为多个子方法（表达式、语句、模式等），降低单函数复杂度，提升可维护性",
+      "difficulty": "medium",
+      "priority": 58,
+      "category": "engineering",
+      "estimated": "3-5 小时",
+      "status": "pending",
+      "depends_on": [],
+      "reason": "审查日志显示 _lower_expr 圈复杂度 55，排名 Top 4。MIR 降级是编译器核心路径，高复杂度导致新增节点类型时容易遗漏。拆分后结构更清晰，维护成本更低。[新增任务 / 审查驱动]"
+    },
+    {
+      "id": "backend_benchmark_framework",
+      "name": "建立后端性能基准测试框架",
+      "description": "建立标准化的编译器性能基准测试，包含多组基准程序（算术密集、循环密集、递归、数据结构等），支持各后端（C/Wasm/VM）的性能对比和优化效果量化",
+      "difficulty": "medium",
+      "priority": 45,
+      "category": "test",
+      "estimated": "3-5 小时",
+      "status": "pending",
+      "depends_on": [
+        "unify_c_backend"
+      ],
+      "reason": "当前优化 Pass（LICM、CSE、DCE等）的效果只能手动验证，缺乏量化评估手段。建立基准测试框架后可以科学衡量优化效果，指导优化方向。[新增任务 / 自主发现]"
     }
   ]
 }

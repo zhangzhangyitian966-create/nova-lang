@@ -1,7 +1,7 @@
 # Nova LLM 智能开发路线图
 
-**更新时间**: 2026-07-20 07:30:00
-**上次评审**: 第 18 轮（路线图评审）
+**更新时间**: 2026-07-20 08:00:00
+**上次评审**: 第 21 轮（路线图评审）
 
 本路线图由 LLM 智能开发系统动态维护。
 
@@ -11,7 +11,7 @@
 |------|------|------|--------|------|------|
 | ✅ | C 后端接入统一 IR 管线 | hard | 95 | 2-3 天 | - |
 | ✅ | C 后端 LIR 代码生成基础框架 | medium | 92 | 1 天 | - |
-| ⏳ | 统一 C 后端（LIR 路径功能对齐） | hard | 75 | 2-3 天 | fix_match_lowering, fix_mir_ssa, refactor_visitor_pattern |
+| ⏳ | 统一 C 后端（LIR 路径功能对齐） | hard | 80 | 2-3 天 | fix_match_lowering, fix_mir_ssa, refactor_visitor_pattern, lir_switch_match_lowering |
 
 ## 🔧 IR 降级 / 正确性
 
@@ -32,7 +32,8 @@
 | ✅ | for 循环 SSA 规范化（去除 hack 式替换） | medium | 76 | 3-5 小时 | fix_mir_ssa |
 | ✅ | 提取循环 SSA 通用方法（消除三重重复） | medium | 88 | 3-5 小时 | for_loop_ssa_normalize |
 | ✅ | 修复列表推导式 latch 块 SSA 替换不完整 | medium | 85 | 2-4 小时 | extract_loop_ssa |
-| ⏳ | LIR switch/match 降级补全 | medium | 55 | 3-5 小时 | fix_mir_ssa |
+| ✅ | MIR CFG 工具与循环分析基础设施 | medium | 70 | 4-6 小时 | mir_ssa_verifier, ssa_verifier_tests |
+| ⏳ | LIR switch/match 降级补全 | medium | 65 | 3-5 小时 | fix_mir_ssa |
 
 ## 🚀 优化 Pass
 
@@ -51,6 +52,8 @@
 | ✅ | 修复 LIR C 后端条件分支 | easy | 72 | 30 分钟 | - |
 | ✅ | 修复 Wasm 后端 Label 实现 | medium | 62 | 3-5 小时 | fix_while_phi |
 | ✅ | Wasm 后端控制流重写（支持任意 CFG） | hard | 90 | 2-3 天 | fix_wasm_label |
+| ⏳ | 修复 Wasm 后端 StoreReg 实现 | easy | 60 | 1 小时 | wasm_control_flow_rewrite |
+| ⏳ | C 后端 LIR 路径 ADT/match 支持 | hard | 72 | 1-2 天 | lir_switch_match_lowering, unify_c_backend |
 | ⏳ | 实现原生后端函数调用 ABI | hard | 25 | 3-5 天 | fix_mir_ssa |
 
 ## 🛠️ 工程质量
@@ -66,7 +69,9 @@
 | ✅ | 重构 HIRRewriter 降低圈复杂度 | easy | 75 | 2-3 小时 | refactor_visitor_pattern |
 | ✅ | 修复过宽异常捕获 | easy | 60 | 1-2 小时 | - |
 | ✅ | 批量清理未使用导入 | easy | 55 | 1-2 小时 | - |
-| ⏳ | 拆分 VM 巨型执行函数 | medium | 50 | 4-6 小时 | - |
+| ⏳ | 拆分 VM 巨型执行函数 | medium | 70 | 4-6 小时 | - |
+| ⏳ | 重构 TypeChecker 降低圈复杂度 | medium | 55 | 4-6 小时 | - |
+| ⏳ | 重构 MIRLowering._lower_expr 降低圈复杂度 | medium | 58 | 3-5 小时 | - |
 
 ## 🧪 测试完善
 
@@ -74,13 +79,14 @@
 |------|------|------|--------|------|------|
 | ✅ | 修复原生后端测试导入 | easy | 85 | 30 分钟 | |
 | ✅ | 为 SSA 验证器编写完整测试 | easy | 78 | 2-3 小时 | mir_ssa_verifier, extract_loop_ssa |
+| ⏳ | 建立后端性能基准测试框架 | medium | 45 | 3-5 小时 | unify_c_backend |
 
 ---
 
-**进度**: 36/43 (84%)
-**已完成**: 36
+**进度**: 38/47 (81%)
+**已完成**: 38
 **进行中**: 0
-**待开发**: 6
+**待开发**: 8
 **已废弃**: 1
 
-> 注：第20轮完成 3 个任务（过宽异常修复、MIR CFG/循环分析基础设施、LICM Pass 实现）。MIR 优化能力大幅提升。下一轮（第21轮）聚焦：工程化清理（VM 巨型函数拆分 + LIR switch/match 降级补全）。
+> 注：第21轮路线图评审完成。回顾第19-20轮（Wasm控制流重写 + 工程化清理 + MIR优化深化），路线图进度 70% → 81%。新增 5 个任务（3个审查驱动 + 2个自主发现），调整 3 个任务优先级。下阶段（第22-24轮）方向：第22轮工程化清理（VM巨型函数拆分 + LIR switch/match降级补全 + Wasm StoreReg修复）、第23轮C后端功能对齐（ADT/match迁移到LIR路径）、第24轮后端整合与基准测试。
