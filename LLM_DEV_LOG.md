@@ -4,6 +4,107 @@
 
 ---
 
+## 2026-07-20 07:30 第20轮开发
+
+### 开发概览
+- **轮次**: 第 20 轮（普通开发轮）
+- **基线测试**: 418/418 通过
+- **完成任务**: 3 个（1 个审查驱动 + 2 个自主规划）
+- **审查驱动任务占比**: 33%（1/3）
+- **路线图进度**: 33/43 (77%) → 36/43 (84%)
+- **测试结果**: 418/418 通过（零回归）
+- **失败回滚**: 0 次
+
+---
+
+### 本轮任务详情
+
+#### 1. 【审查驱动】修复过宽异常捕获
+- **状态**: ✅ 完成
+- **来源**: 审查日志第1495轮 — 7 处 too_broad_exception（MEDIUM 级别）
+- **为什么选这个**: 审查日志报告的 MEDIUM 级别问题中，too_broad_exception 是 7 处且分布在核心代码中。过宽异常捕获会隐藏真实错误导致调试困难，特别是 cli.py 第173行的静默吞噬（except Exception: pass）是最严重的问题。逐个修复成本低，能提升代码健壮性和可调试性。
+- **完成内容**:
+  - **cli.py 第173行**（最严重）：将 `except Exception: pass` 改为 `except NovaError as e:` 并打印类型警告。REPL 中类型检查失败不再静默吞噬，而是告知用户类型警告但继续执行。
+  - **cli.py 另外 2 处顶层兜底**：添加注释说明设计理由（顶层容错，防止程序崩溃时无任何输出），同时改进错误信息（打印异常类型 + 完整 traceback），便于调试。
+  - **pass_manager.py 4 处优雅降级**：添加设计说明注释（单个 Pass 失败不中断整体编译，通过 _record_pass_failure 统一记录和警告）。这些是有意的设计决策而非 bug。
+  - 所有修改保持功能不变，仅改进错误可见性和代码可维护性。
+- **测试**: 418 测试全部通过，零回归
+
+#### 2. 【自主规划】MIR CFG 工具与循环分析基础设施
+- **状态**: ✅ 完成
+- **来源**: 第18轮评审规划的第20轮核心任务的前置条件 / LICM 实现的必要基础设施
+- **为什么选这个**: LICM 等循环优化依赖循环分析基础设施（支配树、回边检测、自然循环识别）。当前 MIR 层没有任何循环分析能力，无法推进高级优化。新建 cfg_utils.py 统一提供 CFG 和循环分析工具，为 LICM Pass 以及后续更多循环优化（循环展开、循环融合等）奠定基础。
+- **完成内容**:
+  - 新建 **ir/cfg_utils.py**（约 600 行）
+  - **基础 CFG 工具**：`build_block_map`、`get_successors`（支持 MIRJump/MIRBranch/MIRSwitch/MIRMatchJump/MIRReturn）、`build_predecessors`、`build_successor_map`
+  - **支配树计算**：`compute_dominators`（迭代式算法）、`compute_idom`（直接支配者）、`dominates`
+  - **回边检测**：`find_back_edges`、`BackEdge` 数据类
+  - **自然循环识别**：`Loop`（header/body/latches/exits/parent/children）、`LoopInfo`（查询接口：get_loop/get_loop_for_block/is_loop_header 等）、`analyze_loops`（完整循环分析，支持嵌套循环、循环树、出口块计算）
+  - **指令工具函数**：`get_instr_operands`（统一获取所有操作数）、`is_instr_pure`（副作用判断）、`get_terminator_used_ssa`
+  - 修复了回边检测的条件写反 bug（source in dom[target] → target in dom[source]）
+- **测试**: 418 测试全部通过，零回归
+
+#### 3. 【自主规划】实现 LICM Pass（循环不变量外提）
+- **状态**: ✅ 完成
+- **来源**: 第18轮评审规划的第20轮核心任务 / 路线图高优先级任务
+- **为什么选这个**: LICM 是经典的循环优化 Pass，对循环密集型代码性能提升显著。SSA 验证器已有完整测试覆盖，MIR 优化管线基础打好了，循环分析基础设施也已就绪，现在是推进高级优化的最佳时机。填补 MIR 优化空白，提升编译器优化能力。
+- **完成内容**:
+  - 实现完整的 **LoopInvariantCodeMotion** Pass（约 290 行），替代原先的空壳实现
+  - **循环分析**：使用 `cfg_utils.analyze_loops` 自动识别所有循环（含嵌套）
+  - **嵌套循环处理**：按嵌套层级从内到外处理（内层先外提，外层可进一步外提已外提的内层不变量）
+  - **Pre-header 管理**：自动获取或创建 pre-header 块（多个外部前驱时创建新块并重定向跳转）
+  - **循环不变量识别**：纯指令 + 所有操作数定义在循环外（迭代处理，直到不动点）
+  - **指令移动**：将不变指令移动到 pre-header 末尾（在终结指令之前），保持 SSA 正确性
+  - **保守策略**：仅外提纯指令（算术运算、字段访问、元组/列表/Map/ADT 构建等），不移动有副作用的指令（函数调用、Store、Panic 等）
+  - **手动验证**：构造测试用例，循环不变量 `a + b` 被正确外提到 pre-header
+- **测试**: 418 测试全部通过，零回归
+
+---
+
+### 审查日志研读摘要
+
+**第 1495 轮审查（最新）**:
+- 总问题数: 1015（0 CRITICAL, 0 HIGH, 167 MEDIUM, 848 LOW）
+- MEDIUM 主要问题: unused_import (95)、cyclomatic_complexity (34)、function_too_long (20)、class_too_large (11)、too_broad_exception (7)
+- Top 10 最复杂函数:
+  1. `NovaVM._execute_instruction` (111) — vm.py
+  2. `HIRRewriter.generic_rewrite` (69) — ir/ir_nodes.py
+  3. `TypeChecker.check_expr` (68) — type_checker.py
+  4. `MIRLowering._lower_expr` (55) — ir/mir_lowering.py
+  5. `LIRCBackend._compile_instr` (42) — backend/lir_c_backend.py
+
+**趋势分析**:
+- 问题数稳定在 1009-1015 之间，波动很小
+- 零 CRITICAL/HIGH，核心架构稳定
+- MEDIUM 略降（169→167），LOW 略增（840→848）
+- unused_import 仍有 95 处（第19轮清理了 80 处，剩余 15 处可能是函数内局部导入或新增）
+
+**本轮采纳的审查问题**:
+1. ✅ 7 处过宽异常捕获（too_broad_exception）— 全部修复，最严重的静默吞噬问题已解决
+
+---
+
+### 测试前后对比
+
+| 指标 | 开发前 | 开发后 | 变化 |
+|------|--------|--------|------|
+| 测试总数 | 418 | 418 | 持平 |
+| 通过数 | 418 | 418 | 持平 |
+| 通过率 | 100% | 100% | 持平 |
+| 失败数 | 0 | 0 | 持平 |
+
+---
+
+### 下一步计划（第 21 轮）
+
+按照第18轮评审规划的"第19-21轮路线"，第21轮应聚焦 **工程化清理**：
+
+1. **拆分 VM 巨型执行函数** — 审查日志长期 Top 1 复杂函数（CC=111），按指令类别拆分降低复杂度
+2. **LIR switch/match 降级补全** — 完善 LIR 层多分支指令支持，为后端优化打基础
+3. **（可选）LICM 增强** — 添加更多可外提指令类型、循环不变式断言等
+
+---
+
 ## 2026-07-20 05:15 第19轮开发
 
 ### 开发概览

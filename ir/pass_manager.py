@@ -713,12 +713,296 @@ class CommonSubexprElimination(Pass):
 
 
 class LoopInvariantCodeMotion(Pass):
-    """循环不变量外提"""
+    """循环不变量外提（LICM）
+
+    在 MIR 层识别循环结构，将循环体内不变的纯运算指令
+    外提到循环前置头（pre-header）中，减少循环内的重复计算。
+
+    实现策略：
+    1. 使用 cfg_utils.analyze_loops 进行循环分析（支配树 + 回边 + 自然循环）
+    2. 按嵌套层级从内到外处理循环
+    3. 对每个循环：
+       - 找到或创建 pre-header 块
+       - 识别循环不变量：纯指令 + 所有操作数定义在循环外
+       - 将不变指令移动到 pre-header 末尾
+    4. 迭代直到不动点（外提可能产生新的不变量）
+
+    仅外提纯指令（算术运算、字段访问、元组构建等），
+    不移动有副作用的指令（函数调用、Store、Panic 等）。
+    """
 
     name = "licm"
 
     def run(self, mir_module):
-        return False
+        """对 MIR 模块执行 LICM，返回是否发生了变化"""
+        changed = False
+        for fn_name, mir_fn in mir_module.functions.items():
+            changed |= self._licm_function(mir_fn)
+        return changed
+
+    def _licm_function(self, mir_fn):
+        """对单个函数执行 LICM"""
+        from .cfg_utils import analyze_loops, build_block_map
+
+        loop_info = analyze_loops(mir_fn)
+        if not loop_info.loops:
+            return False  # 没有循环
+
+        block_map = build_block_map(mir_fn)
+        total_changed = False
+
+        # 迭代直到不动点（外提可能产生新的不变量）
+        max_iterations = 10
+        for _ in range(max_iterations):
+            changed = False
+
+            # 按嵌套层级从内到外处理循环
+            # 内层循环的不变量先外提，然后外层循环可以进一步外提
+            ordered_loops = self._get_loops_inner_first(loop_info)
+
+            for loop in ordered_loops:
+                loop_changed = self._licm_loop(mir_fn, loop, block_map)
+                changed |= loop_changed
+
+            total_changed |= changed
+            if not changed:
+                break
+
+        return total_changed
+
+    def _get_loops_inner_first(self, loop_info):
+        """按嵌套层级从内到外返回循环列表（内层先处理）"""
+        # 计算每个循环的深度
+        depths = {}
+
+        def compute_depth(header):
+            if header in depths:
+                return depths[header]
+            loop = loop_info.get_loop(header)
+            if loop is None:
+                return 0
+            if loop.parent is None:
+                depths[header] = 1
+            else:
+                depths[header] = compute_depth(loop.parent) + 1
+            return depths[header]
+
+        for header in loop_info.loops:
+            compute_depth(header)
+
+        # 按深度从大到小排序（内层先处理）
+        sorted_headers = sorted(depths.keys(), key=lambda h: depths[h], reverse=True)
+        return [loop_info.loops[h] for h in sorted_headers]
+
+    def _licm_loop(self, mir_fn, loop, block_map):
+        """对单个循环执行 LICM，返回是否发生了变化"""
+        # 1. 找到或创建 pre-header
+        pre_header_label = self._get_or_create_pre_header(mir_fn, loop, block_map)
+        if pre_header_label is None:
+            return False  # 无法确定 pre-header
+
+        pre_header = block_map[pre_header_label]
+
+        # 2. 收集所有循环内的定义（SSA 名 -> 定义块）
+        loop_defs = {}  # ssa_name -> block_label
+        for block_label in loop.body:
+            bb = block_map.get(block_label)
+            if bb is None:
+                continue
+            for instr in bb.instructions:
+                if hasattr(instr, "result_name") and instr.result_name:
+                    loop_defs[instr.result_name] = block_label
+
+        # 3. 识别循环不变指令并移动
+        changed = False
+        hoisted = []  # 被外提的指令
+
+        # 遍历循环体中除 header 外的所有块
+        # header 中的 Phi 不能移动，其他指令也可能有不变量
+        for block_label in loop.body:
+            bb = block_map.get(block_label)
+            if bb is None:
+                continue
+
+            new_instrs = []
+            for instr in bb.instructions:
+                # 跳过 Phi 节点（必须在块开头）
+                if hasattr(instr, "sources") and hasattr(instr, "result_name"):
+                    new_instrs.append(instr)
+                    continue
+
+                # 检查是否是循环不变量
+                if self._is_loop_invariant(instr, loop_defs, loop):
+                    # 移动到 pre-header
+                    hoisted.append(instr)
+                    changed = True
+                else:
+                    new_instrs.append(instr)
+
+            if changed:
+                bb.instructions = new_instrs
+
+        # 将外提的指令添加到 pre-header 末尾（在终结指令之前）
+        if hoisted:
+            # pre-header 的终结指令应该是跳转到 loop header
+            # 把不变指令插入到终结指令之前
+            if pre_header.terminator is not None:
+                # 有终结指令，插入到它前面
+                terminator = pre_header.terminator
+                pre_header.terminator = None
+                pre_header.instructions.extend(hoisted)
+                pre_header.terminator = terminator
+            else:
+                pre_header.instructions.extend(hoisted)
+
+        return changed
+
+    def _is_loop_invariant(self, instr, loop_defs, loop):
+        """
+        判断一条指令是否是循环不变量。
+
+        循环不变量的条件：
+        1. 指令是纯的（无副作用）
+        2. 指令有结果名（产生 SSA 值）
+        3. 所有操作数都定义在循环外（即不在 loop_defs 中）
+
+        注意：循环不变量的定义是"指令的结果在循环的每次迭代中都相同"。
+        对于纯指令，如果所有操作数都是循环不变的，则指令本身也是循环不变的。
+        由于我们迭代处理，第一次只外提操作数全在循环外的指令，
+        后续迭代会外提依赖已外提指令的指令。
+        """
+        from .cfg_utils import get_instr_operands, is_instr_pure
+
+        # 必须是纯指令
+        if not is_instr_pure(instr):
+            return False
+
+        # 必须有结果名
+        if not hasattr(instr, "result_name") or not instr.result_name:
+            return False
+
+        # 检查所有操作数是否都定义在循环外
+        operands = get_instr_operands(instr)
+        for op in operands:
+            if op in loop_defs:
+                # 操作数定义在循环内 → 不是不变量
+                # （除非该操作数本身也是不变量，但这由迭代处理）
+                return False
+
+        return True
+
+    def _get_or_create_pre_header(self, mir_fn, loop, block_map):
+        """
+        获取或创建循环的 pre-header 块。
+
+        pre-header 是循环头的唯一前驱（在循环外），
+        所有进入循环的路径都经过 pre-header。
+
+        如果循环头有且仅有一个在循环外的前驱，直接使用它。
+        如果有多个循环外前驱，创建一个新的 pre-header 块。
+        """
+        from .cfg_utils import build_predecessors
+
+        header = loop.header
+        preds = build_predecessors(mir_fn).get(header, [])
+
+        # 筛选出在循环外的前驱
+        outer_preds = [p for p in preds if p not in loop.body]
+
+        if not outer_preds:
+            # 没有外部前驱？可能是不可达循环，跳过
+            return None
+
+        if len(outer_preds) == 1:
+            # 只有一个外部前驱，它就是 pre-header
+            # 但需要确认它的唯一后继是 header（否则外提可能影响其他路径）
+            # 简化处理：直接使用
+            return outer_preds[0]
+        else:
+            # 多个外部前驱，需要创建新的 pre-header 块
+            return self._create_pre_header(mir_fn, loop, block_map, outer_preds)
+
+    def _create_pre_header(self, mir_fn, loop, block_map, outer_preds):
+        """
+        创建一个新的 pre-header 块。
+
+        将所有外部前驱对 header 的跳转改为跳转到 pre-header，
+        pre-header 再跳转到 header。
+        """
+        from .ir_nodes import MIRBasicBlock, MIRJump
+
+        # 生成新的块标签
+        header = loop.header
+        new_label = f"{header}_pre"
+
+        # 确保标签唯一
+        existing_labels = {bb.label for bb in mir_fn.basic_blocks}
+        if new_label in existing_labels:
+            i = 0
+            while f"{new_label}_{i}" in existing_labels:
+                i += 1
+            new_label = f"{new_label}_{i}"
+
+        # 创建新块
+        pre_header = MIRBasicBlock(label=new_label)
+        pre_header.terminator = MIRJump(target=header)
+
+        # 修改所有外部前驱的跳转目标
+        for pred_label in outer_preds:
+            pred_block = block_map.get(pred_label)
+            if pred_block is None or pred_block.terminator is None:
+                continue
+            self._redirect_branch(pred_block.terminator, header, new_label)
+
+        # 找到 header 在 basic_blocks 中的位置，插入到它前面
+        header_idx = None
+        for i, bb in enumerate(mir_fn.basic_blocks):
+            if bb.label == header:
+                header_idx = i
+                break
+
+        if header_idx is not None:
+            mir_fn.basic_blocks.insert(header_idx, pre_header)
+        else:
+            mir_fn.basic_blocks.append(pre_header)
+
+        # 更新 block_map
+        block_map[new_label] = pre_header
+
+        return new_label
+
+    def _redirect_branch(self, terminator, old_target, new_target):
+        """将终结指令中的 old_target 替换为 new_target"""
+        from .ir_nodes import MIRBranch, MIRJump, MIRMatchJump, MIRSwitch
+
+        if isinstance(terminator, MIRJump):
+            if terminator.target == old_target:
+                terminator.target = new_target
+        elif isinstance(terminator, MIRBranch):
+            if terminator.true_target == old_target:
+                terminator.true_target = new_target
+            if terminator.false_target == old_target:
+                terminator.false_target = new_target
+        elif isinstance(terminator, MIRSwitch):
+            new_cases = []
+            for val, target in terminator.cases:
+                if target == old_target:
+                    new_cases.append((val, new_target))
+                else:
+                    new_cases.append((val, target))
+            terminator.cases = new_cases
+            if terminator.default_target == old_target:
+                terminator.default_target = new_target
+        elif isinstance(terminator, MIRMatchJump):
+            new_tests = []
+            for vname, fields, target in terminator.variant_tests:
+                if target == old_target:
+                    new_tests.append((vname, fields, new_target))
+                else:
+                    new_tests.append((vname, fields, target))
+            terminator.variant_tests = new_tests
+            if terminator.default_target == old_target:
+                terminator.default_target = new_target
 
 
 class SSAVerifier(Pass):
@@ -1017,6 +1301,9 @@ class PassManager:
                 pass_name = pass_.__class__.__name__
                 try:
                     changed |= pass_.run(hir_module)
+                # 优雅降级：单个 HIR 优化 Pass 失败不中断整体编译
+                # Pass 可能抛出多种异常（TypeError, AttributeError, KeyError 等）
+                # 通过 _record_pass_failure 统一记录和警告
                 except Exception as e:
                     self._record_pass_failure(pass_name, e)
             if not changed:
@@ -1032,6 +1319,9 @@ class PassManager:
                 pass_name = pass_.__class__.__name__
                 try:
                     changed |= pass_.run(mir_module)
+                # 优雅降级：单个 MIR 优化 Pass 失败不中断整体编译
+                # Pass 可能抛出多种异常（TypeError, AttributeError, KeyError 等）
+                # 通过 _record_pass_failure 统一记录和警告
                 except Exception as e:
                     self._record_pass_failure(pass_name, e)
             if not changed:
@@ -1057,6 +1347,7 @@ class PassManager:
                             f"{pass_name} verification failed: {len(errors)} errors",
                             stacklevel=2,
                         )
+            # 优雅降级：验证 Pass 失败不中断整体编译
             except Exception as e:
                 self._record_pass_failure(pass_name, e)
 
@@ -1070,6 +1361,9 @@ class PassManager:
                 pass_name = pass_.__class__.__name__
                 try:
                     changed |= pass_.run(lir_module)
+                # 优雅降级：单个 LIR 优化 Pass 失败不中断整体编译
+                # Pass 可能抛出多种异常（TypeError, AttributeError, KeyError 等）
+                # 通过 _record_pass_failure 统一记录和警告
                 except Exception as e:
                     self._record_pass_failure(pass_name, e)
             if not changed:

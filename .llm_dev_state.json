@@ -1,5 +1,5 @@
 {
-  "cycles": 19,
+  "cycles": 20,
   "completed_tasks": [
     "unify_ir_naming",
     "for_loop_ssa_normalize",
@@ -42,10 +42,37 @@
     "review_cycle_18",
     "refactor_hir_rewriter_complexity",
     "wasm_control_flow_rewrite",
-    "clean_unused_imports"
+    "clean_unused_imports",
+    "fix_too_broad_exceptions",
+    "mir_cfg_loop_analysis",
+    "implement_licm_pass"
   ],
   "failed_tasks": [],
   "task_history": [
+    {
+      "cycle": 20,
+      "task_id": "fix_too_broad_exceptions",
+      "status": "completed",
+      "source": "审查驱动",
+      "reason": "审查日志第1495轮显示 7 处 too_broad_exception（MEDIUM 级别）。过宽异常捕获会隐藏真实错误导致调试困难，特别是 cli.py 第173行的静默吞噬（except Exception: pass）是最严重的问题。逐个修复成本低，能提升代码健壮性和可调试性。",
+      "details": "修复 7 处过宽异常捕获：1) cli.py 第173行 REPL 中的静默吞噬（except Exception: pass）改为捕获 NovaError 并打印类型警告（最严重的问题）；2) cli.py 另外 2 处顶层兜底添加注释说明理由 + 打印异常类型和完整 traceback；3) pass_manager.py 4 处优雅降级（单个 Pass 失败不中断编译）添加设计说明注释。所有修改保持功能不变，仅改进错误可见性和代码可维护性。"
+    },
+    {
+      "cycle": 20,
+      "task_id": "mir_cfg_loop_analysis",
+      "status": "completed",
+      "source": "自主规划",
+      "reason": "LICM 等循环优化的前置基础设施。当前 MIR 层没有任何循环分析能力（支配树、回边检测、自然循环识别），无法推进高级优化。新建 cfg_utils.py 统一提供 CFG 和循环分析工具，为 LICM Pass 以及后续更多循环优化（如循环展开、循环不变量外提等）奠定基础。",
+      "details": "新建 ir/cfg_utils.py（约600行），提供完整的 MIR CFG 工具和循环分析基础设施：基础CFG工具（build_block_map、get_successors、build_predecessors、build_successor_map）；支配树计算（compute_dominators 迭代式算法、compute_idom、dominates）；回边检测（find_back_edges、BackEdge 类）；自然循环识别（Loop、LoopInfo、analyze_loops，支持嵌套循环、循环树、出口块计算）；指令工具函数（get_instr_operands、is_instr_pure、get_terminator_used_ssa）。修复了回边检测的条件写反 bug。"
+    },
+    {
+      "cycle": 20,
+      "task_id": "implement_licm_pass",
+      "status": "completed",
+      "source": "自主规划",
+      "reason": "第18轮评审规划的第20轮核心任务。LICM 是经典的循环优化 Pass，对循环密集型代码性能提升显著。SSA 验证器已有完整测试覆盖，MIR 优化管线基础打好了，现在是推进高级优化的时机。填补 MIR 优化空白，提升编译器优化能力。",
+      "details": "实现完整的 LoopInvariantCodeMotion Pass（约290行）：使用 cfg_utils.analyze_loops 进行循环分析；按嵌套层级从内到外处理循环（内层先外提，外层可进一步外提）；自动获取或创建 pre-header 块（多个外部前驱时创建新块）；识别循环不变量（纯指令 + 所有操作数定义在循环外）；将不变指令移动到 pre-header 末尾（在终结指令之前）；迭代直到不动点（外提可能产生新的不变量）。仅外提纯指令（算术运算、字段访问、元组/列表/Map/ADT构建等），不移动有副作用的指令（函数调用、Store等）。手动验证：循环不变量 a+b 被正确外提到 pre-header。"
+    },
     {
       "cycle": 19,
       "task_id": "refactor_hir_rewriter_complexity",
@@ -193,7 +220,7 @@
       "details": "实现基础版 SSA 验证器 Pass（SSAVerifier）：支持 5 项检查（基本块终结指令、SSA 单赋值、使用前定义、Phi 节点位置、Phi source 块前驱验证）；手动测试验证了正确和错误场景，能正确检测未定义 SSA 名等问题"
     }
   ],
-  "current_cycle": 19,
+  "current_cycle": 20,
   "baseline_tests": 403,
   "current_tests": 418,
   "last_review_cycle": 18,
@@ -458,7 +485,7 @@
       "priority": 35,
       "category": "optimization",
       "estimated": "1-2 周",
-      "status": "pending",
+      "status": "completed",
       "depends_on": [
         "fix_mir_ssa",
         "cse_pass",
@@ -661,7 +688,7 @@
       "priority": 65,
       "category": "optimization",
       "estimated": "1-2 周",
-      "status": "pending",
+      "status": "completed",
       "depends_on": [
         "fix_mir_ssa",
         "cse_pass",
@@ -704,7 +731,7 @@
       "priority": 60,
       "category": "engineering",
       "estimated": "1-2 小时",
-      "status": "pending",
+      "status": "completed",
       "depends_on": [],
       "reason": "审查日志报告 7 处过宽异常捕获，会隐藏真实错误导致调试困难。逐个修复成本低，能提升代码健壮性和可调试性。[新增任务 / 审查驱动]"
     },
@@ -719,6 +746,21 @@
       "status": "pending",
       "depends_on": [],
       "reason": "审查日志长期显示 _execute_instruction 圈复杂度 111，是全项目最复杂的函数。虽然字节码 VM 是解释器路径，不影响编译后端，但高复杂度导致维护困难、bug 风险高。[新增任务 / 审查驱动]"
+    },
+    {
+      "id": "mir_cfg_loop_analysis",
+      "name": "MIR CFG 工具与循环分析基础设施",
+      "description": "新建 ir/cfg_utils.py，提供 CFG 遍历、支配树计算、回边检测、自然循环识别、指令操作数访问、副作用判断等基础设施，为 LICM 等循环优化奠定基础",
+      "difficulty": "medium",
+      "priority": 70,
+      "category": "ir",
+      "estimated": "4-6 小时",
+      "status": "completed",
+      "depends_on": [
+        "mir_ssa_verifier",
+        "ssa_verifier_tests"
+      ],
+      "reason": "LICM 等循环优化的前置条件。没有循环分析基础设施，所有循环相关优化都无法实现。[新增任务 / 自主发现]"
     }
   ]
 }

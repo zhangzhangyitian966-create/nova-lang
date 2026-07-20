@@ -1,6 +1,6 @@
 # Nova LLM 智能开发路线图
 
-**更新时间**: 2026-07-20 05:15:00
+**更新时间**: 2026-07-20 07:30:00
 **上次评审**: 第 18 轮（路线图评审）
 
 本路线图由 LLM 智能开发系统动态维护。
@@ -41,7 +41,7 @@
 | ✅ | 实现死代码消除 Pass (DCE) | easy | 90 | 1-2 小时 | - |
 | ✅ | 实现函数内联 Pass | medium | 80 | 2-4 小时 | - |
 | ✅ | 实现公共子表达式消除 Pass (CSE) | medium | 75 | 3-5 小时 | - |
-| ⏳ | 实现循环不变量外提 Pass (LICM) | hard | 65 | 1-2 周 | fix_mir_ssa, cse_pass, mir_ssa_verifier, ssa_verifier_tests |
+| ✅ | 实现循环不变量外提 Pass (LICM) | hard | 65 | 1-2 周 | fix_mir_ssa, cse_pass, mir_ssa_verifier, ssa_verifier_tests |
 
 ## ⚙️ 后端开发
 
@@ -64,7 +64,7 @@
 | ✅ | 引入 IR Visitor 模式消除重复遍历 | medium | 82 | 6-8 小时 | unify_ir_naming, fix_constant_folding_class |
 | ✅ | 统一后端类型/操作符映射表 | easy | 68 | 2-3 小时 | unify_ir_naming |
 | ✅ | 重构 HIRRewriter 降低圈复杂度 | easy | 75 | 2-3 小时 | refactor_visitor_pattern |
-| ⏳ | 修复过宽异常捕获 | easy | 60 | 1-2 小时 | - |
+| ✅ | 修复过宽异常捕获 | easy | 60 | 1-2 小时 | - |
 | ✅ | 批量清理未使用导入 | easy | 55 | 1-2 小时 | - |
 | ⏳ | 拆分 VM 巨型执行函数 | medium | 50 | 4-6 小时 | - |
 
@@ -77,10 +77,10 @@
 
 ---
 
-**进度**: 33/43 (77%)
-**已完成**: 33
+**进度**: 36/43 (84%)
+**已完成**: 36
 **进行中**: 0
-**待开发**: 9
+**待开发**: 6
 **已废弃**: 1
 
-> 注：第19轮完成 3 个任务（Wasm 控制流重写、HIRRewriter 复杂度重构、未使用导入清理）。下阶段（第 20-21 轮）聚焦：MIR 优化深化（LICM）→ 工程化清理（过宽异常 + VM 巨型函数拆分）。
+> 注：第20轮完成 3 个任务（过宽异常修复、MIR CFG/循环分析基础设施、LICM Pass 实现）。MIR 优化能力大幅提升。下一轮（第21轮）聚焦：工程化清理（VM 巨型函数拆分 + LIR switch/match 降级补全）。

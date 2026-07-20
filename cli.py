@@ -82,7 +82,11 @@ def run_source(
             raise
         sys.exit(1)
     except Exception as e:
-        print(f"内部错误: {e}", file=sys.stderr)
+        # 顶层兜底：捕获所有非预期异常，防止程序崩溃时无任何输出
+        # 正常情况下所有错误都应包装为 NovaError，此处仅作为最后防线
+        import traceback
+        print(f"内部错误: {type(e).__name__}: {e}", file=sys.stderr)
+        traceback.print_exc(file=sys.stderr)
         if capture_output:
             raise
         sys.exit(1)
@@ -165,14 +169,12 @@ def run_repl():
             parser = Parser(tokens)
             ast = parser.parse()
 
-            # 可选类型检查
+            # 可选类型检查（REPL 中类型错误不阻止执行，仅警告）
             try:
                 checker = TypeChecker()
                 checker.check_program(ast)
-            # TODO: 审查此异常处理是否合理，避免静默吞噬异常
-            except Exception:
-                # TODO: 缩小异常范围，捕获更具体的异常类型
-                pass
+            except NovaError as e:
+                print(f"类型警告: {e}", file=sys.stderr)
 
             # 求值（REPL 使用解释器）
             evaluator.clear_output()
@@ -190,7 +192,11 @@ def run_repl():
             print(f"错误: {e}", file=sys.stderr)
             buffer = ""
         except Exception as e:
-            print(f"内部错误: {e}", file=sys.stderr)
+            # 顶层兜底：REPL 中捕获所有非预期异常，防止单条语句导致整个 REPL 崩溃
+            # 正常情况下所有错误都应包装为 NovaError，此处仅作为最后防线
+            import traceback
+            print(f"内部错误: {type(e).__name__}: {e}", file=sys.stderr)
+            traceback.print_exc(file=sys.stderr)
             buffer = ""
 
 
