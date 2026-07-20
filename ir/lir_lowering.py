@@ -31,6 +31,7 @@ from .ir_nodes import (
     LIRPanic,
     LIRReturn,
     LIRStoreGlobal,
+    LIRSwitch,
     LIRUnaryOp,
     MIRADTBuild,
     MIRBinOp,
@@ -402,16 +403,29 @@ class LIRLowering:
             return lir
 
         if isinstance(term, MIRSwitch):
-            lir = LIRJump(target=term.default_target)
+            # 正确降级 MIRSwitch 为 LIRSwitch，保留所有 case 信息
+            lir = LIRSwitch()
+            lir.default_target = term.default_target
             if term.value:
                 lir.src_locs = [(self.ssa_to_loc.get(term.value, ""), INT_TYPE)]
+            # 复制 cases 列表: [(value, target_block), ...]
+            lir.cases = list(term.cases)
             return lir
 
         if isinstance(term, MIRMatchJump):
-            lir = LIRJump(target=term.default_target)
+            # 降级 MIRMatchJump 为 LIRSwitch（基于 variant tag 的 switch）
+            # variant_tests: [(variant_name, fields, target_block), ...]
+            # 转换为 case 列表: [(variant_name, target_block), ...]
+            lir = LIRSwitch()
+            lir.default_target = term.default_target
             if term.value:
                 val_type = self.ssa_types.get(term.value, UNIT_TYPE)
                 lir.src_locs = [(self.ssa_to_loc.get(term.value, ""), val_type)]
+            # 将 variant_tests 转换为 cases：variant_name 作为 case 值
+            lir.cases = [
+                (variant_name, target)
+                for variant_name, _fields, target in term.variant_tests
+            ]
             return lir
 
         if isinstance(term, MIRPanic):

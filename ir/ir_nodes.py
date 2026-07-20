@@ -1248,6 +1248,21 @@ class LIRBranch(LIRInstr):
 
 
 @dataclass
+class LIRSwitch(LIRInstr):
+    """LIR switch 多分支跳转
+
+    将值与多个 case 比较，匹配成功跳转到对应目标块，
+    都不匹配则跳转到 default_target。
+    后端可以选择实现为 if-else 级联或跳转表。
+    """
+
+    cases: List[Tuple[Any, str]] = field(
+        default_factory=list
+    )  # [(value, target_block), ...]
+    default_target: str = ""
+
+
+@dataclass
 class LIRReturn(LIRInstr):
     """LIR 返回"""
 

@@ -36,6 +36,7 @@ from ..ir.ir_nodes import (
     LIRReturn,
     LIRStoreGlobal,
     LIRStoreReg,
+    LIRSwitch,
     LIRUnaryOp,
 )
 from .common import mangle_builtin_name
@@ -306,6 +307,10 @@ class LIRCBackend:
             self._compile_branch(instr)
             return
 
+        if isinstance(instr, LIRSwitch):
+            self._compile_switch(instr)
+            return
+
         if isinstance(instr, LIRReturn):
             if instr.src_locs:
                 src = self._loc_var_name(instr.src_locs[0][0])
@@ -436,6 +441,37 @@ class LIRCBackend:
         # 不依赖 fall-through 假设，确保任意基本块顺序下都正确
         self._emit(f"if ({cond}) goto {true_target};")
         self._emit(f"goto {false_target};")
+
+    def _compile_switch(self, instr: LIRSwitch):
+        """编译 switch 多分支跳转
+
+        生成 if-else if 级联（通用方案，支持任意类型的 case 值）。
+        对于整型 case，后续可优化为跳转表。
+        """
+        if not instr.src_locs or not instr.cases:
+            # 没有值或没有 case，直接跳 default
+            if instr.default_target:
+                self._emit(f"goto {instr.default_target};")
+            return
+
+        cond_val = self._loc_var_name(instr.src_locs[0][0])
+
+        for i, (case_val, target) in enumerate(instr.cases):
+            if isinstance(case_val, str):
+                # 字符串比较
+                self._emit(
+                    f'if (nova_str_eq({cond_val}, "{case_val}")) goto {target};'
+                )
+            elif isinstance(case_val, bool):
+                # 布尔比较
+                self._emit(f"if ({cond_val} == {'1' if case_val else '0'}) goto {target};")
+            else:
+                # 数值比较（int, float 等）
+                self._emit(f"if ({cond_val} == {case_val}) goto {target};")
+
+        # default 分支
+        if instr.default_target:
+            self._emit(f"goto {instr.default_target};")
 
     def _compile_call(self, instr: LIRCall, dst: str):
         """编译函数调用"""

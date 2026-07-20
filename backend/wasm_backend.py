@@ -30,6 +30,7 @@ from ..ir.ir_nodes import (
     LIRPanic,
     LIRReturn,
     LIRStoreReg,
+    LIRSwitch,
     LIRUnaryOp,
     NovaType,
 )
@@ -180,7 +181,7 @@ class WasmGCBackend:
                 if isinstance(instr, LIRLoadConst) and instr.const_type == "string":
                     if instr.value not in self.string_table:
                         self.string_table[instr.value] = offset
-                        encoded = str(instr.value).encode("utf-8") + b"\\x00"
+                        encoded = str(instr.value).encode("utf-8") + b"\x00"
                         offset += len(encoded)
 
     def _emit_string_data(self):
@@ -379,6 +380,64 @@ class WasmGCBackend:
                 self._emit(")")
                 self._emit("")
 
+            elif isinstance(instr, LIRSwitch):
+                # switch 多分支：使用 if-else 级联比较，设置 PC 后 br $dispatch
+                default_pc = label_to_pc.get(instr.default_target, 0)
+
+                if instr.src_locs and instr.cases:
+                    val_loc = instr.src_locs[0][0]
+                    val_type = instr.src_locs[0][1] if len(instr.src_locs[0]) > 1 else INT_TYPE
+                    wasm_type = WASM_TYPE_MAP.get(val_type, "i64")
+
+                    # 生成嵌套 if-else：每个 case 一个比较
+                    # 从后往前生成，实现 else if 嵌套
+                    for case_val, target in reversed(instr.cases):
+                        target_pc = label_to_pc.get(target, 0)
+                        # 将值压栈
+                        self._emit(f"(local.get ${val_loc})")
+                        # 将 case 值压栈
+                        if isinstance(case_val, int):
+                            self._emit(f"({wasm_type}.const {case_val})")
+                        elif isinstance(case_val, float):
+                            self._emit(f"({wasm_type}.const {case_val})")
+                        else:
+                            # 字符串等复杂类型暂时用 default 处理
+                            self._emit(f"({wasm_type}.const 0)")
+                        # 比较
+                        self._emit(f"({wasm_type}.eq)")
+                        # if 结构
+                        self._emit("(if")
+                        self.indent_level += 1
+                        self._emit("(then")
+                        self.indent_level += 1
+                        self._emit(f"(i32.const {target_pc})")
+                        self._emit("(local.set $pc)")
+                        self.indent_level -= 1
+                        self._emit(")")
+                        self._emit("(else")
+                        self.indent_level += 1
+
+                    # default 分支（最内层 else）
+                    self._emit(f"(i32.const {default_pc})")
+                    self._emit("(local.set $pc)")
+
+                    # 闭合所有 if-else
+                    for _ in instr.cases:
+                        self.indent_level -= 1
+                        self._emit(")")
+                        self.indent_level -= 1
+                        self._emit(")")
+                else:
+                    # 没有值或没有 case，直接跳 default
+                    self._emit(f"(i32.const {default_pc})")
+                    self._emit("(local.set $pc)")
+
+                self._emit("(br $dispatch)")
+                # 关闭当前 block
+                self.indent_level -= 1
+                self._emit(")")
+                self._emit("")
+
             elif isinstance(instr, LIRReturn):
                 # 返回：跳出 exit 块（即函数返回）
                 self._emit("(br $exit)")
@@ -460,12 +519,19 @@ class WasmGCBackend:
             self._emit("(call $nova_alloc)")
 
         elif isinstance(instr, LIRFieldAccess):
-            offset = instr.offset
+            # 字段索引乘以 8（每个字段 8 字节，NovaValue 大小）
+            offset = instr.offset * 8
             self._emit(f"(i32.const {offset})")
             self._emit("(i32.add)")
             self._emit("(i64.load align=8)")
 
         elif isinstance(instr, LIRIndex):
+            # 索引访问：base + index * 8（每个元素 8 字节）
+            # 栈上已有 [base_ptr, index]，需要计算 base + index * 8
+            self._emit("(i64.const 8)")
+            self._emit("(i64.mul)")
+            self._emit("(i32.wrap_i64)")
+            self._emit("(i32.add)")
             self._emit("(i64.load align=8)")
 
         elif isinstance(instr, LIRPanic):
@@ -525,7 +591,8 @@ class WasmGCBackend:
             self._emit(f"({int_op})")
 
     def _emit_call(self, instr: LIRCall):
-        func_ref = f"$nova_{instr.func_name}"
+        # LIRCall 的属性是 callee，不是 func_name
+        func_ref = f"$nova_{instr.callee}"
         self._emit(f"(call {func_ref})")
 
     def _emit_start_function(self, lir_module: LIRModule):
@@ -553,7 +620,7 @@ class WasmGCBackend:
     def _get_string_offset(self, string: str) -> int:
         if string not in self.string_table:
             offset = self.string_counter
-            encoded = string.encode("utf-8") + b"\\x00"
+            encoded = string.encode("utf-8") + b"\x00"
             self.string_counter += len(encoded)
             self.string_table[string] = offset
         return self.string_table[string]

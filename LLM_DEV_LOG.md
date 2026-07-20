@@ -4,6 +4,104 @@
 
 ---
 
+## 2026-07-20 12:00 第22轮（工程化清理 + LIR完善）
+
+### 开发概览
+- **轮次**: 第 22 轮（普通开发轮）
+- **基线测试**: 418/418 通过
+- **完成任务**: 3 个（1 个审查驱动 + 2 个自主规划）
+- **审查驱动任务占比**: 33%（1/3）
+- **路线图进度**: 38/47 (81%) → 41/49 (84%)
+- **测试结果**: 418/418 通过（零回归）
+- **失败回滚**: 0 次
+
+---
+
+### 一、本轮任务详情
+
+#### 1. 【审查驱动】拆分 VM 巨型执行函数
+- **任务 ID**: `split_vm_execute_instruction`
+- **为什么选这个**: 审查日志第1495轮显示 `NovaVM._execute_instruction` 圈复杂度 111（全项目Top 1，唯一CC>100的函数），是长期遗留的技术债。第21轮评审规划为第22轮核心任务。字节码VM虽然是解释器路径，但高复杂度导致维护困难、bug风险高。重构为调度表模式可大幅降低复杂度，提升可维护性。
+- **完成情况**: ✅ 成功
+- **详细内容**:
+  - 将 `_execute_instruction` 从 442 行的巨型 if-elif 链（CC=111）重构为调度表（dispatch table）模式
+  - 新增 `_build_op_dispatch_table()` 构建 57 个 opcode 的 handler 映射表
+  - `_execute_instruction` 简化为查表分发（CC≈5）
+  - 按指令类别拆分为 10 组独立 handler 方法：
+    - 常量与加载（7个）、存储（1个）、算术运算（7个）、比较运算（6个）
+    - 逻辑运算（3个）、控制流（8个）、函数调用（4个）、数据结构（10个）
+    - 模式匹配（8个）、管道（1个）、ADT（2个）、杂项（7个）
+  - `_op_for_iter` 进一步拆分为 `_for_iter_range` 和 `_for_iter_list` 两个子方法
+  - 圈复杂度从 111 降至约 5，代码结构清晰，易于扩展新指令
+
+#### 2. 【自主规划】LIR switch/match 降级补全
+- **任务 ID**: `lir_switch_match_lowering`
+- **为什么选这个**: 第21轮评审规划的第22轮任务。MIR层已有 MIRSwitch 和 MIRMatchJump 指令定义，但降级到LIR时退化为简单的无条件跳转（直接跳 default_target），完全丢失多分支语义。完善LIR层多分支指令支持是C后端功能对齐的前置条件，也为后续跳转表优化奠定基础。
+- **完成情况**: ✅ 成功
+- **详细内容**:
+  1. 在 `ir_nodes.py` 中新增 `LIRSwitch` 指令类型（cases + default_target）
+  2. `lir_lowering.py` 中将 MIRSwitch 正确降级为 LIRSwitch（保留cases列表信息而非直接跳default）
+  3. MIRMatchJump 降级为 LIRSwitch（variant_tests 转换为 cases，variant_name 作为 case 值）
+  4. `lir_c_backend.py` 新增 `_compile_switch` 方法（生成if-else级联，支持int/float/bool/string四种类型比较）
+  5. `wasm_backend.py` 新增 LIRSwitch 支持（嵌套if-else结构，设置PC后br $dispatch）
+  - 多分支语义从完全丢失恢复为完整保留，为后续优化和后端功能对齐奠定基础
+
+#### 3. 【自主规划】修复 Wasm 后端多个正确性 bug
+- **任务 ID**: `fix_wasm_bugs`
+- **为什么选这个**: 深度代码审计发现 Wasm 后端存在多个正确性 bug，影响所有使用 Wasm 后端的程序。虽然当前测试主要走 VM 和 C 后端路径，但 Wasm 后端是重要的目标平台，bug 积累越多修复成本越高。批量修复成本低、收益高。
+- **完成情况**: ✅ 成功
+- **详细内容**:
+  1. **LIRCall 属性名错误** — `_emit_call` 使用不存在的 `instr.func_name`，改为正确的 `instr.callee`（与 LIRCall 类定义一致）
+  2. **LIRFieldAccess 偏移量计算错误** — 字段索引直接当作字节偏移使用，改为 `offset * 8`（每个 NovaValue 8 字节）
+  3. **LIRIndex 实现不完整** — 只生成 load 没有地址计算，补全 `base + index * 8` 的地址计算（i64.mul + i32.wrap_i64 + i32.add）
+  4. **字符串 null 终止符转义错误** — `b"\\x00"` 是4个字节的字面量而非null终止符，两处（`_scan_strings` 和 `_get_string_offset`）都改为 `b"\x00"`
+
+---
+
+### 二、审查日志研读摘要
+
+**审查来源**: AUTO_REVIEW_LOG.md 第1495轮
+
+**关键发现**:
+- 总问题数 1015，其中 CRITICAL 0、HIGH 0、MEDIUM 167、LOW 848
+- `vm.py:_execute_instruction` CC=111（全项目最高，唯一超过100的函数）
+- `type_checker.py:check_expr` CC=68（Top 2）
+- `hir_rewriter.py:generic_rewrite` CC=69（Top 2，第19轮已重构）
+- `mir_lowering.py:_lower_expr` CC=55（Top 4）
+- unused_import 仍有 95 处（第19轮清理了80处）
+- too_broad_exception 7 处（第20轮已修复）
+
+**本轮采纳的审查问题**:
+- VM 巨型执行函数拆分（CC=111→≈5）—— 解决了全项目最严重的圈复杂度问题
+
+**未采纳的高优先级问题及原因**:
+- TypeChecker 复杂度重构 — 依赖关系较少，但当前优先级低于 C 后端功能对齐
+- MIRLowering._lower_expr 复杂度 — 同上，计划在 C 后端统一后再处理
+- unused_import 剩余 95 处 — 第19轮已清理 80 处，剩余的需要更精细的处理
+
+---
+
+### 三、测试前后对比
+
+| 指标 | 开发前 | 开发后 | 变化 |
+|------|--------|--------|------|
+| 测试通过数 | 418 | 418 | 0 |
+| 测试失败数 | 0 | 0 | 0 |
+| 路线图进度 | 81% | 84% | +3% |
+| 已完成任务数 | 38 | 41 | +3 |
+
+---
+
+### 四、下一步计划（第23轮）
+
+根据第21轮评审规划，第23轮聚焦 **C 后端功能对齐**：
+
+1. **C 后端 LIR 路径 ADT/match 支持** — 将 c_codegen.py 中的 ADT 代码生成和 match 编译逻辑迁移到 lir_c_backend.py，是统一 C 后端的核心子任务
+2. **修复 Wasm 后端 StoreReg 实现** — 低成本补齐 Wasm 后端的寄存器操作完整性
+3. **重构 TypeChecker 降低圈复杂度** — 继续推进审查驱动的代码质量改进（CC=68的高复杂度函数）
+
+---
+
 ## 2026-07-20 08:00 第21轮评审（路线图评审）
 
 ### 评审概览

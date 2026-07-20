@@ -173,6 +173,90 @@ class NovaVM:
         # 初始化内置函数
         self._setup_builtins()
 
+        # 指令调度表：opcode -> handler 方法
+        self._op_handlers = self._build_op_dispatch_table()
+
+    def _build_op_dispatch_table(self) -> Dict:
+        """构建 opcode -> handler 调度表
+
+        将巨型 if-elif 链替换为查表分发，按指令类别组织 handler 方法，
+        降低单函数圈复杂度，提升可维护性。
+        """
+        return {
+            # === 常量与加载 ===
+            Op.CONST_INT: self._op_const_int,
+            Op.CONST_FLOAT: self._op_const_float,
+            Op.CONST_STRING: self._op_const_string,
+            Op.CONST_BOOL: self._op_const_bool,
+            Op.CONST_UNIT: self._op_const_unit,
+            Op.LOAD_CONST: self._op_load_const,
+            Op.LOAD_VAR: self._op_load_var,
+            # === 存储 ===
+            Op.STORE_VAR: self._op_store_var,
+            # === 算术运算 ===
+            Op.ADD: self._op_add,
+            Op.SUB: self._op_sub,
+            Op.MUL: self._op_mul,
+            Op.DIV: self._op_div,
+            Op.MOD: self._op_mod,
+            Op.NEG: self._op_neg,
+            Op.CONCAT: self._op_concat,
+            # === 比较运算 ===
+            Op.EQ: self._op_eq,
+            Op.NEQ: self._op_neq,
+            Op.LT: self._op_lt,
+            Op.GT: self._op_gt,
+            Op.LTE: self._op_lte,
+            Op.GTE: self._op_gte,
+            # === 逻辑运算 ===
+            Op.AND: self._op_and,
+            Op.OR: self._op_or,
+            Op.NOT: self._op_not,
+            # === 控制流 ===
+            Op.JUMP: self._op_jump,
+            Op.JUMP_IF_FALSE: self._op_jump_if_false,
+            Op.JUMP_IF_TRUE: self._op_jump_if_true,
+            Op.POP_JUMP_IF_FALSE: self._op_pop_jump_if_false,
+            Op.LOOP_END: self._op_loop_end,
+            Op.BREAK: self._op_break,
+            Op.CONTINUE: self._op_continue,
+            Op.LOOP: self._op_loop,
+            # === 函数调用 ===
+            Op.CLOSURE: self._op_closure,
+            Op.CALL: self._op_call,
+            Op.RETURN: self._op_return,
+            Op.CALL_BUILTIN: self._op_call_builtin,
+            # === 数据结构 ===
+            Op.BUILD_LIST: self._op_build_list,
+            Op.BUILD_TUPLE: self._op_build_tuple,
+            Op.BUILD_MAP: self._op_build_map,
+            Op.INDEX: self._op_index,
+            Op.FIELD_ACCESS: self._op_field_access,
+            Op.BUILD_RANGE: self._op_build_range,
+            Op.FOR_ITER: self._op_for_iter,
+            # === 模式匹配 ===
+            Op.MATCH_START: self._op_match_start,
+            Op.MATCH_TEST_INT: self._op_match_test_int,
+            Op.MATCH_TEST_BOOL: self._op_match_test_bool,
+            Op.MATCH_TEST_STRING: self._op_match_test_string,
+            Op.MATCH_WILDCARD: self._op_match_wildcard,
+            Op.MATCH_BIND: self._op_match_bind,
+            Op.MATCH_CONSTRUCTOR: self._op_match_constructor,
+            Op.MATCH_END: self._op_match_end,
+            # === 管道 ===
+            Op.PIPE_CALL: self._op_pipe_call,
+            # === ADT ===
+            Op.MAKE_ADT: self._op_make_adt,
+            Op.REGISTER_CTOR: self._op_register_ctor,
+            # === 杂项 ===
+            Op.POP: self._op_pop,
+            Op.DUP: self._op_dup,
+            Op.PRINT: self._op_print,
+            Op.HALT: self._op_halt,
+            Op.AUTO_CALL_MAIN: self._op_auto_call_main,
+            Op.TRY_UNWRAP: self._op_try_unwrap,
+        }
+
     def _setup_builtins(self):
         """注册内置函数到全局"""
         self.globals["print"] = NovaBuiltinFn("print", self._builtin_print, 1)
@@ -531,447 +615,491 @@ class NovaVM:
         self.ip = saved_ip
 
     def _execute_instruction(self, instr: Instruction):
-        """执行单条指令"""
+        """执行单条指令（调度表分发）
+
+        使用调度表替代巨型 if-elif 链，将单函数圈复杂度从 111 降至约 5。
+        每个 opcode 对应一个独立的 handler 方法，按指令类别组织。
+        """
         opcode = instr.opcode
         self.ip += 1
 
-        # === 常量与加载 ===
-        if opcode == Op.CONST_INT:
-            self.stack.append(instr.operands[0])
-
-        elif opcode == Op.CONST_FLOAT:
-            self.stack.append(instr.operands[0])
-
-        elif opcode == Op.CONST_STRING:
-            self.stack.append(instr.operands[0])
-
-        elif opcode == Op.CONST_BOOL:
-            self.stack.append(instr.operands[0])
-
-        elif opcode == Op.CONST_UNIT:
-            self.stack.append(UNIT)
-
-        elif opcode == Op.LOAD_CONST:
-            idx = instr.operands[0]
-            self.stack.append(self.constants[idx])
-
-        elif opcode == Op.LOAD_VAR:
-            name = instr.operands[0]
-            # 在帧局部变量中查找
-            if self.call_stack:
-                frame = self.call_stack[-1]
-                if name in frame.locals:
-                    self.stack.append(frame.locals[name])
-                    return
-            # 在全局变量中查找
-            if name in self.globals:
-                self.stack.append(self.globals[name])
-            else:
-                raise RuntimeError_(f"未定义的变量 '{name}'")
-
-        elif opcode == Op.STORE_VAR:
-            name = instr.operands[0]
-            mutable = instr.operands[1]
-            val = self.stack.pop()
-            # 优先存储在当前帧的局部变量中
-            if self.call_stack:
-                frame = self.call_stack[-1]
-                if name in frame.locals:
-                    frame.locals[name] = val
-                    return
-            # 存储到全局
-            self.globals[name] = val
-
-        # === 运算 ===
-        elif opcode == Op.ADD:
-            b, a = self.stack.pop(), self.stack.pop()
-            self.stack.append(a + b)
-
-        elif opcode == Op.SUB:
-            b, a = self.stack.pop(), self.stack.pop()
-            self.stack.append(a - b)
-
-        elif opcode == Op.MUL:
-            b, a = self.stack.pop(), self.stack.pop()
-            self.stack.append(a * b)
-
-        elif opcode == Op.DIV:
-            b, a = self.stack.pop(), self.stack.pop()
-            if isinstance(a, int) and isinstance(b, int):
-                if b == 0:
-                    raise RuntimeError_("除零错误")
-                self.stack.append(a // b)
-            else:
-                self.stack.append(a / b)
-
-        elif opcode == Op.MOD:
-            b, a = self.stack.pop(), self.stack.pop()
-            self.stack.append(a % b)
-
-        elif opcode == Op.NEG:
-            a = self.stack.pop()
-            self.stack.append(-a)
-
-        elif opcode == Op.CONCAT:
-            b, a = self.stack.pop(), self.stack.pop()
-            self.stack.append(str(a) + str(b))
-
-        elif opcode == Op.EQ:
-            b, a = self.stack.pop(), self.stack.pop()
-            self.stack.append(a == b)
-
-        elif opcode == Op.NEQ:
-            b, a = self.stack.pop(), self.stack.pop()
-            self.stack.append(a != b)
-
-        elif opcode == Op.LT:
-            b, a = self.stack.pop(), self.stack.pop()
-            self.stack.append(a < b)
-
-        elif opcode == Op.GT:
-            b, a = self.stack.pop(), self.stack.pop()
-            self.stack.append(a > b)
-
-        elif opcode == Op.LTE:
-            b, a = self.stack.pop(), self.stack.pop()
-            self.stack.append(a <= b)
-
-        elif opcode == Op.GTE:
-            b, a = self.stack.pop(), self.stack.pop()
-            self.stack.append(a >= b)
-
-        elif opcode == Op.AND:
-            # 在 && 编译中，POP_JUMP_IF_FALSE 已经处理了短路
-            # 这里只处理两边的求值结果
-            b, a = self.stack.pop(), self.stack.pop()
-            self.stack.append(a and b)
-
-        elif opcode == Op.OR:
-            b, a = self.stack.pop(), self.stack.pop()
-            self.stack.append(a or b)
-
-        elif opcode == Op.NOT:
-            a = self.stack.pop()
-            self.stack.append(not a)
-
-        # === 控制流 ===
-        elif opcode == Op.JUMP:
-            self.ip = instr.operands[0]
-
-        elif opcode == Op.JUMP_IF_FALSE:
-            cond = self.stack.pop()
-            if not cond:
-                self.ip = instr.operands[0]
-
-        elif opcode == Op.JUMP_IF_TRUE:
-            cond = self.stack.pop()
-            if cond:
-                self.ip = instr.operands[0]
-
-        elif opcode == Op.POP_JUMP_IF_FALSE:
-            cond = self.stack.pop()
-            if not cond:
-                self.ip = instr.operands[0]
-
-        elif opcode == Op.LOOP_END:
-            loop_start = instr.operands[0]
-            # 栈: [iterable, result_list, body_result]
-            body_result = self.stack.pop()
-            result_list = self.stack.pop()
-            iterable = self.stack.pop()
-            result_list.append(body_result)
-            self.stack.append(iterable)
-            self.stack.append(result_list)
-            self.ip = loop_start
-
-        elif opcode == Op.BREAK:
-            # 跳出循环 - 需要清理栈并跳到循环结束
-            # 在 for 循环中弹出 (iter, index, result_list)
-            if self._for_iters:
-                self._for_iters.pop()
-                # 弹出 for 循环状态
-                if len(self.stack) >= 3:
-                    self.stack.pop()  # body_result
-                    result_list = self.stack.pop()  # result_list
-                    self.stack.pop()  # index (for range)
-                    self.stack.pop()  # iter (for range)
-                    self.stack.append(result_list)
-            else:
-                # while 循环中的 break
-                pass
-            # 跳到当前 for_iter 的 end 位置
-            if self._for_iters:
-                self.ip = self._for_iters[-1].get("end_ip", self.ip)
-            else:
-                # 找到下一个 LOOP_END 的位置
-                while self.ip < len(self.code):
-                    next_instr = self.code[self.ip]
-                    if next_instr.opcode in (Op.LOOP_END, Op.CONST_UNIT):
-                        self.ip += 1
-                        break
-                    self.ip += 1
-
-        elif opcode == Op.CONTINUE:
-            if self._for_iters:
-                self.ip = self._for_iters[-1]["loop_start"]
-            else:
-                # while 循环中的 continue - 跳回循环开始
-                # 查找最近的 POP_JUMP_IF_FALSE 之前的 JUMP 位置
-                pass
-
-        # === 函数 ===
-        elif opcode == Op.CLOSURE:
-            func_name = instr.operands[0]
-            param_count = instr.operands[1]
-            # 捕获当前帧的局部变量
-            captured = {}
-            if self.call_stack:
-                captured = dict(self.call_stack[-1].locals)
-            closure = NovaClosure(func_name, param_count, captured)
-            self.stack.append(closure)
-
-        elif opcode == Op.CALL:
-            arg_count = instr.operands[0]
-            args = [self.stack.pop() for _ in range(arg_count)][::-1]
-            fn = self.stack.pop()
-            result = self._call_fn(fn, args)
-            self.stack.append(result)
-
-        elif opcode == Op.RETURN:
-            result = self.stack.pop() if self.stack else UNIT
-            # 由 _execute_function 处理返回
-
-        elif opcode == Op.CALL_BUILTIN:
-            name = instr.operands[0]
-            arg_count = instr.operands[1]
-            args = [self.stack.pop() for _ in range(arg_count)][::-1]
-            builtin = self.globals.get(name)
-            if builtin is None:
-                raise RuntimeError_(f"未找到内置函数 '{name}'")
-            result = self._call_fn(builtin, args)
-            self.stack.append(result)
-
-        # === 数据结构 ===
-        elif opcode == Op.BUILD_LIST:
-            count = instr.operands[0]
-            elements = [self.stack.pop() for _ in range(count)][::-1]
-            self.stack.append(elements)
-
-        elif opcode == Op.BUILD_TUPLE:
-            count = instr.operands[0]
-            elements = [self.stack.pop() for _ in range(count)][::-1]
-            self.stack.append(tuple(elements))
-
-        elif opcode == Op.BUILD_MAP:
-            count = instr.operands[0]
-            result = {}
-            for _ in range(count):
-                val = self.stack.pop()
-                key = self.stack.pop()
-                result[key] = val
-            self.stack.append(result)
-
-        elif opcode == Op.INDEX:
-            index = self.stack.pop()
-            obj = self.stack.pop()
-            self.stack.append(obj[index])
-
-        elif opcode == Op.FIELD_ACCESS:
-            field = instr.operands[0]
-            obj = self.stack.pop()
-            if isinstance(obj, tuple):
-                self.stack.append(obj[int(field)])
-            elif isinstance(obj, NovaADTValue):
-                self.stack.append(obj.fields[int(field)])
-            else:
-                raise RuntimeError_(f"无法对值进行字段访问 '{field}'")
-
-        elif opcode == Op.BUILD_RANGE:
-            step = self.stack.pop()
-            end = self.stack.pop()
-            start = self.stack.pop()
-            # 返回范围信息: (type, start, end, step)
-            self.stack.append(("range", start, end, step))
-
-        elif opcode == Op.FOR_ITER:
-            fail_ip = instr.operands[0]
-            # 栈: [iterable, result_list]
-            result_list = self.stack.pop()
-            iter_val = self.stack.pop()
-
-            if isinstance(iter_val, tuple) and iter_val[0] == "range":
-                # 范围迭代
-                if not hasattr(self, "_range_index"):
-                    self._range_index = {}
-
-                key = id(iter_val)
-                if key not in self._range_index:
-                    self._range_index[key] = iter_val[1]  # start
-
-                current = self._range_index[key]
-                end = iter_val[2]
-                step = iter_val[3]
-
-                if (step > 0 and current <= end) or (step < 0 and current >= end):
-                    self._range_index[key] = current + step
-                    # 栈: [iterable, result_list, current_element]
-                    self.stack.append(iter_val)
-                    self.stack.append(result_list)
-                    self.stack.append(current)
-                else:
-                    del self._range_index[key]
-                    # 迭代结束，只保留结果列表
-                    self.stack.append(result_list)
-                    self.ip = fail_ip
-                    return
-            elif isinstance(iter_val, list):
-                # 列表迭代
-                if not hasattr(self, "_list_index"):
-                    self._list_index = {}
-
-                key = id(iter_val)
-                if key not in self._list_index:
-                    self._list_index[key] = 0
-
-                idx = self._list_index[key]
-                if idx < len(iter_val):
-                    self._list_index[key] = idx + 1
-                    # 栈: [iterable, result_list, current_element]
-                    self.stack.append(iter_val)
-                    self.stack.append(result_list)
-                    self.stack.append(iter_val[idx])
-                else:
-                    del self._list_index[key]
-                    # 迭代结束，只保留结果列表
-                    self.stack.append(result_list)
-                    self.ip = fail_ip
-                    return
-            else:
-                raise RuntimeError_(f"无法迭代的值: {type(iter_val)}")
-
-        # === 模式匹配 ===
-        elif opcode == Op.MATCH_START:
-            pass
-
-        elif opcode == Op.MATCH_TEST_INT:
-            test_val = instr.operands[0]
-            fail_ip = instr.operands[1]
-            subject = self.stack[-1]  # peek
-            if (
-                isinstance(subject, int)
-                and not isinstance(subject, bool)
-                and subject == test_val
-            ):
-                pass  # 匹配成功，subject 仍在栈上
-            else:
-                self.ip = fail_ip  # 跳到下一个 arm（subject 仍保留）
-
-        elif opcode == Op.MATCH_TEST_BOOL:
-            test_val = instr.operands[0]
-            fail_ip = instr.operands[1]
-            subject = self.stack[-1]
-            if isinstance(subject, bool) and subject == test_val:
-                pass
-            else:
-                self.ip = fail_ip
-
-        elif opcode == Op.MATCH_TEST_STRING:
-            test_val = instr.operands[0]
-            fail_ip = instr.operands[1]
-            subject = self.stack[-1]
-            if isinstance(subject, str) and subject == test_val:
-                pass
-            else:
-                self.ip = fail_ip
-
-        elif opcode == Op.MATCH_WILDCARD:
-            pass  # subject 仍在栈上
-
-        elif opcode == Op.MATCH_BIND:
-            name = instr.operands[0]
-            val = self.stack.pop()
-            if self.call_stack:
-                self.call_stack[-1].locals[name] = val
-            else:
-                self.globals[name] = val
-
-        elif opcode == Op.MATCH_CONSTRUCTOR:
-            ctor_name = instr.operands[0]
-            field_count = instr.operands[1]
-            fail_ip = instr.operands[2]
-            subject = self.stack.pop()
-            if (
-                isinstance(subject, NovaADTValue)
-                and subject.variant_name == ctor_name
-                and len(subject.fields) == field_count
-            ):
-                # 匹配成功：弹出 subject，将字段压栈
-                for field_val in reversed(subject.fields):
-                    self.stack.append(field_val)
-            else:
-                self.ip = fail_ip
-
-        elif opcode == Op.MATCH_END:
-            pass
-
-        # === 管道 ===
-        elif opcode == Op.PIPE_CALL:
-            extra_arg_count = instr.operands[0]
-            # 栈: [..., pipe_value, extra_arg1, ..., extra_argN, fn]
-            fn = self.stack.pop()
-            extra_args = [self.stack.pop() for _ in range(extra_arg_count)][::-1]
-            pipe_value = self.stack.pop()
-            # 管道值作为最后一个参数（Nova 约定: filter(f, list)）
-            args = extra_args + [pipe_value]
-            result = self._call_fn(fn, args)
-            self.stack.append(result)
-
-        # === ADT ===
-        elif opcode == Op.MAKE_ADT:
-            type_name = instr.operands[0]
-            variant_name = instr.operands[1]
-            field_count = instr.operands[2]
-            fields = [self.stack.pop() for _ in range(field_count)][::-1]
-            self.stack.append(NovaADTValue(type_name, variant_name, fields))
-
-        elif opcode == Op.REGISTER_CTOR:
-            type_name = instr.operands[0]
-            variant_name = instr.operands[1]
-            field_count = instr.operands[2]
-            name = instr.operands[3]
-            self.stack.append(NovaConstructor(type_name, variant_name, field_count))
-
-        # === 其他 ===
-        elif opcode == Op.POP:
-            self.stack.pop()
-
-        elif opcode == Op.DUP:
-            self.stack.append(self.stack[-1])
-
-        elif opcode == Op.PRINT:
-            val = self.stack.pop()
-            formatted = self._format_value(val)
-            print(formatted)
-            self.output.append(formatted)
-
-        elif opcode == Op.HALT:
-            pass
-
-        elif opcode == Op.AUTO_CALL_MAIN:
-            pass
-
-        elif opcode == Op.TRY_UNWRAP:
-            val = self.stack[-1]
-            if isinstance(val, NovaADTValue) and val.variant_name in ("None", "Err"):
-                pass  # 保持当前值（错误传播）
-            # 否则保持值不变
-
-        elif opcode == Op.LOOP:
-            loop_start = instr.operands[0]
-            self.ip = loop_start
-
+        handler = self._op_handlers.get(opcode)
+        if handler is not None:
+            handler(instr)
         else:
             raise RuntimeError_(f"VM 错误: 未知的指令 '{opcode}'")
+
+    # ============================================================
+    # 指令 handler - 常量与加载
+    # ============================================================
+
+    def _op_const_int(self, instr):
+        self.stack.append(instr.operands[0])
+
+    def _op_const_float(self, instr):
+        self.stack.append(instr.operands[0])
+
+    def _op_const_string(self, instr):
+        self.stack.append(instr.operands[0])
+
+    def _op_const_bool(self, instr):
+        self.stack.append(instr.operands[0])
+
+    def _op_const_unit(self, instr):
+        self.stack.append(UNIT)
+
+    def _op_load_const(self, instr):
+        idx = instr.operands[0]
+        self.stack.append(self.constants[idx])
+
+    def _op_load_var(self, instr):
+        name = instr.operands[0]
+        # 在帧局部变量中查找
+        if self.call_stack:
+            frame = self.call_stack[-1]
+            if name in frame.locals:
+                self.stack.append(frame.locals[name])
+                return
+        # 在全局变量中查找
+        if name in self.globals:
+            self.stack.append(self.globals[name])
+        else:
+            raise RuntimeError_(f"未定义的变量 '{name}'")
+
+    # ============================================================
+    # 指令 handler - 存储
+    # ============================================================
+
+    def _op_store_var(self, instr):
+        name = instr.operands[0]
+        # operands[1] 是 mutable 标记，保留供未来使用
+        val = self.stack.pop()
+        # 优先存储在当前帧的局部变量中
+        if self.call_stack:
+            frame = self.call_stack[-1]
+            if name in frame.locals:
+                frame.locals[name] = val
+                return
+        # 存储到全局
+        self.globals[name] = val
+
+    # ============================================================
+    # 指令 handler - 算术运算
+    # ============================================================
+
+    def _op_add(self, instr):
+        b, a = self.stack.pop(), self.stack.pop()
+        self.stack.append(a + b)
+
+    def _op_sub(self, instr):
+        b, a = self.stack.pop(), self.stack.pop()
+        self.stack.append(a - b)
+
+    def _op_mul(self, instr):
+        b, a = self.stack.pop(), self.stack.pop()
+        self.stack.append(a * b)
+
+    def _op_div(self, instr):
+        b, a = self.stack.pop(), self.stack.pop()
+        if isinstance(a, int) and isinstance(b, int):
+            if b == 0:
+                raise RuntimeError_("除零错误")
+            self.stack.append(a // b)
+        else:
+            self.stack.append(a / b)
+
+    def _op_mod(self, instr):
+        b, a = self.stack.pop(), self.stack.pop()
+        self.stack.append(a % b)
+
+    def _op_neg(self, instr):
+        a = self.stack.pop()
+        self.stack.append(-a)
+
+    def _op_concat(self, instr):
+        b, a = self.stack.pop(), self.stack.pop()
+        self.stack.append(str(a) + str(b))
+
+    # ============================================================
+    # 指令 handler - 比较运算
+    # ============================================================
+
+    def _op_eq(self, instr):
+        b, a = self.stack.pop(), self.stack.pop()
+        self.stack.append(a == b)
+
+    def _op_neq(self, instr):
+        b, a = self.stack.pop(), self.stack.pop()
+        self.stack.append(a != b)
+
+    def _op_lt(self, instr):
+        b, a = self.stack.pop(), self.stack.pop()
+        self.stack.append(a < b)
+
+    def _op_gt(self, instr):
+        b, a = self.stack.pop(), self.stack.pop()
+        self.stack.append(a > b)
+
+    def _op_lte(self, instr):
+        b, a = self.stack.pop(), self.stack.pop()
+        self.stack.append(a <= b)
+
+    def _op_gte(self, instr):
+        b, a = self.stack.pop(), self.stack.pop()
+        self.stack.append(a >= b)
+
+    # ============================================================
+    # 指令 handler - 逻辑运算
+    # ============================================================
+
+    def _op_and(self, instr):
+        # 在 && 编译中，POP_JUMP_IF_FALSE 已经处理了短路
+        # 这里只处理两边的求值结果
+        b, a = self.stack.pop(), self.stack.pop()
+        self.stack.append(a and b)
+
+    def _op_or(self, instr):
+        b, a = self.stack.pop(), self.stack.pop()
+        self.stack.append(a or b)
+
+    def _op_not(self, instr):
+        a = self.stack.pop()
+        self.stack.append(not a)
+
+    # ============================================================
+    # 指令 handler - 控制流
+    # ============================================================
+
+    def _op_jump(self, instr):
+        self.ip = instr.operands[0]
+
+    def _op_jump_if_false(self, instr):
+        cond = self.stack.pop()
+        if not cond:
+            self.ip = instr.operands[0]
+
+    def _op_jump_if_true(self, instr):
+        cond = self.stack.pop()
+        if cond:
+            self.ip = instr.operands[0]
+
+    def _op_pop_jump_if_false(self, instr):
+        cond = self.stack.pop()
+        if not cond:
+            self.ip = instr.operands[0]
+
+    def _op_loop_end(self, instr):
+        loop_start = instr.operands[0]
+        # 栈: [iterable, result_list, body_result]
+        body_result = self.stack.pop()
+        result_list = self.stack.pop()
+        iterable = self.stack.pop()
+        result_list.append(body_result)
+        self.stack.append(iterable)
+        self.stack.append(result_list)
+        self.ip = loop_start
+
+    def _op_break(self, instr):
+        # 跳出循环 - 需要清理栈并跳到循环结束
+        # 在 for 循环中弹出 (iter, index, result_list)
+        if self._for_iters:
+            self._for_iters.pop()
+            # 弹出 for 循环状态
+            if len(self.stack) >= 3:
+                self.stack.pop()  # body_result
+                result_list = self.stack.pop()  # result_list
+                self.stack.pop()  # index (for range)
+                self.stack.pop()  # iter (for range)
+                self.stack.append(result_list)
+        # 跳到当前 for_iter 的 end 位置
+        if self._for_iters:
+            self.ip = self._for_iters[-1].get("end_ip", self.ip)
+        else:
+            # 找到下一个 LOOP_END 的位置
+            while self.ip < len(self.code):
+                next_instr = self.code[self.ip]
+                if next_instr.opcode in (Op.LOOP_END, Op.CONST_UNIT):
+                    self.ip += 1
+                    break
+                self.ip += 1
+
+    def _op_continue(self, instr):
+        if self._for_iters:
+            self.ip = self._for_iters[-1]["loop_start"]
+        # while 循环中的 continue 由编译器生成适当的跳转处理
+
+    def _op_loop(self, instr):
+        loop_start = instr.operands[0]
+        self.ip = loop_start
+
+    # ============================================================
+    # 指令 handler - 函数调用
+    # ============================================================
+
+    def _op_closure(self, instr):
+        func_name = instr.operands[0]
+        param_count = instr.operands[1]
+        # 捕获当前帧的局部变量
+        captured = {}
+        if self.call_stack:
+            captured = dict(self.call_stack[-1].locals)
+        closure = NovaClosure(func_name, param_count, captured)
+        self.stack.append(closure)
+
+    def _op_call(self, instr):
+        arg_count = instr.operands[0]
+        args = [self.stack.pop() for _ in range(arg_count)][::-1]
+        fn = self.stack.pop()
+        result = self._call_fn(fn, args)
+        self.stack.append(result)
+
+    def _op_return(self, instr):
+        # RETURN 由 _execute_function 专门处理，这里只是占位
+        pass
+
+    def _op_call_builtin(self, instr):
+        name = instr.operands[0]
+        arg_count = instr.operands[1]
+        args = [self.stack.pop() for _ in range(arg_count)][::-1]
+        builtin = self.globals.get(name)
+        if builtin is None:
+            raise RuntimeError_(f"未找到内置函数 '{name}'")
+        result = self._call_fn(builtin, args)
+        self.stack.append(result)
+
+    # ============================================================
+    # 指令 handler - 数据结构
+    # ============================================================
+
+    def _op_build_list(self, instr):
+        count = instr.operands[0]
+        elements = [self.stack.pop() for _ in range(count)][::-1]
+        self.stack.append(elements)
+
+    def _op_build_tuple(self, instr):
+        count = instr.operands[0]
+        elements = [self.stack.pop() for _ in range(count)][::-1]
+        self.stack.append(tuple(elements))
+
+    def _op_build_map(self, instr):
+        count = instr.operands[0]
+        result = {}
+        for _ in range(count):
+            val = self.stack.pop()
+            key = self.stack.pop()
+            result[key] = val
+        self.stack.append(result)
+
+    def _op_index(self, instr):
+        index = self.stack.pop()
+        obj = self.stack.pop()
+        self.stack.append(obj[index])
+
+    def _op_field_access(self, instr):
+        field = instr.operands[0]
+        obj = self.stack.pop()
+        if isinstance(obj, tuple):
+            self.stack.append(obj[int(field)])
+        elif isinstance(obj, NovaADTValue):
+            self.stack.append(obj.fields[int(field)])
+        else:
+            raise RuntimeError_(f"无法对值进行字段访问 '{field}'")
+
+    def _op_build_range(self, instr):
+        step = self.stack.pop()
+        end = self.stack.pop()
+        start = self.stack.pop()
+        # 返回范围信息: (type, start, end, step)
+        self.stack.append(("range", start, end, step))
+
+    def _op_for_iter(self, instr):
+        fail_ip = instr.operands[0]
+        # 栈: [iterable, result_list]
+        result_list = self.stack.pop()
+        iter_val = self.stack.pop()
+
+        if isinstance(iter_val, tuple) and iter_val[0] == "range":
+            self._for_iter_range(iter_val, result_list, fail_ip)
+        elif isinstance(iter_val, list):
+            self._for_iter_list(iter_val, result_list, fail_ip)
+        else:
+            raise RuntimeError_(f"无法迭代的值: {type(iter_val)}")
+
+    def _for_iter_range(self, iter_val, result_list, fail_ip):
+        """处理 range 类型的 for 迭代"""
+        if not hasattr(self, "_range_index"):
+            self._range_index = {}
+
+        key = id(iter_val)
+        if key not in self._range_index:
+            self._range_index[key] = iter_val[1]  # start
+
+        current = self._range_index[key]
+        end = iter_val[2]
+        step = iter_val[3]
+
+        if (step > 0 and current <= end) or (step < 0 and current >= end):
+            self._range_index[key] = current + step
+            # 栈: [iterable, result_list, current_element]
+            self.stack.append(iter_val)
+            self.stack.append(result_list)
+            self.stack.append(current)
+        else:
+            del self._range_index[key]
+            # 迭代结束，只保留结果列表
+            self.stack.append(result_list)
+            self.ip = fail_ip
+
+    def _for_iter_list(self, iter_val, result_list, fail_ip):
+        """处理 list 类型的 for 迭代"""
+        if not hasattr(self, "_list_index"):
+            self._list_index = {}
+
+        key = id(iter_val)
+        if key not in self._list_index:
+            self._list_index[key] = 0
+
+        idx = self._list_index[key]
+        if idx < len(iter_val):
+            self._list_index[key] = idx + 1
+            # 栈: [iterable, result_list, current_element]
+            self.stack.append(iter_val)
+            self.stack.append(result_list)
+            self.stack.append(iter_val[idx])
+        else:
+            del self._list_index[key]
+            # 迭代结束，只保留结果列表
+            self.stack.append(result_list)
+            self.ip = fail_ip
+
+    # ============================================================
+    # 指令 handler - 模式匹配
+    # ============================================================
+
+    def _op_match_start(self, instr):
+        pass
+
+    def _op_match_test_int(self, instr):
+        test_val = instr.operands[0]
+        fail_ip = instr.operands[1]
+        subject = self.stack[-1]  # peek
+        if (
+            isinstance(subject, int)
+            and not isinstance(subject, bool)
+            and subject == test_val
+        ):
+            pass  # 匹配成功，subject 仍在栈上
+        else:
+            self.ip = fail_ip  # 跳到下一个 arm（subject 仍保留）
+
+    def _op_match_test_bool(self, instr):
+        test_val = instr.operands[0]
+        fail_ip = instr.operands[1]
+        subject = self.stack[-1]
+        if isinstance(subject, bool) and subject == test_val:
+            pass
+        else:
+            self.ip = fail_ip
+
+    def _op_match_test_string(self, instr):
+        test_val = instr.operands[0]
+        fail_ip = instr.operands[1]
+        subject = self.stack[-1]
+        if isinstance(subject, str) and subject == test_val:
+            pass
+        else:
+            self.ip = fail_ip
+
+    def _op_match_wildcard(self, instr):
+        pass  # subject 仍在栈上
+
+    def _op_match_bind(self, instr):
+        name = instr.operands[0]
+        val = self.stack.pop()
+        if self.call_stack:
+            self.call_stack[-1].locals[name] = val
+        else:
+            self.globals[name] = val
+
+    def _op_match_constructor(self, instr):
+        ctor_name = instr.operands[0]
+        field_count = instr.operands[1]
+        fail_ip = instr.operands[2]
+        subject = self.stack.pop()
+        if (
+            isinstance(subject, NovaADTValue)
+            and subject.variant_name == ctor_name
+            and len(subject.fields) == field_count
+        ):
+            # 匹配成功：弹出 subject，将字段压栈
+            for field_val in reversed(subject.fields):
+                self.stack.append(field_val)
+        else:
+            self.ip = fail_ip
+
+    def _op_match_end(self, instr):
+        pass
+
+    # ============================================================
+    # 指令 handler - 管道
+    # ============================================================
+
+    def _op_pipe_call(self, instr):
+        extra_arg_count = instr.operands[0]
+        # 栈: [..., pipe_value, extra_arg1, ..., extra_argN, fn]
+        fn = self.stack.pop()
+        extra_args = [self.stack.pop() for _ in range(extra_arg_count)][::-1]
+        pipe_value = self.stack.pop()
+        # 管道值作为最后一个参数（Nova 约定: filter(f, list)）
+        args = extra_args + [pipe_value]
+        result = self._call_fn(fn, args)
+        self.stack.append(result)
+
+    # ============================================================
+    # 指令 handler - ADT
+    # ============================================================
+
+    def _op_make_adt(self, instr):
+        type_name = instr.operands[0]
+        variant_name = instr.operands[1]
+        field_count = instr.operands[2]
+        fields = [self.stack.pop() for _ in range(field_count)][::-1]
+        self.stack.append(NovaADTValue(type_name, variant_name, fields))
+
+    def _op_register_ctor(self, instr):
+        type_name = instr.operands[0]
+        variant_name = instr.operands[1]
+        field_count = instr.operands[2]
+        name = instr.operands[3]
+        self.stack.append(NovaConstructor(type_name, variant_name, field_count))
+
+    # ============================================================
+    # 指令 handler - 杂项
+    # ============================================================
+
+    def _op_pop(self, instr):
+        self.stack.pop()
+
+    def _op_dup(self, instr):
+        self.stack.append(self.stack[-1])
+
+    def _op_print(self, instr):
+        val = self.stack.pop()
+        formatted = self._format_value(val)
+        print(formatted)
+        self.output.append(formatted)
+
+    def _op_halt(self, instr):
+        pass
+
+    def _op_auto_call_main(self, instr):
+        pass
+
+    def _op_try_unwrap(self, instr):
+        val = self.stack[-1]
+        if isinstance(val, NovaADTValue) and val.variant_name in ("None", "Err"):
+            pass  # 保持当前值（错误传播）
+        # 否则保持值不变
 
     # ----------------------------------------------------------
     # 公共接口

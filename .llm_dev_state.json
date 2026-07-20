@@ -1,5 +1,5 @@
 {
-  "cycles": 21,
+  "cycles": 22,
   "completed_tasks": [
     "unify_ir_naming",
     "for_loop_ssa_normalize",
@@ -46,10 +46,37 @@
     "fix_too_broad_exceptions",
     "mir_cfg_loop_analysis",
     "implement_licm_pass",
-    "review_cycle_21"
+    "review_cycle_21",
+    "split_vm_execute_instruction",
+    "lir_switch_match_lowering",
+    "fix_wasm_bugs"
   ],
   "failed_tasks": [],
   "task_history": [
+    {
+      "cycle": 22,
+      "task_id": "split_vm_execute_instruction",
+      "status": "completed",
+      "source": "审查驱动",
+      "reason": "审查日志第1495轮显示 NovaVM._execute_instruction 圈复杂度 111（全项目Top 1，唯一CC>100的函数），是长期遗留的技术债。第21轮评审规划为第22轮核心任务。字节码VM虽然是解释器路径，但高复杂度导致维护困难、bug风险高。重构为调度表模式可大幅降低复杂度，提升可维护性。",
+      "details": "将 _execute_instruction 从 442 行的巨型 if-elif 链（CC=111）重构为调度表（dispatch table）模式：新增 _build_op_dispatch_table() 构建 57 个 opcode 的 handler 映射表；_execute_instruction 简化为查表分发（CC≈5）；按指令类别拆分为 10 组独立 handler 方法（常量与加载7个、存储1个、算术运算7个、比较运算6个、逻辑运算3个、控制流8个、函数调用4个、数据结构10个、模式匹配8个、管道1个、ADT2个、杂项7个）；_op_for_iter 进一步拆分为 _for_iter_range 和 _for_iter_list 两个子方法。圈复杂度从 111 降至约 5，代码结构清晰，易于扩展新指令。"
+    },
+    {
+      "cycle": 22,
+      "task_id": "lir_switch_match_lowering",
+      "status": "completed",
+      "source": "自主规划",
+      "reason": "第21轮评审规划的第22轮任务。MIR层已有MIRSwitch和MIRMatchJump指令定义，但降级到LIR时退化为简单的无条件跳转（直接跳default_target），完全丢失多分支语义。完善LIR层多分支指令支持是C后端功能对齐的前置条件，也为后续跳转表优化奠定基础。",
+      "details": "LIR switch/match 降级补全：1) 在 ir_nodes.py 中新增 LIRSwitch 指令类型（cases + default_target）；2) lir_lowering.py 中将 MIRSwitch 正确降级为 LIRSwitch（保留cases列表信息而非直接跳default）；3) MIRMatchJump 降级为 LIRSwitch（variant_tests转换为cases，variant_name作为case值）；4) lir_c_backend.py 新增 _compile_switch 方法（生成if-else级联，支持int/float/bool/string四种类型比较）；5) wasm_backend.py 新增 LIRSwitch 支持（嵌套if-else结构，设置PC后br $dispatch）。多分支语义从完全丢失恢复为完整保留，为后续优化和后端功能对齐奠定基础。"
+    },
+    {
+      "cycle": 22,
+      "task_id": "fix_wasm_bugs",
+      "status": "completed",
+      "source": "自主规划",
+      "reason": "深度代码审计发现 Wasm 后端存在多个正确性 bug，影响所有使用 Wasm 后端的程序。虽然当前测试主要走 VM 和 C 后端路径，但 Wasm 后端是重要的目标平台，bug 积累越多修复成本越高。批量修复成本低、收益高。",
+      "details": "修复 Wasm 后端 4 个 bug：1) LIRCall 属性名错误——_emit_call 使用不存在的 instr.func_name，改为正确的 instr.callee（与 LIRCall 类定义一致）；2) LIRFieldAccess 偏移量计算错误——字段索引直接当作字节偏移使用，改为 offset * 8（每个 NovaValue 8 字节）；3) LIRIndex 实现不完整——只生成 load 没有地址计算，补全 base + index * 8 的地址计算（i64.mul + i32.wrap_i64 + i32.add）；4) 字符串 null 终止符转义错误——b\"\\\\x00\" 是4个字节的字面量而非null终止符，两处（_scan_strings 和 _get_string_offset）都改为 b\"\\x00\"。"
+    },
     {
       "cycle": 21,
       "task_id": "review_cycle_21",
@@ -57,179 +84,9 @@
       "source": "评审轮",
       "reason": "第 21 轮路线图评审，回顾第 19-20 轮开发（Wasm控制流重写 + 工程化清理 + MIR优化深化），进行五维评估，规划第 22-24 轮方向（VM巨型函数拆分 → C后端功能对齐 → 后端整合与基准测试），更新任务池（新增 5 个任务，调整 3 个优先级，补充依赖关系）。",
       "details": "完成第19-20轮回顾：两轮共完成 6 个任务，路线图进度 70% → 84%，测试 418 全通过，零失败零回滚。五维评估：方向正确（Wasm架构修复 + MIR优化 + 工程化清理三线并进）、质量持续变好（平均CC 3.17→3.13，极复杂函数 21→19）、效率稳定（每轮3个任务）、价值高（LICM高级优化 + Wasm控制流架构修复）、审查对齐良好（审查驱动任务占比 50%）。发现新问题：VM._execute_instruction 圈复杂度 111（长期Top 1）、Native后端功能严重不完整、unused_import 仍有 95 处、LIR switch/match 降级缺失。下阶段方向：第22轮工程化清理（VM巨型函数拆分 + LIR switch/match降级补全）、第23轮C后端功能对齐（ADT/match/闭包迁移到LIR路径）、第24轮后端整合与基准测试。任务池新增 5 个任务（3个审查驱动 + 2个自主发现），调整 3 个优先级。"
-    },
-    {
-      "cycle": 20,
-      "task_id": "fix_too_broad_exceptions",
-      "status": "completed",
-      "source": "审查驱动",
-      "reason": "审查日志第1495轮显示 7 处 too_broad_exception（MEDIUM 级别）。过宽异常捕获会隐藏真实错误导致调试困难，特别是 cli.py 第173行的静默吞噬（except Exception: pass）是最严重的问题。逐个修复成本低，能提升代码健壮性和可调试性。",
-      "details": "修复 7 处过宽异常捕获：1) cli.py 第173行 REPL 中的静默吞噬（except Exception: pass）改为捕获 NovaError 并打印类型警告（最严重的问题）；2) cli.py 另外 2 处顶层兜底添加注释说明理由 + 打印异常类型和完整 traceback；3) pass_manager.py 4 处优雅降级（单个 Pass 失败不中断编译）添加设计说明注释。所有修改保持功能不变，仅改进错误可见性和代码可维护性。"
-    },
-    {
-      "cycle": 20,
-      "task_id": "mir_cfg_loop_analysis",
-      "status": "completed",
-      "source": "自主规划",
-      "reason": "LICM 等循环优化的前置基础设施。当前 MIR 层没有任何循环分析能力（支配树、回边检测、自然循环识别），无法推进高级优化。新建 cfg_utils.py 统一提供 CFG 和循环分析工具，为 LICM Pass 以及后续更多循环优化（如循环展开、循环不变量外提等）奠定基础。",
-      "details": "新建 ir/cfg_utils.py（约600行），提供完整的 MIR CFG 工具和循环分析基础设施：基础CFG工具（build_block_map、get_successors、build_predecessors、build_successor_map）；支配树计算（compute_dominators 迭代式算法、compute_idom、dominates）；回边检测（find_back_edges、BackEdge 类）；自然循环识别（Loop、LoopInfo、analyze_loops，支持嵌套循环、循环树、出口块计算）；指令工具函数（get_instr_operands、is_instr_pure、get_terminator_used_ssa）。修复了回边检测的条件写反 bug。"
-    },
-    {
-      "cycle": 20,
-      "task_id": "implement_licm_pass",
-      "status": "completed",
-      "source": "自主规划",
-      "reason": "第18轮评审规划的第20轮核心任务。LICM 是经典的循环优化 Pass，对循环密集型代码性能提升显著。SSA 验证器已有完整测试覆盖，MIR 优化管线基础打好了，现在是推进高级优化的时机。填补 MIR 优化空白，提升编译器优化能力。",
-      "details": "实现完整的 LoopInvariantCodeMotion Pass（约290行）：使用 cfg_utils.analyze_loops 进行循环分析；按嵌套层级从内到外处理循环（内层先外提，外层可进一步外提）；自动获取或创建 pre-header 块（多个外部前驱时创建新块）；识别循环不变量（纯指令 + 所有操作数定义在循环外）；将不变指令移动到 pre-header 末尾（在终结指令之前）；迭代直到不动点（外提可能产生新的不变量）。仅外提纯指令（算术运算、字段访问、元组/列表/Map/ADT构建等），不移动有副作用的指令（函数调用、Store等）。手动验证：循环不变量 a+b 被正确外提到 pre-header。"
-    },
-    {
-      "cycle": 19,
-      "task_id": "refactor_hir_rewriter_complexity",
-      "status": "completed",
-      "source": "审查驱动",
-      "reason": "审查日志显示 HIRRewriter.generic_rewrite 圈复杂度 69（Top 2 最复杂函数），是第17轮 Visitor 重构引入的新问题。数据驱动重构可大幅降低复杂度，提升可维护性。",
-      "details": "引入 _HIR_CHILD_FIELDS 数据驱动映射表（23 种节点类型的子字段描述），将 generic_rewrite 从 270 行的 if-elif 链（CC=69）重构为 80 行的循环驱动实现（CC≈8），同时重构 generic_visit。使用 dataclasses.replace 统一节点重建方式。新增 _iter_hir_children 工具函数供 Visitor 和 Rewriter 共享遍历逻辑。圈复杂度从 69 降至约 8，代码量减少约 150 行。"
-    },
-    {
-      "cycle": 19,
-      "task_id": "wasm_control_flow_rewrite",
-      "status": "completed",
-      "source": "自主规划",
-      "reason": "第18轮评审规划的第19轮核心任务。Wasm 后端控制流用 flat block 嵌套方案无法表达任意 CFG，循环（向后跳转）完全失效，是架构级正确性缺陷。PC + br_table 方案可支持任意 CFG。",
-      "details": "Wasm 后端控制流从 flat block 嵌套方案重写为 PC + br_table 分派循环方案：新增 $pc 局部变量保存基本块索引，用 block $exit + loop $dispatch 双层结构包裹函数体，循环顶部用 br_table 根据 $pc 跳转到对应基本块，每个基本块结尾设置新 $pc 并 br $dispatch 回到循环顶部。LIRJump 设置 PC 后跳转，LIRBranch 用 if-else 设置不同 PC，LIRReturn 直接 br $exit 跳出。支持任意 CFG（前向跳转、后向跳转、循环等）。"
-    },
-    {
-      "cycle": 19,
-      "task_id": "clean_unused_imports",
-      "status": "completed",
-      "source": "审查驱动",
-      "reason": "审查日志显示 95 处 unused_import（MEDIUM 级别），是数量最多的 MEDIUM 问题。批量清理成本低、收益高，能直接降低审查问题数，提升代码整洁度。",
-      "details": "编写 AST 分析脚本自动检测并移除未使用导入，支持多行括号形式。共清理 80 处未使用导入：test_ir.py 40处、test_native_backend.py 21处、test_backends.py 9处、scripts/agents.py 4处、test_ssa_verifier.py 3处、test_nova.py 2处、scripts/auto_improve.py 1处。剩余 9 处为函数内局部导入，不影响模块级整洁度。"
-    },
-    {
-      "cycle": 18,
-      "task_id": "review_cycle_18",
-      "status": "completed",
-      "source": "评审轮",
-      "reason": "第 18 轮路线图评审，回顾第 16-17 轮开发（SSA 加固 + Visitor 重构 + 后端治理），进行五维评估，规划第 19-21 轮方向（Wasm 后端控制流重写 → MIR 优化深化 → 工程化清理），更新任务池（新增 6 个任务，调整 3 个优先级，补充依赖关系）。",
-      "details": "完成第16-17轮回顾：两轮共完成 7 个任务，路线图进度 62% → 81%，测试 403 → 418，零失败零回滚。五维评估：方向正确、质量持续变好、效率稳定（每轮3-4个任务）、价值高、审查对齐良好（审查驱动任务占比 57%）。发现新问题：HIRRewriter.generic_rewrite 圈复杂度 69（第17轮引入）、Wasm 后端控制流有架构缺陷、unused_import 有 95 处、too_broad_exception 有 7 处。下阶段方向：第19轮 Wasm 控制流重写、第20轮 MIR 优化深化（LICM）、第21轮工程化清理。任务池新增 6 个任务（4个审查驱动 + 2个自主发现），调整 3 个优先级。"
-    },
-    {
-      "cycle": 17,
-      "task_id": "refactor_visitor_pattern",
-      "status": "completed",
-      "source": "审查驱动",
-      "reason": "审查日志指出 pass_manager.py 中 6 个方法重复实现了 HIR 表达式的递归匹配（约 500 行重复代码），圈复杂度过高。引入 Visitor 模式是消除重复、降低复杂度、提升可维护性的最佳方案。同时也是第17轮核心工程治理任务，为后续 Pass 开发奠定基础设施。",
-      "details": "引入 HIRVisitor/HIRRewriter 基础设施并重写三个核心优化 Pass：在 ir_nodes.py 中新增 HIRVisitor（只读访问）和 HIRRewriter（变换式访问）两个基类，提供 24 个节点类型的默认递归遍历实现；将 pass_manager.py 中的 ConstantFolding、Inlining、DeadCodeElimination 三个 Pass 从手动递归匹配重构为继承 HIRRewriter，每个 Pass 只需关注自身变换逻辑。消除约 300 行重复的递归遍历代码，ConstantFolding 从 140 行减至 70 行，Inlining 从 130 行减至 55 行，DeadCodeElimination 从 95 行减至 60 行。"
-    },
-    {
-      "cycle": 17,
-      "task_id": "unify_backend_mappings",
-      "status": "completed",
-      "source": "审查驱动",
-      "reason": "审查日志指出三个后端各自维护了内置函数名映射表，结构完全相同（约40行重复）。提取到公共模块可降低维护成本，减少一处改了另一处忘改的 bug。",
-      "details": "创建 backend/common.py 共享模块，内置函数名映射表（40+个函数：print/println、字符串转换、数学函数、列表函数、JSON、文件IO、内存管理等）统一到共享模块，提供 mangle_builtin_name() 和 is_builtin_function() 工具函数；lir_c_backend.py 的 _mangle_fn_name 从 42 行减少为 2 行。消除约 40 行重复代码。"
-    },
-    {
-      "cycle": 17,
-      "task_id": "fix_wasm_label",
-      "status": "completed",
-      "source": "自主规划",
-      "reason": "深度审计发现 Wasm 后端将 LIRLabel 实现为 Wasm block，但从不关闭 block，生成的 WAT 语法错误；同时 br_if 的跳转目标方向错误（跳 false 而非跳 true）。修复后 Wasm 后端生成的代码至少语法正确，为后续 Wasm 后端功能完善奠定基础。",
-      "details": "修复 Wasm 后端 Label/控制流实现：将控制流指令（Label/Jump/Branch）从 _compile_instr 提升到 _compile_function 层级统一处理；每个 Label 对应一个 block 嵌套，函数末尾统一闭合所有打开的 block（确保 WAT 语法正确）；修正 Branch 的语义方向（从 false_target 改为 true_target，与 br_if 语义一致）。修复后生成的 Wasm WAT 文件具有正确的 block 嵌套结构。"
-    },
-    {
-      "cycle": 16,
-      "task_id": "fix_listcomp_ssa_latch",
-      "status": "completed",
-      "details": "修复列表推导式 latch 块 SSA 替换不完整 bug：在提取循环 SSA 通用方法（extract_loop_ssa）时一并修复。原代码有 pass 占位注释，只硬编码处理 filter_block/filter_false_block，通用方法 _insert_loop_phis 自动遍历所有 latch_blocks 进行 SSA 替换，确保所有回边路径的 SSA 引用都被正确替换。消除了带 filter 的列表推导式中循环体修改外部变量可能产生未定义 SSA 名引用的隐患。"
-    },
-    {
-      "cycle": 16,
-      "task_id": "extract_loop_ssa",
-      "status": "completed",
-      "details": "提取循环 SSA Phi 插入通用方法 _insert_loop_phis：将 _lower_while_expr、_lower_for_expr、_lower_list_comprehension 中重复的 SSA Phi 插入逻辑（约 150 行）提取为通用方法。统一 latch_blocks 数据结构为 (block_obj, env_dict) 二元组，修复了列表推导式中 latch 块 SSA 替换不完整的 pass 占位 bug（之前只硬编码处理 filter_block/filter_false_block，现在通用方法遍历所有 latch 块）。三个循环方法的 SSA 构建逻辑从各自维护改为调用通用方法，维护成本降为 1/3。"
-    },
-    {
-      "cycle": 16,
-      "task_id": "fix_constant_folding_class",
-      "status": "completed",
-      "details": "修复 ConstantFolding 的 __class__ 突变问题：将 _fold_expr 从就地修改模式（__class__ 赋值 + del 属性）改为返回新节点模式（返回 new_expr, changed），与 Inlining Pass 风格一致。消除了 Python 黑魔法，提升代码健壮性和可维护性，同时为后续 Visitor 模式重构铺平道路（Visitor 需要返回新节点的变换模式）。"
-    },
-    {
-      "cycle": 16,
-      "task_id": "ssa_verifier_tests",
-      "status": "completed",
-      "details": "为 SSAVerifier 编写完整专项测试（15 个测试用例），覆盖全部 5 项检查：基本块终结指令检查、SSA 单赋值检查、使用前定义检查、Phi 节点位置检查、Phi source 块前驱验证。包含正反例测试（正确通过 + 错误检测）和 4 个端到端集成测试。顺带修复了 SSAVerifier 不识别函数参数 SSA 名的 bug（将函数参数加入 all_defs）。新增测试从 0 覆盖提升到核心功能全覆盖。"
-    },
-    {
-      "cycle": 15,
-      "task_id": "review_cycle_15",
-      "status": "completed",
-      "details": "第15轮路线图评审：完成第13-14轮回顾（工程治理一+二：包结构标准化+类型传递修复+命名统一+for循环SSA规范化）、四维评估、问题总结、下阶段方向规划（第16-18轮：SSA加固→Visitor重构→后端整合）、任务池更新（新增5个任务、调整3个优先级、补充依赖关系）"
-    },
-    {
-      "cycle": 14,
-      "task_id": "unify_ir_naming",
-      "status": "completed",
-      "details": "统一跨 IR 层字段命名：HIRCallExpr 添加 callee/args property 别名（对应 function/arguments）；MIRInstruction 添加 ir_type property 别名（对应 result_type）；LIRCall 添加 callee/arg_locs 字段和 property 别名（对应 func_name/arg_count），新增 arg_locs 传递参数位置信息；lir_lowering.py 中 MIRCall→LIRCall 降级时现在传递完整的参数位置和类型信息。采用渐进式策略（property 别名），保持完全向后兼容，同时为后续代码统一命名奠定基础。"
-    },
-    {
-      "cycle": 14,
-      "task_id": "for_loop_ssa_normalize",
-      "status": "completed",
-      "details": "for 循环 SSA 规范化：重构 _lower_for_expr 和 _lower_list_comprehension，采用与 while 循环一致的 env 快照 + Phi 插入策略。自动检测循环体内被修改的变量，在 header 块开头插入 Phi 节点（入口边 + 所有回边），替换 header 和 body 中的旧 SSA 引用为 Phi 结果。修复了 for 循环和列表推导式中循环体内变量赋值跨迭代不传播的正确性 bug。工程治理 + 正确性修复双重收益。"
-    },
-    {
-      "cycle": 13,
-      "task_id": "refactor_sys_path",
-      "status": "completed",
-      "details": "消除 sys.path hack，标准化包结构：修复 pyproject.toml flat-layout 配置，将 25 个文件的所有内部导入改为相对导入，删除全部 20 处 sys.path.insert；将 nova.py 重命名为 cli.py 解决包名与文件名冲突；顺带修复了被 sys.path hack 长期隐藏的 MIRInstruction 缺少 @dataclass 装饰器导致 result_type 为 Field 对象的预存 bug。工程治理第一优先级任务，为所有后续开发奠定干净的包结构基础。"
-    },
-    {
-      "cycle": 13,
-      "task_id": "mir_type_propagation",
-      "status": "completed",
-      "details": "修复 MIR/LIR 类型传递，消除 UNIT_TYPE 占位：mir_lowering.py 中 28 处 + lir_lowering.py 中 2 处全部修复。新增 ssa_types 字典跟踪 SSA 值类型，Phi 节点从 source SSA 推断类型，for/list 循环辅助变量正确设置为 INT_TYPE/BOOL_TYPE，模式匹配比较设置为 BOOL_TYPE，list_length 返回 INT_TYPE，list_get 从列表类型提取元素类型，ADT 字段访问从 type_defs 查找字段类型。类型信息现在正确贯穿 HIR→MIR→LIR 整个编译管线。"
-    },
-    {
-      "cycle": 12,
-      "task_id": "review_cycle_12",
-      "status": "completed",
-      "details": "第12轮路线图评审：完成第10-11轮回顾（SSA修复二+三：循环Phi+赋值SSA+验证器接管道）、四维评估、问题总结、下阶段方向规划（第13-15轮：工程治理→后端整合→优化提升）、任务池更新（新增4个任务、调整3个优先级、1个标记deprecated、1个标记完成）"
-    },
-    {
-      "cycle": 11,
-      "task_id": "fix_assign_ssa",
-      "status": "completed",
-      "details": "修复赋值表达式 SSA 语义：将 MIRStore 的 result_type 从 UNIT_TYPE 改为值的类型，env[name] 从指向 val_ssa 改为指向 store 指令的 result_name，使每次赋值都产生新的 SSA 版本，MIRStore 不再是死指令。这是 SSA 完整性的最后一块核心拼图。"
-    },
-    {
-      "cycle": 11,
-      "task_id": "fix_c_backend_branch",
-      "status": "completed",
-      "details": "修复 LIR C 后端条件分支：从单向跳转 if (!cond) goto false（依赖 true 分支 fall-through 假设）改为显式双向跳转 if (cond) goto true; goto false;，确保任意基本块顺序下控制流语义都正确。低成本高价值的正确性修复。"
-    },
-    {
-      "cycle": 11,
-      "task_id": "ssa_verifier_pipeline",
-      "status": "completed",
-      "details": "SSAVerifier 接入编译管道：在 PassManager 中新增验证 Pass 机制（mir_verification_passes 列表、add_mir_verification_pass 方法、get_verification_errors 方法），验证 Pass 在优化不动点迭代完成后运行，不参与迭代；在 default_optimization_pipeline 中添加 SSAVerifier，让 SSA 验证在每次编译时自动执行。"
-    },
-    {
-      "cycle": 10,
-      "task_id": "fix_while_ssa",
-      "status": "completed",
-      "details": "修复 while 循环 SSA：重写 _lower_while_expr，env 快照对比法自动检测循环中被修改的变量，在 header 块开头插入 Phi 节点（入口边 + 回边），自动替换 header 和 body 中的旧 SSA 引用为 Phi 结果；新增 3 个通用辅助方法：_replace_ssa_in_instr、_replace_ssa_in_terminator、_replace_ssa_in_block"
-    },
-    {
-      "cycle": 10,
-      "task_id": "mir_ssa_verifier",
-      "status": "completed",
-      "details": "实现基础版 SSA 验证器 Pass（SSAVerifier）：支持 5 项检查（基本块终结指令、SSA 单赋值、使用前定义、Phi 节点位置、Phi source 块前驱验证）；手动测试验证了正确和错误场景，能正确检测未定义 SSA 名等问题"
     }
   ],
-  "current_cycle": 21,
+  "current_cycle": 22,
   "baseline_tests": 403,
   "current_tests": 418,
   "last_review_cycle": 21,
@@ -364,7 +221,7 @@
       "priority": 65,
       "category": "ir",
       "estimated": "3-5 小时",
-      "status": "pending",
+      "status": "completed",
       "depends_on": [
         "fix_mir_ssa"
       ],
@@ -753,7 +610,7 @@
       "priority": 70,
       "category": "engineering",
       "estimated": "4-6 小时",
-      "status": "pending",
+      "status": "completed",
       "depends_on": [],
       "reason": "审查日志长期显示 _execute_instruction 圈复杂度 111，是全项目最复杂的函数，也是唯一一个 CC>100 的函数。虽然字节码 VM 是解释器路径，不影响编译后端，但高复杂度导致维护困难、bug 风险高。按指令类别拆分后可大幅降低复杂度，提升可维护性。[优先级调整: 50 → 70，提升为第22轮核心任务 / 审查驱动]"
     },
@@ -838,6 +695,20 @@
         "unify_c_backend"
       ],
       "reason": "当前优化 Pass（LICM、CSE、DCE等）的效果只能手动验证，缺乏量化评估手段。建立基准测试框架后可以科学衡量优化效果，指导优化方向。[新增任务 / 自主发现]"
+    },
+    {
+      "id": "fix_wasm_bugs",
+      "name": "修复 Wasm 后端多个正确性 bug",
+      "description": "批量修复 Wasm 后端的多个正确性 bug：LIRCall 属性名错误（func_name→callee）、LIRFieldAccess 偏移量计算错误、LIRIndex 地址计算缺失、字符串null终止符转义错误",
+      "difficulty": "easy",
+      "priority": 65,
+      "category": "backend",
+      "estimated": "1-2 小时",
+      "status": "completed",
+      "depends_on": [
+        "wasm_control_flow_rewrite"
+      ],
+      "reason": "深度代码审计发现 Wasm 后端存在多个正确性 bug，影响所有使用 Wasm 后端的程序。批量修复成本低、收益高，提升 Wasm 后端的可靠性。[新增任务 / 自主发现]"
     }
   ]
 }

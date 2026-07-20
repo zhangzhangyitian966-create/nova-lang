@@ -1,6 +1,6 @@
 # Nova LLM 智能开发路线图
 
-**更新时间**: 2026-07-20 08:00:00
+**更新时间**: 2026-07-20 12:00:00
 **上次评审**: 第 21 轮（路线图评审）
 
 本路线图由 LLM 智能开发系统动态维护。
@@ -33,7 +33,7 @@
 | ✅ | 提取循环 SSA 通用方法（消除三重重复） | medium | 88 | 3-5 小时 | for_loop_ssa_normalize |
 | ✅ | 修复列表推导式 latch 块 SSA 替换不完整 | medium | 85 | 2-4 小时 | extract_loop_ssa |
 | ✅ | MIR CFG 工具与循环分析基础设施 | medium | 70 | 4-6 小时 | mir_ssa_verifier, ssa_verifier_tests |
-| ⏳ | LIR switch/match 降级补全 | medium | 65 | 3-5 小时 | fix_mir_ssa |
+| ✅ | LIR switch/match 降级补全 | medium | 65 | 3-5 小时 | fix_mir_ssa |
 
 ## 🚀 优化 Pass
 
@@ -52,6 +52,7 @@
 | ✅ | 修复 LIR C 后端条件分支 | easy | 72 | 30 分钟 | - |
 | ✅ | 修复 Wasm 后端 Label 实现 | medium | 62 | 3-5 小时 | fix_while_phi |
 | ✅ | Wasm 后端控制流重写（支持任意 CFG） | hard | 90 | 2-3 天 | fix_wasm_label |
+| ✅ | 修复 Wasm 后端多个正确性 bug | easy | 65 | 1-2 小时 | wasm_control_flow_rewrite |
 | ⏳ | 修复 Wasm 后端 StoreReg 实现 | easy | 60 | 1 小时 | wasm_control_flow_rewrite |
 | ⏳ | C 后端 LIR 路径 ADT/match 支持 | hard | 72 | 1-2 天 | lir_switch_match_lowering, unify_c_backend |
 | ⏳ | 实现原生后端函数调用 ABI | hard | 25 | 3-5 天 | fix_mir_ssa |
@@ -69,7 +70,7 @@
 | ✅ | 重构 HIRRewriter 降低圈复杂度 | easy | 75 | 2-3 小时 | refactor_visitor_pattern |
 | ✅ | 修复过宽异常捕获 | easy | 60 | 1-2 小时 | - |
 | ✅ | 批量清理未使用导入 | easy | 55 | 1-2 小时 | - |
-| ⏳ | 拆分 VM 巨型执行函数 | medium | 70 | 4-6 小时 | - |
+| ✅ | 拆分 VM 巨型执行函数 | medium | 70 | 4-6 小时 | - |
 | ⏳ | 重构 TypeChecker 降低圈复杂度 | medium | 55 | 4-6 小时 | - |
 | ⏳ | 重构 MIRLowering._lower_expr 降低圈复杂度 | medium | 58 | 3-5 小时 | - |
 
@@ -83,10 +84,10 @@
 
 ---
 
-**进度**: 38/47 (81%)
-**已完成**: 38
+**进度**: 41/49 (84%)
+**已完成**: 41
 **进行中**: 0
-**待开发**: 8
+**待开发**: 7
 **已废弃**: 1
 
-> 注：第21轮路线图评审完成。回顾第19-20轮（Wasm控制流重写 + 工程化清理 + MIR优化深化），路线图进度 70% → 81%。新增 5 个任务（3个审查驱动 + 2个自主发现），调整 3 个任务优先级。下阶段（第22-24轮）方向：第22轮工程化清理（VM巨型函数拆分 + LIR switch/match降级补全 + Wasm StoreReg修复）、第23轮C后端功能对齐（ADT/match迁移到LIR路径）、第24轮后端整合与基准测试。
+> 注：第22轮开发完成。完成 3 个任务（1 个审查驱动 + 2 个自主规划）：VM 巨型执行函数拆分（CC=111→≈5）、LIR switch/match 降级补全、Wasm 后端多 bug 修复。路线图进度 81% → 84%。测试 418 全通过，零回归。下一步（第23轮）：C 后端 LIR 路径 ADT/match 支持，推进统一 C 后端目标。
