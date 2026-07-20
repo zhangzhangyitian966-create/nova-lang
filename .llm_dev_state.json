@@ -1,5 +1,5 @@
 {
-  "cycles": 17,
+  "cycles": 18,
   "completed_tasks": [
     "unify_ir_naming",
     "for_loop_ssa_normalize",
@@ -38,10 +38,19 @@
     "fix_listcomp_ssa_latch",
     "refactor_visitor_pattern",
     "unify_backend_mappings",
-    "fix_wasm_label"
+    "fix_wasm_label",
+    "review_cycle_18"
   ],
   "failed_tasks": [],
   "task_history": [
+    {
+      "cycle": 18,
+      "task_id": "review_cycle_18",
+      "status": "completed",
+      "source": "评审轮",
+      "reason": "第 18 轮路线图评审，回顾第 16-17 轮开发（SSA 加固 + Visitor 重构 + 后端治理），进行五维评估，规划第 19-21 轮方向（Wasm 后端控制流重写 → MIR 优化深化 → 工程化清理），更新任务池（新增 6 个任务，调整 3 个优先级，补充依赖关系）。",
+      "details": "完成第16-17轮回顾：两轮共完成 7 个任务，路线图进度 62% → 81%，测试 403 → 418，零失败零回滚。五维评估：方向正确、质量持续变好、效率稳定（每轮3-4个任务）、价值高、审查对齐良好（审查驱动任务占比 57%）。发现新问题：HIRRewriter.generic_rewrite 圈复杂度 69（第17轮引入）、Wasm 后端控制流有架构缺陷、unused_import 有 95 处、too_broad_exception 有 7 处。下阶段方向：第19轮 Wasm 控制流重写、第20轮 MIR 优化深化（LICM）、第21轮工程化清理。任务池新增 6 个任务（4个审查驱动 + 2个自主发现），调整 3 个优先级。"
+    },
     {
       "cycle": 17,
       "task_id": "refactor_visitor_pattern",
@@ -157,10 +166,10 @@
       "details": "实现基础版 SSA 验证器 Pass（SSAVerifier）：支持 5 项检查（基本块终结指令、SSA 单赋值、使用前定义、Phi 节点位置、Phi source 块前驱验证）；手动测试验证了正确和错误场景，能正确检测未定义 SSA 名等问题"
     }
   ],
-  "current_cycle": 17,
+  "current_cycle": 18,
   "baseline_tests": 403,
   "current_tests": 418,
-  "last_review_cycle": 15,
+  "last_review_cycle": 18,
   "tasks": [
     {
       "id": "fix_match_lowering",
@@ -289,14 +298,14 @@
       "name": "LIR switch/match 降级补全",
       "description": "当前 MIRSwitch 和 MIRMatchJump 降级为简单的条件跳转，丢失了 switch/match 的多分支语义。需要完善 LIR 层的多分支指令支持，确保各后端能正确生成高效的分支代码",
       "difficulty": "medium",
-      "priority": 60,
+      "priority": 55,
       "category": "ir",
       "estimated": "3-5 小时",
       "status": "pending",
       "depends_on": [
         "fix_mir_ssa"
       ],
-      "reason": "MIR 层已有完整的 switch/match 支持，但降级到 LIR 时退化为简单 if-else，丢失了优化机会。完善后各后端可以基于 switch 语义生成更高效的代码（如跳转表）。[优先级调整: 70 → 60，优先级相对低于 SSA 加固和 Visitor 重构]"
+      "reason": "MIR 层已有完整的 switch/match 支持，但降级到 LIR 时退化为简单 if-else，丢失了优化机会。完善后各后端可以基于 switch 语义生成更高效的代码（如跳转表）。[优先级调整: 60 → 55，优先级低于 Wasm 控制流修复和 LICM 优化]"
     },
     {
       "id": "mir_ssa_verifier",
@@ -360,7 +369,7 @@
       "name": "统一 C 后端（LIR 路径功能对齐）",
       "description": "将 c_codegen.py 中已实现但 lir_c_backend.py 缺失的功能迁移过来：ADT 代码生成、match 编译、闭包实现、列表推导式，待功能对齐后废弃旧的 AST→C 路径",
       "difficulty": "hard",
-      "priority": 80,
+      "priority": 75,
       "category": "architecture",
       "estimated": "2-3 天",
       "status": "pending",
@@ -369,7 +378,7 @@
         "fix_mir_ssa",
         "refactor_visitor_pattern"
       ],
-      "reason": "目前有两套 C 代码生成路径（AST 路径功能完整，LIR 路径仅阶段一），功能重叠增加维护成本。SSA 基础打好后，统一到 LIR→C 路径可以让所有后端共享 IR 优化成果。[优先级调整: 82 → 80，依赖 Visitor 重构后再推进，列为第18轮任务]"
+      "reason": "目前有两套 C 代码生成路径（AST 路径功能完整，LIR 路径仅阶段一），功能重叠增加维护成本。SSA 基础打好后，统一到 LIR→C 路径可以让所有后端共享 IR 优化成果。[优先级调整: 80 → 75，Wasm 后端架构缺陷优先级更高]"
     },
     {
       "id": "unify_backend_mappings",
@@ -602,6 +611,87 @@
       "status": "completed",
       "depends_on": [],
       "reason": "深度审计发现 C 后端 LIR 路径的条件分支依赖 fall-through 假设，非顺序 CFG 下生成错误代码。高价值低成本修复"
+    },
+    {
+      "id": "wasm_control_flow_rewrite",
+      "name": "Wasm 后端控制流重写（支持任意 CFG）",
+      "description": "当前 Wasm 后端用 block 嵌套模拟任意 CFG，但 Wasm 的 br 只能向外层跳出，无法向前跳转，循环（向后跳转）完全失效。需要重写控制流生成：采用显式 PC 变量 + br_table 方案，将任意 CFG 转换为 Wasm 支持的结构化控制流",
+      "difficulty": "hard",
+      "priority": 90,
+      "category": "backend",
+      "estimated": "2-3 天",
+      "status": "pending",
+      "depends_on": [
+        "fix_wasm_label"
+      ],
+      "reason": "深度代码审计发现 Wasm 后端有架构级缺陷：控制流用 block 嵌套方案无法处理循环等向后跳转，生成的 Wasm 代码语法正确但语义错误（循环不工作）。这是当前后端最严重的正确性问题，必须优先修复。[新增任务 / 自主发现]"
+    },
+    {
+      "id": "implement_licm_pass",
+      "name": "实现循环不变量外提 Pass (LICM)",
+      "description": "在 MIR 层实现 LoopInvariantCodeMotion Pass：识别循环结构（支配树 + 回边检测），判断循环不变量（操作数都在循环外定义），将不变指令移动到循环前置头",
+      "difficulty": "hard",
+      "priority": 65,
+      "category": "optimization",
+      "estimated": "1-2 周",
+      "status": "pending",
+      "depends_on": [
+        "fix_mir_ssa",
+        "cse_pass",
+        "mir_ssa_verifier",
+        "ssa_verifier_tests"
+      ],
+      "reason": "SSA 验证器已有完整测试覆盖，MIR 优化管线基础打好了，现在是推进高级优化的时机。LICM 是经典优化 Pass，对循环密集型代码性能提升显著。[优先级调整: 35 → 65]"
+    },
+    {
+      "id": "refactor_hir_rewriter_complexity",
+      "name": "重构 HIRRewriter 降低圈复杂度",
+      "description": "HIRRewriter.generic_rewrite 圈复杂度 69（Top 2 最复杂函数），24 个节点类型的递归重写都在一个函数里。需要拆分为多个方法（每个节点类型一个 visit_xxx 方法），降低单函数复杂度，提升可维护性",
+      "difficulty": "easy",
+      "priority": 75,
+      "category": "engineering",
+      "estimated": "2-3 小时",
+      "status": "pending",
+      "depends_on": [
+        "refactor_visitor_pattern"
+      ],
+      "reason": "审查日志第1495轮显示 HIRRewriter.generic_rewrite 圈复杂度 69，已攀升至 Top 2 最复杂函数（仅次于 vm.py 的 111）。这是第17轮 Visitor 重构引入的新问题——把分散在各处的重复代码集中到一个大函数里了。需要进一步拆分以降低复杂度。[新增任务 / 审查驱动]"
+    },
+    {
+      "id": "clean_unused_imports",
+      "name": "批量清理未使用导入",
+      "description": "审查日志显示有 95 处 unused_import（MEDIUM 级别），批量清理所有未使用的导入语句，提升代码整洁度，减少模块加载开销",
+      "difficulty": "easy",
+      "priority": 55,
+      "category": "engineering",
+      "estimated": "1-2 小时",
+      "status": "pending",
+      "depends_on": [],
+      "reason": "审查日志持续报告 95 处未使用导入，是数量最多的 MEDIUM 级别问题。批量清理成本低、收益高，能直接降低审查问题数。[新增任务 / 审查驱动]"
+    },
+    {
+      "id": "fix_too_broad_exceptions",
+      "name": "修复过宽异常捕获",
+      "description": "审查日志显示有 7 处 too_broad_exception（MEDIUM 级别），逐个将 except Exception 替换为具体的异常类型，添加日志记录，避免静默吞噬真实错误",
+      "difficulty": "easy",
+      "priority": 60,
+      "category": "engineering",
+      "estimated": "1-2 小时",
+      "status": "pending",
+      "depends_on": [],
+      "reason": "审查日志报告 7 处过宽异常捕获，会隐藏真实错误导致调试困难。逐个修复成本低，能提升代码健壮性和可调试性。[新增任务 / 审查驱动]"
+    },
+    {
+      "id": "split_vm_execute_instruction",
+      "name": "拆分 VM 巨型执行函数",
+      "description": "NovaVM._execute_instruction 圈复杂度 111（全项目最高），是一个 400+ 行的巨型 switch 函数。需要按指令类别拆分为多个方法（算术运算、比较、控制流、数据结构、函数调用等），降低单函数复杂度",
+      "difficulty": "medium",
+      "priority": 50,
+      "category": "engineering",
+      "estimated": "4-6 小时",
+      "status": "pending",
+      "depends_on": [],
+      "reason": "审查日志长期显示 _execute_instruction 圈复杂度 111，是全项目最复杂的函数。虽然字节码 VM 是解释器路径，不影响编译后端，但高复杂度导致维护困难、bug 风险高。[新增任务 / 审查驱动]"
     }
   ]
 }

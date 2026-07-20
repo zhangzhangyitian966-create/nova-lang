@@ -1,7 +1,7 @@
 # Nova LLM 智能开发路线图
 
-**更新时间**: 2026-07-19 17:15:00
-**上次评审**: 第 15 轮（路线图评审）
+**更新时间**: 2026-07-20 04:06:00
+**上次评审**: 第 18 轮（路线图评审）
 
 本路线图由 LLM 智能开发系统动态维护。
 
@@ -11,7 +11,7 @@
 |------|------|------|--------|------|------|
 | ✅ | C 后端接入统一 IR 管线 | hard | 95 | 2-3 天 | - |
 | ✅ | C 后端 LIR 代码生成基础框架 | medium | 92 | 1 天 | - |
-| ⏳ | 统一 C 后端（LIR 路径功能对齐） | hard | 80 | 2-3 天 | fix_match_lowering, fix_mir_ssa, refactor_visitor_pattern |
+| ⏳ | 统一 C 后端（LIR 路径功能对齐） | hard | 75 | 2-3 天 | fix_match_lowering, fix_mir_ssa, refactor_visitor_pattern |
 
 ## 🔧 IR 降级 / 正确性
 
@@ -32,7 +32,7 @@
 | ✅ | for 循环 SSA 规范化（去除 hack 式替换） | medium | 76 | 3-5 小时 | fix_mir_ssa |
 | ✅ | 提取循环 SSA 通用方法（消除三重重复） | medium | 88 | 3-5 小时 | for_loop_ssa_normalize |
 | ✅ | 修复列表推导式 latch 块 SSA 替换不完整 | medium | 85 | 2-4 小时 | extract_loop_ssa |
-| ⏳ | LIR switch/match 降级补全 | medium | 60 | 3-5 小时 | fix_mir_ssa |
+| ⏳ | LIR switch/match 降级补全 | medium | 55 | 3-5 小时 | fix_mir_ssa |
 
 ## 🚀 优化 Pass
 
@@ -41,7 +41,7 @@
 | ✅ | 实现死代码消除 Pass (DCE) | easy | 90 | 1-2 小时 | - |
 | ✅ | 实现函数内联 Pass | medium | 80 | 2-4 小时 | - |
 | ✅ | 实现公共子表达式消除 Pass (CSE) | medium | 75 | 3-5 小时 | - |
-| ⏳ | 实现循环不变量外提 Pass (LICM) | hard | 35 | 1-2 周 | fix_mir_ssa, cse_pass, mir_ssa_verifier, ssa_verifier_tests |
+| ⏳ | 实现循环不变量外提 Pass (LICM) | hard | 65 | 1-2 周 | fix_mir_ssa, cse_pass, mir_ssa_verifier, ssa_verifier_tests |
 
 ## ⚙️ 后端开发
 
@@ -50,6 +50,7 @@
 | ✅ | 补充 WasmGC StoreReg 实现 | easy | 65 | 1 小时 | - |
 | ✅ | 修复 LIR C 后端条件分支 | easy | 72 | 30 分钟 | - |
 | ✅ | 修复 Wasm 后端 Label 实现 | medium | 62 | 3-5 小时 | fix_while_phi |
+| ⏳ | Wasm 后端控制流重写（支持任意 CFG） | hard | 90 | 2-3 天 | fix_wasm_label |
 | ⏳ | 实现原生后端函数调用 ABI | hard | 25 | 3-5 天 | fix_mir_ssa |
 
 ## 🛠️ 工程质量
@@ -62,6 +63,10 @@
 | ✅ | 修复 ConstantFolding 的 __class__ 突变问题 | easy | 70 | 1-2 小时 | - |
 | ✅ | 引入 IR Visitor 模式消除重复遍历 | medium | 82 | 6-8 小时 | unify_ir_naming, fix_constant_folding_class |
 | ✅ | 统一后端类型/操作符映射表 | easy | 68 | 2-3 小时 | unify_ir_naming |
+| ⏳ | 重构 HIRRewriter 降低圈复杂度 | easy | 75 | 2-3 小时 | refactor_visitor_pattern |
+| ⏳ | 修复过宽异常捕获 | easy | 60 | 1-2 小时 | - |
+| ⏳ | 批量清理未使用导入 | easy | 55 | 1-2 小时 | - |
+| ⏳ | 拆分 VM 巨型执行函数 | medium | 50 | 4-6 小时 | - |
 
 ## 🧪 测试完善
 
@@ -72,10 +77,10 @@
 
 ---
 
-**进度**: 30/37 (81%)
+**进度**: 30/43 (70%)
 **已完成**: 30
 **进行中**: 0
-**待开发**: 6
+**待开发**: 12
 **已废弃**: 1
 
-> 注：第17轮完成 3 个任务（Visitor模式重构、后端映射统一、Wasm Label修复）。其中 Visitor 模式重构是第17轮核心工程治理任务，消除约300行重复代码。下阶段（第18轮）聚焦：C 后端 LIR 功能对齐。
+> 注：第18轮路线图评审完成。新增 6 个任务（Wasm 控制流重写、LICM 优化、HIRRewriter 复杂度重构、未使用导入清理、过宽异常修复、VM 巨型函数拆分）。调整 3 个优先级（unify_c_backend 75, lir_switch_match_lowering 55, licm_pass 65）。下阶段（第 19-21 轮）聚焦：Wasm 后端控制流重写 → MIR 优化深化（LICM）→ 工程化清理。
