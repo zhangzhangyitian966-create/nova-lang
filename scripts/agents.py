@@ -7,10 +7,8 @@ Nova LLM 多智能体开发系统 v1.0
 """
 
 import os
-import sys
 import subprocess
 from datetime import datetime
-from typing import List, Dict, Any
 
 # 配置
 PROJECT_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))

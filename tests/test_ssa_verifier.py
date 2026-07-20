@@ -15,8 +15,6 @@ import unittest
 
 from nova.ir.ir_nodes import (
     INT_TYPE,
-    BOOL_TYPE,
-    UNIT_TYPE,
     MIRModule,
     MIRFunction,
     MIRBasicBlock,
@@ -24,7 +22,6 @@ from nova.ir.ir_nodes import (
     MIRBinOp,
     MIRPhi,
     MIRJump,
-    MIRBranch,
     MIRReturn,
 )
 from nova.ir.pass_manager import SSAVerifier

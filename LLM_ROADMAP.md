@@ -1,6 +1,6 @@
 # Nova LLM 智能开发路线图
 
-**更新时间**: 2026-07-20 04:06:00
+**更新时间**: 2026-07-20 05:15:00
 **上次评审**: 第 18 轮（路线图评审）
 
 本路线图由 LLM 智能开发系统动态维护。
@@ -50,7 +50,7 @@
 | ✅ | 补充 WasmGC StoreReg 实现 | easy | 65 | 1 小时 | - |
 | ✅ | 修复 LIR C 后端条件分支 | easy | 72 | 30 分钟 | - |
 | ✅ | 修复 Wasm 后端 Label 实现 | medium | 62 | 3-5 小时 | fix_while_phi |
-| ⏳ | Wasm 后端控制流重写（支持任意 CFG） | hard | 90 | 2-3 天 | fix_wasm_label |
+| ✅ | Wasm 后端控制流重写（支持任意 CFG） | hard | 90 | 2-3 天 | fix_wasm_label |
 | ⏳ | 实现原生后端函数调用 ABI | hard | 25 | 3-5 天 | fix_mir_ssa |
 
 ## 🛠️ 工程质量
@@ -63,9 +63,9 @@
 | ✅ | 修复 ConstantFolding 的 __class__ 突变问题 | easy | 70 | 1-2 小时 | - |
 | ✅ | 引入 IR Visitor 模式消除重复遍历 | medium | 82 | 6-8 小时 | unify_ir_naming, fix_constant_folding_class |
 | ✅ | 统一后端类型/操作符映射表 | easy | 68 | 2-3 小时 | unify_ir_naming |
-| ⏳ | 重构 HIRRewriter 降低圈复杂度 | easy | 75 | 2-3 小时 | refactor_visitor_pattern |
+| ✅ | 重构 HIRRewriter 降低圈复杂度 | easy | 75 | 2-3 小时 | refactor_visitor_pattern |
 | ⏳ | 修复过宽异常捕获 | easy | 60 | 1-2 小时 | - |
-| ⏳ | 批量清理未使用导入 | easy | 55 | 1-2 小时 | - |
+| ✅ | 批量清理未使用导入 | easy | 55 | 1-2 小时 | - |
 | ⏳ | 拆分 VM 巨型执行函数 | medium | 50 | 4-6 小时 | - |
 
 ## 🧪 测试完善
@@ -77,10 +77,10 @@
 
 ---
 
-**进度**: 30/43 (70%)
-**已完成**: 30
+**进度**: 33/43 (77%)
+**已完成**: 33
 **进行中**: 0
-**待开发**: 12
+**待开发**: 9
 **已废弃**: 1
 
-> 注：第18轮路线图评审完成。新增 6 个任务（Wasm 控制流重写、LICM 优化、HIRRewriter 复杂度重构、未使用导入清理、过宽异常修复、VM 巨型函数拆分）。调整 3 个优先级（unify_c_backend 75, lir_switch_match_lowering 55, licm_pass 65）。下阶段（第 19-21 轮）聚焦：Wasm 后端控制流重写 → MIR 优化深化（LICM）→ 工程化清理。
+> 注：第19轮完成 3 个任务（Wasm 控制流重写、HIRRewriter 复杂度重构、未使用导入清理）。下阶段（第 20-21 轮）聚焦：MIR 优化深化（LICM）→ 工程化清理（过宽异常 + VM 巨型函数拆分）。

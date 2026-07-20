@@ -266,7 +266,6 @@ def stage3_create_backup() -> Optional[str]:
 def ensure_pytest() -> bool:
     """确保 pytest 可用，不可用则安装"""
     try:
-        import pytest
         return True
     except ImportError:
         print_step("dep", "安装 pytest...")

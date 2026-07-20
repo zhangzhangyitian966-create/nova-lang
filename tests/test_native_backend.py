@@ -4,13 +4,18 @@ Nova test_native_backend 模块
 本模块是 Nova 编程语言的组成部分。
 """
 import unittest
-import os
 import struct
 
 from nova.backend.x86_64 import (
-    X86_64Emitter, RAX, RBX, RCX, RDX, RSP, RBP, RDI, RSI,
-    R8, R9, R10, R11, R12, R13, R14, R15,
-    XMM0, XMM1, CALLER_SAVED, CALLEE_SAVED, ARG_REGS, RETURN_REG,
+    X86_64Emitter,
+    RAX,
+    RBX,
+    RCX,
+    RDX,
+    RDI,
+    R8,
+    R9,
+    XMM0,
 )
 from nova.backend.native_backend import (
     NativeCodeGen, LinearScanAllocator, LiveInterval,
@@ -18,9 +23,11 @@ from nova.backend.native_backend import (
 
 # 直接导入 IR 节点
 from nova.ir.ir_nodes import (
-    LIRModule, LIRFunction, LIRLoadConst, LIRReturn,
-    IRType, NovaType,
-    INT_TYPE, FLOAT_TYPE, STRING_TYPE, BOOL_TYPE, UNIT_TYPE,
+    LIRModule,
+    LIRFunction,
+    LIRLoadConst,
+    LIRReturn,
+    INT_TYPE,
 )
 
 

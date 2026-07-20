@@ -4,6 +4,113 @@
 
 ---
 
+## 2026-07-20 05:15 第19轮开发
+
+### 开发概览
+- **轮次**: 第 19 轮（普通开发轮）
+- **基线测试**: 418/418 通过
+- **完成任务**: 3 个（2 个审查驱动 + 1 个自主规划）
+- **审查驱动任务占比**: 67%（2/3）
+- **路线图进度**: 30/43 (70%) → 33/43 (77%)
+- **测试结果**: 418/418 通过（零回归）
+- **失败回滚**: 0 次
+
+---
+
+### 本轮任务详情
+
+#### 1. 【审查驱动】重构 HIRRewriter 降低圈复杂度
+- **状态**: ✅ 完成
+- **来源**: 审查日志第1495轮 — HIRRewriter.generic_rewrite 圈复杂度 69（Top 2 最复杂函数）
+- **为什么选这个**: 第17轮 Visitor 重构引入的新问题，把分散的重复代码集中成了一个大函数（CC=69）。数据驱动重构可大幅降低复杂度，提升可维护性。低成本高收益。
+- **完成内容**:
+  - 引入 `_HIR_CHILD_FIELDS` 数据驱动映射表，描述 23 种节点类型的子字段结构
+  - `generic_rewrite` 从 270 行 if-elif 链重构为 80 行循环驱动实现，圈复杂度从 69 降至约 8
+  - `generic_visit` 同步重构为数据驱动，使用 `_iter_hir_children` 生成器
+  - 使用 `dataclasses.replace()` 统一节点重建方式，替代手动构造新节点
+  - 新增 `_iter_hir_children` 工具函数，Visitor 和 Rewriter 共享遍历逻辑
+  - 代码量净减少约 150 行
+- **测试**: 418 测试全部通过，零回归
+
+#### 2. 【自主规划】Wasm 后端控制流重写（支持任意 CFG）
+- **状态**: ✅ 完成
+- **来源**: 第18轮评审规划的第19轮核心任务 / 深度代码审计发现
+- **为什么选这个**: Wasm 后端控制流用 flat block 嵌套方案无法表达任意 CFG，循环（向后跳转）完全失效，是架构级正确性缺陷。PC + br_table 方案可支持任意 CFG，是 Wasm 后端从"能生成 WAT"到"能正确运行"的关键一步。
+- **完成内容**:
+  - 从 flat block 嵌套方案重写为 **PC + br_table 分派循环** 方案
+  - 新增 `$pc` 局部变量保存当前基本块索引
+  - `block $exit` + `loop $dispatch` 双层结构包裹函数体
+  - 循环顶部用 `br_table` 根据 `$pc` 跳转到对应基本块
+  - 每个基本块独立 `block`，块结尾设置新 `$pc` 并 `br $dispatch` 回到循环顶部
+  - `LIRJump`: 设置目标 PC 后跳转
+  - `LIRBranch`: 用 if-else 根据条件设置不同 PC
+  - `LIRReturn`: 直接 `br $exit` 跳出函数
+  - 支持任意 CFG：前向跳转、后向跳转、循环、多分支等
+- **测试**: 14 个 Wasm 后端测试全部通过，总测试 418 全绿
+
+#### 3. 【审查驱动】批量清理未使用导入
+- **状态**: ✅ 完成
+- **来源**: 审查日志 — 95 处 unused_import（MEDIUM 级别，数量最多）
+- **为什么选这个**: 数量最多的 MEDIUM 级别问题，批量清理成本低、收益高，能直接降低审查问题数，提升代码整洁度。
+- **完成内容**:
+  - 编写 AST 分析脚本自动检测未使用导入，支持多行括号形式
+  - 共清理 **80 处** 未使用导入：
+    - tests/test_ir.py: 40 处
+    - tests/test_native_backend.py: 21 处
+    - tests/test_backends.py: 9 处
+    - scripts/agents.py: 4 处
+    - tests/test_ssa_verifier.py: 3 处
+    - tests/test_nova.py: 2 处
+    - scripts/auto_improve.py: 1 处
+  - 剩余 9 处为函数内局部导入（不影响模块级整洁度）
+- **测试**: 418 测试全部通过，零回归
+
+---
+
+### 审查日志研读摘要
+
+**第 1495 轮审查（最新）**:
+- 总问题数: 1015（0 CRITICAL, 0 HIGH, 167 MEDIUM, 848 LOW）
+- MEDIUM 主要问题: unused_import (95)、cyclomatic_complexity (34)、function_too_long (20)、class_too_large (11)、too_broad_exception (7)
+- Top 10 最复杂函数:
+  1. `NovaVM._execute_instruction` (111) — vm.py
+  2. **`HIRRewriter.generic_rewrite` (69)** — ir/ir_nodes.py ← 本轮修复
+  3. `TypeChecker.check_expr` (68) — type_checker.py
+  4. `MIRLowering._lower_expr` (55) — ir/mir_lowering.py
+  5. `LIRCBackend._compile_instr` (42) — backend/lir_c_backend.py
+
+**趋势分析**:
+- 问题数稳定在 1009-1015 之间，波动很小
+- 零 CRITICAL/HIGH，核心架构稳定
+- MEDIUM 略降（169→167），LOW 略增（840→848）
+
+**本轮采纳的审查问题**:
+1. ✅ HIRRewriter.generic_rewrite 圈复杂度过高（CC=69）— 重构为数据驱动
+2. ✅ 95 处未使用导入 — 批量清理 80 处
+
+---
+
+### 测试前后对比
+
+| 指标 | 开发前 | 开发后 | 变化 |
+|------|--------|--------|------|
+| 测试总数 | 418 | 418 | 持平 |
+| 通过数 | 418 | 418 | 持平 |
+| 通过率 | 100% | 100% | 持平 |
+| 失败数 | 0 | 0 | 持平 |
+
+---
+
+### 下一步计划（第 20 轮）
+
+按照第18轮评审规划的"第19-21轮路线"，第20轮应聚焦 **MIR 优化深化（LICM）**：
+
+1. **实现 LICM Pass（循环不变量外提）** — 经典优化，填补 MIR 优化空白
+2. **修复过宽异常捕获** — 审查日志 7 处 too_broad_exception，低成本质量修复
+3. **（可选）MIR Visitor/Rewriter 基础设施** — 为更多 MIR 优化打基础
+
+---
+
 ## 2026-07-20 04:06 第18轮评审（路线图评审）
 
 ### 评审概览

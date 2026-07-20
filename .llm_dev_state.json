@@ -1,5 +1,5 @@
 {
-  "cycles": 18,
+  "cycles": 19,
   "completed_tasks": [
     "unify_ir_naming",
     "for_loop_ssa_normalize",
@@ -39,10 +39,37 @@
     "refactor_visitor_pattern",
     "unify_backend_mappings",
     "fix_wasm_label",
-    "review_cycle_18"
+    "review_cycle_18",
+    "refactor_hir_rewriter_complexity",
+    "wasm_control_flow_rewrite",
+    "clean_unused_imports"
   ],
   "failed_tasks": [],
   "task_history": [
+    {
+      "cycle": 19,
+      "task_id": "refactor_hir_rewriter_complexity",
+      "status": "completed",
+      "source": "审查驱动",
+      "reason": "审查日志显示 HIRRewriter.generic_rewrite 圈复杂度 69（Top 2 最复杂函数），是第17轮 Visitor 重构引入的新问题。数据驱动重构可大幅降低复杂度，提升可维护性。",
+      "details": "引入 _HIR_CHILD_FIELDS 数据驱动映射表（23 种节点类型的子字段描述），将 generic_rewrite 从 270 行的 if-elif 链（CC=69）重构为 80 行的循环驱动实现（CC≈8），同时重构 generic_visit。使用 dataclasses.replace 统一节点重建方式。新增 _iter_hir_children 工具函数供 Visitor 和 Rewriter 共享遍历逻辑。圈复杂度从 69 降至约 8，代码量减少约 150 行。"
+    },
+    {
+      "cycle": 19,
+      "task_id": "wasm_control_flow_rewrite",
+      "status": "completed",
+      "source": "自主规划",
+      "reason": "第18轮评审规划的第19轮核心任务。Wasm 后端控制流用 flat block 嵌套方案无法表达任意 CFG，循环（向后跳转）完全失效，是架构级正确性缺陷。PC + br_table 方案可支持任意 CFG。",
+      "details": "Wasm 后端控制流从 flat block 嵌套方案重写为 PC + br_table 分派循环方案：新增 $pc 局部变量保存基本块索引，用 block $exit + loop $dispatch 双层结构包裹函数体，循环顶部用 br_table 根据 $pc 跳转到对应基本块，每个基本块结尾设置新 $pc 并 br $dispatch 回到循环顶部。LIRJump 设置 PC 后跳转，LIRBranch 用 if-else 设置不同 PC，LIRReturn 直接 br $exit 跳出。支持任意 CFG（前向跳转、后向跳转、循环等）。"
+    },
+    {
+      "cycle": 19,
+      "task_id": "clean_unused_imports",
+      "status": "completed",
+      "source": "审查驱动",
+      "reason": "审查日志显示 95 处 unused_import（MEDIUM 级别），是数量最多的 MEDIUM 问题。批量清理成本低、收益高，能直接降低审查问题数，提升代码整洁度。",
+      "details": "编写 AST 分析脚本自动检测并移除未使用导入，支持多行括号形式。共清理 80 处未使用导入：test_ir.py 40处、test_native_backend.py 21处、test_backends.py 9处、scripts/agents.py 4处、test_ssa_verifier.py 3处、test_nova.py 2处、scripts/auto_improve.py 1处。剩余 9 处为函数内局部导入，不影响模块级整洁度。"
+    },
     {
       "cycle": 18,
       "task_id": "review_cycle_18",
@@ -166,7 +193,7 @@
       "details": "实现基础版 SSA 验证器 Pass（SSAVerifier）：支持 5 项检查（基本块终结指令、SSA 单赋值、使用前定义、Phi 节点位置、Phi source 块前驱验证）；手动测试验证了正确和错误场景，能正确检测未定义 SSA 名等问题"
     }
   ],
-  "current_cycle": 18,
+  "current_cycle": 19,
   "baseline_tests": 403,
   "current_tests": 418,
   "last_review_cycle": 18,
@@ -620,7 +647,7 @@
       "priority": 90,
       "category": "backend",
       "estimated": "2-3 天",
-      "status": "pending",
+      "status": "completed",
       "depends_on": [
         "fix_wasm_label"
       ],
@@ -651,7 +678,7 @@
       "priority": 75,
       "category": "engineering",
       "estimated": "2-3 小时",
-      "status": "pending",
+      "status": "completed",
       "depends_on": [
         "refactor_visitor_pattern"
       ],
@@ -665,7 +692,7 @@
       "priority": 55,
       "category": "engineering",
       "estimated": "1-2 小时",
-      "status": "pending",
+      "status": "completed",
       "depends_on": [],
       "reason": "审查日志持续报告 95 处未使用导入，是数量最多的 MEDIUM 级别问题。批量清理成本低、收益高，能直接降低审查问题数。[新增任务 / 审查驱动]"
     },

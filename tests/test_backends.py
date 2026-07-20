@@ -7,13 +7,22 @@ import os
 import tempfile
 
 from nova.ir.ir_nodes import (
-    IRType, NovaType,
-    INT_TYPE, FLOAT_TYPE, STRING_TYPE, BOOL_TYPE, UNIT_TYPE,
-    LIRModule, LIRFunction, LIRGlobal, LIRData,
-    LIRLoadConst, LIRBinOp, LIRUnaryOp, LIRCall,
-    LIRJump, LIRBranch, LIRReturn, LIRLabel,
-    LIRBuildList, LIRBuildTuple, LIRBuildADT, LIRPanic,
-    HIRModule, MIRModule,
+    IRType,
+    NovaType,
+    INT_TYPE,
+    FLOAT_TYPE,
+    STRING_TYPE,
+    BOOL_TYPE,
+    UNIT_TYPE,
+    LIRModule,
+    LIRFunction,
+    LIRLoadConst,
+    LIRBinOp,
+    LIRCall,
+    LIRReturn,
+    LIRLabel,
+    HIRModule,
+    MIRModule,
     LIRInstr,
 )
 from nova.backend.cranelift_backend import CraneliftBackend

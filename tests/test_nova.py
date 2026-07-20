@@ -33,9 +33,7 @@ from nova.ast_nodes import (
     FnCall,
     PipeExpr,
     Block,
-    UnitLiteral,
 )
-from nova.environment import Environment
 
 # ============================================================
 # 辅助函数
