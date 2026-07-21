@@ -3,17 +3,15 @@
 Nova 基准测试运行脚本
 
 用法:
-    python3 -m tests.benchmarks.run_benchmarks
-    python3 tests/benchmarks/run_benchmarks.py
+    cd /workspace/nova && python3 tests/benchmarks/run_benchmarks.py  # 直接运行
+    python3 -m nova.tests.benchmarks.run_benchmarks  # 模块方式运行
+    python3 -m pytest tests/benchmarks/  # 通过 pytest 运行
 """
 
 import sys
-from pathlib import Path
 
-# 确保项目根目录在路径中
-sys.path.insert(0, str(Path(__file__).parent.parent.parent))
-
-from tests.benchmarks import run_all_benchmarks, list_builtin_cases
+# 标准包导入（tests 已纳入 nova 包结构）
+from nova.tests.benchmarks.runner import run_all_benchmarks, list_builtin_cases
 
 
 def print_results(results):

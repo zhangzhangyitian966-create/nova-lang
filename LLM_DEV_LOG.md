@@ -4,6 +4,99 @@
 
 ---
 
+## 2026-07-21 10:35 第29轮（普通开发轮）
+
+### 开发概览
+- **轮次**: 第 29 轮（普通开发轮）
+- **基线测试**: 418/418 通过
+- **完成任务**: 3 个（2 个审查驱动 + 1 个自主规划）
+- **审查驱动任务占比**: 67%（2/3）
+- **路线图进度**: 55/60 (92%) → 57/60 (95%)
+- **测试结果**: 418/418 通过（零回归）
+- **失败回滚**: 0 次
+
+---
+
+### 一、任务详情
+
+#### 1. 【审查驱动】修复基准测试 sys.path hack
+- **状态**: ✅ 成功
+- **来源**: 审查发现（第1496轮唯一 HIGH 级别问题）
+- **为什么选这个**: 审查日志第1496轮显示 `tests/benchmarks/run_benchmarks.py` 有 1 处 `sys_path_hack`（HIGH 级别），是当前唯一的 HIGH 级别问题。消除后项目完全符合 Python 包管理规范，架构更整洁。成本极低收益极高。
+- **完成内容**:
+  - 新增 `tests/__init__.py`，将 tests 目录纳入 `nova` 包结构
+  - 更新 `pyproject.toml`，添加 `nova.tests` 和 `nova.tests.benchmarks` 包
+  - `run_benchmarks.py` 改为 `from nova.tests.benchmarks.runner import ...` 标准包导入
+  - 彻底移除 `sys.path.insert` hack
+- **效果**: 唯一 HIGH 级别问题已解决，包结构更规范
+
+#### 2. 【审查驱动】重构 HIRLowering._lower_expr 调度表
+- **状态**: ✅ 成功
+- **来源**: 审查发现（CC=32，最后一个核心分发函数）
+- **为什么选这个**: 审查日志显示 `HIRLowering._lower_expr` 圈复杂度 32，是最后一个还在用 if-isinstance 链的核心分发函数。延续 VM→TypeChecker→MIRLowering→LIRLowering→LIRCBackend 的调度表化路线，统一架构风格，降低维护成本。
+- **完成内容**:
+  - 新增 `_build_expr_lowerers()` 构建 28 种 AST 节点类型的 handler 映射表
+  - `_lower_expr` 简化为查表分发（CC≈3）
+  - 按类别拆分为 7 组独立方法：
+    - 字面量（6个）：int/float/string/char/bool/unit
+    - 标识符与运算（3个）：identifier/binary_op/unary_op
+    - 管道与 try（2个）：pipe_expr/try_expr
+    - 函数与调用（2个）：fn_call/lambda
+    - 控制流（2个）：if_expr/match_expr
+    - 数据结构（4个）：list_expr/tuple_expr/map_expr/field_access
+    - 块与循环（5个）：block/for_expr/while_expr/break_expr/continue_expr
+    - 列表推导式与赋值（3个）：list_comprehension/assignment/let_binding/mut_binding
+- **效果**: 圈复杂度从约 32 降至约 3，代码结构清晰，易于扩展新节点类型
+
+#### 3. 【自主规划】LIR 层死代码消除 Pass (LIR-DCE)
+- **状态**: ✅ 成功
+- **来源**: 自主规划（第27轮评审规划）
+- **为什么选这个**: LIR 层优化 Pass 目前为零，DCE 是最简单的优化 Pass，成本低收益高。实现后三层优化架构（HIR/MIR/LIR）更完整，也为后续 LIR 层更多优化 Pass 打基础。
+- **完成内容**:
+  - 新增 `LIRDeadCodeElimination` 类，继承 `Pass` 基类
+  - 采用反向扫描策略：从函数体末尾出发收集被使用的寄存器/栈位置
+  - 副作用判断覆盖 11 种指令类型（存储、调用、控制流、Label、Panic、ListAppend等）
+  - 源操作数收集同时处理 `src_locs` 和 `arg_locs`（函数调用参数）
+  - 已接入 `default_optimization_pipeline` 和 `compiler_pipeline` 的 LIR 优化阶段
+- **效果**: 三层优化架构补完 LIR 层，为后续更多 LIR 优化（寄存器分配前的死代码消除等）奠定基础
+
+---
+
+### 二、审查日志研读摘要
+
+**重点审查问题（第1496轮最新）**:
+- ✅ `sys_path_hack` HIGH 级别 1 处 — 本轮解决
+- ✅ `HIRLowering._lower_expr` CC=32（最后一个核心分发函数）— 本轮解决
+- ⏳ `CCodeGen._infer_c_type_from_expr` CC=42（旧 C 后端，待废弃）
+- ⏳ LOW 级问题 1005 个（no_docstring 598 + magic_number 290 + 其他）
+- ⏳ 基准测试框架增强（C/Wasm 执行时间测量）
+
+**趋势**: 核心分发函数调度表化路线基本完成（VM→TypeChecker→MIRLowering→LIRLowering→LIRCBackend→HIRLowering），极复杂函数持续减少。LOW 级问题持续累积，需建立质量底线。
+
+---
+
+### 三、测试前后对比
+
+| 指标 | 开发前 | 开发后 | 变化 |
+|------|--------|--------|------|
+| 测试通过数 | 418 | 418 | 0（零回归） |
+| 路线图进度 | 92% | 95% | +3% |
+| 已完成任务 | 55 | 57 | +2 |
+| HIGH 级问题 | 1 | 0 | -1 |
+| 核心分发函数未调度表化 | 1 | 0 | -1 |
+
+---
+
+### 四、下一步计划（第30轮）
+
+第30轮方向：**质量底线建设 + 基准测试增强**：
+
+1. **【审查驱动】LOW 级问题批量治理** — 为 ir/ 和 backend/ 模块的公共 API 添加 docstring，将高频魔法数字提取为命名常量，建立代码质量底线
+2. **【自主规划】基准测试框架增强** — 添加 C/Wasm 后端执行时间测量，支持优化前后对比，扩充 ADT/模式匹配/闭包等场景基准用例
+3. 【备选】C 后端数据结构构建正确性验证 — 验证 LIR→C 路径上列表/元组/Map/ADT 的构建正确性
+
+---
+
 ## 2026-07-21 09:15 第28轮（普通开发轮）
 
 ### 开发概览

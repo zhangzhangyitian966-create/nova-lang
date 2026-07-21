@@ -1,6 +1,6 @@
 # Nova LLM 智能开发路线图
 
-**更新时间**: 2026-07-21 09:15:00
+**更新时间**: 2026-07-21 10:35:00
 **上次评审**: 第 27 轮（路线图评审）
 
 本路线图由 LLM 智能开发系统动态维护。
@@ -43,7 +43,7 @@
 | ✅ | 实现函数内联 Pass | medium | 80 | 2-4 小时 | - |
 | ✅ | 实现公共子表达式消除 Pass (CSE) | medium | 75 | 3-5 小时 | - |
 | ✅ | 实现循环不变量外提 Pass (LICM) | hard | 65 | 1-2 周 | fix_mir_ssa, cse_pass, mir_ssa_verifier, ssa_verifier_tests |
-| ⏳ | LIR 层死代码消除 Pass (LIR-DCE) | easy | 70 | 2-3 小时 | mir_ssa_verifier |
+| ✅ | LIR 层死代码消除 Pass (LIR-DCE) | easy | 70 | 2-3 小时 | mir_ssa_verifier |
 
 ## ⚙️ 后端开发
 
@@ -80,7 +80,7 @@
 | ✅ | 重构 LIRCBackend 调度表降低圈复杂度 | medium | 72 | 2-3 小时 | - |
 | ✅ | 统一 SSA 操作数收集逻辑（消除 cfg_utils 与 pass_manager 重复） | medium | 85 | 3-5 小时 | mir_operand_api_unify |
 | ✅ | 重构 LIRLowering._lower_instruction 调度表 | medium | 78 | 3-5 小时 | lir_switch_match_lowering |
-| ⏳ | 重构 HIRLowering._lower_expr 调度表 | medium | 68 | 3-5 小时 | refactor_visitor_pattern |
+| ✅ | 重构 HIRLowering._lower_expr 调度表 | medium | 68 | 3-5 小时 | refactor_visitor_pattern |
 | ⏳ | LOW 级问题批量治理（docstring + 魔法数字） | easy | 50 | 2-4 小时 | - |
 
 ## 🧪 测试完善
@@ -94,10 +94,10 @@
 
 ---
 
-**进度**: 55/60 (92%)
-**已完成**: 55
+**进度**: 57/60 (95%)
+**已完成**: 57
 **进行中**: 0
-**待开发**: 4
+**待开发**: 2
 **已废弃**: 1
 
-> 注：第28轮完成 3 个任务（2个审查驱动 + 1个自主规划）：统一 SSA 操作数收集逻辑（解决 Top 1 复杂度热点 get_instr_operands CC=46）、重构 LIRLowering 调度表（CC=38→≈4）、C 后端 LIR 路径列表推导式验证与 bug 修复（4 个 bug）。路线图进度 88% → 92%，测试 418 全通过，零回归。下一步（第29轮）：基准测试增强 + LIR-DCE 起步。
+> 注：第29轮完成 3 个任务（2个审查驱动 + 1个自主规划）：修复基准测试 sys.path hack（解决唯一 HIGH 级别问题）、重构 HIRLowering 调度表（CC=32→≈3，最后一个核心分发函数调度表化）、实现 LIR 层死代码消除 Pass（三层优化架构补完 LIR 层）。路线图进度 92% → 95%，测试 418 全通过，零回归。下一步（第30轮）：基准测试框架增强 + LOW 级问题批量治理。

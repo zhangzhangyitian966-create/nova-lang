@@ -53,7 +53,7 @@ Documentation = "https://github.com/nova-lang/nova#readme"
 Repository = "https://github.com/nova-lang/nova"
 
 [tool.setuptools]
-packages = ["nova", "nova.ir", "nova.backend"]
+packages = ["nova", "nova.ir", "nova.backend", "nova.tests", "nova.tests.benchmarks"]
 package-dir = {"nova" = "."}
 
 [tool.pytest.ini_options]

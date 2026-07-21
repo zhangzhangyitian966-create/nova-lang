@@ -1067,6 +1067,169 @@ class SSAVerifier(Pass):
             self.errors.append("[%s] %s %s" % (fn_name, block_label, msg))
 
 
+class LIRDeadCodeElimination(Pass):
+    """LIR 层死代码消除
+
+    移除未使用的虚拟寄存器赋值和无副作用的指令。
+    采用反向扫描策略：从函数体末尾出发，
+    收集所有被使用的位置（寄存器/栈槽），
+    未被使用且无副作用的指令被移除。
+
+    LIR 是线性指令序列（非 SSA 形式），
+    DCE 基于寄存器/栈位置的使用-定义链。
+    """
+
+    name = "lir_dead_code_elimination"
+
+    # 有副作用的指令类型（不能消除）
+    SIDE_EFFECT_TYPES = (
+        "LIRStoreGlobal",
+        "LIRStoreReg",
+        "LIRCall",
+        "LIRCallIndirect",
+        "LIRJump",
+        "LIRBranch",
+        "LIRSwitch",
+        "LIRReturn",
+        "LIRLabel",
+        "LIRPanic",
+        "LIRListAppend",  # 修改列表，有副作用
+    )
+
+    def run(self, lir_module):
+        """对 LIR 模块执行死代码消除"""
+        from .ir_nodes import (
+            LIRStoreGlobal,
+            LIRStoreReg,
+            LIRCall,
+            LIRCallIndirect,
+            LIRJump,
+            LIRBranch,
+            LIRSwitch,
+            LIRReturn,
+            LIRLabel,
+            LIRPanic,
+            LIRListAppend,
+        )
+
+        changed = False
+        for fn_name, fn in lir_module.functions.items():
+            body_changed = self._eliminate_function(fn)
+            if body_changed:
+                changed = True
+
+        return changed
+
+    def _eliminate_function(self, fn) -> bool:
+        """消除单个函数中的死代码
+
+        采用反向扫描：
+        1. 从最后一条指令开始向前遍历
+        2. 维护 used_locs 集合：当前位置之后被使用的寄存器/栈位置
+        3. 如果指令的 dst_loc 不在 used_locs 中且无副作用，移除该指令
+        4. 否则，将指令的 src_locs 加入 used_locs
+        """
+        body = fn.body
+        if not body:
+            return False
+
+        # 被使用的位置集合（寄存器名或栈位置）
+        used_locs = set()
+        new_body = []
+        changed = False
+
+        # 反向遍历
+        for instr in reversed(body):
+            is_removed = False
+
+            # 判断指令是否有副作用
+            has_side_effect = self._has_side_effect(instr)
+
+            # 获取指令定义的位置（dst_loc）
+            dst = self._get_dst_loc(instr)
+
+            if not has_side_effect and dst is not None and dst not in used_locs:
+                # 无副作用且结果未被使用 → 消除
+                changed = True
+                is_removed = True
+            else:
+                # 保留指令，将其源操作数加入 used_locs
+                srcs = self._get_src_locs(instr)
+                for src_loc, _ in srcs:
+                    used_locs.add(src_loc)
+                # 对于有副作用的指令，其 dst 也可能被后续使用（但后续在前面，因为反向扫描）
+                # 实际上反向扫描中，我们需要把 src 加入 used_locs
+                # dst 是否在 used_locs 中决定了这条指令是否被需要
+                # 如果被保留，不需要把 dst 加入（因为是反向，dst 是定义，不是使用）
+
+                new_body.append(instr)
+
+        if changed:
+            # 恢复正向顺序
+            fn.body = list(reversed(new_body))
+
+        return changed
+
+    def _has_side_effect(self, instr) -> bool:
+        """判断指令是否有副作用
+
+        有副作用的指令不能被消除，即使其结果未被使用。
+        """
+        from .ir_nodes import (
+            LIRStoreGlobal,
+            LIRStoreReg,
+            LIRCall,
+            LIRCallIndirect,
+            LIRJump,
+            LIRBranch,
+            LIRSwitch,
+            LIRReturn,
+            LIRLabel,
+            LIRPanic,
+            LIRListAppend,
+        )
+
+        return isinstance(
+            instr,
+            (
+                LIRStoreGlobal,
+                LIRStoreReg,
+                LIRCall,
+                LIRCallIndirect,
+                LIRJump,
+                LIRBranch,
+                LIRSwitch,
+                LIRReturn,
+                LIRLabel,
+                LIRPanic,
+                LIRListAppend,
+            ),
+        )
+
+    def _get_dst_loc(self, instr) -> str | None:
+        """获取指令的目标位置（寄存器/栈名）
+
+        返回 dst_loc 的位置名，如果没有目标则返回 None。
+        """
+        if instr.dst_loc is not None:
+            return instr.dst_loc[0]
+        return None
+
+    def _get_src_locs(self, instr):
+        """获取指令的源操作数位置列表
+
+        返回 [(loc_name, type), ...]
+        包括 src_locs 和 arg_locs（函数调用的参数）。
+        """
+        srcs = list(instr.src_locs)
+
+        # 函数调用的参数也是源操作数
+        if hasattr(instr, "arg_locs"):
+            srcs.extend(instr.arg_locs)
+
+        return srcs
+
+
 class PassManager:
     """优化 Pass 管理器"""
 
@@ -1207,6 +1370,8 @@ def default_optimization_pipeline():
     pm.add_hir_pass(Inlining())
     pm.add_mir_pass(CommonSubexprElimination())
     pm.add_mir_pass(LoopInvariantCodeMotion())
+    # LIR 层优化
+    pm.add_lir_pass(LIRDeadCodeElimination())
     # SSA 验证：优化完成后验证 MIR 的 SSA 性质
     pm.add_mir_verification_pass(SSAVerifier())
     return pm
