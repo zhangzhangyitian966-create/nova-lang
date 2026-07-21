@@ -1,7 +1,7 @@
 # Nova LLM 智能开发路线图
 
-**更新时间**: 2026-07-21 10:35:00
-**上次评审**: 第 27 轮（路线图评审）
+**更新时间**: 2026-07-21 17:01:00
+**上次评审**: 第 30 轮（路线图评审）
 
 本路线图由 LLM 智能开发系统动态维护。
 
@@ -57,6 +57,8 @@
 | ✅ | 修复 Wasm 后端 StoreReg 实现 | easy | 60 | 1 小时 | wasm_control_flow_rewrite |
 | ✅ | C 后端 LIR 路径 ADT/match 支持 | hard | 72 | 1-2 天 | lir_switch_match_lowering, unify_c_backend |
 | ✅ | C 后端 LIR 路径列表推导式支持 | medium | 72 | 3-5 小时 | c_backend_adt_match, unify_c_backend |
+| ⏳ | C 后端数据结构构建正确性验证 | medium | 75 | 3-5 小时 | c_backend_listcomp_verify, c_backend_adt_match |
+| ⏳ | 修复 Wasm 后端全局变量声明缺失 | easy | 62 | 1-2 小时 | wasm_control_flow_rewrite |
 | ⏳ | 实现原生后端函数调用 ABI | hard | 20 | 3-5 天 | fix_mir_ssa |
 
 ## 🛠️ 工程质量
@@ -81,7 +83,14 @@
 | ✅ | 统一 SSA 操作数收集逻辑（消除 cfg_utils 与 pass_manager 重复） | medium | 85 | 3-5 小时 | mir_operand_api_unify |
 | ✅ | 重构 LIRLowering._lower_instruction 调度表 | medium | 78 | 3-5 小时 | lir_switch_match_lowering |
 | ✅ | 重构 HIRLowering._lower_expr 调度表 | medium | 68 | 3-5 小时 | refactor_visitor_pattern |
-| ⏳ | LOW 级问题批量治理（docstring + 魔法数字） | easy | 50 | 2-4 小时 | - |
+| ✅ | 修复基准测试 sys.path hack | easy | 90 | 1-2 小时 | - |
+| ⏳ | LOW 级问题批量治理（docstring + 魔法数字） | easy | 55 | 2-4 小时 | - |
+| ⏳ | 高复杂度函数补全 docstring | easy | 55 | 2-3 小时 | - |
+| ⏳ | 重构 Evaluator.eval_expr 降低圈复杂度 | medium | 72 | 3-5 小时 | - |
+| ⏳ | 重构 _has_side_effect_expr 调度表化 | easy | 65 | 2-3 小时 | - |
+| ⏳ | 重构 Lexer._next_token 降低圈复杂度 | medium | 58 | 3-5 小时 | - |
+| ⏳ | 重构 CCodeGen._infer_c_type_from_expr 降低圈复杂度 | medium | 50 | 3-5 小时 | - |
+| ⏳ | 重构 NativeCodeGen._compile_body 降低圈复杂度 | medium | 45 | 4-6 小时 | - |
 
 ## 🧪 测试完善
 
@@ -91,13 +100,15 @@
 | ✅ | 为 SSA 验证器编写完整测试 | easy | 78 | 2-3 小时 | mir_ssa_verifier, extract_loop_ssa |
 | ✅ | 建立后端性能基准测试框架 | medium | 60 | 3-5 小时 | unify_c_backend |
 | ⏳ | 基准测试框架增强（C/Wasm执行时间+优化对比） | medium | 65 | 3-5 小时 | backend_benchmark_framework |
+| ⏳ | LICM 优化正确性测试 | medium | 70 | 3-5 小时 | implement_licm_pass, ssa_verifier_tests |
+| ⏳ | CFG 基础设施单元测试 | medium | 60 | 3-5 小时 | mir_cfg_loop_analysis |
 
 ---
 
-**进度**: 57/60 (95%)
+**进度**: 57/69 (83%)
 **已完成**: 57
 **进行中**: 0
-**待开发**: 2
+**待开发**: 11
 **已废弃**: 1
 
-> 注：第29轮完成 3 个任务（2个审查驱动 + 1个自主规划）：修复基准测试 sys.path hack（解决唯一 HIGH 级别问题）、重构 HIRLowering 调度表（CC=32→≈3，最后一个核心分发函数调度表化）、实现 LIR 层死代码消除 Pass（三层优化架构补完 LIR 层）。路线图进度 92% → 95%，测试 418 全通过，零回归。下一步（第30轮）：基准测试框架增强 + LOW 级问题批量治理。
+> 注：第30轮路线图评审完成。五维评估：方向正确（继续推进质量治理）、质量提升（HIGH 问题清零、CC>25 函数持续减少）、效率稳定（每轮 3 任务零失败）、价值高（67% 审查驱动率）、审查对齐良好。新增 8 个任务（6个审查驱动 + 2个自主发现）。下阶段（第31-33轮）方向：复杂度治理 → 测试深化 → 质量底线。
