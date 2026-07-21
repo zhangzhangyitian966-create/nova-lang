@@ -183,7 +183,7 @@ class MIRLowering:
 
     def _lower_function(self, hir_fn):
         self.ssa_counter = 0
-        self.block_counter = 0
+        self.block_counter = 1  # 入口块是 bb0，新块从 bb1 开始
         self.env = {}
         self.all_blocks = []
         self.ssa_types = {}
@@ -311,9 +311,28 @@ class MIRLowering:
     # _lower_match_expr 已在下方定义
 
     def _lower_block_expr(self, hir_expr, block):
+        """
+        降级代码块表达式。
+
+        处理块中的表达式和声明（如 HIRLetDecl），
+        返回最后一个表达式的结果 SSA 名。
+        正确处理控制流：每个表达式降级后，后续表达式在当前块继续。
+        """
         result = None
+        current_block = block
         for expr in hir_expr.exprs:
-            result = self._lower_expr(expr, block)
+            if isinstance(expr, HIRLetDecl):
+                # 处理 let 绑定声明
+                value_ssa = self._lower_expr(expr.value, current_block)
+                if value_ssa:
+                    self.env[expr.name] = value_ssa
+                    self.ssa_types[value_ssa] = expr.ir_type
+                result = None  # 声明不产生值
+            else:
+                result = self._lower_expr(expr, current_block)
+            # 表达式可能改变了当前块（如循环、if 等）
+            # 后续表达式在新的当前块继续
+            current_block = self.current_block
         return result
 
     # === 数据结构构建 ===

@@ -1050,85 +1050,14 @@ class SSAVerifier(Pass):
             return []
 
     def _get_used_ssa(self, instr):
-        """获取一条指令使用的所有 SSA 名"""
-        used = []
-
-        # 二元运算
-        if hasattr(instr, "left") and instr.left:
-            used.append(instr.left)
-        if hasattr(instr, "right") and instr.right:
-            used.append(instr.right)
-
-        # 一元运算
-        if hasattr(instr, "operand") and instr.operand:
-            used.append(instr.operand)
-
-        # 函数调用
-        if hasattr(instr, "callee") and instr.callee:
-            # callee 可能是函数名字符串（不是 SSA 名），跳过
-            pass
-        if hasattr(instr, "args"):
-            for arg in instr.args:
-                if arg:
-                    used.append(arg)
-
-        # 字段/索引访问
-        if hasattr(instr, "object") and instr.object:
-            used.append(instr.object)
-        if hasattr(instr, "index") and instr.index:
-            used.append(instr.index)
-        if hasattr(instr, "value") and instr.value:
-            # value 可能是常量值而不是 SSA 名，需要判断
-            # 这里保守处理：如果看起来像 SSA 名（以 v 开头）则加入
-            if isinstance(instr.value, str) and instr.value:
-                used.append(instr.value)
-
-        # 列表/元组/Map 构建
-        if hasattr(instr, "elements"):
-            for elem in instr.elements:
-                if elem:
-                    used.append(elem)
-        if hasattr(instr, "entries"):
-            for k, v in instr.entries:
-                if k:
-                    used.append(k)
-                if v:
-                    used.append(v)
-        if hasattr(instr, "fields"):
-            for k, v in instr.fields.items():
-                if v:
-                    used.append(v)
-
-        # 列表操作
-        if hasattr(instr, "list_ssa") and instr.list_ssa:
-            used.append(instr.list_ssa)
-        if hasattr(instr, "element_ssa") and instr.element_ssa:
-            used.append(instr.element_ssa)
-
-        # 全局变量加载/存储
-        if hasattr(instr, "src") and instr.src:
-            used.append(instr.src)
-
-        # Phi 的 sources（注意：Phi 的 source 值是使用，不是定义
-        if hasattr(instr, "sources"):
-            for label, val in instr.sources:
-                if val:
-                    used.append(val)
-
-        return used
+        """获取一条指令使用的所有 SSA 名（委托给 cfg_utils 标准 API）"""
+        from .cfg_utils import get_instr_operands
+        return get_instr_operands(instr)
 
     def _get_terminator_used_ssa(self, terminator):
-        """获取终结指令使用的 SSA 名"""
-        used = []
-        if hasattr(terminator, "cond") and terminator.cond:
-            used.append(terminator.cond)
-        if hasattr(terminator, "value") and terminator.value:
-            used.append(terminator.value)
-        if hasattr(terminator, "args"):
-            for arg in terminator.args:
-                if arg:
-                    used.append(arg)
-        return used
+        """获取终结指令使用的 SSA 名（委托给 cfg_utils 标准 API）"""
+        from .cfg_utils import get_terminator_used_ssa
+        return get_terminator_used_ssa(terminator)
 
     def _error(self, fn_name, block_label, instr_idx, msg):
         """记录一个错误"""

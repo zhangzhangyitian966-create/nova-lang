@@ -380,11 +380,16 @@ class LIRCBackend:
             self._emit(f"{dst} = nova_list_new({instr.count});")
 
     def _compile_list_append(self, instr: LIRListAppend):
-        """编译列表追加"""
+        """编译列表追加（原地修改，返回值与输入列表相同）"""
         if instr.src_locs and len(instr.src_locs) >= 2:
             lst = self._loc_var_name(instr.src_locs[0][0])
             elem = self._loc_var_name(instr.src_locs[1][0])
             self._emit(f"nova_list_push({lst}, {elem});")
+            # SSA 语义：list_append 返回新列表，但 C 运行时是原地修改
+            # 所以 dst 等于 lst（同一个指针）
+            dst = self._dst_var_name(instr) if instr.dst_loc else None
+            if dst and dst != lst:
+                self._emit(f"{dst} = {lst};")
 
     def _compile_build_tuple(self, instr: LIRBuildTuple):
         """编译元组构建"""
@@ -548,9 +553,9 @@ class LIRCBackend:
         c_name = self._mangle_fn_name(instr.func_name)
         args = []
 
-        if instr.src_locs:
-            for i in range(min(instr.arg_count, len(instr.src_locs))):
-                args.append(self._loc_var_name(instr.src_locs[i][0]))
+        if instr.arg_locs:
+            for i in range(min(instr.arg_count, len(instr.arg_locs))):
+                args.append(self._loc_var_name(instr.arg_locs[i][0]))
 
         args_str = ", ".join(args)
 

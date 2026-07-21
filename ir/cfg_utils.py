@@ -483,74 +483,106 @@ def get_instr_operands(instr) -> List[str]:
     获取一条 MIR 指令使用的所有 SSA 操作数。
 
     返回 SSA 名列表（不含 result_name）。
+    使用 isinstance 类型分发，与 replace_instr_operands 保持一致。
     """
-    used = []
+    # 常量加载：无操作数
+    from .ir_nodes import MIRConst
+    if isinstance(instr, MIRConst):
+        return []
+
+    # 变量加载：无 SSA 操作数（name 是变量名字符串）
+    from .ir_nodes import MIRLoad
+    if isinstance(instr, MIRLoad):
+        return []
+
+    # 变量存储：value 是 SSA 操作数
+    from .ir_nodes import MIRStore
+    if isinstance(instr, MIRStore):
+        return [instr.value] if instr.value else []
 
     # 二元运算
-    if hasattr(instr, "left") and instr.left:
-        used.append(instr.left)
-    if hasattr(instr, "right") and instr.right:
-        used.append(instr.right)
+    from .ir_nodes import MIRBinOp
+    if isinstance(instr, MIRBinOp):
+        used = []
+        if instr.left:
+            used.append(instr.left)
+        if instr.right:
+            used.append(instr.right)
+        return used
 
     # 一元运算
-    if hasattr(instr, "operand") and instr.operand:
-        used.append(instr.operand)
+    from .ir_nodes import MIRUnaryOp
+    if isinstance(instr, MIRUnaryOp):
+        return [instr.operand] if instr.operand else []
 
-    # 函数调用
-    if hasattr(instr, "args") and isinstance(instr.args, list):
-        for arg in instr.args:
-            if isinstance(arg, str) and arg:
-                used.append(arg)
+    # 函数调用：args 是 SSA 操作数，callee 可能是函数名（非 SSA）
+    from .ir_nodes import MIRCall
+    if isinstance(instr, MIRCall):
+        return [a for a in instr.args if a]
 
-    # 字段访问 / 索引访问
-    if hasattr(instr, "object") and instr.object:
-        used.append(instr.object)
-    if hasattr(instr, "index") and instr.index:
-        used.append(instr.index)
+    # 闭包创建：captures 是 SSA 操作数
+    from .ir_nodes import MIRClosureCreate
+    if isinstance(instr, MIRClosureCreate):
+        return [c for c in instr.captures if c]
 
-    # Store 的值
-    if hasattr(instr, "value") and instr.value:
-        used.append(instr.value)
-
-    # 列表/元组/Map/ADT 构建
-    if hasattr(instr, "elements") and isinstance(instr.elements, list):
-        for elem in instr.elements:
-            if isinstance(elem, str) and elem:
-                used.append(elem)
+    # 列表构建
+    from .ir_nodes import MIRListBuild
+    if isinstance(instr, MIRListBuild):
+        return [e for e in instr.elements if e]
 
     # 列表追加
-    if hasattr(instr, "list_ssa") and instr.list_ssa:
-        used.append(instr.list_ssa)
-    if hasattr(instr, "element_ssa") and instr.element_ssa:
-        used.append(instr.element_ssa)
+    from .ir_nodes import MIRListAppend
+    if isinstance(instr, MIRListAppend):
+        used = []
+        if instr.list_ssa:
+            used.append(instr.list_ssa)
+        if instr.element_ssa:
+            used.append(instr.element_ssa)
+        return used
 
-    # Map entries
-    if hasattr(instr, "entries") and isinstance(instr.entries, list):
+    # 元组构建
+    from .ir_nodes import MIRTupleBuild
+    if isinstance(instr, MIRTupleBuild):
+        return [e for e in instr.elements if e]
+
+    # Map 构建
+    from .ir_nodes import MIRMapBuild
+    if isinstance(instr, MIRMapBuild):
+        used = []
         for key_ssa, val_ssa in instr.entries:
             if key_ssa:
                 used.append(key_ssa)
             if val_ssa:
                 used.append(val_ssa)
+        return used
 
     # ADT 构建
-    if hasattr(instr, "fields") and isinstance(instr.fields, list):
-        for f in instr.fields:
-            if isinstance(f, str) and f:
-                used.append(f)
+    from .ir_nodes import MIRADTBuild
+    if isinstance(instr, MIRADTBuild):
+        return [f for f in instr.fields if f]
 
-    # 闭包捕获
-    if hasattr(instr, "captures") and isinstance(instr.captures, list):
-        for cap in instr.captures:
-            if isinstance(cap, str) and cap:
-                used.append(cap)
+    # 字段访问
+    from .ir_nodes import MIRFieldAccess
+    if isinstance(instr, MIRFieldAccess):
+        return [instr.object] if instr.object else []
+
+    # 索引访问
+    from .ir_nodes import MIRIndexAccess
+    if isinstance(instr, MIRIndexAccess):
+        used = []
+        if instr.object:
+            used.append(instr.object)
+        if instr.index:
+            used.append(instr.index)
+        return used
 
     # Phi 节点
-    if hasattr(instr, "sources") and isinstance(instr.sources, list):
-        for _, ssa_name in instr.sources:
-            if ssa_name:
-                used.append(ssa_name)
+    from .ir_nodes import MIRPhi
+    if isinstance(instr, MIRPhi):
+        return [ssa for _, ssa in instr.sources if ssa]
 
-    return used
+    # 默认：返回空列表
+    return []
 
 
 def is_instr_pure(instr) -> bool:
@@ -620,13 +652,36 @@ def is_instr_pure(instr) -> bool:
 
 
 def get_terminator_used_ssa(terminator) -> List[str]:
-    """获取终结指令使用的 SSA 名"""
-    used = []
-    if hasattr(terminator, "condition") and terminator.condition:
-        used.append(terminator.condition)
-    if hasattr(terminator, "value") and terminator.value:
-        used.append(terminator.value)
-    return used
+    """
+    获取终结指令使用的 SSA 名。
+
+    使用 isinstance 类型分发，与 replace_terminator_operands 保持一致。
+    """
+    if terminator is None:
+        return []
+
+    # 条件分支
+    if isinstance(terminator, MIRBranch):
+        return [terminator.condition] if terminator.condition else []
+
+    # Switch 跳转
+    if isinstance(terminator, MIRSwitch):
+        return [terminator.value] if terminator.value else []
+
+    # 返回
+    if isinstance(terminator, MIRReturn):
+        return [terminator.value] if terminator.value else []
+
+    # Match 跳转
+    if isinstance(terminator, MIRMatchJump):
+        return [terminator.value] if terminator.value else []
+
+    # 无条件跳转：无 SSA 操作数
+    if isinstance(terminator, MIRJump):
+        return []
+
+    # 默认：返回空列表
+    return []
 
 
 def replace_instr_operands(instr, replacements: Dict[str, str]):

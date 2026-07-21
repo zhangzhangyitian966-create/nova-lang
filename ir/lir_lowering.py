@@ -69,6 +69,31 @@ class LIRLowering:
         self.ssa_types = {}  # SSA 名 -> 类型映射
         self.loc_counter = 0
         self.functions = {}
+        self._instr_dispatch = self._build_instr_dispatch_table()
+
+    def _build_instr_dispatch_table(self):
+        """
+        构建 MIR 指令 -> LIR 降级方法的调度表。
+
+        采用调度表模式替代 if-isinstance 链，
+        降低圈复杂度，提升可扩展性。
+        """
+        return {
+            MIRConst: self._lower_const,
+            MIRLoad: self._lower_load_global,
+            MIRStore: self._lower_store_global,
+            MIRBinOp: self._lower_binop,
+            MIRUnaryOp: self._lower_unaryop,
+            MIRCall: self._lower_call,
+            MIRClosureCreate: self._lower_closure_create,
+            MIRListBuild: self._lower_list_build,
+            MIRListAppend: self._lower_list_append,
+            MIRTupleBuild: self._lower_tuple_build,
+            MIRMapBuild: self._lower_map_build,
+            MIRADTBuild: self._lower_adt_build,
+            MIRFieldAccess: self._lower_field_access,
+            MIRIndexAccess: self._lower_index_access,
+        }
 
     def lower(self, mir_module):
         lir_module = LIRModule(name=mir_module.name)
@@ -197,6 +222,11 @@ class LIRLowering:
         return []
 
     def _lower_instruction(self, instr):
+        """
+        降级一条 MIR 指令为 LIR 指令（调度表模式）。
+
+        先分配结果位置，再通过调度表调用对应的降级方法。
+        """
         result = []
 
         if instr.result_name:
@@ -204,184 +234,217 @@ class LIRLowering:
             self.ssa_to_loc[instr.result_name] = loc
             self.ssa_types[instr.result_name] = instr.result_type
 
-        if isinstance(instr, MIRConst):
-            lir = LIRLoadConst()
-            lir.value = instr.value
-            lir.const_type = instr.const_type
-            if instr.result_name:
-                lir.dst_loc = (
-                    self.ssa_to_loc.get(instr.result_name, ""),
-                    instr.result_type,
-                )
-            result.append(lir)
-
-        elif isinstance(instr, MIRLoad):
-            lir = LIRLoadGlobal()
-            lir.global_name = instr.name
-            if instr.result_name:
-                lir.dst_loc = (
-                    self.ssa_to_loc.get(instr.result_name, ""),
-                    instr.result_type,
-                )
-            result.append(lir)
-
-        elif isinstance(instr, MIRStore):
-            lir = LIRStoreGlobal()
-            lir.global_name = instr.name
-            if instr.value:
-                lir.src_locs = [
-                    (self.ssa_to_loc.get(instr.value, ""), instr.result_type)
-                ]
-            result.append(lir)
-
-        elif isinstance(instr, MIRBinOp):
-            lir = LIRBinOp()
-            lir.op = instr.op
-            if instr.left:
-                lir.src_locs = [
-                    (self.ssa_to_loc.get(instr.left, ""), instr.result_type)
-                ]
-            if instr.right:
-                lir.src_locs.append(
-                    (self.ssa_to_loc.get(instr.right, ""), instr.result_type)
-                )
-            if instr.result_name:
-                lir.dst_loc = (
-                    self.ssa_to_loc.get(instr.result_name, ""),
-                    instr.result_type,
-                )
-            result.append(lir)
-
-        elif isinstance(instr, MIRUnaryOp):
-            lir = LIRUnaryOp()
-            lir.op = instr.op
-            if instr.operand:
-                lir.src_locs = [
-                    (self.ssa_to_loc.get(instr.operand, ""), instr.result_type)
-                ]
-            if instr.result_name:
-                lir.dst_loc = (
-                    self.ssa_to_loc.get(instr.result_name, ""),
-                    instr.result_type,
-                )
-            result.append(lir)
-
-        elif isinstance(instr, MIRCall):
-            lir = LIRCall()
-            lir.callee = instr.callee  # 使用统一命名
-            # 传递参数位置信息（从 ssa_to_loc 映射）
-            lir.arg_locs = [
-                (self.ssa_to_loc.get(arg_ssa, ""), self.ssa_types.get(arg_ssa, UNIT_TYPE))
-                for arg_ssa in instr.args
-            ]
-            lir.arg_count = len(instr.args)
-            if instr.result_name:
-                lir.dst_loc = (
-                    self.ssa_to_loc.get(instr.result_name, ""),
-                    instr.result_type,
-                )
-            result.append(lir)
-
-        elif isinstance(instr, MIRClosureCreate):
-            lir = LIRLoadConst()
-            lir.value = "<closure:%s>" % instr.fn_name
-            lir.const_type = "closure"
-            if instr.result_name:
-                lir.dst_loc = (
-                    self.ssa_to_loc.get(instr.result_name, ""),
-                    instr.result_type,
-                )
-            result.append(lir)
-
-        elif isinstance(instr, MIRListBuild):
-            lir = LIRBuildList()
-            lir.count = len(instr.elements)
-            if instr.result_name:
-                lir.dst_loc = (
-                    self.ssa_to_loc.get(instr.result_name, ""),
-                    instr.result_type,
-                )
-            result.append(lir)
-
-        elif isinstance(instr, MIRListAppend):
-            lir = LIRListAppend()
-            if instr.list_ssa:
-                lir.src_locs = [
-                    (self.ssa_to_loc.get(instr.list_ssa, ""), instr.result_type)
-                ]
-            if instr.element_ssa:
-                lir.src_locs.append(
-                    (self.ssa_to_loc.get(instr.element_ssa, ""), instr.result_type)
-                )
-            if instr.result_name:
-                lir.dst_loc = (
-                    self.ssa_to_loc.get(instr.result_name, ""),
-                    instr.result_type,
-                )
-            result.append(lir)
-
-        elif isinstance(instr, MIRTupleBuild):
-            lir = LIRBuildTuple()
-            lir.count = len(instr.elements)
-            if instr.result_name:
-                lir.dst_loc = (
-                    self.ssa_to_loc.get(instr.result_name, ""),
-                    instr.result_type,
-                )
-            result.append(lir)
-
-        elif isinstance(instr, MIRMapBuild):
-            lir = LIRBuildMap()
-            lir.entry_count = len(instr.entries)
-            if instr.result_name:
-                lir.dst_loc = (
-                    self.ssa_to_loc.get(instr.result_name, ""),
-                    instr.result_type,
-                )
-            result.append(lir)
-
-        elif isinstance(instr, MIRADTBuild):
-            lir = LIRBuildADT()
-            lir.field_count = len(instr.fields)
-            if instr.result_name:
-                lir.dst_loc = (
-                    self.ssa_to_loc.get(instr.result_name, ""),
-                    instr.result_type,
-                )
-            result.append(lir)
-
-        elif isinstance(instr, MIRFieldAccess):
-            lir = LIRFieldAccess()
-            lir.offset = instr.field_index
-            if instr.object:
-                lir.src_locs = [
-                    (self.ssa_to_loc.get(instr.object, ""), instr.result_type)
-                ]
-            if instr.result_name:
-                lir.dst_loc = (
-                    self.ssa_to_loc.get(instr.result_name, ""),
-                    instr.result_type,
-                )
-            result.append(lir)
-
-        elif isinstance(instr, MIRIndexAccess):
-            lir = LIRIndex()
-            if instr.object:
-                lir.src_locs = [
-                    (self.ssa_to_loc.get(instr.object, ""), instr.result_type)
-                ]
-            if instr.index:
-                lir.src_locs.append(
-                    (self.ssa_to_loc.get(instr.index, ""), instr.result_type)
-                )
-            if instr.result_name:
-                lir.dst_loc = (
-                    self.ssa_to_loc.get(instr.result_name, ""),
-                    instr.result_type,
-                )
-            result.append(lir)
+        # 通过调度表查找对应的降级方法
+        handler = self._instr_dispatch.get(type(instr))
+        if handler is not None:
+            handler(instr, result)
 
         return result
+
+    # --------------------------------------------------------
+    # 指令降级方法（按类别分组）
+    # --------------------------------------------------------
+
+    # ---- 常量与加载 ----
+
+    def _lower_const(self, instr, result):
+        """降级常量加载"""
+        lir = LIRLoadConst()
+        lir.value = instr.value
+        lir.const_type = instr.const_type
+        if instr.result_name:
+            lir.dst_loc = (
+                self.ssa_to_loc.get(instr.result_name, ""),
+                instr.result_type,
+            )
+        result.append(lir)
+
+    def _lower_load_global(self, instr, result):
+        """降级全局变量加载"""
+        lir = LIRLoadGlobal()
+        lir.global_name = instr.name
+        if instr.result_name:
+            lir.dst_loc = (
+                self.ssa_to_loc.get(instr.result_name, ""),
+                instr.result_type,
+            )
+        result.append(lir)
+
+    def _lower_store_global(self, instr, result):
+        """降级全局变量存储"""
+        lir = LIRStoreGlobal()
+        lir.global_name = instr.name
+        if instr.value:
+            lir.src_locs = [
+                (self.ssa_to_loc.get(instr.value, ""), instr.result_type)
+            ]
+        result.append(lir)
+
+    # ---- 运算 ----
+
+    def _lower_binop(self, instr, result):
+        """降级二元运算"""
+        lir = LIRBinOp()
+        lir.op = instr.op
+        if instr.left:
+            lir.src_locs = [
+                (self.ssa_to_loc.get(instr.left, ""), instr.result_type)
+            ]
+        if instr.right:
+            lir.src_locs.append(
+                (self.ssa_to_loc.get(instr.right, ""), instr.result_type)
+            )
+        if instr.result_name:
+            lir.dst_loc = (
+                self.ssa_to_loc.get(instr.result_name, ""),
+                instr.result_type,
+            )
+        result.append(lir)
+
+    def _lower_unaryop(self, instr, result):
+        """降级一元运算"""
+        lir = LIRUnaryOp()
+        lir.op = instr.op
+        if instr.operand:
+            lir.src_locs = [
+                (self.ssa_to_loc.get(instr.operand, ""), instr.result_type)
+            ]
+        if instr.result_name:
+            lir.dst_loc = (
+                self.ssa_to_loc.get(instr.result_name, ""),
+                instr.result_type,
+            )
+        result.append(lir)
+
+    # ---- 函数调用 ----
+
+    def _lower_call(self, instr, result):
+        """降级函数调用"""
+        lir = LIRCall()
+        lir.callee = instr.callee  # 使用统一命名
+        # 传递参数位置信息（从 ssa_to_loc 映射）
+        lir.arg_locs = [
+            (self.ssa_to_loc.get(arg_ssa, ""), self.ssa_types.get(arg_ssa, UNIT_TYPE))
+            for arg_ssa in instr.args
+        ]
+        lir.arg_count = len(instr.args)
+        if instr.result_name:
+            lir.dst_loc = (
+                self.ssa_to_loc.get(instr.result_name, ""),
+                instr.result_type,
+            )
+        result.append(lir)
+
+    def _lower_closure_create(self, instr, result):
+        """降级闭包创建（作为常量处理）"""
+        lir = LIRLoadConst()
+        lir.value = "<closure:%s>" % instr.fn_name
+        lir.const_type = "closure"
+        if instr.result_name:
+            lir.dst_loc = (
+                self.ssa_to_loc.get(instr.result_name, ""),
+                instr.result_type,
+            )
+        result.append(lir)
+
+    # ---- 数据结构构建 ----
+
+    def _lower_list_build(self, instr, result):
+        """降级列表构建"""
+        lir = LIRBuildList()
+        lir.count = len(instr.elements)
+        if instr.result_name:
+            lir.dst_loc = (
+                self.ssa_to_loc.get(instr.result_name, ""),
+                instr.result_type,
+            )
+        result.append(lir)
+
+    def _lower_list_append(self, instr, result):
+        """降级列表追加元素"""
+        lir = LIRListAppend()
+        if instr.list_ssa:
+            lir.src_locs = [
+                (self.ssa_to_loc.get(instr.list_ssa, ""), instr.result_type)
+            ]
+        if instr.element_ssa:
+            lir.src_locs.append(
+                (self.ssa_to_loc.get(instr.element_ssa, ""), instr.result_type)
+            )
+        if instr.result_name:
+            lir.dst_loc = (
+                self.ssa_to_loc.get(instr.result_name, ""),
+                instr.result_type,
+            )
+        result.append(lir)
+
+    def _lower_tuple_build(self, instr, result):
+        """降级元组构建"""
+        lir = LIRBuildTuple()
+        lir.count = len(instr.elements)
+        if instr.result_name:
+            lir.dst_loc = (
+                self.ssa_to_loc.get(instr.result_name, ""),
+                instr.result_type,
+            )
+        result.append(lir)
+
+    def _lower_map_build(self, instr, result):
+        """降级 Map 构建"""
+        lir = LIRBuildMap()
+        lir.entry_count = len(instr.entries)
+        if instr.result_name:
+            lir.dst_loc = (
+                self.ssa_to_loc.get(instr.result_name, ""),
+                instr.result_type,
+            )
+        result.append(lir)
+
+    def _lower_adt_build(self, instr, result):
+        """降级 ADT 构建"""
+        lir = LIRBuildADT()
+        lir.field_count = len(instr.fields)
+        if instr.result_name:
+            lir.dst_loc = (
+                self.ssa_to_loc.get(instr.result_name, ""),
+                instr.result_type,
+            )
+        result.append(lir)
+
+    # ---- 访问操作 ----
+
+    def _lower_field_access(self, instr, result):
+        """降级字段访问"""
+        lir = LIRFieldAccess()
+        lir.offset = instr.field_index
+        if instr.object:
+            lir.src_locs = [
+                (self.ssa_to_loc.get(instr.object, ""), instr.result_type)
+            ]
+        if instr.result_name:
+            lir.dst_loc = (
+                self.ssa_to_loc.get(instr.result_name, ""),
+                instr.result_type,
+            )
+        result.append(lir)
+
+    def _lower_index_access(self, instr, result):
+        """降级索引访问"""
+        lir = LIRIndex()
+        if instr.object:
+            lir.src_locs = [
+                (self.ssa_to_loc.get(instr.object, ""), instr.result_type)
+            ]
+        if instr.index:
+            lir.src_locs.append(
+                (self.ssa_to_loc.get(instr.index, ""), instr.result_type)
+            )
+        if instr.result_name:
+            lir.dst_loc = (
+                self.ssa_to_loc.get(instr.result_name, ""),
+                instr.result_type,
+            )
+        result.append(lir)
 
     def _lower_terminator(self, term):
         if isinstance(term, MIRJump):

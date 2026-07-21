@@ -1,6 +1,6 @@
 # Nova LLM 智能开发路线图
 
-**更新时间**: 2026-07-21 05:02:00
+**更新时间**: 2026-07-21 09:15:00
 **上次评审**: 第 27 轮（路线图评审）
 
 本路线图由 LLM 智能开发系统动态维护。
@@ -56,7 +56,7 @@
 | ✅ | 修复 Wasm 后端多个正确性 bug | easy | 65 | 1-2 小时 | wasm_control_flow_rewrite |
 | ✅ | 修复 Wasm 后端 StoreReg 实现 | easy | 60 | 1 小时 | wasm_control_flow_rewrite |
 | ✅ | C 后端 LIR 路径 ADT/match 支持 | hard | 72 | 1-2 天 | lir_switch_match_lowering, unify_c_backend |
-| ⏳ | C 后端 LIR 路径列表推导式支持 | medium | 72 | 3-5 小时 | c_backend_adt_match, unify_c_backend |
+| ✅ | C 后端 LIR 路径列表推导式支持 | medium | 72 | 3-5 小时 | c_backend_adt_match, unify_c_backend |
 | ⏳ | 实现原生后端函数调用 ABI | hard | 20 | 3-5 天 | fix_mir_ssa |
 
 ## 🛠️ 工程质量
@@ -78,8 +78,8 @@
 | ✅ | 统一 MIR 指令操作数 API（消除三处重复） | medium | 70 | 4-6 小时 | refactor_mir_lower_expr |
 | ✅ | 修复 type_checker.py 空函数和重复定义 bug | easy | 65 | 1-2 小时 | - |
 | ✅ | 重构 LIRCBackend 调度表降低圈复杂度 | medium | 72 | 2-3 小时 | - |
-| ⏳ | 统一 SSA 操作数收集逻辑（消除 cfg_utils 与 pass_manager 重复） | medium | 85 | 3-5 小时 | mir_operand_api_unify |
-| ⏳ | 重构 LIRLowering._lower_instruction 调度表 | medium | 78 | 3-5 小时 | lir_switch_match_lowering |
+| ✅ | 统一 SSA 操作数收集逻辑（消除 cfg_utils 与 pass_manager 重复） | medium | 85 | 3-5 小时 | mir_operand_api_unify |
+| ✅ | 重构 LIRLowering._lower_instruction 调度表 | medium | 78 | 3-5 小时 | lir_switch_match_lowering |
 | ⏳ | 重构 HIRLowering._lower_expr 调度表 | medium | 68 | 3-5 小时 | refactor_visitor_pattern |
 | ⏳ | LOW 级问题批量治理（docstring + 魔法数字） | easy | 50 | 2-4 小时 | - |
 
@@ -94,10 +94,10 @@
 
 ---
 
-**进度**: 52/60 (87%)
-**已完成**: 52
+**进度**: 55/60 (92%)
+**已完成**: 55
 **进行中**: 0
-**待开发**: 7
+**待开发**: 4
 **已废弃**: 1
 
-> 注：第27轮评审完成。回顾第25-26轮（6个任务：MIR复杂度攻坚 + type_checker空函数修复 + Pass管理器类型安全 + LIRCBackend调度表重构 + MIR操作数API统一 + 基准测试框架），路线图进度 89% → 87%（任务池扩大7个），测试 403 全通过，零回归。五维评估：方向正确、质量持续变好（最高CC 111→46，极复杂函数17→14，MEDIUM问题-43.8%）、效率稳定（每轮3个任务，成功率100%）、价值高（操作数API统一 + 复杂度重构 + 基准测试）、审查对齐良好（审查驱动任务占比 50%）。新增 7 个任务（4个审查驱动 + 2个自主发现 + 1个自主规划），调整 3 个优先级。下阶段（第28-30轮）：新复杂度热点治理 → 基准测试增强+LIR优化起步 → 工程化治理+质量底线提升。
+> 注：第28轮完成 3 个任务（2个审查驱动 + 1个自主规划）：统一 SSA 操作数收集逻辑（解决 Top 1 复杂度热点 get_instr_operands CC=46）、重构 LIRLowering 调度表（CC=38→≈4）、C 后端 LIR 路径列表推导式验证与 bug 修复（4 个 bug）。路线图进度 88% → 92%，测试 418 全通过，零回归。下一步（第29轮）：基准测试增强 + LIR-DCE 起步。
