@@ -1,5 +1,5 @@
 {
-  "cycles": 26,
+  "cycles": 27,
   "completed_tasks": [
     "unify_ir_naming",
     "for_loop_ssa_normalize",
@@ -59,10 +59,19 @@
     "refactor_pass_manager_type_checks",
     "refactor_lir_c_backend_dispatch",
     "mir_operand_api_unify",
-    "backend_benchmark_framework"
+    "backend_benchmark_framework",
+    "review_cycle_27"
   ],
   "failed_tasks": [],
   "task_history": [
+    {
+      "cycle": 27,
+      "task_id": "review_cycle_27",
+      "status": "completed",
+      "source": "评审轮",
+      "reason": "第 27 轮路线图评审，回顾第 25-26 轮开发（MIR复杂度攻坚 + MIR基础设施统一 + 基准测试框架），进行五维评估，规划第 28-30 轮方向（新复杂度热点治理 → 基准测试增强+LIR优化起步 → 工程化治理+质量底线提升），更新任务池（新增 7 个任务，调整 3 个优先级，补充依赖关系）。",
+      "details": "完成第25-26轮回顾：两轮共完成 6 个任务，路线图进度 89% → 88%（任务池扩大 7 个），测试 403 全通过，零失败零回滚。五维评估：方向正确（MIR基础设施统一 + 工程化清理 + 基准测试三线并进）、质量持续变好（最高CC 111→46，极复杂函数17→14，MEDIUM问题-43.8%）、效率稳定（每轮3个任务，成功率100%）、价值高（操作数API统一 + 复杂度重构 + 基准测试框架）、审查对齐良好（审查驱动任务占比 50%）。发现新问题：cfg_utils.get_instr_operands CC=46（新引入Top 1）、SSA操作数收集两处重复、LOW级问题快速增长(+19.6%)、C后端统一进度偏慢。下阶段方向：第28轮新复杂度热点治理（SSA操作数统一+C后端列表推导式+LIRLowering调度表）、第29轮基准测试增强+LIR优化起步、第30轮工程化治理+质量底线提升。任务池新增 7 个任务（4个审查驱动 + 2个自主发现 + 1个自主规划），调整 3 个优先级。"
+    },
     {
       "cycle": 26,
       "task_id": "refactor_lir_c_backend_dispatch",
@@ -176,10 +185,10 @@
       "details": "完成第19-20轮回顾：两轮共完成 6 个任务，路线图进度 70% → 84%，测试 418 全通过，零失败零回滚。五维评估：方向正确（Wasm架构修复 + MIR优化 + 工程化清理三线并进）、质量持续变好（平均CC 3.17→3.13，极复杂函数 21→19）、效率稳定（每轮3个任务）、价值高（LICM高级优化 + Wasm控制流架构修复）、审查对齐良好（审查驱动任务占比 50%）。发现新问题：VM._execute_instruction 圈复杂度 111（长期Top 1）、Native后端功能严重不完整、unused_import 仍有 95 处、LIR switch/match 降级缺失。下阶段方向：第22轮工程化清理（VM巨型函数拆分 + LIR switch/match降级补全）、第23轮C后端功能对齐（ADT/match/闭包迁移到LIR路径）、第24轮后端整合与基准测试。任务池新增 5 个任务（3个审查驱动 + 2个自主发现），调整 3 个优先级。"
     }
   ],
-  "current_cycle": 26,
+  "current_cycle": 27,
   "baseline_tests": 403,
   "current_tests": 403,
-  "last_review_cycle": 24,
+  "last_review_cycle": 27,
   "tasks": [
     {
       "id": "fix_match_lowering",
@@ -379,7 +388,7 @@
       "name": "统一 C 后端（LIR 路径功能对齐）",
       "description": "将 c_codegen.py 中已实现但 lir_c_backend.py 缺失的功能迁移过来：ADT 代码生成、match 编译、闭包实现、列表推导式，待功能对齐后废弃旧的 AST→C 路径",
       "difficulty": "hard",
-      "priority": 75,
+      "priority": 70,
       "category": "architecture",
       "estimated": "2-3 天",
       "status": "pending",
@@ -425,7 +434,7 @@
       "name": "实现原生后端函数调用 ABI",
       "description": "实现 System V AMD64 ABI 参数传递和 call 地址回填",
       "difficulty": "hard",
-      "priority": 25,
+      "priority": 20,
       "category": "backend",
       "estimated": "3-5 天",
       "status": "deprecated",
@@ -816,7 +825,7 @@
       "name": "C 后端 LIR 路径列表推导式支持",
       "description": "将 c_codegen.py 中的列表推导式代码生成逻辑迁移到 lir_c_backend.py，让 LIR→C 路径支持列表推导式（包括 filter 和多层嵌套），进一步缩小与旧 AST→C 路径的功能差距",
       "difficulty": "medium",
-      "priority": 68,
+      "priority": 72,
       "category": "backend",
       "estimated": "3-5 小时",
       "status": "pending",
@@ -861,6 +870,88 @@
       "status": "completed",
       "depends_on": [],
       "reason": "审查日志显示 LIRCBackend._compile_instr 圈复杂度约 25，是 LIR C 后端的核心分发函数。LIR C 后端是当前重点推进的模块，高复杂度导致新增指令时容易遗漏。参考 VM 和 TypeChecker 的调度表重构经验，可大幅降低复杂度，提升可维护性。[新增任务 / 审查驱动]"
+    },
+    {
+      "id": "unify_ssa_operand_logic",
+      "name": "统一 SSA 操作数收集逻辑（消除 cfg_utils 与 pass_manager 重复）",
+      "description": "将 cfg_utils.get_instr_operands（CC=46）与 pass_manager.SSAVerifier._get_used_ssa（CC=39）的重复逻辑统一，SSAVerifier 改为调用 cfg_utils 的标准 API，同时降低两个高复杂度函数，消除约 80 行重复代码",
+      "difficulty": "medium",
+      "priority": 85,
+      "category": "engineering",
+      "estimated": "3-5 小时",
+      "status": "pending",
+      "depends_on": [
+        "mir_operand_api_unify"
+      ],
+      "reason": "深度代码审计发现 get_instr_operands (CC=46) 是当前 Top 1 复杂函数，与 _get_used_ssa (CC=39) 功能高度重叠，合计 CC=85。统一后一举解决两个复杂度热点，消除重复代码，降低维护成本。[新增任务 / 审查发现]"
+    },
+    {
+      "id": "refactor_lir_lowering_dispatch",
+      "name": "重构 LIRLowering._lower_instruction 调度表",
+      "description": "LIRLowering._lower_instruction 圈复杂度 38，MIR→LIR 降级的主分发函数。将 if-isinstance 链重构为调度表模式，按指令类别拆分为独立方法，降低单函数复杂度",
+      "difficulty": "medium",
+      "priority": 78,
+      "category": "engineering",
+      "estimated": "3-5 小时",
+      "status": "pending",
+      "depends_on": [
+        "lir_switch_match_lowering"
+      ],
+      "reason": "审查日志显示 _lower_instruction 圈复杂度 38，是剩余的高复杂度核心分发函数之一。延续调度表化路线，参考 VM、TypeChecker、MIRLowering 的成功经验，重构后可大幅降低复杂度，提升可维护性。[新增任务 / 审查发现]"
+    },
+    {
+      "id": "benchmark_enhance_exec_time",
+      "name": "基准测试框架增强（C/Wasm执行时间+优化对比）",
+      "description": "为基准测试框架添加 C 后端和 Wasm 后端的执行时间测量，支持优化前后对比功能（同一用例在不同优化级别下的性能对比），扩充基准用例覆盖 ADT、模式匹配、闭包等场景",
+      "difficulty": "medium",
+      "priority": 65,
+      "category": "test",
+      "estimated": "3-5 小时",
+      "status": "pending",
+      "depends_on": [
+        "backend_benchmark_framework"
+      ],
+      "reason": "基准测试框架目前只支持 VM 后端执行时间测量，C/Wasm 后端只能测编译时间。补齐后可全面评估各后端性能，优化效果量化更准确。[新增任务 / 自主规划]"
+    },
+    {
+      "id": "lir_dce_pass",
+      "name": "LIR 层死代码消除 Pass (LIR-DCE)",
+      "description": "在 LIR 层实现死代码消除 Pass，移除未使用的虚拟寄存器赋值和无副作用指令，完善三层优化架构的 LIR 层优化",
+      "difficulty": "easy",
+      "priority": 70,
+      "category": "optimization",
+      "estimated": "2-3 小时",
+      "status": "pending",
+      "depends_on": [
+        "mir_ssa_verifier"
+      ],
+      "reason": "LIR 层优化 Pass 目前为零，DCE 是最简单的优化 Pass，成本低收益高，对所有后端都有效。从 DCE 开始逐步完善 LIR 层优化。[新增任务 / 自主发现]"
+    },
+    {
+      "id": "refactor_hir_lowering_dispatch",
+      "name": "重构 HIRLowering._lower_expr 调度表",
+      "description": "HIRLowering._lower_expr 圈复杂度 32，AST→HIR 降级的主分发函数。将 if-isinstance 链重构为调度表模式，按节点类别拆分为独立方法，降低单函数复杂度",
+      "difficulty": "medium",
+      "priority": 68,
+      "category": "engineering",
+      "estimated": "3-5 小时",
+      "status": "pending",
+      "depends_on": [
+        "refactor_visitor_pattern"
+      ],
+      "reason": "审查日志显示 _lower_expr 圈复杂度 32，是剩余的核心分发函数之一。继续推进调度表化路线，保持各层 IR 降级架构一致。[新增任务 / 审查发现]"
+    },
+    {
+      "id": "low_quality_issues_cleanup",
+      "name": "LOW 级问题批量治理（docstring + 魔法数字）",
+      "description": "批量清理 LOW 级问题：为 ir/ 和 backend/ 模块的公共 API 添加 docstring，将高频魔法数字（如 8 字节大小、默认迭代次数等）提取为命名常量，清理调试打印语句",
+      "difficulty": "easy",
+      "priority": 50,
+      "category": "engineering",
+      "estimated": "2-4 小时",
+      "status": "pending",
+      "depends_on": [],
+      "reason": "LOW 级问题已达 1005 个且持续增长（5 轮增长 19.6%），no_docstring 和 magic_number 是主要增量。虽然单个问题影响小，但累积起来严重影响代码可读性。批量治理建立质量底线。[新增任务 / 审查发现]"
     }
   ]
 }
