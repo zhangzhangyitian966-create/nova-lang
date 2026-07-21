@@ -7,7 +7,7 @@ Nova 编程语言 - 词法分析器（Lexer / Tokenizer）
 
 from dataclasses import dataclass
 from enum import Enum, auto
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 from .errors import LexerError
 
@@ -145,6 +145,19 @@ KEYWORDS = {
 
 class Lexer:
     """Nova 词法分析器"""
+
+    # 双字符操作符映射表（第一个字符 -> {第二个字符: TokenType}）
+    _TWO_CHAR_TOKENS: Dict[str, Dict[str, TokenType]] = {
+        ".": {".": TokenType.RANGE},
+        "+": {"+": TokenType.PLUSPLUS},
+        "-": {">": TokenType.ARROW},
+        "=": {"=": TokenType.EQ, ">": TokenType.FAT_ARROW},
+        "!": {"=": TokenType.NEQ},
+        "<": {"=": TokenType.LTE},
+        ">": {"=": TokenType.GTE},
+        "&": {"&": TokenType.AND},
+        "|": {"|": TokenType.OR, ">": TokenType.PIPE_GT},
+    }
 
     def __init__(self, source: str):
         self.source = source
@@ -349,42 +362,14 @@ class Lexer:
         # 操作符和标点
         self._advance()
 
-        # 双字符操作符
+        # 双字符操作符（表驱动）
         next_ch = self._peek()
         if next_ch:
-            if ch == "." and next_ch == ".":
+            second_map = self._TWO_CHAR_TOKENS.get(ch)
+            if second_map and next_ch in second_map:
+                token_type = second_map[next_ch]
                 self._advance()
-                return Token(TokenType.RANGE, "..", start_line, start_col)
-            if ch == "+" and next_ch == "+":
-                self._advance()
-                return Token(TokenType.PLUSPLUS, "++", start_line, start_col)
-            if ch == "-" and next_ch == ">":
-                self._advance()
-                return Token(TokenType.ARROW, "->", start_line, start_col)
-            if ch == "=" and next_ch == "=":
-                self._advance()
-                return Token(TokenType.EQ, "==", start_line, start_col)
-            if ch == "!" and next_ch == "=":
-                self._advance()
-                return Token(TokenType.NEQ, "!=", start_line, start_col)
-            if ch == "<" and next_ch == "=":
-                self._advance()
-                return Token(TokenType.LTE, "<=", start_line, start_col)
-            if ch == ">" and next_ch == "=":
-                self._advance()
-                return Token(TokenType.GTE, ">=", start_line, start_col)
-            if ch == "&" and next_ch == "&":
-                self._advance()
-                return Token(TokenType.AND, "&&", start_line, start_col)
-            if ch == "|" and next_ch == "|":
-                self._advance()
-                return Token(TokenType.OR, "||", start_line, start_col)
-            if ch == "|" and next_ch == ">":
-                self._advance()
-                return Token(TokenType.PIPE_GT, "|>", start_line, start_col)
-            if ch == "=" and next_ch == ">":
-                self._advance()
-                return Token(TokenType.FAT_ARROW, "=>", start_line, start_col)
+                return Token(token_type, ch + next_ch, start_line, start_col)
 
         # 单字符 token
         single_char_tokens = {

@@ -18,7 +18,7 @@ from nova.backend.x86_64 import (
     XMM0,
 )
 from nova.backend.native_backend import (
-    NativeCodeGen, LinearScanAllocator, LiveInterval,
+    NativeCodeGen,
 )
 
 # 直接导入 IR 节点
@@ -284,57 +284,6 @@ class TestX86_64Emitter(unittest.TestCase):
         self.assertEqual(code[0], 0x48)  # REX.W
         self.assertEqual(code[1], 0x85)  # TEST r/m64, r64
         self.assertEqual(code[2], 0xC0)  # ModR/M: mod=11, reg=RAX, rm=RAX
-
-
-class TestLinearScanAllocator(unittest.TestCase):
-    """线性扫描寄存器分配器测试"""
-
-    def test_basic_allocation(self):
-        """基本分配"""
-        intervals = [
-            LiveInterval("v0", 0, 10),
-            LiveInterval("v1", 5, 15),
-            LiveInterval("v2", 0, 5),  # v0 和 v2 重叠但 v2 在 v0 结束前结束
-        ]
-        alloc = LinearScanAllocator([RAX, RBX, RCX])
-        result, slots = alloc.allocate(intervals)
-        self.assertIsNotNone(result.get("v0"))
-        self.assertIsNotNone(result.get("v1"))
-        self.assertIsNotNone(result.get("v2"))
-        # v0 和 v2 重叠
-        self.assertNotEqual(result.get("v0"), result.get("v2"))
-
-    def test_spill_when_full(self):
-        """溢出处理"""
-        intervals = [
-            LiveInterval("v0", 0, 100),
-            LiveInterval("v1", 0, 100),
-            LiveInterval("v2", 0, 100),
-            LiveInterval("v3", 0, 100),
-        ]
-        alloc = LinearScanAllocator([RAX, RBX])  # 只有 2 个寄存器
-        result, slots = alloc.allocate(intervals)
-        # 前两个分配到寄存器，后两个溢出到栈
-        self.assertEqual(slots, 2)
-
-    def test_no_intervals(self):
-        """空输入"""
-        alloc = LinearScanAllocator([RAX, RBX])
-        result, slots = alloc.allocate([])
-        self.assertEqual(slots, 0)
-        self.assertEqual(len(result), 0)
-
-    def test_non_overlapping_intervals(self):
-        """不重叠的区间应能复用寄存器"""
-        intervals = [
-            LiveInterval("v0", 0, 5),
-            LiveInterval("v1", 5, 10),  # v0 结束后 v1 才开始
-        ]
-        alloc = LinearScanAllocator([RAX])
-        result, slots = alloc.allocate(intervals)
-        # 两个区间不重叠，应能复用同一寄存器
-        self.assertEqual(result.get("v0"), result.get("v1"))
-        self.assertEqual(slots, 0)  # 无溢出
 
 
 class TestNativeCodeGen(unittest.TestCase):

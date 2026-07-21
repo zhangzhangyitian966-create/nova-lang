@@ -1,5 +1,5 @@
 {
-  "cycles": 30,
+  "cycles": 31,
   "completed_tasks": [
     "unify_ir_naming",
     "for_loop_ssa_normalize",
@@ -67,10 +67,37 @@
     "fix_syspath_hack",
     "refactor_hir_lowering_dispatch",
     "lir_dce_pass",
-    "review_cycle_30"
+    "review_cycle_30",
+    "test_slimming",
+    "backend_dead_code_cleanup",
+    "frontend_dead_code_cleanup"
   ],
   "failed_tasks": [],
   "task_history": [
+    {
+      "cycle": 31,
+      "task_id": "test_slimming",
+      "status": "completed",
+      "source": "审查驱动",
+      "reason": "审查日志显示 tests 模块问题数 461 个排所有模块第一，test_nova.py（1874行）是全项目最大文件。测试代码也是代码，过大的测试文件维护成本高于收益。按用户反馈'不应该努力膨胀'的方向，启动测试瘦身专项。",
+      "details": "测试文件瘦身：1) 算术/比较/逻辑运算 11 个独立测试合并为 3 个表驱动测试（subTest 分组）；2) match 模式匹配 5 个测试合并为 1 个参数化测试；3) TestErrorFormatting 抽取 _make_error 辅助方法，移除 12 处局部 import 重复；4) TestErrors 删除 6 个与其他测试类重复的错误测试（保留独有场景）。test_nova.py 从 1874 行减至 1764 行（-110行，-6%），测试函数从 212 个减至 190 个，覆盖率无损失。"
+    },
+    {
+      "cycle": 31,
+      "task_id": "backend_dead_code_cleanup",
+      "status": "completed",
+      "source": "审查驱动",
+      "reason": "审查日志和深度代码审计发现后端存在死代码：native_backend.py 中的 LinearScanAllocator 和 SimpleNativeCompiler 从未被生产代码使用，是原型阶段遗留。用户反馈'后端也没有优化膨胀'，启动后端死代码清理。",
+      "details": "后端死代码清理：1) 删除 native_backend.py 中的 LinearScanAllocator 类 + LiveInterval 类（未被生产代码使用，仅测试引用）；2) 删除 native_backend.py 中的 SimpleNativeCompiler 类（死代码，全项目无引用，内部调用不存在的 compile_and_write 方法）；3) 同步删除 test_native_backend.py 中的 TestLinearScanAllocator 测试类（4 个测试）；4) 移除不再使用的 List/Tuple import。native_backend.py 从 538 行减至 428 行（-110行，-20%），测试文件从 486 行减至 435 行（-51行），合计 -161 行。"
+    },
+    {
+      "cycle": 31,
+      "task_id": "frontend_dead_code_cleanup",
+      "status": "completed",
+      "source": "审查驱动",
+      "reason": "审查日志显示前端 5 个文件 4300+ 行代码长期未被优化，用户反馈'前端也没有优化膨胀代码'。深度审计发现 compiler.py 中有死方法和冗余分支，lexer.py 中有可表驱动化的 if 链。",
+      "details": "前端冗余代码治理：1) 删除 compiler.py 中死方法 _compile_pattern_test（43行，从未被调用）和 _compile_pattern_bindings（16行，仅内部递归无外部调用）；2) 删除 compiler.py 管道编译中的冗余 if-else 分支（两个分支完全相同，都是 LOAD_VAR）；3) lexer.py 双字符操作符 11 个 if 分支重构为表驱动查找（_TWO_CHAR_TOKENS 类变量），代码从 36 行减至 8 行。compiler.py 从 961 行减至 898 行（-63行），lexer.py 从 428 行减至 413 行（-15行），合计 -78 行。"
+    },
     {
       "cycle": 28,
       "task_id": "unify_ssa_operand_logic",
@@ -125,12 +152,12 @@
       "status": "completed",
       "source": "评审轮",
       "reason": "第30轮路线图评审，每3轮一次的例行评审。总结第28-29轮开发成果，评估方向/质量/效率/价值/审查对齐五维表现，规划第31-33轮方向。",
-      "details": "完成第30轮路线图评审：五维评估（方向正确、质量提升、效率稳定、价值高、审查对齐良好）；任务池新增 8 个任务（6个审查驱动 + 2个自主发现）；调整 4 个任务优先级；规划第31-33轮方向为"复杂度治理 → 测试深化 → 质量底线"。"
+      "details": "完成第30轮路线图评审：五维评估（方向正确、质量提升、效率稳定、价值高、审查对齐良好）；任务池新增 8 个任务（6个审查驱动 + 2个自主发现）；调整 4 个任务优先级；规划第31-33轮方向为'复杂度治理 → 测试深化 → 质量底线'。"
     }
   ],
-  "current_cycle": 30,
-  "baseline_tests": 403,
-  "current_tests": 403,
+  "current_cycle": 31,
+  "baseline_tests": 418,
+  "current_tests": 392,
   "last_review_cycle": 30,
   "tasks": [
     {
@@ -208,9 +235,9 @@
       "priority": 58,
       "category": "engineering",
       "estimated": "3-5 小时",
-      "status": "pending",
+      "status": "in_progress",
       "depends_on": [],
-      "reason": "审查日志显示 _next_token 圈复杂度 32，是前端最复杂的函数。词法分析是编译器的第一道门，高复杂度增加维护难度。拆分后结构更清晰，也便于添加新的 token 类型。[新增任务 / 审查驱动]"
+      "reason": "审查日志显示 _next_token 圈复杂度 32，是前端最复杂的函数。词法分析是编译器的第一道门，高复杂度增加维护难度。拆分后结构更清晰，也便于添加新的 token 类型。[新增任务 / 审查驱动][第31轮部分完成：双字符操作符已表驱动化]"
     },
     {
       "id": "refactor_pass_manager_side_effect",
@@ -331,6 +358,42 @@
       "status": "completed",
       "depends_on": [],
       "reason": "审查日志第1496轮唯一 HIGH 级别问题，消除后项目完全符合 Python 包管理规范 [审查驱动]"
+    },
+    {
+      "id": "test_slimming",
+      "name": "测试文件瘦身与拆分",
+      "description": "精简 test_nova.py 中的重复测试模式，合并参数化测试，删除冗余测试，按模块拆分大测试文件",
+      "difficulty": "easy",
+      "priority": 68,
+      "category": "test",
+      "estimated": "2-3 小时",
+      "status": "completed",
+      "depends_on": [],
+      "reason": "test_nova.py 是全项目最大文件（1874行），测试膨胀问题严重。测试代码也是代码，需要维护。瘦身可降低维护成本，提升测试组织清晰度。[第31轮完成 / 用户反馈驱动]"
+    },
+    {
+      "id": "backend_dead_code_cleanup",
+      "name": "后端占位代码与死代码清理",
+      "description": "清理后端中的 pass 占位、死代码、未使用类和方法，给后端代码库'挤水分'",
+      "difficulty": "easy",
+      "priority": 60,
+      "category": "engineering",
+      "estimated": "1-2 小时",
+      "status": "completed",
+      "depends_on": [],
+      "reason": "后端存在未使用的死代码（LinearScanAllocator、SimpleNativeCompiler），占用代码量却不产生价值。清理后后端代码更真实反映实际完成度。[第31轮完成 / 用户反馈驱动]"
+    },
+    {
+      "id": "frontend_dead_code_cleanup",
+      "name": "前端冗余代码治理",
+      "description": "清理前端文件中的死方法、冗余分支、重复代码，精简前端代码库",
+      "difficulty": "easy",
+      "priority": 58,
+      "category": "engineering",
+      "estimated": "2-3 小时",
+      "status": "completed",
+      "depends_on": [],
+      "reason": "前端 5 个文件 4300+ 行长期未被优化，存在死代码和冗余模式。治理后前端代码更精简。[第31轮完成 / 用户反馈驱动]"
     }
   ]
 }

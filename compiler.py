@@ -558,10 +558,7 @@ class BytecodeCompiler:
             # 加载 f
             if isinstance(fn_call.callee, Identifier):
                 name = fn_call.callee.name
-                if name in self._builtin_names:
-                    self.bytecode.emit_op(Op.LOAD_VAR, name)
-                else:
-                    self.bytecode.emit_op(Op.LOAD_VAR, name)
+                self.bytecode.emit_op(Op.LOAD_VAR, name)
             else:
                 self._compile_expr(fn_call.callee)
 
@@ -779,66 +776,6 @@ class BytecodeCompiler:
             self.bytecode.emit_op(Op.POP)
         else:
             self.bytecode.emit_op(Op.POP)
-
-    def _compile_pattern_test(self, pattern):
-        """编译模式测试指令，失败时跳转到 fail_ip"""
-        if isinstance(pattern, PatternWildcard):
-            self.bytecode.emit_op(Op.MATCH_WILDCARD)
-            return
-
-        elif isinstance(pattern, PatternInt):
-            fail_pos = self.bytecode.current_pos()
-            self.bytecode.emit_op(Op.MATCH_TEST_INT, pattern.value, 0)
-            return fail_pos
-
-        elif isinstance(pattern, PatternBool):
-            fail_pos = self.bytecode.current_pos()
-            self.bytecode.emit_op(Op.MATCH_TEST_BOOL, pattern.value, 0)
-            return fail_pos
-
-        elif isinstance(pattern, PatternString):
-            fail_pos = self.bytecode.current_pos()
-            self.bytecode.emit_op(Op.MATCH_TEST_STRING, pattern.value, 0)
-            return fail_pos
-
-        elif isinstance(pattern, PatternIdentifier):
-            self.bytecode.emit_op(Op.MATCH_WILDCARD)
-            return None
-
-        elif isinstance(pattern, PatternConstructor):
-            fail_pos = self.bytecode.current_pos()
-            self.bytecode.emit_op(
-                Op.MATCH_CONSTRUCTOR, pattern.name, len(pattern.fields), 0
-            )
-            return fail_pos
-
-        elif isinstance(pattern, PatternTuple):
-            self.bytecode.emit_op(Op.MATCH_WILDCARD)
-            return None
-
-        elif isinstance(pattern, PatternList):
-            self.bytecode.emit_op(Op.MATCH_WILDCARD)
-            return None
-
-        else:
-            self.bytecode.emit_op(Op.MATCH_WILDCARD)
-            return None
-
-    def _compile_pattern_bindings(self, pattern, has_subject_on_stack=True):
-        """编译模式变量绑定"""
-        if isinstance(pattern, PatternIdentifier):
-            self.bytecode.emit_op(Op.MATCH_BIND, pattern.name)
-        elif isinstance(pattern, PatternConstructor):
-            for field_pattern in pattern.fields:
-                self._compile_pattern_bindings(
-                    field_pattern, has_subject_on_stack=False
-                )
-        elif isinstance(pattern, PatternTuple):
-            for elem_pattern in pattern.elements:
-                self._compile_pattern_bindings(elem_pattern, has_subject_on_stack=False)
-        elif isinstance(pattern, PatternList):
-            for elem_pattern in pattern.elements:
-                self._compile_pattern_bindings(elem_pattern, has_subject_on_stack=False)
 
     def _compile_block(self, expr: Block):
         """编译代码块"""

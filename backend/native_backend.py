@@ -7,7 +7,7 @@ Nova 自研原生代码生成后端
 
 import os
 import struct
-from typing import Dict, List, Tuple
+from typing import Dict
 
 from .x86_64 import (
     CALLEE_SAVED,
@@ -50,62 +50,6 @@ from ..ir.ir_nodes import (
     LIRReturn,
     LIRUnaryOp,
 )
-
-# ============================================================
-# 寄存器分配器（线性扫描算法）
-# ============================================================
-
-
-class LiveInterval:
-    """活跃区间，表示一个虚拟寄存器的生命周期"""
-
-    def __init__(self, vreg, start, end):
-        self.vreg = vreg
-        self.start = start
-        self.end = end
-        self.reg = None
-        self.spill_slot = None
-
-
-class LinearScanAllocator:
-    """线性扫描寄存器分配器"""
-
-    def __init__(self, available_regs):
-        self.available = list(available_regs)
-        self.spill_counter = 0
-
-    def allocate(self, intervals: List[LiveInterval]) -> Tuple[Dict[str, int], int]:
-        """分配寄存器，返回 (vreg -> reg, max_stack_slots)"""
-        active = []  # 当前活跃的 intervals
-        result = {}
-        max_slot = 0
-
-        # 按起始位置排序
-        intervals.sort(key=lambda i: i.start)
-
-        for interval in intervals:
-            # 过期检查：移除已结束的区间
-            active = [a for a in active if a.end > interval.start]
-
-            # 尝试分配寄存器
-            used_regs = {a.reg for a in active if a.reg is not None}
-            free = [r for r in self.available if r not in used_regs]
-
-            if free:
-                interval.reg = free[0]
-                result[interval.vreg] = interval.reg
-            else:
-                # 溢出到栈
-                interval.spill_slot = self.spill_counter
-                self.spill_counter += 1
-                max_slot = max(max_slot, self.spill_counter)
-                result[interval.vreg] = interval.spill_slot  # 负数表示 spill
-
-            active.append(interval)
-            active.sort(key=lambda a: a.end)
-
-        return result, max_slot
-
 
 # ============================================================
 # 代码生成器
@@ -482,57 +426,3 @@ class NativeCodeGen:
             f.write(elf)
         os.chmod(output_path, 0o755)
         return output_path
-
-
-# ============================================================
-# 简化的直接编译器（不经过 LIR，直接从源码生成 x86_64）
-# ============================================================
-
-
-class SimpleNativeCompiler:
-    """
-    简化版原生编译器
-    直接将 Nova 源码编译为 x86_64 ELF 可执行文件
-    用于快速验证机器码生成是否正确
-    """
-
-    def __init__(self):
-        self.codegen = NativeCodeGen()
-
-    def compile_source(self, source: str, output_path: str) -> str:
-        """将 Nova 源码编译为 x86_64 ELF"""
-        # 1. 前端解析（复用现有）
-        from ..parser import Parser
-
-        from ..lexer import Lexer
-
-        tokens = Lexer(source).tokenize()
-        ast = Parser(tokens).parse()
-
-        # 2. 构建简单的 LIR
-        lir = self._build_simple_lir(ast)
-
-        # 3. 编译为 ELF
-        self.codegen.compile_and_write(lir, output_path)
-        return output_path
-
-    def _build_simple_lir(self, ast):
-        """从 AST 构建简单的 LIR（仅支持整数运算和函数调用）"""
-        lir = LIRModule(name="nova_program")
-
-        # 构建 main 函数
-        main_fn = LIRFunction("main", [], UNIT_TYPE)
-        main_fn.body = []
-
-        # 构建用户函数
-        for decl in ast.declarations:
-            if hasattr(decl, "name"):
-                fn = LIRFunction(decl.name, [], INT_TYPE)
-                fn.body = [LIRLoadConst(), LIRReturn()]
-                lir.functions[decl.name] = fn
-
-        # 简化的 _start
-        lir.functions["_start"] = LIRFunction("_start", [], UNIT_TYPE)
-        lir.functions["_start"].body = [LIRReturn()]
-
-        return lir

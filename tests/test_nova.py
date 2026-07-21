@@ -16,7 +16,7 @@ from nova.lexer import Lexer, TokenType
 from nova.parser import Parser
 from nova.type_checker import TypeChecker
 from nova.evaluator import Evaluator
-from nova.errors import LexerError, ParseError, TypeCheckError, RuntimeError_
+from nova.errors import LexerError, ParseError, TypeCheckError, RuntimeError_, NovaError
 from nova.ast_nodes import (
     IntLiteral,
     FloatLiteral,
@@ -551,69 +551,51 @@ class TestEvaluator(unittest.TestCase):
 
         self.assertEqual(ev.env.lookup("x"), UNIT_VALUE)
 
-    def test_arithmetic_add(self):
-        ev = eval_source("let x = 1 + 2", check_types=False)
-        self.assertEqual(ev.env.lookup("x"), 3)
-
-    def test_arithmetic_sub(self):
-        ev = eval_source("let x = 10 - 3", check_types=False)
-        self.assertEqual(ev.env.lookup("x"), 7)
-
-    def test_arithmetic_mul(self):
-        ev = eval_source("let x = 4 * 5", check_types=False)
-        self.assertEqual(ev.env.lookup("x"), 20)
-
-    def test_arithmetic_div(self):
-        ev = eval_source("let x = 10 / 3", check_types=False)
-        self.assertEqual(ev.env.lookup("x"), 3)
-
-    def test_arithmetic_mod(self):
-        ev = eval_source("let x = 10 % 3", check_types=False)
-        self.assertEqual(ev.env.lookup("x"), 1)
+    def test_arithmetic_operations(self):
+        """算术运算表驱动测试"""
+        cases = [
+            ("1 + 2", 3),
+            ("10 - 3", 7),
+            ("4 * 5", 20),
+            ("10 / 3", 3),
+            ("10 % 3", 1),
+        ]
+        for expr, expected in cases:
+            with self.subTest(expr=expr):
+                ev = eval_source(f"let x = {expr}", check_types=False)
+                self.assertEqual(ev.env.lookup("x"), expected)
 
     def test_string_concat(self):
         ev = eval_source('let x = "hello" ++ " " ++ "world"', check_types=False)
         self.assertEqual(ev.env.lookup("x"), "hello world")
 
-    def test_comparison_eq(self):
-        ev = eval_source("let x = 1 == 1", check_types=False)
-        self.assertTrue(ev.env.lookup("x"))
+    def test_comparison_operations(self):
+        """比较运算表驱动测试"""
+        cases = [
+            ("1 == 1", True),
+            ("1 != 2", True),
+            ("1 < 2", True),
+            ("2 > 1", True),
+            ("1 <= 1", True),
+            ("2 >= 2", True),
+        ]
+        for expr, expected in cases:
+            with self.subTest(expr=expr):
+                ev = eval_source(f"let x = {expr}", check_types=False)
+                self.assertEqual(ev.env.lookup("x"), expected)
 
-    def test_comparison_neq(self):
-        ev = eval_source("let x = 1 != 2", check_types=False)
-        self.assertTrue(ev.env.lookup("x"))
-
-    def test_comparison_lt(self):
-        ev = eval_source("let x = 1 < 2", check_types=False)
-        self.assertTrue(ev.env.lookup("x"))
-
-    def test_comparison_gt(self):
-        ev = eval_source("let x = 2 > 1", check_types=False)
-        self.assertTrue(ev.env.lookup("x"))
-
-    def test_comparison_lte(self):
-        ev = eval_source("let x = 1 <= 1", check_types=False)
-        self.assertTrue(ev.env.lookup("x"))
-
-    def test_comparison_gte(self):
-        ev = eval_source("let x = 2 >= 2", check_types=False)
-        self.assertTrue(ev.env.lookup("x"))
-
-    def test_logical_and(self):
-        ev = eval_source("let x = true && true", check_types=False)
-        self.assertTrue(ev.env.lookup("x"))
-
-    def test_logical_and_shortcircuit(self):
-        ev = eval_source("let x = false && true", check_types=False)
-        self.assertFalse(ev.env.lookup("x"))
-
-    def test_logical_or(self):
-        ev = eval_source("let x = false || true", check_types=False)
-        self.assertTrue(ev.env.lookup("x"))
-
-    def test_logical_or_shortcircuit(self):
-        ev = eval_source("let x = true || false", check_types=False)
-        self.assertTrue(ev.env.lookup("x"))
+    def test_logical_operations(self):
+        """逻辑运算表驱动测试"""
+        cases = [
+            ("true && true", True),
+            ("false && true", False),  # 短路
+            ("false || true", True),
+            ("true || false", True),  # 短路
+        ]
+        for expr, expected in cases:
+            with self.subTest(expr=expr):
+                ev = eval_source(f"let x = {expr}", check_types=False)
+                self.assertEqual(ev.env.lookup("x"), expected)
 
     def test_unary_minus(self):
         ev = eval_source("let x = -42", check_types=False)
@@ -706,63 +688,19 @@ class TestEvaluator(unittest.TestCase):
         )
         self.assertEqual(ev.env.lookup("result"), 15)
 
-    def test_match_int(self):
-        ev = eval_source(
-            """
-            let x = match 1 {
-                1 -> "one"
-                2 -> "two"
-                _ -> "other"
-            }
-        """,
-            check_types=False,
-        )
-        self.assertEqual(ev.env.lookup("x"), "one")
-
-    def test_match_bool(self):
-        ev = eval_source(
-            """
-            let x = match true {
-                true  -> "yes"
-                false -> "no"
-            }
-        """,
-            check_types=False,
-        )
-        self.assertEqual(ev.env.lookup("x"), "yes")
-
-    def test_match_wildcard(self):
-        ev = eval_source(
-            """
-            let x = match 42 {
-                _ -> "anything"
-            }
-        """,
-            check_types=False,
-        )
-        self.assertEqual(ev.env.lookup("x"), "anything")
-
-    def test_match_binding(self):
-        ev = eval_source(
-            """
-            let x = match 42 {
-                n -> n
-            }
-        """,
-            check_types=False,
-        )
-        self.assertEqual(ev.env.lookup("x"), 42)
-
-    def test_match_tuple(self):
-        ev = eval_source(
-            """
-            let x = match (1, 2) {
-                (a, b) -> a + b
-            }
-        """,
-            check_types=False,
-        )
-        self.assertEqual(ev.env.lookup("x"), 3)
+    def test_match_patterns(self):
+        """match 模式匹配表驱动测试"""
+        cases = [
+            ("int 字面量", 'match 1 {\n    1 -> "one"\n    2 -> "two"\n    _ -> "other"\n}', "one"),
+            ("bool 字面量", 'match true {\n    true -> "yes"\n    false -> "no"\n}', "yes"),
+            ("通配符", 'match 42 {\n    _ -> "anything"\n}', "anything"),
+            ("变量绑定", 'match 42 {\n    n -> n\n}', 42),
+            ("元组模式", 'match (1, 2) {\n    (a, b) -> a + b\n}', 3),
+        ]
+        for name, expr, expected in cases:
+            with self.subTest(pattern=name):
+                ev = eval_source(f"let x = {expr}", check_types=False)
+                self.assertEqual(ev.env.lookup("x"), expected)
 
 
 # ============================================================
@@ -1109,31 +1047,7 @@ class TestIntegration(unittest.TestCase):
 
 
 class TestErrors(unittest.TestCase):
-    """错误处理测试"""
-
-    def test_lexer_error(self):
-        with self.assertRaises(LexerError):
-            tokenize("@")
-
-    def test_parse_error(self):
-        with self.assertRaises(ParseError):
-            parse("let = 42")
-
-    def test_type_error_add_int_bool(self):
-        with self.assertRaises(TypeCheckError):
-            type_check("1 + true")
-
-    def test_type_error_if_cond(self):
-        with self.assertRaises(TypeCheckError):
-            type_check("if 42 then 1 else 2")
-
-    def test_type_error_undefined(self):
-        with self.assertRaises(TypeCheckError):
-            type_check("x + 1")
-
-    def test_runtime_error_division_by_zero(self):
-        with self.assertRaises(RuntimeError_):
-            eval_source("let x = 10 / 0", check_types=False)
+    """错误处理测试 - 专注于其他测试类未覆盖的错误场景"""
 
     def test_match_exhaustiveness_error(self):
         """没有匹配分支应该报运行时错误"""
@@ -1490,69 +1404,57 @@ class TestListComprehension(unittest.TestCase):
 class TestErrorFormatting(unittest.TestCase):
     """错误格式测试"""
 
+    def _make_error(self, msg, line=-1, col=-1, source=None, span=None):
+        """构造带源码上下文的错误对象"""
+        err = NovaError(msg, line=line, column=col)
+        if source:
+            err.source_code = source
+        if span:
+            err.highlight_span = span
+        return err
+
     def test_error_with_source_context(self):
         """错误信息包含源码上下文"""
-        from nova.errors import NovaError
-
-        err = NovaError("测试错误", line=2, column=5)
-        err.source_code = "line1\nline2 error here\nline3"
+        err = self._make_error("测试错误", line=2, col=5, source="line1\nline2 error here\nline3")
         formatted = str(err)
-        # 应包含源码行
         self.assertIn("line2", formatted)
         self.assertIn("^", formatted)
 
     def test_error_with_source_context_first_line(self):
         """错误在第一行时也能正确显示"""
-        from nova.errors import NovaError
-
-        err = NovaError("第一行错误", line=1, column=3)
-        err.source_code = "first line\nsecond line"
+        err = self._make_error("第一行错误", line=1, col=3, source="first line\nsecond line")
         formatted = str(err)
         self.assertIn("first line", formatted)
         self.assertIn("^", formatted)
 
     def test_error_with_source_context_last_line(self):
         """错误在最后一行时也能正确显示"""
-        from nova.errors import NovaError
-
-        err = NovaError("最后一行错误", line=3, column=1)
-        err.source_code = "line1\nline2\nline3 error"
+        err = self._make_error("最后一行错误", line=3, col=1, source="line1\nline2\nline3 error")
         formatted = str(err)
         self.assertIn("line3", formatted)
         self.assertIn("^", formatted)
 
     def test_error_without_source_fallback(self):
         """没有源码时使用传统格式"""
-        from nova.errors import NovaError
-
-        err = NovaError("简单错误", line=5, column=10)
+        err = self._make_error("简单错误", line=5, col=10)
         formatted = str(err)
         self.assertIn("[行 5, 列 10]", formatted)
         self.assertIn("简单错误", formatted)
 
     def test_error_no_line_info(self):
         """没有行列号时只显示消息"""
-        from nova.errors import NovaError
-
-        err = NovaError("无位置错误")
+        err = self._make_error("无位置错误")
         formatted = str(err)
         self.assertEqual(formatted, "无位置错误")
 
     def test_error_highlight_span(self):
         """使用 highlight_span 标记范围"""
-        from nova.errors import NovaError
-
-        err = NovaError("范围错误", line=2, column=5)
-        err.source_code = "line1\nabcDEFGhij\nline3"
-        err.highlight_span = (5, 10)
+        err = self._make_error("范围错误", line=2, col=5, source="line1\nabcDEFGhij\nline3", span=(5, 10))
         formatted = str(err)
-        # 10 - 5 = 5 个 ^
         self.assertIn("^^^^^", formatted)
 
     def test_lexer_error_with_source(self):
         """词法分析错误自动附带源码"""
-        from nova.errors import LexerError
-
         err = LexerError("非法字符", 1, 1, source="let x = @")
         formatted = str(err)
         self.assertIn("let x = @", formatted)
@@ -1560,43 +1462,31 @@ class TestErrorFormatting(unittest.TestCase):
 
     def test_parse_error_with_source(self):
         """语法分析错误附带源码"""
-        from nova.errors import ParseError
-
         err = ParseError("意外 token", 1, 5, source="let = 42")
         formatted = str(err)
         self.assertIn("let = 42", formatted)
 
     def test_type_check_error_with_source(self):
         """类型检查错误附带源码"""
-        from nova.errors import TypeCheckError
-
         err = TypeCheckError("类型不匹配", 1, 3, source="let x: Int = true")
         formatted = str(err)
         self.assertIn("let x: Int = true", formatted)
 
     def test_runtime_error_with_source(self):
         """运行时错误附带源码"""
-        from nova.errors import RuntimeError_
-
         err = RuntimeError_("除零错误", 1, 10, source="let x = 10 / 0")
         formatted = str(err)
         self.assertIn("10 / 0", formatted)
 
     def test_error_context_shows_previous_line(self):
         """上下文显示前一行"""
-        from nova.errors import NovaError
-
-        err = NovaError("错误", line=2, column=1)
-        err.source_code = "prev\nerror\nnext"
+        err = self._make_error("错误", line=2, col=1, source="prev\nerror\nnext")
         formatted = str(err)
         self.assertIn("prev", formatted)
 
     def test_error_context_shows_next_line(self):
         """上下文显示后一行"""
-        from nova.errors import NovaError
-
-        err = NovaError("错误", line=2, column=1)
-        err.source_code = "prev\nerror\nnext"
+        err = self._make_error("错误", line=2, col=1, source="prev\nerror\nnext")
         formatted = str(err)
         self.assertIn("next", formatted)
 
