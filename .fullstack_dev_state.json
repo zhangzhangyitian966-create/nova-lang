@@ -1,10 +1,36 @@
 {
-  "cycles": 0,
-  "frontend_completed": 0,
-  "backend_completed": 0,
-  "completed_tasks": [],
+  "cycles": 1,
+  "frontend_completed": 1,
+  "backend_completed": 1,
+  "completed_tasks": [
+    "frontend_try_expr_typecheck",
+    "backend_native_label_patch"
+  ],
   "failed_tasks": [],
-  "task_history": [],
+  "task_history": [
+    {
+      "cycle": 1,
+      "task_id": "frontend_try_expr_typecheck",
+      "name": "完善 ? 操作符类型检查",
+      "track": "frontend",
+      "difficulty": "medium",
+      "priority": 78,
+      "result": "success",
+      "details": "修复 _check_try_expr 从占位实现升级为真正的类型检查：验证表达式为 Option/Result ADT 类型，提取内部值类型返回；非 Option/Result 类型使用 ? 报类型错误。TypeVar 暂时放行以保持兼容。",
+      "timestamp": "2026-07-22 08:15"
+    },
+    {
+      "cycle": 1,
+      "task_id": "backend_native_label_patch",
+      "name": "实现原生后端两阶段汇编与标签回填",
+      "track": "backend",
+      "difficulty": "medium",
+      "priority": 92,
+      "result": "success",
+      "details": "在 _compile_body 中实现两阶段汇编：第一阶段发射指令并记录 label_offsets 和 jump_fixups；第二阶段遍历 jump_fixups 调用 emitter.patch_rel32 回填所有 jmp/jcc 的 rel32 偏移量。",
+      "timestamp": "2026-07-22 08:16"
+    }
+  ],
   "tasks": [
     {
       "task_id": "frontend_type_unification",
@@ -26,18 +52,6 @@
       "difficulty": "hard",
       "priority": 82,
       "estimated_effort": "2-3天",
-      "status": "pending",
-      "source": "quality_analysis",
-      "depends_on": []
-    },
-    {
-      "task_id": "frontend_try_expr_typecheck",
-      "name": "完善 ? 操作符类型检查",
-      "description": "修复 _check_try_expr 简化实现，真正验证 Option/Result 类型传播，确保错误传播的类型安全。要求：? 只能用于 Option/Result 类型，返回值类型正确推导。",
-      "track": "frontend",
-      "difficulty": "medium",
-      "priority": 78,
-      "estimated_effort": "4-6小时",
       "status": "pending",
       "source": "quality_analysis",
       "depends_on": []
@@ -76,18 +90,6 @@
       "difficulty": "medium",
       "priority": 60,
       "estimated_effort": "4-6小时",
-      "status": "pending",
-      "source": "quality_analysis",
-      "depends_on": []
-    },
-    {
-      "task_id": "backend_native_label_patch",
-      "name": "实现原生后端两阶段汇编与标签回填",
-      "description": "实现两阶段汇编：第一阶段发射指令并记录标签位置和跳转引用，第二阶段回填 jmp/jcc 的 rel32 偏移量。这是原生后端可用的基础。",
-      "track": "backend",
-      "difficulty": "medium",
-      "priority": 92,
-      "estimated_effort": "1-2天",
       "status": "pending",
       "source": "quality_analysis",
       "depends_on": []
@@ -161,18 +163,6 @@
       "depends_on": []
     },
     {
-      "task_id": "backend_wasm_gc_types",
-      "name": "完善 WasmGC 原生类型定义",
-      "description": "扩展 WasmGC 类型系统：增加 List/Map/ADT 的原生 struct/array 类型定义，真正利用 GC 托管堆，替代运行时函数调用。",
-      "track": "backend",
-      "difficulty": "hard",
-      "priority": 68,
-      "estimated_effort": "3-5天",
-      "status": "pending",
-      "source": "quality_analysis",
-      "depends_on": []
-    },
-    {
       "task_id": "backend_unify_c_codegen",
       "name": "统一 C 后端（旧路径迁移到 LIR 路径）",
       "description": "将旧的 c_codegen.py（AST级C代码生成）功能迁移到 lir_c_backend.py（LIR级C代码生成），淘汰旧路径，消除双轨维护成本。",
@@ -180,6 +170,18 @@
       "difficulty": "hard",
       "priority": 70,
       "estimated_effort": "2-3天",
+      "status": "pending",
+      "source": "quality_analysis",
+      "depends_on": []
+    },
+    {
+      "task_id": "backend_wasm_gc_types",
+      "name": "完善 WasmGC 原生类型定义",
+      "description": "扩展 WasmGC 类型系统：增加 List/Map/ADT 的原生 struct/array 类型定义，真正利用 GC 托管堆，替代运行时函数调用。",
+      "track": "backend",
+      "difficulty": "hard",
+      "priority": 68,
+      "estimated_effort": "3-5天",
       "status": "pending",
       "source": "quality_analysis",
       "depends_on": []

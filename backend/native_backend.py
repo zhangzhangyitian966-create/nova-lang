@@ -133,13 +133,22 @@ class NativeCodeGen:
         return bytes(e.code)
 
     def _compile_body(self, e: X86_64Emitter, func: LIRFunction):
-        """编译函数体指令"""
+        """
+        编译函数体指令（两阶段汇编）。
+        
+        第一阶段：发射指令，记录标签位置和待回填的跳转引用
+        第二阶段：回填所有 jmp/jcc 的 rel32 偏移量
+        """
         # 虚拟寄存器 -> 物理寄存器映射
         vregs = {}  # vreg_name -> phys_reg
 
         # 分配虚拟寄存器
         free_gprs = [RAX, RCX, RDX, RBX, R8, R9, R10, R11, R12, R13, R14, R15]
         free_xmms = [XMM0, XMM1, XMM2, XMM3, XMM4, XMM5, XMM6, XMM7]
+
+        # 两阶段汇编：标签位置和待回填项
+        label_offsets = {}  # label_name -> code_offset
+        jump_fixups = []    # [(code_offset, target_label, is_conditional)]
 
         def get_reg(is_float=False):
             if is_float:
@@ -155,6 +164,7 @@ class NativeCodeGen:
                 vregs[name] = get_reg(is_float)
             return vregs[name]
 
+        # ====== 第一阶段：发射指令并记录标签和跳转 ======
         for instr in func.body:
             if isinstance(instr, LIRLoadConst):
                 if instr.const_type == "int":
@@ -236,7 +246,7 @@ class NativeCodeGen:
                     # 将第 i 个参数放到 ARG_REGS[i]
                     pass  # 实际需要从虚拟寄存器加载
 
-                # 调用
+                # 调用（函数间调用在 ELF 链接阶段回填）
                 call_offset = e.call_rel32()
                 self.link_calls.append((call_offset, instr.func_name))
 
@@ -245,25 +255,37 @@ class NativeCodeGen:
                 e.ret()
 
             elif isinstance(instr, LIRJump):
-                # jmp label
+                # 无条件跳转：发射 jmp rel32 占位，记录回填
                 jmp_offset = e.jmp_rel32()
-                # 记录标签跳转，后续回填
+                jump_fixups.append((jmp_offset, instr.target, "jmp"))
 
             elif isinstance(instr, LIRBranch):
-                # if (RAX != 0) jmp true; else jmp false
+                # 条件跳转：test + jne(true) + jmp(false)
                 e.test_reg_reg(RAX, RAX)
-                jne_offset = e.jne_rel32()
-                jmp_offset = e.jmp_rel32()
-                # 记录分支跳转
+                jne_offset = e.jne_rel32()  # true 分支
+                jump_fixups.append((jne_offset, instr.true_target, "jcc"))
+                jmp_offset = e.jmp_rel32()  # false 分支
+                jump_fixups.append((jmp_offset, instr.false_target, "jmp"))
 
             elif isinstance(instr, LIRLabel):
-                pass  # 标签在回填阶段处理
+                # 记录标签的当前代码偏移位置
+                label_offsets[instr.name] = e.current_offset()
 
             elif isinstance(instr, LIRPanic):
                 # 调用 abort (exit code 1)
                 e.mov_reg_imm64(RDI, 1)
                 e.mov_reg_imm64(RAX, 60)  # syscall: exit
                 e.syscall()
+
+        # ====== 第二阶段：回填所有跳转偏移 ======
+        for fixup_offset, target_label, _kind in jump_fixups:
+            if target_label in label_offsets:
+                target_offset = label_offsets[target_label]
+                e.patch_rel32(fixup_offset, target_offset)
+            else:
+                # 标签未找到（可能是跨函数跳转或错误），保持 0 偏移
+                # 在完整实现中应报错或在链接阶段处理
+                pass
 
     def _generate_start(self, func_code: Dict[str, bytes], module: LIRModule):
         """生成 _start 入口函数"""

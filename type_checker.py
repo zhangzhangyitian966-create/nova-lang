@@ -742,8 +742,37 @@ class TypeChecker:
         raise TypeCheckError(f"无法对类型 {target_ty} 进行字段访问")
 
     def _check_try_expr(self, expr) -> NovaType:
-        # ? 操作符的简化检查
-        return self.check_expr(expr.expr)
+        """
+        ? 操作符的类型检查。
+        
+        ? 只能用于 Option 或 Result 类型：
+        - Option[T]? => T（若为 None 则提前返回 None）
+        - Result[T, E]? => T（若为 Err 则提前返回 Err）
+        
+        非 Option/Result 类型使用 ? 会报类型错误。
+        """
+        inner_ty = self.check_expr(expr.expr)
+        
+        # TypeVar 暂时放行（在合一实现前保持兼容）
+        if isinstance(inner_ty, TypeVar):
+            return TypeVar(f"try_{inner_ty.name}")
+        
+        if isinstance(inner_ty, ADTType):
+            if inner_ty.name == "Option":
+                # Option[T]? => T
+                if len(inner_ty.type_params) >= 1:
+                    return inner_ty.type_params[0]
+                # 没有类型参数时返回 TypeVar 占位
+                return TypeVar("option_value")
+            elif inner_ty.name == "Result":
+                # Result[T, E]? => T
+                if len(inner_ty.type_params) >= 1:
+                    return inner_ty.type_params[0]
+                return TypeVar("result_value")
+        
+        raise TypeCheckError(
+            f"? 操作符只能用于 Option 或 Result 类型，当前类型为 {inner_ty}"
+        )
 
     def _check_list_comprehension(self, expr) -> NovaType:
         # 列表推导式：返回 List[expr 类型]
