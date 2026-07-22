@@ -18,6 +18,12 @@ class NovaCompilerPipeline:
     """Nova 统一编译管道"""
 
     def __init__(self, target: str = BACKEND_NATIVE, optimize_level: int = 2):
+        """初始化统一编译管道
+
+        Args:
+            target: 目标后端（BACKEND_NATIVE / BACKEND_WASM / BACKEND_C）
+            optimize_level: 优化级别（0=不优化，1-2=启用优化）
+        """
         self.target = target
         self.optimize_level = optimize_level
         self.pass_manager = (

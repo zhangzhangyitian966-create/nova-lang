@@ -350,9 +350,18 @@ class LIRLowering:
     # ---- 数据结构构建 ----
 
     def _lower_list_build(self, instr, result):
-        """降级列表构建"""
+        """降级列表构建
+
+        将所有元素通过 src_locs 传递，后端负责循环填充。
+        每个元素的类型从 ssa_types 中查找，找不到则用 INT_TYPE 占位。
+        """
         lir = LIRBuildList()
         lir.count = len(instr.elements)
+        # 传递所有元素的位置和类型
+        for elem_ssa in instr.elements:
+            elem_loc = self.ssa_to_loc.get(elem_ssa, "")
+            elem_type = self.ssa_types.get(elem_ssa, INT_TYPE)
+            lir.src_locs.append((elem_loc, elem_type))
         if instr.result_name:
             lir.dst_loc = (
                 self.ssa_to_loc.get(instr.result_name, ""),
@@ -379,9 +388,17 @@ class LIRLowering:
         result.append(lir)
 
     def _lower_tuple_build(self, instr, result):
-        """降级元组构建"""
+        """降级元组构建
+
+        将所有元素通过 src_locs 传递，后端负责循环填充。
+        """
         lir = LIRBuildTuple()
         lir.count = len(instr.elements)
+        # 传递所有元素的位置和类型
+        for elem_ssa in instr.elements:
+            elem_loc = self.ssa_to_loc.get(elem_ssa, "")
+            elem_type = self.ssa_types.get(elem_ssa, INT_TYPE)
+            lir.src_locs.append((elem_loc, elem_type))
         if instr.result_name:
             lir.dst_loc = (
                 self.ssa_to_loc.get(instr.result_name, ""),
@@ -390,9 +407,21 @@ class LIRLowering:
         result.append(lir)
 
     def _lower_map_build(self, instr, result):
-        """降级 Map 构建"""
+        """降级 Map 构建
+
+        将键值对通过 src_locs 传递（key, value, key, value... 交替排列），
+        后端负责循环插入。
+        """
         lir = LIRBuildMap()
         lir.entry_count = len(instr.entries)
+        # 交替传递 key 和 value
+        for key_ssa, val_ssa in instr.entries:
+            key_loc = self.ssa_to_loc.get(key_ssa, "")
+            key_type = self.ssa_types.get(key_ssa, INT_TYPE)
+            lir.src_locs.append((key_loc, key_type))
+            val_loc = self.ssa_to_loc.get(val_ssa, "")
+            val_type = self.ssa_types.get(val_ssa, INT_TYPE)
+            lir.src_locs.append((val_loc, val_type))
         if instr.result_name:
             lir.dst_loc = (
                 self.ssa_to_loc.get(instr.result_name, ""),
@@ -401,9 +430,21 @@ class LIRLowering:
         result.append(lir)
 
     def _lower_adt_build(self, instr, result):
-        """降级 ADT 构建"""
+        """降级 ADT 构建
+
+        将所有字段通过 src_locs 传递，后端负责循环填充。
+        type_name 和 variant_name 作为附加信息通过 type_tag 暂存
+        （后端可通过类型表查询）。
+        """
         lir = LIRBuildADT()
         lir.field_count = len(instr.fields)
+        lir.type_name = instr.type_name
+        lir.variant_name = instr.variant_name
+        # 传递所有字段的位置和类型
+        for field_ssa in instr.fields:
+            field_loc = self.ssa_to_loc.get(field_ssa, "")
+            field_type = self.ssa_types.get(field_ssa, INT_TYPE)
+            lir.src_locs.append((field_loc, field_type))
         if instr.result_name:
             lir.dst_loc = (
                 self.ssa_to_loc.get(instr.result_name, ""),

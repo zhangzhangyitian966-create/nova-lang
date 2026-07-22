@@ -45,12 +45,29 @@ from .ir_nodes import (
 from .cfg_utils import replace_instr_operands, replace_terminator_operands
 
 
+# Pass 管理器默认最大迭代次数（不动点上限）
+DEFAULT_MAX_PASS_ITERATIONS = 10
+
+
 class Pass:
-    """优化 Pass 基类"""
+    """优化 Pass 基类
+
+    所有优化 Pass 都继承自此类，实现 run() 方法对模块进行变换。
+    run() 返回 True 表示本次运行修改了模块，返回 False 表示无变化。
+    Pass 管理器会反复运行 Pass 直到达到不动点或最大迭代次数。
+    """
 
     name = ""
 
     def run(self, module) -> bool:
+        """对模块执行一次 Pass 变换
+
+        Args:
+            module: 待优化的 IR 模块（HIRModule / MIRModule / LIRModule）
+
+        Returns:
+            bool: 本次运行是否修改了模块（True=有变化，False=无变化）
+        """
         raise NotImplementedError
 
 
@@ -64,6 +81,11 @@ class ConstantFolding(Pass, HIRRewriter):
     name = "constant_folding"
 
     def run(self, hir_module):
+        """对 HIR 模块执行常量折叠，返回是否发生了变化
+
+        遍历所有函数体和顶层声明，将编译期可计算的常量表达式
+        （如 1 + 2、true && false）直接替换为计算结果。
+        """
         changed = False
         for decl in hir_module.declarations:
             if isinstance(decl, HIRFnDecl):
@@ -160,6 +182,11 @@ class Inlining(Pass, HIRRewriter):
         self._inlineable = {}  # 可内联函数字典
 
     def run(self, hir_module):
+        """对 HIR 模块执行函数内联，返回是否发生了变化
+
+        收集所有小型函数（体大小 <= MAX_INLINE_SIZE），将其调用点
+        替换为函数体副本，减少函数调用开销。
+        """
         changed = False
         # 收集所有可内联的函数
         self._inlineable = {}
@@ -291,6 +318,12 @@ class DeadCodeElimination(Pass, HIRRewriter):
     PURE_UNARYOPS = {"-", "!", "~"}
 
     def run(self, hir_module):
+        """对 HIR 模块执行死代码消除，返回是否发生了变化
+
+        移除未使用的 let 绑定和无副作用的表达式语句。
+        采用反向扫描算法：从块的结果表达式出发，
+        收集所有被使用的变量，未被使用且无副作用的绑定被移除。
+        """
         changed = False
         for decl in hir_module.declarations:
             if isinstance(decl, HIRFnDecl):
@@ -1318,7 +1351,7 @@ class PassManager:
         else:
             warnings.warn(msg, stacklevel=3)
 
-    def run_hir_passes(self, hir_module, max_iterations=10):
+    def run_hir_passes(self, hir_module, max_iterations=DEFAULT_MAX_PASS_ITERATIONS):
         total_changed = False
         for iteration in range(max_iterations):
             changed = False
@@ -1336,7 +1369,7 @@ class PassManager:
             total_changed = True
         return total_changed
 
-    def run_mir_passes(self, mir_module, max_iterations=10):
+    def run_mir_passes(self, mir_module, max_iterations=DEFAULT_MAX_PASS_ITERATIONS):
         total_changed = False
         for iteration in range(max_iterations):
             changed = False
@@ -1378,7 +1411,7 @@ class PassManager:
 
         return total_changed
 
-    def run_lir_passes(self, lir_module, max_iterations=10):
+    def run_lir_passes(self, lir_module, max_iterations=DEFAULT_MAX_PASS_ITERATIONS):
         total_changed = False
         for iteration in range(max_iterations):
             changed = False

@@ -62,6 +62,10 @@ class WasmGCBackend:
     """将 Nova LIR 编译为 WebAssembly（WasmGC）"""
 
     def __init__(self):
+        """初始化 WasmGC 后端代码生成器
+
+        初始化输出行列表、缩进级别、字符串常量表和字符串计数器。
+        """
         self.output_lines: List[str] = []
         self.indent_level = 0
         self.string_table: Dict[str, int] = {}  # 字符串 -> 数据段偏移

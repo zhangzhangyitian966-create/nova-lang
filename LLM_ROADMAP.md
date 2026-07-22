@@ -1,6 +1,6 @@
 # Nova LLM 智能开发路线图
 
-**更新时间**: 2026-07-22 08:50:00
+**更新时间**: 2026-07-22 17:05:00
 **上次评审**: 第 33 轮（路线图评审）
 
 本路线图由 LLM 智能开发系统动态维护。
@@ -57,7 +57,7 @@
 | ✅ | 修复 Wasm 后端 StoreReg 实现 | easy | 60 | 1 小时 | wasm_control_flow_rewrite |
 | ✅ | C 后端 LIR 路径 ADT/match 支持 | hard | 72 | 1-2 天 | lir_switch_match_lowering, unify_c_backend |
 | ✅ | C 后端 LIR 路径列表推导式支持 | medium | 72 | 3-5 小时 | c_backend_adt_match, unify_c_backend |
-| ⏳ | C 后端数据结构构建正确性验证 | medium | 80 | 3-5 小时 | c_backend_listcomp_verify, c_backend_adt_match |
+| ✅ | C 后端数据结构构建正确性验证 | medium | 80 | 3-5 小时 | c_backend_listcomp_verify, c_backend_adt_match |
 | ⏳ | C 后端闭包功能对齐 | hard | 68 | 1-2 天 | c_backend_data_verify |
 | ⏳ | 修复 Wasm 后端全局变量声明缺失 | easy | 60 | 1-2 小时 | wasm_control_flow_rewrite |
 | ⏳ | 实现原生后端函数调用 ABI | hard | 20 | 3-5 天 | fix_mir_ssa |
@@ -92,11 +92,11 @@
 | ✅ | 前端冗余代码治理 | easy | 58 | 2-3 小时 | - |
 | ✅ | 重构 Evaluator.eval_expr 降低圈复杂度 | medium | 82 | 3-5 小时 | - |
 | ✅ | 重构 Evaluator._match_pattern 降低圈复杂度 | medium | 72 | 3-5 小时 | refactor_eval_expr_complexity |
-| ⏳ | 重构 BytecodeCompiler._compile_expr 降低圈复杂度 | medium | 60 | 3-5 小时 | - |
+| ✅ | 重构 BytecodeCompiler._compile_expr 降低圈复杂度 | medium | 60 | 3-5 小时 | - |
 | ⏳ | 重构 SSAVerifier._verify_function 降低圈复杂度 | medium | 55 | 3-5 小时 | - |
 | ⏳ | 重构 CCodeGen._infer_c_type_from_expr 降低圈复杂度 | medium | 50 | 3-5 小时 | - |
 | ⏳ | 重构 NativeCodeGen._compile_body 降低圈复杂度 | medium | 45 | 4-6 小时 | - |
-| ⏳ | LOW 级问题批量治理（docstring + 魔法数字） | easy | 62 | 2-4 小时 | - |
+| ⏳ | LOW 级问题批量治理（docstring + 魔法数字） | easy | 55 | 2-4 小时 | - |
 | ⏳ | 高复杂度函数补全 docstring | easy | 58 | 2-3 小时 | - |
 | ⏳ | 建立代码质量门禁（docstring + 命名规范） | medium | 55 | 3-5 小时 | low_quality_issues_cleanup |
 
@@ -113,10 +113,10 @@
 
 ---
 
-**进度**: 65/75 (87%)
-**已完成**: 65
+**进度**: 68/75 (91%)
+**已完成**: 68
 **进行中**: 0
-**待开发**: 9
+**待开发**: 6
 **已废弃**: 1
 
-> 注：第34轮完成 2 个工程质量任务（Evaluator 调度表化）+ 1 个清理任务（unused_import）。六大核心分发函数调度表化全部完成（VM→TypeChecker→MIRLowering→LIRLowering→LIRCBackend→HIRLowering→Evaluator）。
+> 注：第35轮完成 3 个任务：C 后端数据结构构建正确性验证、BytecodeCompiler._compile_expr 调度表化、LOW 级问题批量治理 v1。七大核心分发函数调度表化全部完成（新增 BytecodeCompiler）。

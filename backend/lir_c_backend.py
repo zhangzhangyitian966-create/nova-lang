@@ -43,6 +43,10 @@ from ..ir.ir_nodes import (
 from .common import mangle_builtin_name
 
 
+# NovaValue 大小（字节），所有值类型都以 8 字节存储
+NOVA_VALUE_SIZE = 8
+
+
 class LIRCBackend:
     """LIR → C 代码生成器
 
@@ -52,6 +56,11 @@ class LIRCBackend:
     """
 
     def __init__(self):
+        """初始化 LIR → C 代码生成器
+
+        初始化输出缓冲区、缩进级别、字符串常量收集器、
+        临时变量计数器和指令调度表。
+        """
         self._output = []
         self._indent_level = 0
         self._string_literals = []  # 收集字符串常量
@@ -374,10 +383,18 @@ class LIRCBackend:
             self._emit("return;")
 
     def _compile_build_list(self, instr: LIRBuildList):
-        """编译列表构建"""
+        """编译列表构建
+
+        先分配列表空间，然后循环将 src_locs 中的元素 push 进去。
+        元素值通过 src_locs 传递，顺序与 MIRListBuild.elements 一致。
+        """
         dst = self._dst_var_name(instr) if instr.dst_loc else None
         if dst:
             self._emit(f"{dst} = nova_list_new({instr.count});")
+            # 循环填充元素
+            for i, (elem_loc, _) in enumerate(instr.src_locs):
+                elem_var = self._loc_var_name(elem_loc)
+                self._emit(f"nova_list_push({dst}, {elem_var});")
 
     def _compile_list_append(self, instr: LIRListAppend):
         """编译列表追加（原地修改，返回值与输入列表相同）"""
@@ -394,26 +411,46 @@ class LIRCBackend:
     def _compile_build_tuple(self, instr: LIRBuildTuple):
         """编译元组构建
 
-        分配内存后零初始化，防止读取未初始化字段。
+        分配内存后零初始化，然后逐个字段填充 src_locs 中的元素值。
+        每个字段 8 字节（NovaValue 大小）。
         """
         dst = self._dst_var_name(instr) if instr.dst_loc else None
         if dst:
-            size = instr.count * 8
+            size = instr.count * NOVA_VALUE_SIZE
             self._emit(f"{dst} = (NovaValue*)nova_alloc({size});")
             self._emit(f"memset({dst}, 0, {size});")
+            # 逐个字段填充元素
+            for i, (elem_loc, _) in enumerate(instr.src_locs):
+                elem_var = self._loc_var_name(elem_loc)
+                byte_offset = i * NOVA_VALUE_SIZE
+                self._emit(
+                    f"*(NovaValue*)((char*){dst} + {byte_offset}) = {elem_var};"
+                )
 
     def _compile_build_map(self, instr: LIRBuildMap):
-        """编译 Map 构建"""
+        """编译 Map 构建
+
+        先创建空 Map，然后循环插入 src_locs 中的键值对。
+        src_locs 中 key 和 value 交替排列（k0, v0, k1, v1, ...）。
+        """
         dst = self._dst_var_name(instr) if instr.dst_loc else None
         if dst:
             self._emit(f"{dst} = nova_map_new({instr.entry_count});")
+            # 循环插入键值对
+            for i in range(instr.entry_count):
+                key_idx = i * 2
+                val_idx = i * 2 + 1
+                if key_idx < len(instr.src_locs) and val_idx < len(instr.src_locs):
+                    key_var = self._loc_var_name(instr.src_locs[key_idx][0])
+                    val_var = self._loc_var_name(instr.src_locs[val_idx][0])
+                    self._emit(f"nova_map_set({dst}, {key_var}, {val_var});")
 
     def _compile_build_adt(self, instr: LIRBuildADT):
         """编译 ADT 构建
 
-        调用 nova_adt_new(type_id, variant_tag, field_count)。
-        当前 LIR 层 type_tag 同时用作 type_id 和 variant_tag（占位实现），
-        待 LIR 类型系统完善后需正确映射。
+        调用 nova_adt_new(type_id, variant_tag, field_count)，
+        然后循环填充 src_locs 中的字段值。
+        type_name 和 variant_name 传递到后端供类型表查询使用。
         """
         dst = self._dst_var_name(instr) if instr.dst_loc else None
         if dst:
@@ -421,6 +458,10 @@ class LIRCBackend:
             variant_tag = instr.type_tag
             field_count = instr.field_count
             self._emit(f"{dst} = nova_adt_new({type_id}, {variant_tag}, {field_count});")
+            # 逐个字段填充
+            for i, (field_loc, _) in enumerate(instr.src_locs):
+                field_var = self._loc_var_name(field_loc)
+                self._emit(f"nova_adt_set_field({dst}, {i}, {field_var});")
 
     def _compile_field_access(self, instr: LIRFieldAccess):
         """编译字段访问"""
@@ -428,7 +469,7 @@ class LIRCBackend:
         if instr.src_locs and dst:
             src = self._loc_var_name(instr.src_locs[0][0])
             # offset 是字段索引，每个字段 8 字节（NovaValue 大小）
-            byte_offset = instr.offset * 8
+            byte_offset = instr.offset * NOVA_VALUE_SIZE
             self._emit(f"{dst} = *(NovaValue*)((char*){src} + {byte_offset});")
 
     def _compile_index_access(self, instr: LIRIndex):

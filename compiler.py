@@ -252,6 +252,54 @@ class BytecodeCompiler:
         self.bytecode = Bytecode()
         self._builtin_names: set = set()
         self._init_builtin_names()
+        self._expr_dispatch = self._build_expr_dispatch_table()
+
+    def _build_expr_dispatch_table(self):
+        """
+        构建 AST 表达式类型 -> 编译方法的调度表。
+
+        采用调度表模式替代长 if-isinstance 链，
+        降低圈复杂度（从 ~33 降至 ~3），提升可维护性和可扩展性。
+        """
+        return {
+            # ---- 字面量 ----
+            IntLiteral: self._compile_int_literal,
+            FloatLiteral: self._compile_float_literal,
+            StringLiteral: self._compile_string_literal,
+            CharLiteral: self._compile_char_literal,
+            BoolLiteral: self._compile_bool_literal,
+            UnitLiteral: self._compile_unit_literal,
+            # ---- 标识符 ----
+            Identifier: self._compile_identifier,
+            # ---- 运算 ----
+            BinaryOp: self._compile_binary_op,
+            UnaryOp: self._compile_unary_op,
+            # ---- 管道与错误传播 ----
+            PipeExpr: self._compile_pipe,
+            TryExpr: self._compile_try_expr,
+            # ---- 函数 ----
+            FnCall: self._compile_fn_call,
+            Lambda: self._compile_lambda,
+            # ---- 控制流 ----
+            IfExpr: self._compile_if,
+            MatchExpr: self._compile_match,
+            # ---- 块与绑定 ----
+            Block: self._compile_block,
+            LetBinding: self._compile_let_binding,
+            MutBinding: self._compile_mut_binding,
+            Assignment: self._compile_assignment,
+            # ---- 数据结构 ----
+            ListExpr: self._compile_list_expr,
+            ListComprehension: self._compile_list_comprehension,
+            TupleExpr: self._compile_tuple_expr,
+            MapExpr: self._compile_map_expr,
+            FieldAccess: self._compile_field_access,
+            # ---- 循环 ----
+            ForExpr: self._compile_for,
+            WhileExpr: self._compile_while,
+            BreakExpr: self._compile_break_expr,
+            ContinueExpr: self._compile_continue_expr,
+        }
 
     def _init_builtin_names(self):
         """初始化内置函数名称集合"""
@@ -382,109 +430,117 @@ class BytecodeCompiler:
     # ----------------------------------------------------------
 
     def _compile_expr(self, expr):
-        """编译表达式"""
-        if isinstance(expr, IntLiteral):
-            self.bytecode.emit_op(Op.CONST_INT, expr.value)
+        """编译表达式（调度表模式）
 
-        elif isinstance(expr, FloatLiteral):
-            self.bytecode.emit_op(Op.CONST_FLOAT, expr.value)
-
-        elif isinstance(expr, StringLiteral):
-            self.bytecode.emit_op(Op.CONST_STRING, expr.value)
-
-        elif isinstance(expr, CharLiteral):
-            self.bytecode.emit_op(Op.CONST_STRING, expr.value)
-
-        elif isinstance(expr, BoolLiteral):
-            self.bytecode.emit_op(Op.CONST_BOOL, expr.value)
-
-        elif isinstance(expr, UnitLiteral):
-            self.bytecode.emit_op(Op.CONST_UNIT)
-
-        elif isinstance(expr, Identifier):
-            name = expr.name
-            if name == "None":
-                self.bytecode.emit_op(Op.MAKE_ADT, "Option", "None", 0)
-            else:
-                self.bytecode.emit_op(Op.LOAD_VAR, name)
-
-        elif isinstance(expr, BinaryOp):
-            self._compile_binary_op(expr)
-
-        elif isinstance(expr, UnaryOp):
-            self._compile_unary_op(expr)
-
-        elif isinstance(expr, PipeExpr):
-            self._compile_pipe(expr)
-
-        elif isinstance(expr, TryExpr):
-            self._compile_expr(expr.expr)
-            self.bytecode.emit_op(Op.TRY_UNWRAP)
-
-        elif isinstance(expr, FnCall):
-            self._compile_fn_call(expr)
-
-        elif isinstance(expr, Lambda):
-            self._compile_lambda(expr)
-
-        elif isinstance(expr, IfExpr):
-            self._compile_if(expr)
-
-        elif isinstance(expr, MatchExpr):
-            self._compile_match(expr)
-
-        elif isinstance(expr, Block):
-            self._compile_block(expr)
-
-        elif isinstance(expr, LetBinding):
-            self._compile_expr(expr.value)
-            self.bytecode.emit_op(Op.STORE_VAR, expr.name, False)
-
-        elif isinstance(expr, MutBinding):
-            self._compile_expr(expr.value)
-            self.bytecode.emit_op(Op.STORE_VAR, expr.name, True)
-
-        elif isinstance(expr, Assignment):
-            self._compile_expr(expr.value)
-            self.bytecode.emit_op(Op.STORE_VAR, expr.name, True)
-
-        elif isinstance(expr, ListExpr):
-            for elem in expr.elements:
-                self._compile_expr(elem)
-            self.bytecode.emit_op(Op.BUILD_LIST, len(expr.elements))
-
-        elif isinstance(expr, ListComprehension):
-            self._compile_list_comprehension(expr)
-
-        elif isinstance(expr, ForExpr):
-            self._compile_for(expr)
-
-        elif isinstance(expr, WhileExpr):
-            self._compile_while(expr)
-
-        elif isinstance(expr, BreakExpr):
-            self.bytecode.emit_op(Op.BREAK)
-
-        elif isinstance(expr, ContinueExpr):
-            self.bytecode.emit_op(Op.CONTINUE)
-
-        elif isinstance(expr, TupleExpr):
-            for elem in expr.elements:
-                self._compile_expr(elem)
-            self.bytecode.emit_op(Op.BUILD_TUPLE, len(expr.elements))
-
-        elif isinstance(expr, MapExpr):
-            for key_expr, val_expr in expr.pairs:
-                self._compile_expr(key_expr)
-                self._compile_expr(val_expr)
-            self.bytecode.emit_op(Op.BUILD_MAP, len(expr.pairs))
-
-        elif isinstance(expr, FieldAccess):
-            self._compile_expr(expr.target)
-            self.bytecode.emit_op(Op.FIELD_ACCESS, expr.field)
-
+        使用类型 -> 方法 的调度表替代长 if-isinstance 链，
+        圈复杂度从 ~33 降至 ~3，提升可维护性和可扩展性。
+        """
+        handler = self._expr_dispatch.get(type(expr))
+        if handler:
+            handler(expr)
         else:
-            raise RuntimeError(f"编译器错误: 未知的表达式类型 {type(expr).__name__}")
+            raise RuntimeError(
+                f"编译器错误: 未知的表达式类型 {type(expr).__name__}"
+            )
+
+    # ---- 字面量编译 ----
+
+    def _compile_int_literal(self, expr: IntLiteral):
+        """编译整数字面量"""
+        self.bytecode.emit_op(Op.CONST_INT, expr.value)
+
+    def _compile_float_literal(self, expr: FloatLiteral):
+        """编译浮点数字面量"""
+        self.bytecode.emit_op(Op.CONST_FLOAT, expr.value)
+
+    def _compile_string_literal(self, expr: StringLiteral):
+        """编译字符串字面量"""
+        self.bytecode.emit_op(Op.CONST_STRING, expr.value)
+
+    def _compile_char_literal(self, expr: CharLiteral):
+        """编译字符字面量（存储为字符串）"""
+        self.bytecode.emit_op(Op.CONST_STRING, expr.value)
+
+    def _compile_bool_literal(self, expr: BoolLiteral):
+        """编译布尔字面量"""
+        self.bytecode.emit_op(Op.CONST_BOOL, expr.value)
+
+    def _compile_unit_literal(self, expr: UnitLiteral):
+        """编译单元字面量"""
+        self.bytecode.emit_op(Op.CONST_UNIT)
+
+    # ---- 标识符编译 ----
+
+    def _compile_identifier(self, expr: Identifier):
+        """编译标识符
+
+        特殊处理 None 标识符，编译为 Option::None ADT 值。
+        """
+        name = expr.name
+        if name == "None":
+            self.bytecode.emit_op(Op.MAKE_ADT, "Option", "None", 0)
+        else:
+            self.bytecode.emit_op(Op.LOAD_VAR, name)
+
+    # ---- 管道与错误传播 ----
+
+    def _compile_try_expr(self, expr: TryExpr):
+        """编译 try 表达式（错误传播）"""
+        self._compile_expr(expr.expr)
+        self.bytecode.emit_op(Op.TRY_UNWRAP)
+
+    # ---- 块与绑定 ----
+
+    def _compile_let_binding(self, expr: LetBinding):
+        """编译 let 绑定"""
+        self._compile_expr(expr.value)
+        self.bytecode.emit_op(Op.STORE_VAR, expr.name, False)
+
+    def _compile_mut_binding(self, expr: MutBinding):
+        """编译 mut 绑定"""
+        self._compile_expr(expr.value)
+        self.bytecode.emit_op(Op.STORE_VAR, expr.name, True)
+
+    def _compile_assignment(self, expr: Assignment):
+        """编译赋值表达式"""
+        self._compile_expr(expr.value)
+        self.bytecode.emit_op(Op.STORE_VAR, expr.name, True)
+
+    # ---- 数据结构 ----
+
+    def _compile_list_expr(self, expr: ListExpr):
+        """编译列表字面量"""
+        for elem in expr.elements:
+            self._compile_expr(elem)
+        self.bytecode.emit_op(Op.BUILD_LIST, len(expr.elements))
+
+    def _compile_tuple_expr(self, expr: TupleExpr):
+        """编译元组字面量"""
+        for elem in expr.elements:
+            self._compile_expr(elem)
+        self.bytecode.emit_op(Op.BUILD_TUPLE, len(expr.elements))
+
+    def _compile_map_expr(self, expr: MapExpr):
+        """编译 Map 字面量"""
+        for key_expr, val_expr in expr.pairs:
+            self._compile_expr(key_expr)
+            self._compile_expr(val_expr)
+        self.bytecode.emit_op(Op.BUILD_MAP, len(expr.pairs))
+
+    def _compile_field_access(self, expr: FieldAccess):
+        """编译字段访问"""
+        self._compile_expr(expr.target)
+        self.bytecode.emit_op(Op.FIELD_ACCESS, expr.field)
+
+    # ---- 循环 ----
+
+    def _compile_break_expr(self, expr: BreakExpr):
+        """编译 break 表达式"""
+        self.bytecode.emit_op(Op.BREAK)
+
+    def _compile_continue_expr(self, expr: ContinueExpr):
+        """编译 continue 表达式"""
+        self.bytecode.emit_op(Op.CONTINUE)
 
     def _compile_binary_op(self, expr: BinaryOp):
         """编译二元操作"""

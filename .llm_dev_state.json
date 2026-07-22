@@ -1,5 +1,5 @@
 {
-  "cycles": 34,
+  "cycles": 35,
   "completed_tasks": [
     "refactor_eval_expr_complexity",
     "refactor_evaluator_match_pattern",
@@ -77,7 +77,10 @@
     "review_cycle_30",
     "test_slimming",
     "backend_dead_code_cleanup",
-    "frontend_dead_code_cleanup"
+    "frontend_dead_code_cleanup",
+    "c_backend_data_verify",
+    "refactor_bytecode_compiler_expr",
+    "low_quality_issues_cleanup_v1"
   ],
   "failed_tasks": [],
   "task_history": [
@@ -112,9 +115,33 @@
       "source": "评审轮",
       "reason": "第33轮路线图评审，每3轮一次的例行评审。总结第31-32轮开发成果，评估方向/质量/效率/价值/审查对齐五维表现，规划第34-36轮方向。",
       "details": "完成第33轮路线图评审：五维评估（方向正确、质量提升、效率稳定、价值高、审查对齐优秀）；任务池新增 5 个任务（4个审查驱动 + 1个自主规划）；调整 4 个任务优先级；规划第34-36轮方向为'解释器调度表化 → C后端数据结构验证 → 质量底线建设'。"
+    },
+    {
+      "cycle": 35,
+      "task_id": "c_backend_data_verify",
+      "status": "completed",
+      "source": "审查驱动/自主发现",
+      "reason": "审查日志显示 LIR 数据结构构建存在功能性缺陷，第33轮评审规划的第35轮核心任务，统一 C 后端的关键路径。深度代码分析确认 List/Tuple/Map/ADT 构建在 MIR→LIR 降级时元素值完全丢失。",
+      "details": "修复 LIR 数据结构构建元素值丢失问题：1) ir/ir_nodes.py: LIRBuildADT 添加 type_name/variant_name 字段；2) ir/lir_lowering.py: 4个Build方法（List/Tuple/Map/ADT）填充 src_locs 传递所有元素值；3) backend/lir_c_backend.py: 4个Build方法循环填充元素（List用push、Tuple用指针赋值、Map用set、ADT用nova_adt_set_field）。"
+    },
+    {
+      "cycle": 35,
+      "task_id": "refactor_bytecode_compiler_expr",
+      "status": "completed",
+      "source": "审查驱动",
+      "reason": "审查日志显示 BytecodeCompiler._compile_expr 圈复杂度 33，全项目 Top 4。调度表化战略的延续，字节码路径主分发函数重构，统一架构风格。",
+      "details": "将 BytecodeCompiler._compile_expr 从约 27 个 if-isinstance 分支（CC≈33）重构为调度表模式：新增 _build_expr_dispatch_table() 构建 28 种 AST 节点类型的 handler 映射表；_compile_expr 简化为查表分发（CC≈3）；按类别拆分为多组独立方法（字面量6个、标识符1个、运算2个、管道与错误传播2个、函数2个、控制流2个、块与绑定4个、数据结构5个、循环4个）。"
+    },
+    {
+      "cycle": 35,
+      "task_id": "low_quality_issues_cleanup_v1",
+      "status": "completed",
+      "source": "审查驱动",
+      "reason": "审查日志显示 LOW 级问题 1006 个且持续增长，第33轮评审规划的质量底线建设任务。优先治理价值最高的部分：公共 API docstring + 高频魔法数字。",
+      "details": "LOW 级问题批量治理第一轮：1) ir/pass_manager.py: 添加 DEFAULT_MAX_PASS_ITERATIONS=10 常量，为 Pass 基类和 3 个 HIR Pass（ConstantFolding/Inlining/DeadCodeElimination）的 run 方法补充 docstring；2) backend/: 为 LIRCBackend、WasmGCBackend、NovaCompilerPipeline 的 __init__ 补充 docstring；3) backend/lir_c_backend.py: 提取 NOVA_VALUE_SIZE=8 常量替换 3 处魔法数字。"
     }
   ],
-  "current_cycle": 34,
+  "current_cycle": 35,
   "baseline_tests": 392,
   "current_tests": 392,
   "last_review_cycle": 33,
@@ -155,12 +182,12 @@
       "name": "LOW 级问题批量治理（docstring + 魔法数字）",
       "description": "批量清理 LOW 级问题：为 ir/ 和 backend/ 模块的公共 API 添加 docstring，将高频魔法数字（如 8 字节大小、默认迭代次数等）提取为命名常量，清理调试打印语句",
       "difficulty": "easy",
-      "priority": 62,
+      "priority": 55,
       "category": "engineering",
       "estimated": "2-4 小时",
       "status": "pending",
       "depends_on": [],
-      "reason": "LOW 级问题已达 1003 个且持续增长，no_docstring 和 magic_number 是主要增量。虽然单个问题影响小，但累积起来严重影响代码可读性。批量治理建立质量底线。[优先级调整: 55 → 62，LOW问题持续增长，质量底线建设紧迫性提升][审查发现]"
+      "reason": "LOW 级问题已达 1003 个且持续增长，no_docstring 和 magic_number 是主要增量。虽然单个问题影响小，但累积起来严重影响代码可读性。批量治理建立质量底线。[优先级调整: 55 → 62，LOW问题持续增长，质量底线建设紧迫性提升][审查发现] [v1已完成docstring+魔法数字部分，剩余待后续轮次]"
     },
     {
       "id": "refactor_eval_expr_complexity",
@@ -196,7 +223,7 @@
       "priority": 60,
       "category": "engineering",
       "estimated": "3-5 小时",
-      "status": "pending",
+      "status": "completed",
       "depends_on": [],
       "reason": "审查日志显示 _compile_expr 圈复杂度 33，排名 Top 5。字节码路径虽然逐渐被 IR 路径取代，但仍是默认执行路径。调度表化可降低维护成本，为后续可能的优化打基础。[新增任务 / 审查驱动]"
     },
@@ -273,7 +300,7 @@
       "priority": 80,
       "category": "backend",
       "estimated": "3-5 小时",
-      "status": "pending",
+      "status": "completed",
       "depends_on": [
         "c_backend_listcomp_verify",
         "c_backend_adt_match"

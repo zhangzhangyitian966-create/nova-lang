@@ -1339,6 +1339,8 @@ class LIRBuildTuple(LIRInstr):
 class LIRBuildADT(LIRInstr):
     """LIR 构建 ADT"""
 
+    type_name: str = ""
+    variant_name: str = ""
     type_tag: int = 0
     field_count: int = 0
 
