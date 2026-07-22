@@ -1,7 +1,7 @@
 {
-  "cycles": 4,
-  "frontend_completed": 3,
-  "backend_completed": 3,
+  "cycles": 5,
+  "frontend_completed": 4,
+  "backend_completed": 4,
   "last_review_cycle": 3,
   "current_review_cycle": 6,
   "completed_tasks": [
@@ -10,7 +10,9 @@
     "frontend_field_access_error",
     "backend_native_float_const",
     "frontend_adt_type_param_eq",
-    "backend_native_elf_entry_fix"
+    "backend_native_elf_entry_fix",
+    "frontend_eq_op_typecheck",
+    "backend_native_reg_alloc"
   ],
   "failed_tasks": [],
   "deprecated_tasks": [
@@ -93,6 +95,28 @@
       "result": "success",
       "details": "完成三项 P0 修复：(1) 修复 ELF e_entry 从文件偏移 0 改为虚拟地址 0x400000 + start_offset；(2) 实现 link_calls 回填机制——修改 link_calls 数据结构增加调用者函数名，在 _generate_elf 中参照 data_fixups 模式回填所有 call rel32 偏移；(3) 将 BACKEND_NATIVE 从 CraneliftBackend 切换为 NativeCodeGen，原生后端正式接入编译管道。",
       "timestamp": "2026-07-22 16:10"
+    },
+    {
+      "cycle": 5,
+      "task_id": "frontend_eq_op_typecheck",
+      "name": "修复 ==/!= 比较运算符类型检查",
+      "track": "frontend",
+      "difficulty": "easy",
+      "priority": 75,
+      "result": "success",
+      "details": "修复 _check_binary_op 中 == 和 != 直接返回 BOOL_T 完全不检查操作数类型的 bug。新增所有比较操作的左右操作数类型兼容检查（_types_compatible），有序比较（< > <= >=）额外要求数值类型。同时修复有序比较只检查数值类型但未检查两操作数一致的问题。",
+      "timestamp": "2026-07-22 19:04"
+    },
+    {
+      "cycle": 5,
+      "task_id": "backend_native_reg_alloc",
+      "name": "实现原生后端线性扫描寄存器分配器",
+      "track": "backend",
+      "difficulty": "hard",
+      "priority": 94,
+      "result": "success",
+      "details": "完整重写 _compile_body，实现线性扫描寄存器分配器：(1) 收集所有虚拟寄存器的活跃区间 [first_use, last_use]；(2) 按开始点排序，线性扫描分配物理寄存器（13 GPR + 8 XMM），寄存器不足时溢出到栈槽（选择最远活跃区间作为牺牲者）；(3) 打通指令发射链路——所有指令真正从 src_locs 读操作数、向 dst_loc 写结果，支持寄存器/栈两种位置，load_to_reg/store_from_reg 辅助函数处理搬移。支持整数/浮点两套寄存器池，LIRBinOp/LIRUnaryOp/LIRReturn/LIRBranch 等指令均已适配。",
+      "timestamp": "2026-07-22 19:12"
     }
   ],
   "tasks": [
@@ -140,7 +164,7 @@
       "difficulty": "easy",
       "priority": 75,
       "estimated_effort": "30分钟",
-      "status": "pending",
+      "status": "completed",
       "source": "review_3",
       "depends_on": []
     },
@@ -190,7 +214,7 @@
       "difficulty": "hard",
       "priority": 94,
       "estimated_effort": "3-5天",
-      "status": "pending",
+      "status": "completed",
       "source": "quality_analysis",
       "depends_on": [
         "backend_native_elf_entry_fix"

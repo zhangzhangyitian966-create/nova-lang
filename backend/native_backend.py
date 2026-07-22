@@ -24,6 +24,7 @@ from .x86_64 import (
     RCX,
     RDI,
     RDX,
+    RSI,
     RSP,
     XMM0,
     XMM1,
@@ -36,6 +37,7 @@ from .x86_64 import (
     X86_64Emitter,
 )
 from ..ir.ir_nodes import (
+    IRType,
     LIRBinOp,
     LIRBranch,
     LIRCall,
@@ -144,136 +146,420 @@ class NativeCodeGen:
 
     def _compile_body(self, e: X86_64Emitter, func: LIRFunction, func_name: str):
         """
-        编译函数体指令（两阶段汇编）。
-        
-        第一阶段：发射指令，记录标签位置和待回填的跳转引用
-        第二阶段：回填所有 jmp/jcc 的 rel32 偏移量
-        """
-        # 虚拟寄存器 -> 物理寄存器映射
-        vregs = {}  # vreg_name -> phys_reg
+        编译函数体指令（寄存器分配 + 两阶段汇编）。
 
-        # 分配虚拟寄存器
-        free_gprs = [RAX, RCX, RDX, RBX, R8, R9, R10, R11, R12, R13, R14, R15]
-        free_xmms = [XMM0, XMM1, XMM2, XMM3, XMM4, XMM5, XMM6, XMM7]
+        阶段 A: 线性扫描寄存器分配
+          - 计算每个虚拟寄存器的活跃区间 [first_use, last_use]
+          - 按开始点排序，扫描并分配物理寄存器
+          - 寄存器不足时溢出到栈槽
+
+        阶段 B: 两阶段汇编
+          - 第一阶段：发射指令，记录标签位置和待回填的跳转引用
+          - 第二阶段：回填所有 jmp/jcc 的 rel32 偏移量
+        """
+        # ============================================================
+        # 阶段 A: 线性扫描寄存器分配
+        # ============================================================
+
+        # 可用物理寄存器（调用者保存优先分配，被调用者保存备用）
+        # 注意：RAX 预留为特殊用途（除法、返回值等），但也可参与普通分配
+        ALL_GPRS = [RCX, RDX, RSI, RDI, R8, R9, R10, R11,  # caller-saved
+                    RBX, R12, R13, R14, R15]                # callee-saved
+        ALL_XMMS = [XMM0, XMM1, XMM2, XMM3, XMM4, XMM5, XMM6, XMM7]
+
+        # 步骤 1: 收集所有虚拟寄存器及其活跃区间
+        # vreg_info[vreg_name] = {"is_float": bool, "first": int, "last": int}
+        vreg_info = {}
+
+        def _note_vreg(vreg_name, is_float, instr_idx):
+            """记录虚拟寄存器的使用点，更新活跃区间"""
+            if vreg_name not in vreg_info:
+                vreg_info[vreg_name] = {
+                    "is_float": is_float,
+                    "first": instr_idx,
+                    "last": instr_idx,
+                }
+            else:
+                info = vreg_info[vreg_name]
+                if instr_idx < info["first"]:
+                    info["first"] = instr_idx
+                if instr_idx > info["last"]:
+                    info["last"] = instr_idx
+
+        # 遍历所有指令，收集 vreg 使用信息
+        for idx, instr in enumerate(func.body):
+            # 源操作数（src_locs）
+            for loc_name, loc_type in instr.src_locs:
+                is_float = loc_type.kind == IRType.FLOAT
+                _note_vreg(loc_name, is_float, idx)
+            # 目的操作数（dst_loc）
+            if instr.dst_loc:
+                dst_name, dst_type = instr.dst_loc
+                is_float = dst_type.kind == IRType.FLOAT
+                _note_vreg(dst_name, is_float, idx)
+            # LIRLoadConst 特殊处理：值本身是一个隐式 vreg
+            if isinstance(instr, LIRLoadConst):
+                is_float = instr.const_type == "float"
+                vname = f"const_{instr.value}" if not is_float else f"fconst_{instr.value}"
+                _note_vreg(vname, is_float, idx)
+
+        # 步骤 2: 线性扫描分配
+        # 分配结果：vreg_name -> ("reg", phys_reg) 或 ("stack", stack_offset)
+        vreg_alloc = {}
+        stack_offset = 0  # 栈帧偏移（从 0 开始向下增长，使用正数表示偏移量）
+
+        # 按活跃区间开始点排序
+        sorted_vregs = sorted(vreg_info.items(), key=lambda x: x[1]["first"])
+
+        # 当前活跃的寄存器：{phys_reg: last_use_idx}
+        active_gprs = {}  # phys_reg -> last_use
+        active_xmms = {}  # xmm_reg -> last_use
+
+        # 可用寄存器池
+        free_gprs = list(ALL_GPRS)
+        free_xmms = list(ALL_XMMS)
+
+        def _expire_old_intervals(current_idx, is_float):
+            """回收已过期的寄存器（活跃区间结束点 < current_idx）"""
+            if is_float:
+                to_free = [r for r, last in active_xmms.items() if last < current_idx]
+                for r in to_free:
+                    del active_xmms[r]
+                    free_xmms.insert(0, r)
+            else:
+                to_free = [r for r, last in active_gprs.items() if last < current_idx]
+                for r in to_free:
+                    del active_gprs[r]
+                    free_gprs.insert(0, r)
+
+        def _spill_victim(current_idx, is_float):
+            """选择一个活跃区间最远的寄存器溢出，返回被溢出的 vreg 名"""
+            if is_float:
+                if not active_xmms:
+                    return None
+                # 选择结束点最远的作为牺牲者
+                victim_reg = max(active_xmms, key=active_xmms.get)
+                victim_last = active_xmms[victim_reg]
+                del active_xmms[victim_reg]
+                free_xmms.insert(0, victim_reg)
+                # 找到对应 vreg
+                for vname, info in vreg_info.items():
+                    if vreg_alloc.get(vname) == ("reg", victim_reg) and info["last"] == victim_last:
+                        return vname
+            else:
+                if not active_gprs:
+                    return None
+                victim_reg = max(active_gprs, key=active_gprs.get)
+                victim_last = active_gprs[victim_reg]
+                del active_gprs[victim_reg]
+                free_gprs.insert(0, victim_reg)
+                for vname, info in vreg_info.items():
+                    if vreg_alloc.get(vname) == ("reg", victim_reg) and info["last"] == victim_last:
+                        return vname
+            return None
+
+        for vname, info in sorted_vregs:
+            is_float = info["is_float"]
+            first_use = info["first"]
+            last_use = info["last"]
+
+            # 回收已过期的寄存器
+            _expire_old_intervals(first_use, is_float)
+
+            # 尝试分配寄存器
+            if is_float:
+                if free_xmms:
+                    reg = free_xmms.pop(0)
+                    vreg_alloc[vname] = ("reg", reg)
+                    active_xmms[reg] = last_use
+                else:
+                    # 溢出：选择最远的活跃区间
+                    victim = _spill_victim(first_use, is_float)
+                    if victim is not None and free_xmms:
+                        reg = free_xmms.pop(0)
+                        vreg_alloc[vname] = ("reg", reg)
+                        active_xmms[reg] = last_use
+                        # 牺牲者分配到栈
+                        stack_offset += 8  # double = 8 字节
+                        vreg_alloc[victim] = ("stack", stack_offset)
+                    else:
+                        # 直接分配到栈
+                        stack_offset += 8
+                        vreg_alloc[vname] = ("stack", stack_offset)
+            else:
+                if free_gprs:
+                    reg = free_gprs.pop(0)
+                    vreg_alloc[vname] = ("reg", reg)
+                    active_gprs[reg] = last_use
+                else:
+                    victim = _spill_victim(first_use, is_float)
+                    if victim is not None and free_gprs:
+                        reg = free_gprs.pop(0)
+                        vreg_alloc[vname] = ("reg", reg)
+                        active_gprs[reg] = last_use
+                        stack_offset += 8
+                        vreg_alloc[victim] = ("stack", stack_offset)
+                    else:
+                        stack_offset += 8
+                        vreg_alloc[vname] = ("stack", stack_offset)
+
+        # 更新函数栈帧大小
+        if stack_offset > func.stack_size:
+            func.stack_size = stack_offset
+
+        # 步骤 3: 辅助函数 - 获取 vreg 的物理位置
+        def get_loc(vreg_name):
+            """获取虚拟寄存器的物理位置：("reg", phys_reg) 或 ("stack", offset)"""
+            if vreg_name in vreg_alloc:
+                return vreg_alloc[vreg_name]
+            # 未在分配表中（可能是特殊寄存器或外部引用），尝试旧的 vreg 机制
+            return ("reg", RAX)  # fallback
+
+        def load_to_reg(vreg_name, target_reg, is_float=False):
+            """将 vreg 的值加载到目标物理寄存器"""
+            loc = get_loc(vreg_name)
+            if loc[0] == "reg":
+                if loc[1] != target_reg:
+                    if is_float:
+                        e.movsd_reg_reg(target_reg, loc[1])
+                    else:
+                        e.mov_reg_reg64(target_reg, loc[1])
+            else:
+                # 从栈加载
+                offset = loc[1]
+                if is_float:
+                    # movsd xmm, [rsp + offset]
+                    e.movsd_reg_imm(target_reg, 0)  # 简化：暂时用 RIP-relative 方式占位
+                    # 注意：栈相对寻址需要更复杂的 SIB 编码，这里先预留位置
+                    # 实际实现应使用 movsd xmm, [rsp + offset]
+                else:
+                    e.mov_reg_mem(target_reg, RSP, offset)
+
+        def store_from_reg(vreg_name, source_reg, is_float=False):
+            """将源物理寄存器的值存储到 vreg 的位置"""
+            loc = get_loc(vreg_name)
+            if loc[0] == "reg":
+                if loc[1] != source_reg:
+                    if is_float:
+                        e.movsd_reg_reg(loc[1], source_reg)
+                    else:
+                        e.mov_reg_reg64(loc[1], source_reg)
+            else:
+                # 存到栈
+                offset = loc[1]
+                if is_float:
+                    # movsd [rsp + offset], xmm
+                    pass  # 待实现
+                else:
+                    e.mov_mem_reg(RSP, offset, source_reg)
+
+        # ============================================================
+        # 阶段 B: 两阶段汇编
+        # ============================================================
 
         # 两阶段汇编：标签位置和待回填项
         label_offsets = {}  # label_name -> code_offset
         jump_fixups = []    # [(code_offset, target_label, is_conditional)]
 
-        def get_reg(is_float=False):
-            if is_float:
-                if free_xmms:
-                    return free_xmms.pop(0)
-            else:
-                if free_gprs:
-                    return free_gprs.pop(0)
-            return None  # 需要溢出处理
-
-        def alloc_vreg(name, is_float=False):
-            if name not in vregs:
-                vregs[name] = get_reg(is_float)
-            return vregs[name]
-
         # ====== 第一阶段：发射指令并记录标签和跳转 ======
-        for instr in func.body:
+        for idx, instr in enumerate(func.body):
             if isinstance(instr, LIRLoadConst):
+                # 确定目标位置
+                is_float = instr.const_type == "float"
+                if is_float:
+                    vname = f"fconst_{instr.value}"
+                else:
+                    vname = f"const_{instr.value}"
+
+                dst_loc = get_loc(vname)
+
                 if instr.const_type == "int":
-                    reg = alloc_vreg(f"const_{instr.value}")
-                    if reg is not None:
-                        e.mov_reg_imm64(reg, int(instr.value))
+                    if dst_loc[0] == "reg":
+                        e.mov_reg_imm64(dst_loc[1], int(instr.value))
+                    else:
+                        # 先加载到 RAX 再存栈
+                        e.mov_reg_imm64(RAX, int(instr.value))
+                        e.mov_mem_reg(RSP, dst_loc[1], RAX)
                 elif instr.const_type == "float":
-                    reg = alloc_vreg(f"fconst_{instr.value}", is_float=True)
-                    if reg is not None:
-                        # 加载浮点常量：movsd xmm, [rip + offset]
-                        fixup_offset = e.movsd_reg_imm(reg, 0)
-                        # 查找数据段偏移
-                        data_off = self._float_const_map.get(str(instr.value))
-                        if data_off is not None:
-                            self.data_fixups.append(
-                                (func.name, fixup_offset, data_off, "float")
-                            )
+                    if dst_loc[0] == "reg":
+                        fixup_offset = e.movsd_reg_imm(dst_loc[1], 0)
+                    else:
+                        # 先加载到 XMM0 再存栈（简化：暂直接用 XMM0）
+                        fixup_offset = e.movsd_reg_imm(XMM0, 0)
+                    data_off = self._float_const_map.get(str(instr.value))
+                    if data_off is not None:
+                        self.data_fixups.append(
+                            (func_name, fixup_offset, data_off, "float")
+                        )
                 elif instr.const_type == "bool":
-                    reg = alloc_vreg(f"bconst_{instr.value}")
-                    if reg is not None:
-                        e.mov_reg_imm64(reg, 1 if instr.value else 0)
+                    val = 1 if instr.value else 0
+                    if dst_loc[0] == "reg":
+                        e.mov_reg_imm64(dst_loc[1], val)
+                    else:
+                        e.mov_reg_imm64(RAX, val)
+                        e.mov_mem_reg(RSP, dst_loc[1], RAX)
                 elif instr.const_type == "string":
-                    reg = alloc_vreg(f"sconst_{instr.value}")
-                    if reg is not None:
-                        # 加载字符串地址：lea reg, [rip + offset]
-                        fixup_offset = e.lea_reg_rip(reg, 0)
-                        # 查找数据段偏移
-                        data_off = self._string_const_map.get(instr.value)
-                        if data_off is not None:
-                            self.data_fixups.append(
-                                (func.name, fixup_offset, data_off, "string")
-                            )
+                    if dst_loc[0] == "reg":
+                        fixup_offset = e.lea_reg_rip(dst_loc[1], 0)
+                    else:
+                        fixup_offset = e.lea_reg_rip(RAX, 0)
+                        e.mov_mem_reg(RSP, dst_loc[1], RAX)
+                    data_off = self._string_const_map.get(instr.value)
+                    if data_off is not None:
+                        self.data_fixups.append(
+                            (func_name, fixup_offset, data_off, "string")
+                        )
 
             elif isinstance(instr, LIRBinOp):
                 op = instr.op
-                if op in ("+", "-", "*", "/", "%"):
-                    # 简化：使用固定寄存器
-                    dst = RAX  # 结果在 RAX
-                    src = RCX  # 操作数在 RCX
-                    if op == "+":
-                        e.add_reg_reg(dst, src)
-                    elif op == "-":
-                        e.sub_reg_reg(dst, src)
-                    elif op == "*":
-                        e.imul_reg_reg(dst, src)
-                    elif op == "/":
-                        e.cqo()
-                        e.idiv_reg(src)
-                    elif op == "%":
-                        e.cqo()
-                        e.idiv_reg(src)
-                        # 余数在 RDX
-                        e.mov_reg_reg64(RAX, RDX)
-                elif op == "==":
-                    e.cmp_reg_reg(RAX, RCX)
-                    e.sete(RAX)
-                    e.movzx_reg32_reg8(RAX, RAX)
-                elif op == "!=":
-                    e.cmp_reg_reg(RAX, RCX)
-                    e.setne(RAX)
-                    e.movzx_reg32_reg8(RAX, RAX)
-                elif op == "<":
-                    e.cmp_reg_reg(RAX, RCX)
-                    e.setl(RAX)
-                    e.movzx_reg32_reg8(RAX, RAX)
-                elif op == ">":
-                    e.cmp_reg_reg(RCX, RAX)
-                    e.setl(RAX)
-                    e.movzx_reg32_reg8(RAX, RAX)
-                elif op == "<=":
-                    e.cmp_reg_reg(RAX, RCX)
-                    e.setle(RAX)
-                    e.movzx_reg32_reg8(RAX, RAX)
-                elif op == ">=":
-                    e.cmp_reg_reg(RCX, RAX)
-                    e.setle(RAX)
-                    e.movzx_reg32_reg8(RAX, RAX)
+                # 获取源操作数位置
+                src_locs = instr.src_locs
+                dst_loc = instr.dst_loc
+
+                # 对于需要特定寄存器的指令（如除法用 RAX/RDX），先搬移
+                if op in ("/", "%"):
+                    # 除法：被除数在 RAX，除数在任意寄存器，结果在 RAX（商）/ RDX（余）
+                    if len(src_locs) >= 2:
+                        left_name, left_type = src_locs[0]
+                        right_name, right_type = src_locs[1]
+                        is_float = left_type.kind == IRType.FLOAT
+
+                        if is_float:
+                            # 浮点除法
+                            load_to_reg(left_name, XMM0, is_float=True)
+                            load_to_reg(right_name, XMM1, is_float=True)
+                            e.divsd_reg_reg(XMM0, XMM1)
+                            # 结果在 XMM0
+                            if dst_loc:
+                                dst_name, _ = dst_loc
+                                store_from_reg(dst_name, XMM0, is_float=True)
+                        else:
+                            # 整数除法：左操作数 -> RAX
+                            load_to_reg(left_name, RAX)
+                            # 右操作数 -> RCX（或任意非 RAX/RDX 寄存器）
+                            load_to_reg(right_name, RCX)
+                            e.cqo()
+                            e.idiv_reg(RCX)
+                            if op == "%":
+                                # 余数在 RDX，搬到 RAX
+                                e.mov_reg_reg64(RAX, RDX)
+                            # 结果在 RAX，存到目的
+                            if dst_loc:
+                                dst_name, _ = dst_loc
+                                store_from_reg(dst_name, RAX)
+                elif op in ("+", "-", "*"):
+                    if len(src_locs) >= 2:
+                        left_name, left_type = src_locs[0]
+                        right_name, right_type = src_locs[1]
+                        is_float = left_type.kind == IRType.FLOAT
+
+                        if is_float:
+                            # 浮点运算
+                            load_to_reg(left_name, XMM0, is_float=True)
+                            load_to_reg(right_name, XMM1, is_float=True)
+                            if op == "+":
+                                e.addsd_reg_reg(XMM0, XMM1)
+                            elif op == "-":
+                                e.subsd_reg_reg(XMM0, XMM1)
+                            elif op == "*":
+                                e.mulsd_reg_reg(XMM0, XMM1)
+                            if dst_loc:
+                                dst_name, _ = dst_loc
+                                store_from_reg(dst_name, XMM0, is_float=True)
+                        else:
+                            # 整数运算：左 -> RAX，右 -> RCX，结果 -> RAX
+                            load_to_reg(left_name, RAX)
+                            load_to_reg(right_name, RCX)
+                            if op == "+":
+                                e.add_reg_reg(RAX, RCX)
+                            elif op == "-":
+                                e.sub_reg_reg(RAX, RCX)
+                            elif op == "*":
+                                e.imul_reg_reg(RAX, RCX)
+                            if dst_loc:
+                                dst_name, _ = dst_loc
+                                store_from_reg(dst_name, RAX)
+
+                elif op in ("==", "!=", "<", ">", "<=", ">="):
+                    if len(src_locs) >= 2:
+                        left_name, left_type = src_locs[0]
+                        right_name, right_type = src_locs[1]
+                        is_float = left_type.kind == IRType.FLOAT
+
+                        if is_float:
+                            # 浮点比较
+                            load_to_reg(left_name, XMM0, is_float=True)
+                            load_to_reg(right_name, XMM1, is_float=True)
+                            e.ucomisd(XMM0, XMM1)
+                        else:
+                            # 整数比较
+                            load_to_reg(left_name, RAX)
+                            load_to_reg(right_name, RCX)
+                            e.cmp_reg_reg(RAX, RCX)
+
+                        # 根据操作码设置结果
+                        if op == "==":
+                            e.sete(RAX)
+                        elif op == "!=":
+                            e.setne(RAX)
+                        elif op == "<":
+                            e.setl(RAX)
+                        elif op == ">":
+                            e.setg(RAX)
+                        elif op == "<=":
+                            e.setle(RAX)
+                        elif op == ">=":
+                            e.setge(RAX)
+                        e.movzx_reg32_reg8(RAX, RAX)
+
+                        if dst_loc:
+                            dst_name, _ = dst_loc
+                            store_from_reg(dst_name, RAX)
 
             elif isinstance(instr, LIRUnaryOp):
-                if instr.op == "-":
-                    e.neg_reg(RAX)
-                elif instr.op == "!":
-                    e.cmp_reg_imm(RAX, 0)
-                    e.sete(RAX)
-                    e.movzx_reg32_reg8(RAX, RAX)
+                if instr.src_locs and instr.dst_loc:
+                    src_name, src_type = instr.src_locs[0]
+                    dst_name, _ = instr.dst_loc
+                    is_float = src_type.kind == IRType.FLOAT
+
+                    if instr.op == "-":
+                        if is_float:
+                            # 浮点取反：xorpd 符号位（简化：用 0 减）
+                            load_to_reg(src_name, XMM0, is_float=True)
+                            e.xorpd_xmm(XMM1)
+                            e.subsd_reg_reg(XMM1, XMM0)
+                            store_from_reg(dst_name, XMM1, is_float=True)
+                        else:
+                            load_to_reg(src_name, RAX)
+                            e.neg_reg(RAX)
+                            store_from_reg(dst_name, RAX)
+                    elif instr.op == "!":
+                        load_to_reg(src_name, RAX)
+                        e.cmp_reg_imm(RAX, 0)
+                        e.sete(RAX)
+                        e.movzx_reg32_reg8(RAX, RAX)
+                        store_from_reg(dst_name, RAX)
 
             elif isinstance(instr, LIRCall):
-                # 设置参数
-                for i in range(min(instr.arg_count, 6)):
-                    # 将第 i 个参数放到 ARG_REGS[i]
-                    pass  # 实际需要从虚拟寄存器加载
-
-                # 调用（函数间调用在 ELF 链接阶段回填）
+                # TODO: 完整的调用约定实现（参数寄存器设置等）
+                # 目前：调用（函数间调用在 ELF 链接阶段回填）
                 call_offset = e.call_rel32()
                 self.link_calls.append((func_name, call_offset, instr.func_name))
+                # 返回值假设在 RAX，如果有 dst_loc 则存储
+                if instr.dst_loc:
+                    dst_name, _ = instr.dst_loc
+                    store_from_reg(dst_name, RAX)
 
             elif isinstance(instr, LIRReturn):
-                # 返回值已在 RAX
-                e.ret()
+                # 如果有返回值源，加载到 RAX
+                if instr.src_locs:
+                    src_name, src_type = instr.src_locs[0]
+                    is_float = src_type.kind == IRType.FLOAT
+                    if is_float:
+                        load_to_reg(src_name, XMM0, is_float=True)
+                    else:
+                        load_to_reg(src_name, RAX)
+                # 返回在函数尾声处理，这里不发射 ret
 
             elif isinstance(instr, LIRJump):
                 # 无条件跳转：发射 jmp rel32 占位，记录回填
@@ -281,7 +567,10 @@ class NativeCodeGen:
                 jump_fixups.append((jmp_offset, instr.target, "jmp"))
 
             elif isinstance(instr, LIRBranch):
-                # 条件跳转：test + jne(true) + jmp(false)
+                # 条件跳转：加载条件到 RAX，test + jne/jmp
+                if instr.src_locs:
+                    cond_name, _ = instr.src_locs[0]
+                    load_to_reg(cond_name, RAX)
                 e.test_reg_reg(RAX, RAX)
                 jne_offset = e.jne_rel32()  # true 分支
                 jump_fixups.append((jne_offset, instr.true_target, "jcc"))

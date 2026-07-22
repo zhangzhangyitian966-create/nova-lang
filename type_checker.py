@@ -947,14 +947,20 @@ class TypeChecker:
 
         # 比较操作
         if expr.op in ("==", "!=", "<", ">", "<=", ">="):
+            # 所有比较操作都要求左右操作数类型兼容
+            if not self._types_compatible(left_ty, right_ty):
+                raise TypeCheckError(
+                    f"操作符 '{expr.op}' 的操作数类型不兼容：{left_ty} 和 {right_ty}"
+                )
+            # 有序比较（< > <= >=）额外要求数值类型
             if expr.op in ("<", ">", "<=", ">="):
                 if not (
                     self._types_compatible(left_ty, INT_T)
-                    and self._types_compatible(right_ty, INT_T)
                     or self._types_compatible(left_ty, FLOAT_T)
-                    and self._types_compatible(right_ty, FLOAT_T)
                 ):
-                    raise TypeCheckError(f"操作符 '{expr.op}' 需要数值类型操作数")
+                    raise TypeCheckError(
+                        f"操作符 '{expr.op}' 需要数值类型操作数，得到 {left_ty}"
+                    )
             return BOOL_T
 
         # 逻辑操作
