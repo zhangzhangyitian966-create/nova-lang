@@ -1,7 +1,7 @@
 # Nova LLM 智能开发路线图
 
-**更新时间**: 2026-07-22 05:01:00
-**上次评审**: 第 30 轮（路线图评审）
+**更新时间**: 2026-07-22 08:26:00
+**上次评审**: 第 33 轮（路线图评审）
 
 本路线图由 LLM 智能开发系统动态维护。
 
@@ -11,7 +11,7 @@
 |------|------|------|--------|------|------|
 | ✅ | C 后端接入统一 IR 管线 | hard | 95 | 2-3 天 | - |
 | ✅ | C 后端 LIR 代码生成基础框架 | medium | 92 | 1 天 | - |
-| ⏳ | 统一 C 后端（LIR 路径功能对齐） | hard | 70 | 2-3 天 | fix_match_lowering, fix_mir_ssa, refactor_visitor_pattern, lir_switch_match_lowering |
+| ⏳ | 统一 C 后端（LIR 路径功能对齐） | hard | 72 | 2-3 天 | fix_match_lowering, fix_mir_ssa, refactor_visitor_pattern, lir_switch_match_lowering |
 
 ## 🔧 IR 降级 / 正确性
 
@@ -57,8 +57,9 @@
 | ✅ | 修复 Wasm 后端 StoreReg 实现 | easy | 60 | 1 小时 | wasm_control_flow_rewrite |
 | ✅ | C 后端 LIR 路径 ADT/match 支持 | hard | 72 | 1-2 天 | lir_switch_match_lowering, unify_c_backend |
 | ✅ | C 后端 LIR 路径列表推导式支持 | medium | 72 | 3-5 小时 | c_backend_adt_match, unify_c_backend |
-| ⏳ | C 后端数据结构构建正确性验证 | medium | 75 | 3-5 小时 | c_backend_listcomp_verify, c_backend_adt_match |
-| ⏳ | 修复 Wasm 后端全局变量声明缺失 | easy | 62 | 1-2 小时 | wasm_control_flow_rewrite |
+| ⏳ | C 后端数据结构构建正确性验证 | medium | 80 | 3-5 小时 | c_backend_listcomp_verify, c_backend_adt_match |
+| ⏳ | C 后端闭包功能对齐 | hard | 68 | 1-2 天 | c_backend_data_verify |
+| ⏳ | 修复 Wasm 后端全局变量声明缺失 | easy | 60 | 1-2 小时 | wasm_control_flow_rewrite |
 | ⏳ | 实现原生后端函数调用 ABI | hard | 20 | 3-5 天 | fix_mir_ssa |
 
 ## 🛠️ 工程质量
@@ -86,11 +87,18 @@
 | ✅ | 修复基准测试 sys.path hack | easy | 90 | 1-2 小时 | - |
 | ✅ | 重构 _has_side_effect_expr 调度表化 | easy | 65 | 2-3 小时 | - |
 | ✅ | 重构 Lexer._next_token 降低圈复杂度 | medium | 58 | 3-5 小时 | - |
-| ⏳ | LOW 级问题批量治理（docstring + 魔法数字） | easy | 55 | 2-4 小时 | - |
-| ⏳ | 高复杂度函数补全 docstring | easy | 55 | 2-3 小时 | - |
-| ⏳ | 重构 Evaluator.eval_expr 降低圈复杂度 | medium | 72 | 3-5 小时 | - |
+| ✅ | 测试文件瘦身与拆分 | easy | 68 | 2-3 小时 | - |
+| ✅ | 后端占位代码与死代码清理 | easy | 60 | 1-2 小时 | - |
+| ✅ | 前端冗余代码治理 | easy | 58 | 2-3 小时 | - |
+| ⏳ | 重构 Evaluator.eval_expr 降低圈复杂度 | medium | 82 | 3-5 小时 | - |
+| ⏳ | 重构 Evaluator._match_pattern 降低圈复杂度 | medium | 72 | 3-5 小时 | refactor_eval_expr_complexity |
+| ⏳ | 重构 BytecodeCompiler._compile_expr 降低圈复杂度 | medium | 60 | 3-5 小时 | - |
+| ⏳ | 重构 SSAVerifier._verify_function 降低圈复杂度 | medium | 55 | 3-5 小时 | - |
 | ⏳ | 重构 CCodeGen._infer_c_type_from_expr 降低圈复杂度 | medium | 50 | 3-5 小时 | - |
 | ⏳ | 重构 NativeCodeGen._compile_body 降低圈复杂度 | medium | 45 | 4-6 小时 | - |
+| ⏳ | LOW 级问题批量治理（docstring + 魔法数字） | easy | 62 | 2-4 小时 | - |
+| ⏳ | 高复杂度函数补全 docstring | easy | 58 | 2-3 小时 | - |
+| ⏳ | 建立代码质量门禁（docstring + 命名规范） | medium | 55 | 3-5 小时 | low_quality_issues_cleanup |
 
 ## 🧪 测试完善
 
@@ -99,16 +107,16 @@
 | ✅ | 修复原生后端测试导入 | easy | 85 | 30 分钟 | |
 | ✅ | 为 SSA 验证器编写完整测试 | easy | 78 | 2-3 小时 | mir_ssa_verifier, extract_loop_ssa |
 | ✅ | 建立后端性能基准测试框架 | medium | 60 | 3-5 小时 | unify_c_backend |
-| ⏳ | 基准测试框架增强（C/Wasm执行时间+优化对比） | medium | 65 | 3-5 小时 | backend_benchmark_framework |
+| ⏳ | 基准测试框架增强（C/Wasm执行时间+优化对比） | medium | 62 | 3-5 小时 | backend_benchmark_framework |
 | ⏳ | LICM 优化正确性测试 | medium | 70 | 3-5 小时 | implement_licm_pass, ssa_verifier_tests |
 | ⏳ | CFG 基础设施单元测试 | medium | 60 | 3-5 小时 | mir_cfg_loop_analysis |
 
 ---
 
-**进度**: 60/70 (86%)
-**已完成**: 60
+**进度**: 63/75 (84%)
+**已完成**: 63
 **进行中**: 0
-**待开发**: 9
+**待开发**: 11
 **已废弃**: 1
 
-> 注：第32轮完成 3 个任务（3 个审查驱动）。调度表化路线继续推进（_has_side_effect_expr + Lexer 收尾），后端安全性问题修复 2 个。下一轮（第33轮）是第33轮评审。
+> 注：第33轮为路线图评审轮。新增 5 个任务（4个审查驱动 + 1个自主规划），调整 6 个任务优先级。规划第34-36轮方向为"解释器调度表化 → C后端数据结构验证 → 质量底线建设"。

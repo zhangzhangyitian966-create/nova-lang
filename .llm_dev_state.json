@@ -1,6 +1,7 @@
 {
-  "cycles": 32,
+  "cycles": 33,
   "completed_tasks": [
+    "review_cycle_33",
     "refactor_pass_manager_side_effect",
     "fix_lir_c_backend_data_safety",
     "refactor_lexer_next_token",
@@ -77,6 +78,14 @@
   ],
   "failed_tasks": [],
   "task_history": [
+    {
+      "cycle": 33,
+      "task_id": "review_cycle_33",
+      "status": "completed",
+      "source": "评审轮",
+      "reason": "第33轮路线图评审，每3轮一次的例行评审。总结第31-32轮开发成果，评估方向/质量/效率/价值/审查对齐五维表现，规划第34-36轮方向。",
+      "details": "完成第33轮路线图评审：五维评估（方向正确、质量提升、效率稳定、价值高、审查对齐优秀）；任务池新增 5 个任务（4个审查驱动 + 1个自主规划）；调整 4 个任务优先级；规划第34-36轮方向为'解释器调度表化 → C后端数据结构验证 → 质量底线建设'。"
+    },
     {
       "cycle": 32,
       "task_id": "refactor_pass_manager_side_effect",
@@ -182,17 +191,17 @@
       "details": "完成第30轮路线图评审：五维评估（方向正确、质量提升、效率稳定、价值高、审查对齐良好）；任务池新增 8 个任务（6个审查驱动 + 2个自主发现）；调整 4 个任务优先级；规划第31-33轮方向为'复杂度治理 → 测试深化 → 质量底线'。"
     }
   ],
-  "current_cycle": 32,
+  "current_cycle": 33,
   "baseline_tests": 392,
   "current_tests": 392,
-  "last_review_cycle": 30,
+  "last_review_cycle": 33,
   "tasks": [
     {
       "id": "unify_c_backend",
       "name": "统一 C 后端（LIR 路径功能对齐）",
       "description": "将 c_codegen.py 中已实现但 lir_c_backend.py 缺失的功能迁移过来：ADT 代码生成、match 编译、闭包实现、列表推导式，待功能对齐后废弃旧的 AST→C 路径",
       "difficulty": "hard",
-      "priority": 70,
+      "priority": 72,
       "category": "architecture",
       "estimated": "2-3 天",
       "status": "pending",
@@ -202,45 +211,71 @@
         "refactor_visitor_pattern",
         "lir_switch_match_lowering"
       ],
-      "reason": "目前有两套 C 代码生成路径（AST 路径功能完整，LIR 路径仅阶段一），功能重叠增加维护成本。SSA 基础打好后，统一到 LIR→C 路径可以让所有后端共享 IR 优化成果。[优先级调整: 80 → 75，拆分为多个子任务后作为总任务，优先级微调]"
+      "reason": "目前有两套 C 代码生成路径（AST 路径功能完整，LIR 路径仅阶段一），功能重叠增加维护成本。SSA 基础打好后，统一到 LIR→C 路径可以让所有后端共享 IR 优化成果。[优先级调整: 70 → 72，数据结构验证推进后优先级上调]"
     },
     {
       "id": "benchmark_enhance_exec_time",
       "name": "基准测试框架增强（C/Wasm执行时间+优化对比）",
       "description": "为基准测试框架添加 C 后端和 Wasm 后端的执行时间测量，支持优化前后对比功能（同一用例在不同优化级别下的性能对比），扩充基准用例覆盖 ADT、模式匹配、闭包等场景",
       "difficulty": "medium",
-      "priority": 65,
+      "priority": 62,
       "category": "test",
       "estimated": "3-5 小时",
       "status": "pending",
       "depends_on": [
         "backend_benchmark_framework"
       ],
-      "reason": "基准测试框架目前只支持 VM 后端执行时间测量，C/Wasm 后端只能测编译时间。补齐后可全面评估各后端性能，优化效果量化更准确。[自主规划]"
+      "reason": "基准测试框架目前只支持 VM 后端执行时间测量，C/Wasm 后端只能测编译时间。补齐后可全面评估各后端性能，优化效果量化更准确。[优先级调整: 65 → 62，测试深化优先级微调][自主规划]"
     },
     {
       "id": "low_quality_issues_cleanup",
       "name": "LOW 级问题批量治理（docstring + 魔法数字）",
       "description": "批量清理 LOW 级问题：为 ir/ 和 backend/ 模块的公共 API 添加 docstring，将高频魔法数字（如 8 字节大小、默认迭代次数等）提取为命名常量，清理调试打印语句",
       "difficulty": "easy",
-      "priority": 55,
+      "priority": 62,
       "category": "engineering",
       "estimated": "2-4 小时",
       "status": "pending",
       "depends_on": [],
-      "reason": "LOW 级问题已达 1003 个且持续增长，no_docstring 和 magic_number 是主要增量。虽然单个问题影响小，但累积起来严重影响代码可读性。批量治理建立质量底线。[优先级调整: 50 → 55 / 审查发现]"
+      "reason": "LOW 级问题已达 1003 个且持续增长，no_docstring 和 magic_number 是主要增量。虽然单个问题影响小，但累积起来严重影响代码可读性。批量治理建立质量底线。[优先级调整: 55 → 62，LOW问题持续增长，质量底线建设紧迫性提升][审查发现]"
     },
     {
       "id": "refactor_eval_expr_complexity",
       "name": "重构 Evaluator.eval_expr 降低圈复杂度",
-      "description": "Evaluator.eval_expr 圈复杂度 38（全项目 Top 3），是解释器执行的主分发函数。引入调度表模式，按 AST 节点类别拆分为独立方法，降低单函数复杂度，提升可维护性",
+      "description": "Evaluator.eval_expr 圈复杂度 38（全项目 Top 3），是解释器执行的主分发函数，也是六大核心分发函数中唯一未调度表化的。引入调度表模式，按 AST 节点类别拆分为独立方法，降低单函数复杂度，提升可维护性",
+      "difficulty": "medium",
+      "priority": 82,
+      "category": "engineering",
+      "estimated": "3-5 小时",
+      "status": "pending",
+      "depends_on": [],
+      "reason": "审查日志显示 eval_expr 圈复杂度 38，排名 Top 3。六大核心分发函数（VM→TypeChecker→MIRLowering→LIRLowering→LIRCBackend→HIRLowering）已全部调度表化，唯独 Evaluator 是最后一块拼图。统一架构风格，降低解释器路径的维护成本。[优先级调整: 72 → 82，六大核心分发函数唯一未重构的，优先级大幅提升][审查驱动]"
+    },
+    {
+      "id": "refactor_evaluator_match_pattern",
+      "name": "重构 Evaluator._match_pattern 降低圈复杂度",
+      "description": "Evaluator._match_pattern 圈复杂度 30（全项目 Top 9），模式匹配是 Nova 的核心特性。按模式类型拆分为独立方法，引入调度表模式，降低复杂度，提升可维护性和可扩展性",
       "difficulty": "medium",
       "priority": 72,
       "category": "engineering",
       "estimated": "3-5 小时",
       "status": "pending",
+      "depends_on": [
+        "refactor_eval_expr_complexity"
+      ],
+      "reason": "审查日志显示 _match_pattern 圈复杂度 30，排名 Top 9。解释器路径的模式匹配逻辑复杂，是 bug 高发区。调度表化后模式扩展更方便，代码更清晰。[新增任务 / 审查驱动]"
+    },
+    {
+      "id": "refactor_bytecode_compiler_expr",
+      "name": "重构 BytecodeCompiler._compile_expr 降低圈复杂度",
+      "description": "BytecodeCompiler._compile_expr 圈复杂度 33（全项目 Top 5），字节码编译器的主分发函数。引入调度表模式按 AST 节点类型拆分，降低复杂度，统一架构风格",
+      "difficulty": "medium",
+      "priority": 60,
+      "category": "engineering",
+      "estimated": "3-5 小时",
+      "status": "pending",
       "depends_on": [],
-      "reason": "审查日志显示 eval_expr 圈复杂度 38，排名 Top 3。延续调度表化路线（VM→TypeChecker→MIRLowering→LIRLowering→LIRCBackend→HIRLowering），统一架构风格。解释器路径虽然不影响编译后端，但高复杂度增加 bug 风险。[新增任务 / 审查驱动]"
+      "reason": "审查日志显示 _compile_expr 圈复杂度 33，排名 Top 5。字节码路径虽然逐渐被 IR 路径取代，但仍是默认执行路径。调度表化可降低维护成本，为后续可能的优化打基础。[新增任务 / 审查驱动]"
     },
     {
       "id": "refactor_ccodegen_infer_type",
@@ -252,31 +287,19 @@
       "estimated": "3-5 小时",
       "status": "pending",
       "depends_on": [],
-      "reason": "审查日志显示 _infer_c_type_from_expr 圈复杂度 42，是全项目最复杂的函数。虽然旧 C 后端将被废弃，但当前仍是功能最完整的 C 路径，且统一 C 后端需要参考其实现。降低复杂度可减少迁移过程中的理解成本和 bug 风险。[新增任务 / 审查驱动]"
+      "reason": "审查日志显示 _infer_c_type_from_expr 圈复杂度 42，是全项目最复杂的函数。虽然旧 C 后端将被废弃，但当前仍是功能最完整的 C 路径，且统一 C 后端需要参考其实现。降低复杂度可减少迁移过程中的理解成本和 bug 风险。[审查驱动]"
     },
     {
-      "id": "refactor_lexer_next_token",
-      "name": "重构 Lexer._next_token 降低圈复杂度",
-      "description": "Lexer._next_token 圈复杂度 32（全项目 Top 8），词法分析的主循环。按 token 类型拆分为多个辅助方法（标识符/关键字、数字、字符串、运算符等），降低单函数复杂度",
+      "id": "refactor_ssaverifier_verify_function",
+      "name": "重构 SSAVerifier._verify_function 降低圈复杂度",
+      "description": "SSAVerifier._verify_function 圈复杂度 33（全项目 Top 6），SSA 验证器的核心验证函数。按验证逻辑类别拆分为独立方法（Phi验证、定义-使用验证、支配性验证等），降低单函数复杂度",
       "difficulty": "medium",
-      "priority": 58,
+      "priority": 55,
       "category": "engineering",
       "estimated": "3-5 小时",
-      "status": "completed",
+      "status": "pending",
       "depends_on": [],
-      "reason": "审查日志显示 _next_token 圈复杂度 32，是前端最复杂的函数。词法分析是编译器的第一道门，高复杂度增加维护难度。[第31轮部分完成：双字符操作符表驱动化 / 第32轮全部完成：单字符表驱动化 + LPAREN合并]"
-    },
-    {
-      "id": "refactor_pass_manager_side_effect",
-      "name": "重构 _has_side_effect_expr 调度表化",
-      "description": "pass_manager.py 的 _has_side_effect_expr 圈复杂度 28（Top 10），用大量 isinstance 检查判断表达式是否有副作用。重构为调度表模式，按节点类型映射到副作用判断函数，降低复杂度，新增节点类型时只需添加一条映射",
-      "difficulty": "easy",
-      "priority": 65,
-      "category": "engineering",
-      "estimated": "2-3 小时",
-      "status": "completed",
-      "depends_on": [],
-      "reason": "审查日志显示 _has_side_effect_expr 圈复杂度 28，Top 10 级别。延续调度表化路线，重构后新增 HIR 节点类型时只需添加一条映射，不易遗漏。成本低收益高。[第32轮完成 / 审查驱动]"
+      "reason": "审查日志显示 _verify_function 圈复杂度 33，排名 Top 6。SSA 验证器是优化正确性的重要保障，降低复杂度可提升验证器本身的可信度，也便于扩展更多验证规则。[新增任务 / 审查驱动]"
     },
     {
       "id": "licm_correctness_tests",
@@ -291,7 +314,7 @@
         "implement_licm_pass",
         "ssa_verifier_tests"
       ],
-      "reason": "LICM 是已实现的最高级优化 Pass，但缺乏专项测试，无法确保其正确性。优化 Pass 的正确性是编译器可信度的基石，必须有充分测试保障。[新增任务 / 自主发现]"
+      "reason": "LICM 是已实现的最高级优化 Pass，但缺乏专项测试，无法确保其正确性。优化 Pass 的正确性是编译器可信度的基石，必须有充分测试保障。[自主发现]"
     },
     {
       "id": "cfg_utils_unit_tests",
@@ -305,26 +328,26 @@
       "depends_on": [
         "mir_cfg_loop_analysis"
       ],
-      "reason": "深度代码审计发现 cfg_utils.py（799行）是循环优化的核心基础设施，但缺乏直接测试。所有循环优化（LICM 等）都依赖它，基础设施的正确性是上层优化正确的前提。[新增任务 / 自主发现]"
+      "reason": "深度代码审计发现 cfg_utils.py（799行）是循环优化的核心基础设施，但缺乏直接测试。所有循环优化（LICM 等）都依赖它，基础设施的正确性是上层优化正确的前提。[自主发现]"
     },
     {
       "id": "high_complexity_docstrings",
       "name": "高复杂度函数补全 docstring",
       "description": "为 29 个圈复杂度 >15 的高复杂度函数补充 docstring，说明函数用途、输入输出语义、算法简述、关键设计决策。优先处理 Top 10 最复杂函数",
       "difficulty": "easy",
-      "priority": 55,
+      "priority": 58,
       "category": "engineering",
       "estimated": "2-3 小时",
       "status": "pending",
       "depends_on": [],
-      "reason": "高复杂度函数是理解成本最高的代码，也是 bug 高发区。补充文档可以大幅降低维护成本，帮助未来的重构工作。属于 LOW 级问题治理中价值最高的部分。[新增任务 / 审查驱动]"
+      "reason": "高复杂度函数是理解成本最高的代码，也是 bug 高发区。补充文档可以大幅降低维护成本，帮助未来的重构工作。属于 LOW 级问题治理中价值最高的部分。[优先级调整: 55 → 58][审查驱动]"
     },
     {
       "id": "c_backend_data_verify",
       "name": "C 后端数据结构构建正确性验证",
       "description": "验证 LIR→C 路径上列表/元组/Map/ADT 的构建正确性，修复列表构建只分配空间不填充元素、元组/ADT 构建只分配不赋值字段等问题，确保数据结构在 LIR C 后端正确工作",
       "difficulty": "medium",
-      "priority": 75,
+      "priority": 80,
       "category": "backend",
       "estimated": "3-5 小时",
       "status": "pending",
@@ -332,33 +355,35 @@
         "c_backend_listcomp_verify",
         "c_backend_adt_match"
       ],
-      "reason": "深度代码审计发现 LIR C 后端的数据结构构建存在缺陷：列表构建只分配空间不填充元素、元组/ADT 构建只分配不赋值字段。这是统一 C 后端的关键缺口，必须修复才能让 LIR→C 路径真正可用。[新增任务 / 自主发现]"
+      "reason": "深度代码审计发现 LIR C 后端的数据结构构建存在缺陷：列表构建只分配空间不填充元素、元组/ADT 构建只分配不赋值字段。这是统一 C 后端的关键缺口，必须修复才能让 LIR→C 路径真正可用。[优先级调整: 75 → 80，统一C后端的关键路径][自主发现]"
     },
     {
-      "id": "fix_lir_c_backend_data_safety",
-      "name": "修复 LIR C 后端数据结构构建安全性",
-      "description": "修复 LIR C 后端数据结构构建的正确性和安全性问题：nova_adt_new 参数不匹配（2个vs3个）、元组构建不初始化内存",
-      "difficulty": "easy",
-      "priority": 70,
+      "id": "c_backend_closure_support",
+      "name": "C 后端闭包功能对齐",
+      "description": "将旧 C 后端的闭包实现迁移到 LIR→C 路径：闭包环境捕获、函数指针包装、upvar 访问、闭包生命周期管理。确保闭包在 LIR C 后端正确工作",
+      "difficulty": "hard",
+      "priority": 68,
       "category": "backend",
-      "estimated": "1-2 小时",
-      "status": "completed",
-      "depends_on": [],
-      "reason": "深度代码审计发现 LIR C 后端数据结构构建存在正确性和安全性问题：nova_adt_new 参数不匹配会导致 C 编译错误，元组未初始化内存可能导致未定义行为。修复成本极低，但对后端正确性和安全性影响大。[第32轮完成 / 审查驱动/自主发现]"
+      "estimated": "1-2 天",
+      "status": "pending",
+      "depends_on": [
+        "c_backend_data_verify"
+      ],
+      "reason": "闭包是 Nova 函数式核心的重要特性，旧 C 后端有完整实现但 LIR 路径尚未迁移。闭包支持是统一 C 后端的关键里程碑。[新增任务 / 自主规划]"
     },
     {
       "id": "wasm_global_vars_fix",
       "name": "修复 Wasm 后端全局变量声明缺失",
       "description": "修复 Wasm 后端中全局变量使用 global.get/set 但没有对应 global 声明的问题。扫描 MIR 模块中的全局变量定义，生成对应的 Wasm global 声明，确保 Wasm 模块可以正确加载",
       "difficulty": "easy",
-      "priority": 62,
+      "priority": 60,
       "category": "backend",
       "estimated": "1-2 小时",
       "status": "pending",
       "depends_on": [
         "wasm_control_flow_rewrite"
       ],
-      "reason": "深度代码审计发现的 Wasm 后端正确性 bug：全局变量只有使用没有声明，导致生成的 Wasm 模块无法加载。修复成本低，但对 Wasm 后端的可用性影响大。[新增任务 / 自主发现]"
+      "reason": "深度代码审计发现的 Wasm 后端正确性 bug：全局变量只有使用没有声明，导致生成的 Wasm 模块无法加载。修复成本低，但对 Wasm 后端的可用性影响大。[优先级调整: 62 → 60][自主发现]"
     },
     {
       "id": "refactor_native_compile_body",
@@ -370,7 +395,21 @@
       "estimated": "4-6 小时",
       "status": "pending",
       "depends_on": [],
-      "reason": "审查日志显示 _compile_body 圈复杂度 38，排名 Top 2。虽然原生后端整体完成度低（30%），但降低核心分发函数的复杂度可以为后续开发打好基础。优先级较低，待核心后端成熟后再处理。[新增任务 / 审查驱动]"
+      "reason": "审查日志显示 _compile_body 圈复杂度 38，排名 Top 2。虽然原生后端整体完成度低（30%），但降低核心分发函数的复杂度可以为后续开发打好基础。优先级较低，待核心后端成熟后再处理。[审查驱动]"
+    },
+    {
+      "id": "establish_quality_gate",
+      "name": "建立代码质量门禁（docstring + 命名规范）",
+      "description": "在 auto_review.py 中增加增量质量检查：新增代码必须有 docstring（公共 API）、不得引入新的魔法数字、命名规范检查。设定 LOW 问题增长率上限，防止技术债持续累积",
+      "difficulty": "medium",
+      "priority": 55,
+      "category": "engineering",
+      "estimated": "3-5 小时",
+      "status": "pending",
+      "depends_on": [
+        "low_quality_issues_cleanup"
+      ],
+      "reason": "LOW 级问题从 840 增长到 1003（+19%），缺乏质量红线导致持续累积。建立质量门禁可以从源头控制新增问题，配合存量治理形成闭环。[新增任务 / 自主规划]"
     },
     {
       "id": "native_call_abi",
@@ -384,55 +423,7 @@
       "depends_on": [
         "fix_mir_ssa"
       ],
-      "reason": "原生后端整体完成度极低（代码生成器骨架、无寄存器分配、无跳转回填），项目已有 C 后端、Cranelift 后端和 Wasm 后端三个更可行路径，自研 x86_64 投入产出比太低。保留任务但标记为 deprecated，待其他后端成熟后再评估 [优先级调整: 40 → 25, 状态: pending → deprecated]"
-    },
-    {
-      "id": "fix_syspath_hack",
-      "name": "修复基准测试 sys.path hack",
-      "description": "移除 tests/benchmarks/run_benchmarks.py 中的 sys.path.insert hack，将 tests 目录纳入 nova 包结构，使用标准包导入",
-      "difficulty": "easy",
-      "priority": 90,
-      "category": "engineering",
-      "estimated": "1-2 小时",
-      "status": "completed",
-      "depends_on": [],
-      "reason": "审查日志第1496轮唯一 HIGH 级别问题，消除后项目完全符合 Python 包管理规范 [审查驱动]"
-    },
-    {
-      "id": "test_slimming",
-      "name": "测试文件瘦身与拆分",
-      "description": "精简 test_nova.py 中的重复测试模式，合并参数化测试，删除冗余测试，按模块拆分大测试文件",
-      "difficulty": "easy",
-      "priority": 68,
-      "category": "test",
-      "estimated": "2-3 小时",
-      "status": "completed",
-      "depends_on": [],
-      "reason": "test_nova.py 是全项目最大文件（1874行），测试膨胀问题严重。测试代码也是代码，需要维护。瘦身可降低维护成本，提升测试组织清晰度。[第31轮完成 / 用户反馈驱动]"
-    },
-    {
-      "id": "backend_dead_code_cleanup",
-      "name": "后端占位代码与死代码清理",
-      "description": "清理后端中的 pass 占位、死代码、未使用类和方法，给后端代码库'挤水分'",
-      "difficulty": "easy",
-      "priority": 60,
-      "category": "engineering",
-      "estimated": "1-2 小时",
-      "status": "completed",
-      "depends_on": [],
-      "reason": "后端存在未使用的死代码（LinearScanAllocator、SimpleNativeCompiler），占用代码量却不产生价值。清理后后端代码更真实反映实际完成度。[第31轮完成 / 用户反馈驱动]"
-    },
-    {
-      "id": "frontend_dead_code_cleanup",
-      "name": "前端冗余代码治理",
-      "description": "清理前端文件中的死方法、冗余分支、重复代码，精简前端代码库",
-      "difficulty": "easy",
-      "priority": 58,
-      "category": "engineering",
-      "estimated": "2-3 小时",
-      "status": "completed",
-      "depends_on": [],
-      "reason": "前端 5 个文件 4300+ 行长期未被优化，存在死代码和冗余模式。治理后前端代码更精简。[第31轮完成 / 用户反馈驱动]"
+      "reason": "原生后端整体完成度极低（代码生成器骨架、无寄存器分配、无跳转回填），项目已有 C 后端、Cranelift 后端和 Wasm 后端三个更可行路径，自研 x86_64 投入产出比太低。保留任务但标记为 deprecated，待其他后端成熟后再评估 [deprecated]"
     }
   ]
 }
