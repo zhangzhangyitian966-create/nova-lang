@@ -2,6 +2,8 @@
   "cycles": 2,
   "frontend_completed": 2,
   "backend_completed": 2,
+  "last_review_cycle": 0,
+  "current_review_cycle": 3,
   "completed_tasks": [
     "frontend_try_expr_typecheck",
     "backend_native_label_patch",
@@ -9,6 +11,9 @@
     "backend_native_float_const"
   ],
   "failed_tasks": [],
+  "deprecated_tasks": [
+    "frontend_type_var_strict"
+  ],
   "task_history": [
     {
       "cycle": 1,
@@ -59,19 +64,19 @@
     {
       "task_id": "frontend_type_unification",
       "name": "实现真正的类型合一（unification）算法",
-      "description": "将简化版 HM 类型推断升级为真正的合一算法。TypeVar 从身份比较改为结构合一，支持完整的泛型实例化和类型推导。",
+      "description": "将简化版 HM 类型推断升级为真正的合一算法。TypeVar 从身份比较改为结构合一，支持 substitution、occur check、let-polymorphism 和泛型实例化。这是类型系统的核心基石。",
       "track": "frontend",
       "difficulty": "hard",
-      "priority": 90,
-      "estimated_effort": "3-5天",
+      "priority": 95,
+      "estimated_effort": "5-7天",
       "status": "pending",
-      "source": "quality_analysis",
+      "source": "review_3",
       "depends_on": []
     },
     {
       "task_id": "frontend_pattern_exhaustiveness",
       "name": "实现模式匹配完备性检查",
-      "description": "为 match 表达式添加完备性检查，确保所有构造器都被覆盖，检测冗余分支和不可达分支，给出精确的错误提示。",
+      "description": "为 match 表达式添加完备性检查，确保所有构造器都被覆盖，检测冗余分支和不可达分支，给出精确的错误提示（缺失哪些变体）。",
       "track": "frontend",
       "difficulty": "hard",
       "priority": 82,
@@ -81,29 +86,27 @@
       "depends_on": []
     },
     {
-      "task_id": "frontend_type_var_strict",
-      "name": "收紧 TypeVar 兼容性判断",
-      "description": "修复 _types_compatible 中'只要一方是 TypeVar 就返回 True'的过宽逻辑，实现严格的类型变量兼容检查，确保类型安全。",
-      "track": "frontend",
-      "difficulty": "medium",
-      "priority": 72,
-      "estimated_effort": "3-5小时",
-      "status": "pending",
-      "source": "quality_analysis",
-      "depends_on": [
-        "frontend_type_unification"
-      ]
-    },
-    {
-      "task_id": "frontend_field_access_error",
-      "name": "修复字段访问异常静默吞噬",
-      "description": "修复 _check_field_access 中 ValueError 被静默 pass 的问题，正确报告元组索引越界、字段不存在等错误。",
+      "task_id": "frontend_adt_type_param_eq",
+      "name": "修复 ADT 类型参数相等性比较",
+      "description": "修复 ADTType.__eq__ 只比较 name 不比较 type_params 的 bug。Option[Int] 和 Option[String] 应该是不同类型。这是低难度高收益的类型安全修复。",
       "track": "frontend",
       "difficulty": "easy",
-      "priority": 65,
+      "priority": 80,
       "estimated_effort": "1-2小时",
-      "status": "completed",
-      "source": "quality_analysis",
+      "status": "pending",
+      "source": "review_3",
+      "depends_on": []
+    },
+    {
+      "task_id": "frontend_eq_op_typecheck",
+      "name": "修复 ==/!= 比较运算符类型检查",
+      "description": "修复 _check_binary_op 中 == 和 != 直接返回 BOOL_T 不检查操作数类型的 bug。相等比较应要求左右操作数类型兼容。低难度高收益的类型安全修复。",
+      "track": "frontend",
+      "difficulty": "easy",
+      "priority": 75,
+      "estimated_effort": "30分钟",
+      "status": "pending",
+      "source": "review_3",
       "depends_on": []
     },
     {
@@ -119,26 +122,52 @@
       "depends_on": []
     },
     {
-      "task_id": "backend_native_reg_alloc",
-      "name": "实现原生后端线性扫描寄存器分配器",
-      "description": "实现线性扫描寄存器分配：计算虚拟寄存器活跃区间，分配到物理寄存器（RAX/RBX/RCX/RDX/RSI/RDI/R8-R15），溢出到栈槽。",
-      "track": "backend",
-      "difficulty": "hard",
-      "priority": 88,
-      "estimated_effort": "3-5天",
+      "task_id": "frontend_map_literal_parse",
+      "name": "实现 Map 字面量解析与类型检查",
+      "description": "填补 Map 类型断层：parser 中添加 {key: value, ...} map 字面量解析，type_checker 中添加 Map 表达式类型推导。当前 AST 有 MapExpr 但 parser 完全缺失。",
+      "track": "frontend",
+      "difficulty": "medium",
+      "priority": 58,
+      "estimated_effort": "1-2天",
       "status": "pending",
-      "source": "quality_analysis",
+      "source": "review_3",
+      "depends_on": []
+    },
+    {
+      "task_id": "backend_native_elf_entry_fix",
+      "name": "修复原生后端 ELF 入口地址并接入编译管道",
+      "description": "修复两个 P0 问题：(1) ELF e_entry 使用文件偏移 0 而非虚拟地址 0x400000 的严重 bug；(2) 将 NativeCodeGen 接入 compiler_pipeline.py，使 --target native 真正使用自研后端。",
+      "track": "backend",
+      "difficulty": "medium",
+      "priority": 96,
+      "estimated_effort": "1-2天",
+      "status": "pending",
+      "source": "review_3",
       "depends_on": [
         "backend_native_label_patch"
       ]
     },
     {
-      "task_id": "backend_native_stack_frame",
-      "name": "实现原生后端栈帧管理",
-      "description": "实现完整栈帧管理：prologue/epilogue 生成、栈槽分配、局部变量寻址、溢出槽管理、16字节栈指针对齐。",
+      "task_id": "backend_native_reg_alloc",
+      "name": "实现原生后端线性扫描寄存器分配器",
+      "description": "实现线性扫描寄存器分配：计算虚拟寄存器活跃区间，分配到物理寄存器（RAX/RBX/RCX/RDX/RSI/RDI/R8-R15），溢出到栈槽。替换当前硬编码 RAX/RCX 的玩具级实现。",
       "track": "backend",
       "difficulty": "hard",
-      "priority": 86,
+      "priority": 94,
+      "estimated_effort": "3-5天",
+      "status": "pending",
+      "source": "quality_analysis",
+      "depends_on": [
+        "backend_native_elf_entry_fix"
+      ]
+    },
+    {
+      "task_id": "backend_native_stack_frame",
+      "name": "实现原生后端栈帧管理",
+      "description": "实现完整栈帧管理：prologue/epilogue 生成、栈槽分配、局部变量寻址、溢出槽管理、16字节栈指针对齐。寄存器分配的必要配套。",
+      "track": "backend",
+      "difficulty": "hard",
+      "priority": 90,
       "estimated_effort": "2-3天",
       "status": "pending",
       "source": "quality_analysis",
@@ -149,10 +178,10 @@
     {
       "task_id": "backend_native_call_abi",
       "name": "实现原生后端 System V AMD64 ABI",
-      "description": "实现 System V AMD64 调用约定：前6个参数用寄存器（RDI/RSI/RDX/RCX/R8/R9），其余栈传，返回值 RAX，调用者/被调用者保存寄存器管理。",
+      "description": "实现 System V AMD64 调用约定：前6个参数用寄存器（RDI/RSI/RDX/RCX/R8/R9），其余栈传，返回值 RAX，浮点返回 XMM0，调用者/被调用者保存寄存器管理。",
       "track": "backend",
       "difficulty": "hard",
-      "priority": 84,
+      "priority": 88,
       "estimated_effort": "2-3天",
       "status": "pending",
       "source": "quality_analysis",
@@ -161,18 +190,42 @@
       ]
     },
     {
-      "task_id": "backend_native_float_const",
-      "name": "实现原生后端浮点/字符串常量加载",
-      "description": "实现 LIRFloatConst（movsd 从常量池加载）和 LIRStringConst（lea 指向 .rodata 段）的原生代码生成。",
+      "task_id": "backend_native_link_calls",
+      "name": "实现原生后端函数间调用回填",
+      "description": "完成 link_calls 机制：编译所有函数后计算各函数虚拟地址，回填所有 call 指令的 rel32 偏移。当前 link_calls 列表收集了但从未使用，导致多函数程序调用地址错误。",
       "track": "backend",
       "difficulty": "medium",
-      "priority": 75,
+      "priority": 85,
       "estimated_effort": "4-6小时",
-      "status": "completed",
-      "source": "quality_analysis",
+      "status": "pending",
+      "source": "review_3",
       "depends_on": [
         "backend_native_label_patch"
       ]
+    },
+    {
+      "task_id": "backend_phi_edge_block_fix",
+      "name": "修复 Phi 节点降级的边缘块问题",
+      "description": "修复 lir_lowering.py 中 Phi 拷贝插入位置错误：对于条件分支的两个后继，Phi 拷贝都被插入到同一个前驱块末尾（互斥路径不应都执行）。需要为每个分支创建边缘块（edge block）放置 Phi 拷贝。",
+      "track": "backend",
+      "difficulty": "medium",
+      "priority": 82,
+      "estimated_effort": "1-2天",
+      "status": "pending",
+      "source": "review_3",
+      "depends_on": []
+    },
+    {
+      "task_id": "backend_wasm_stack_balance",
+      "name": "实现 Wasm 后端栈平衡验证器",
+      "description": "为 WasmGC 后端添加栈深度跟踪与验证：编译每条指令时维护操作数栈深度计数器，确保生成的 Wasm 代码栈平衡。当前栈机映射是"凭感觉"的，复杂程序大概率栈不平衡导致验证失败。",
+      "track": "backend",
+      "difficulty": "medium",
+      "priority": 74,
+      "estimated_effort": "1-2天",
+      "status": "pending",
+      "source": "review_3",
+      "depends_on": []
     },
     {
       "task_id": "backend_wasm_indirect_multiarg",
@@ -197,6 +250,20 @@
       "status": "pending",
       "source": "quality_analysis",
       "depends_on": []
+    },
+    {
+      "task_id": "backend_native_instr_selection",
+      "name": "实现原生后端指令选择优化",
+      "description": "添加指令选择优化：如 xor eax, eax 替代 mov rax, 0（节省 5 字节）、使用 LEA 做加法+移位组合、test reg, reg 替代 cmp reg, 0 等。低难度高收益的代码质量优化。",
+      "track": "backend",
+      "difficulty": "easy",
+      "priority": 68,
+      "estimated_effort": "2-4小时",
+      "status": "pending",
+      "source": "review_3",
+      "depends_on": [
+        "backend_native_label_patch"
+      ]
     },
     {
       "task_id": "backend_wasm_gc_types",
