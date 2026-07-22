@@ -36,8 +36,6 @@ from .x86_64 import (
     X86_64Emitter,
 )
 from ..ir.ir_nodes import (
-    INT_TYPE,
-    UNIT_TYPE,
     LIRBinOp,
     LIRBranch,
     LIRCall,

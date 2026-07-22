@@ -133,12 +133,6 @@ UNIT_VALUE = object()
 class Evaluator:
     """Nova 解释器求值器"""
 
-    def __init__(self, check_types: bool = True):
-        self.env = Environment()
-        self.check_types = check_types
-        self._output: List[str] = []  # 收集 print 输出
-        self._setup_builtins()
-
     def _setup_builtins(self):
         """注册内置函数"""
         self.env.define("print", BuiltinFn("print", self._builtin_print, 1))
@@ -580,165 +574,190 @@ class Evaluator:
             self.eval_expr(decl)
 
     # ----------------------------------------------------------
-    # 表达式求值
+    # 表达式求值（调度表模式）
     # ----------------------------------------------------------
 
+    def _build_expr_eval_dispatch_table(self) -> Dict[type, Callable]:
+        """构建表达式求值调度表
+
+        按 AST 节点类型映射到对应的求值方法，替代 if-isinstance 链。
+        新增节点类型时只需在调度表中添加一条映射。
+        """
+        return {
+            # --- 字面量 ---
+            IntLiteral: self._eval_int_literal,
+            FloatLiteral: self._eval_float_literal,
+            StringLiteral: self._eval_string_literal,
+            CharLiteral: self._eval_char_literal,
+            BoolLiteral: self._eval_bool_literal,
+            UnitLiteral: self._eval_unit_literal,
+            # --- 标识符 ---
+            Identifier: self._eval_identifier,
+            # --- 运算 ---
+            BinaryOp: self._eval_binary_op,
+            UnaryOp: self._eval_unary_op,
+            # --- 管道与错误传播 ---
+            PipeExpr: self._eval_pipe_expr,
+            TryExpr: self._eval_try_expr,
+            # --- 函数 ---
+            FnCall: self._eval_fn_call,
+            Lambda: self._eval_lambda,
+            # --- 控制流 ---
+            IfExpr: self._eval_if_expr,
+            MatchExpr: self._eval_match,
+            # --- 块与绑定 ---
+            Block: self._eval_block,
+            LetBinding: self._eval_let_binding,
+            MutBinding: self._eval_mut_binding,
+            Assignment: self._eval_assignment,
+            # --- 数据结构 ---
+            ListExpr: self._eval_list_expr,
+            ListComprehension: self._eval_list_comprehension,
+            TupleExpr: self._eval_tuple_expr,
+            FieldAccess: self._eval_field_access,
+            # --- 循环 ---
+            ForExpr: self._eval_for_expr,
+            WhileExpr: self._eval_while_expr,
+            BreakExpr: self._eval_break_expr,
+            ContinueExpr: self._eval_continue_expr,
+        }
+
     def eval_expr(self, expr) -> Any:
-        """求值表达式并返回运行时值"""
+        """求值表达式并返回运行时值
 
-        # --- 字面量 ---
-        if isinstance(expr, IntLiteral):
-            return expr.value
+        使用调度表模式分发到对应的求值方法，圈复杂度 O(1)。
+        """
+        handler = self._expr_dispatch.get(type(expr))
+        if handler is not None:
+            return handler(expr)
+        raise RuntimeError_(f"未知的表达式类型: {type(expr).__name__}")
 
-        elif isinstance(expr, FloatLiteral):
-            return expr.value
+    # --- 字面量求值 ---
 
-        elif isinstance(expr, StringLiteral):
-            return expr.value
+    def _eval_int_literal(self, expr: IntLiteral) -> Any:
+        return expr.value
 
-        elif isinstance(expr, CharLiteral):
-            return expr.value
+    def _eval_float_literal(self, expr: FloatLiteral) -> Any:
+        return expr.value
 
-        elif isinstance(expr, BoolLiteral):
-            return expr.value
+    def _eval_string_literal(self, expr: StringLiteral) -> Any:
+        return expr.value
 
-        elif isinstance(expr, UnitLiteral):
-            return UNIT_VALUE
+    def _eval_char_literal(self, expr: CharLiteral) -> Any:
+        return expr.value
 
-        # --- 标识符 ---
-        elif isinstance(expr, Identifier):
+    def _eval_bool_literal(self, expr: BoolLiteral) -> Any:
+        return expr.value
+
+    def _eval_unit_literal(self, expr: UnitLiteral) -> Any:
+        return UNIT_VALUE
+
+    # --- 标识符求值 ---
+
+    def _eval_identifier(self, expr: Identifier) -> Any:
+        try:
+            return self.env.lookup(expr.name)
+        except NameError:
+            raise RuntimeError_(f"未定义的变量 '{expr.name}'")
+
+    # --- 管道与错误传播 ---
+
+    def _eval_pipe_expr(self, expr: PipeExpr) -> Any:
+        """expr |> f  等价于 f(expr)"""
+        left_val = self.eval_expr(expr.left)
+        right_val = self.eval_expr(expr.right)
+        return self._call_fn(right_val, [left_val])
+
+    def _eval_try_expr(self, expr: TryExpr) -> Any:
+        val = self.eval_expr(expr.expr)
+        if isinstance(val, NovaADTValue):
+            if val.variant_name in ("None", "Err"):
+                # 简化：直接返回当前值（实际应提前返回）
+                return val
+        return val
+
+    # --- 函数求值 ---
+
+    def _eval_fn_call(self, expr: FnCall) -> Any:
+        callee = self.eval_expr(expr.callee)
+        args = [self.eval_expr(a) for a in expr.args]
+        return self._call_fn(callee, args)
+
+    def _eval_lambda(self, expr: Lambda) -> Any:
+        return NovaClosure(
+            name="<lambda>",
+            params=expr.params,
+            body=expr.body,
+            env=self.env,
+        )
+
+    # --- 控制流求值 ---
+
+    def _eval_if_expr(self, expr: IfExpr) -> Any:
+        cond = self.eval_expr(expr.condition)
+        if cond:
+            return self.eval_expr(expr.then_branch)
+        elif expr.else_branch:
+            return self.eval_expr(expr.else_branch)
+        return UNIT_VALUE
+
+    # --- 块与绑定求值 ---
+
+    def _eval_block(self, expr: Block) -> Any:
+        child_env = self.env.child()
+        old_env = self.env
+        self.env = child_env
+        for stmt in expr.statements:
+            self.eval_expr(stmt)
+        result = UNIT_VALUE
+        if expr.tail_expression:
+            result = self.eval_expr(expr.tail_expression)
+        self.env = old_env
+        return result
+
+    def _eval_let_binding(self, expr: LetBinding) -> Any:
+        val = self.eval_expr(expr.value)
+        self.env.define(expr.name, val, mutable=False)
+        return UNIT_VALUE
+
+    def _eval_mut_binding(self, expr: MutBinding) -> Any:
+        val = self.eval_expr(expr.value)
+        self.env.define(expr.name, val, mutable=True)
+        return UNIT_VALUE
+
+    def _eval_assignment(self, expr: Assignment) -> Any:
+        val = self.eval_expr(expr.value)
+        try:
+            self.env.assign(expr.name, val)
+        except RuntimeError as e:
+            raise RuntimeError_(str(e))
+        return UNIT_VALUE
+
+    # --- 数据结构求值 ---
+
+    def _eval_list_expr(self, expr: ListExpr) -> Any:
+        return [self.eval_expr(e) for e in expr.elements]
+
+    def _eval_tuple_expr(self, expr: TupleExpr) -> Any:
+        return tuple(self.eval_expr(e) for e in expr.elements)
+
+    def _eval_field_access(self, expr: FieldAccess) -> Any:
+        target = self.eval_expr(expr.target)
+        if isinstance(target, tuple):
             try:
-                return self.env.lookup(expr.name)
-            except NameError:
-                raise RuntimeError_(f"未定义的变量 '{expr.name}'")
+                idx = int(expr.field)
+                return target[idx]
+            except (ValueError, IndexError):
+                raise RuntimeError_(f"元组索引 '{expr.field}' 越界")
+        raise RuntimeError_(f"无法对值进行字段访问")
 
-        # --- 二元操作 ---
-        elif isinstance(expr, BinaryOp):
-            return self._eval_binary_op(expr)
+    # --- 循环求值 ---
 
-        # --- 一元操作 ---
-        elif isinstance(expr, UnaryOp):
-            return self._eval_unary_op(expr)
+    def _eval_break_expr(self, expr: BreakExpr) -> Any:
+        raise BreakSignal()
 
-        # --- 管道操作 ---
-        elif isinstance(expr, PipeExpr):
-            # expr |> f  等价于 f(expr)
-            left_val = self.eval_expr(expr.left)
-            right_val = self.eval_expr(expr.right)
-            return self._call_fn(right_val, [left_val])
-
-        # --- ? 错误传播 ---
-        elif isinstance(expr, TryExpr):
-            val = self.eval_expr(expr.expr)
-            if isinstance(val, NovaADTValue):
-                if val.variant_name in ("None", "Err"):
-                    # 简化：直接返回当前值（实际应提前返回）
-                    return val
-            return val
-
-        # --- 函数调用 ---
-        elif isinstance(expr, FnCall):
-            callee = self.eval_expr(expr.callee)
-            args = [self.eval_expr(a) for a in expr.args]
-            return self._call_fn(callee, args)
-
-        # --- Lambda ---
-        elif isinstance(expr, Lambda):
-            return NovaClosure(
-                name="<lambda>",
-                params=expr.params,
-                body=expr.body,
-                env=self.env,
-            )
-
-        # --- if-then-else ---
-        elif isinstance(expr, IfExpr):
-            cond = self.eval_expr(expr.condition)
-            if cond:
-                return self.eval_expr(expr.then_branch)
-            elif expr.else_branch:
-                return self.eval_expr(expr.else_branch)
-            return UNIT_VALUE
-
-        # --- match ---
-        elif isinstance(expr, MatchExpr):
-            return self._eval_match(expr)
-
-        # --- 代码块 ---
-        elif isinstance(expr, Block):
-            child_env = self.env.child()
-            old_env = self.env
-            self.env = child_env
-            for stmt in expr.statements:
-                self.eval_expr(stmt)
-            result = UNIT_VALUE
-            if expr.tail_expression:
-                result = self.eval_expr(expr.tail_expression)
-            self.env = old_env
-            return result
-
-        # --- let 绑定（在代码块内） ---
-        elif isinstance(expr, LetBinding):
-            val = self.eval_expr(expr.value)
-            self.env.define(expr.name, val, mutable=False)
-            return UNIT_VALUE
-
-        # --- mut 绑定（在代码块内） ---
-        elif isinstance(expr, MutBinding):
-            val = self.eval_expr(expr.value)
-            self.env.define(expr.name, val, mutable=True)
-            return UNIT_VALUE
-
-        # --- 赋值 ---
-        elif isinstance(expr, Assignment):
-            val = self.eval_expr(expr.value)
-            try:
-                self.env.assign(expr.name, val)
-            except RuntimeError as e:
-                raise RuntimeError_(str(e))
-            return UNIT_VALUE
-
-        # --- 列表 ---
-        elif isinstance(expr, ListExpr):
-            return [self.eval_expr(e) for e in expr.elements]
-
-        # --- 列表推导式 ---
-        elif isinstance(expr, ListComprehension):
-            return self._eval_list_comprehension(expr)
-
-        # --- for 循环 ---
-        elif isinstance(expr, ForExpr):
-            return self._eval_for_expr(expr)
-
-        # --- while 循环 ---
-        elif isinstance(expr, WhileExpr):
-            return self._eval_while_expr(expr)
-
-        # --- break ---
-        elif isinstance(expr, BreakExpr):
-            raise BreakSignal()
-
-        # --- continue ---
-        elif isinstance(expr, ContinueExpr):
-            raise ContinueSignal()
-
-        # --- 元组 ---
-        elif isinstance(expr, TupleExpr):
-            return tuple(self.eval_expr(e) for e in expr.elements)
-
-        # --- 字段访问 ---
-        elif isinstance(expr, FieldAccess):
-            target = self.eval_expr(expr.target)
-            if isinstance(target, tuple):
-                try:
-                    idx = int(expr.field)
-                    return target[idx]
-                except (ValueError, IndexError):
-                    raise RuntimeError_(f"元组索引 '{expr.field}' 越界")
-            raise RuntimeError_(f"无法对值进行字段访问")
-
-        else:
-            raise RuntimeError_(f"未知的表达式类型: {type(expr).__name__}")
+    def _eval_continue_expr(self, expr: ContinueExpr) -> Any:
+        raise ContinueSignal()
 
     def _eval_binary_op(self, expr: BinaryOp) -> Any:
         """求值二元操作"""
@@ -892,60 +911,102 @@ class Evaluator:
 
         raise RuntimeError_("模式匹配失败：没有匹配的分支（考虑添加 _ 通配符）")
 
+    def _build_pattern_match_dispatch_table(self) -> Dict[type, Callable]:
+        """构建模式匹配调度表
+
+        按模式节点类型映射到对应的匹配方法，替代 if-isinstance 链。
+        新增模式类型时只需在调度表中添加一条映射。
+        """
+        return {
+            PatternWildcard: self._match_wildcard,
+            PatternInt: self._match_int,
+            PatternFloat: self._match_float,
+            PatternString: self._match_string,
+            PatternBool: self._match_bool,
+            PatternChar: self._match_char,
+            PatternIdentifier: self._match_identifier,
+            PatternConstructor: self._match_constructor,
+            PatternTuple: self._match_tuple,
+            PatternList: self._match_list,
+        }
+
+    def __init__(self, check_types: bool = True):
+        self.env = Environment()
+        self.check_types = check_types
+        self._output: List[str] = []  # 收集 print 输出
+        self._expr_dispatch = self._build_expr_eval_dispatch_table()
+        self._pattern_dispatch = self._build_pattern_match_dispatch_table()
+        self._setup_builtins()
+
     def _match_pattern(self, pattern, value, bindings: Dict[str, Any]) -> bool:
-        """尝试匹配模式，成功则填充 bindings"""
-        if isinstance(pattern, PatternWildcard):
-            return True
+        """尝试匹配模式，成功则填充 bindings
 
-        elif isinstance(pattern, PatternInt):
-            return isinstance(value, int) and value == pattern.value
-
-        elif isinstance(pattern, PatternFloat):
-            return isinstance(value, float) and value == pattern.value
-
-        elif isinstance(pattern, PatternString):
-            return isinstance(value, str) and value == pattern.value
-
-        elif isinstance(pattern, PatternBool):
-            return isinstance(value, bool) and value == pattern.value
-
-        elif isinstance(pattern, PatternChar):
-            return isinstance(value, str) and len(value) == 1 and value == pattern.value
-
-        elif isinstance(pattern, PatternIdentifier):
-            bindings[pattern.name] = value
-            return True
-
-        elif isinstance(pattern, PatternConstructor):
-            if not isinstance(value, NovaADTValue):
-                return False
-            if value.variant_name != pattern.name:
-                return False
-            if len(pattern.fields) != len(value.fields):
-                return False
-            for p, v in zip(pattern.fields, value.fields):
-                if not self._match_pattern(p, v, bindings):
-                    return False
-            return True
-
-        elif isinstance(pattern, PatternTuple):
-            if not isinstance(value, tuple):
-                return False
-            if len(pattern.elements) != len(value):
-                return False
-            for p, v in zip(pattern.elements, value):
-                if not self._match_pattern(p, v, bindings):
-                    return False
-            return True
-
-        elif isinstance(pattern, PatternList):
-            if not isinstance(value, list):
-                return False
-            if len(pattern.elements) != len(value):
-                return False
-            for p, v in zip(pattern.elements, value):
-                if not self._match_pattern(p, v, bindings):
-                    return False
-            return True
-
+        使用调度表模式分发到对应的匹配方法，圈复杂度 O(1)。
+        """
+        handler = self._pattern_dispatch.get(type(pattern))
+        if handler is not None:
+            return handler(pattern, value, bindings)
         return False
+
+    # --- 字面量模式匹配 ---
+
+    def _match_wildcard(self, pattern, value, bindings: Dict[str, Any]) -> bool:
+        """通配符 _ 匹配任何值"""
+        return True
+
+    def _match_int(self, pattern: PatternInt, value, bindings: Dict[str, Any]) -> bool:
+        return isinstance(value, int) and value == pattern.value
+
+    def _match_float(self, pattern: PatternFloat, value, bindings: Dict[str, Any]) -> bool:
+        return isinstance(value, float) and value == pattern.value
+
+    def _match_string(self, pattern: PatternString, value, bindings: Dict[str, Any]) -> bool:
+        return isinstance(value, str) and value == pattern.value
+
+    def _match_bool(self, pattern: PatternBool, value, bindings: Dict[str, Any]) -> bool:
+        return isinstance(value, bool) and value == pattern.value
+
+    def _match_char(self, pattern: PatternChar, value, bindings: Dict[str, Any]) -> bool:
+        return isinstance(value, str) and len(value) == 1 and value == pattern.value
+
+    def _match_identifier(self, pattern: PatternIdentifier, value, bindings: Dict[str, Any]) -> bool:
+        """标识符模式绑定变量名到值"""
+        bindings[pattern.name] = value
+        return True
+
+    # --- 复合模式匹配 ---
+
+    def _match_constructor(self, pattern: PatternConstructor, value, bindings: Dict[str, Any]) -> bool:
+        """ADT 构造器模式匹配，递归匹配字段"""
+        if not isinstance(value, NovaADTValue):
+            return False
+        if value.variant_name != pattern.name:
+            return False
+        if len(pattern.fields) != len(value.fields):
+            return False
+        for p, v in zip(pattern.fields, value.fields):
+            if not self._match_pattern(p, v, bindings):
+                return False
+        return True
+
+    def _match_tuple(self, pattern: PatternTuple, value, bindings: Dict[str, Any]) -> bool:
+        """元组模式匹配，递归匹配元素"""
+        if not isinstance(value, tuple):
+            return False
+        if len(pattern.elements) != len(value):
+            return False
+        for p, v in zip(pattern.elements, value):
+            if not self._match_pattern(p, v, bindings):
+                return False
+        return True
+
+    def _match_list(self, pattern: PatternList, value, bindings: Dict[str, Any]) -> bool:
+        """列表模式匹配，递归匹配元素"""
+        if not isinstance(value, list):
+            return False
+        if len(pattern.elements) != len(value):
+            return False
+        for p, v in zip(pattern.elements, value):
+            if not self._match_pattern(p, v, bindings):
+                return False
+        return True

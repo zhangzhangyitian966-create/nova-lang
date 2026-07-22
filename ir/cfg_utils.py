@@ -6,7 +6,7 @@ MIR CFG 工具函数与循环分析基础设施
 """
 
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Set, Tuple
+from typing import Dict, List, Optional, Set
 
 from .ir_nodes import (
     MIRADTBuild,

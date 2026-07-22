@@ -1,6 +1,9 @@
 {
-  "cycles": 33,
+  "cycles": 34,
   "completed_tasks": [
+    "refactor_eval_expr_complexity",
+    "refactor_evaluator_match_pattern",
+    "clean_unused_imports_v2",
     "review_cycle_33",
     "refactor_pass_manager_side_effect",
     "fix_lir_c_backend_data_safety",
@@ -79,119 +82,39 @@
   "failed_tasks": [],
   "task_history": [
     {
+      "cycle": 34,
+      "task_id": "refactor_eval_expr_complexity",
+      "status": "completed",
+      "source": "审查驱动",
+      "reason": "审查日志显示 Evaluator.eval_expr 圈复杂度 38，全项目 Top 3。六大核心分发函数（VM→TypeChecker→MIRLowering→LIRLowering→LIRCBackend→HIRLowering）已全部调度表化，唯独 Evaluator 是最后一块拼图。第33轮评审规划的第34轮核心任务，统一架构风格，降低解释器路径维护成本。",
+      "details": "将 Evaluator.eval_expr 从约 28 个 if-isinstance 分支（CC≈38）重构为调度表模式：新增 _build_expr_eval_dispatch_table() 构建 28 种 AST 节点类型的 handler 映射表；eval_expr 简化为查表分发（CC≈3）；按类别拆分为多组独立方法（字面量6个、标识符1个、运算2个、管道与错误传播2个、函数2个、控制流2个、块与绑定4个、数据结构4个、循环4个）。圈复杂度从约 38 降至约 3，六大核心分发函数调度表化全部完成。"
+    },
+    {
+      "cycle": 34,
+      "task_id": "refactor_evaluator_match_pattern",
+      "status": "completed",
+      "source": "审查驱动",
+      "reason": "审查日志显示 Evaluator._match_pattern 圈复杂度 30，全项目 Top 9。与 eval_expr 同文件，可连续完成。解释器路径的模式匹配逻辑复杂，是 bug 高发区。调度表化后模式扩展更方便，代码更清晰。",
+      "details": "将 _match_pattern 从 10 个 if-isinstance 分支（CC≈30）重构为调度表模式：新增 _build_pattern_match_dispatch_table() 构建 10 种模式节点类型的 handler 映射表；_match_pattern 简化为查表分发（CC≈3）；拆分为多组独立方法（字面量模式7个、标识符1个、复合模式3个）。圈复杂度从约 30 降至约 3，与 eval_expr 一起完成解释器路径调度表化。"
+    },
+    {
+      "cycle": 34,
+      "task_id": "clean_unused_imports_v2",
+      "status": "completed",
+      "source": "审查驱动",
+      "reason": "审查日志显示 unused_import 共 30 个 MEDIUM 级别问题。配合解释器重构一起做，清理成本低收益高，快速降低 MEDIUM 问题数量。",
+      "details": "清理了 3 个文件的 4 个未使用导入：1) backend/native_backend.py 移除 INT_TYPE、UNIT_TYPE；2) ir/cfg_utils.py 移除 Tuple；3) tests/benchmarks/runner.py 移除 Path。均为仅在导入行出现、代码中从未使用的冗余导入。包 __init__.py 中的导出导入予以保留（属于公开 API）。"
+    },
+    {
       "cycle": 33,
       "task_id": "review_cycle_33",
       "status": "completed",
       "source": "评审轮",
       "reason": "第33轮路线图评审，每3轮一次的例行评审。总结第31-32轮开发成果，评估方向/质量/效率/价值/审查对齐五维表现，规划第34-36轮方向。",
       "details": "完成第33轮路线图评审：五维评估（方向正确、质量提升、效率稳定、价值高、审查对齐优秀）；任务池新增 5 个任务（4个审查驱动 + 1个自主规划）；调整 4 个任务优先级；规划第34-36轮方向为'解释器调度表化 → C后端数据结构验证 → 质量底线建设'。"
-    },
-    {
-      "cycle": 32,
-      "task_id": "refactor_pass_manager_side_effect",
-      "status": "completed",
-      "source": "审查驱动",
-      "reason": "审查日志显示 _has_side_effect_expr 圈复杂度 28，Top 10 级别。延续调度表化路线（VM→TypeChecker→MIRLowering→LIRLowering→LIRCBackend→HIRLowering），统一架构风格。成本极低收益高，风险极小。",
-      "details": "将 _has_side_effect_expr 从约 20 个 if-isinstance 分支（CC≈28）重构为调度表模式：新增 _SIDE_EFFECT_HANDLERS 调度表（23 种 HIR 节点类型），按类别拆分为 12 个独立处理函数（直接有副作用5个、无副作用8个、递归检查12个）。_has_side_effect_expr 简化为查表分发（CC≈3）。圈复杂度从约 28 降至约 3，新增节点类型只需添加一条映射。"
-    },
-    {
-      "cycle": 32,
-      "task_id": "fix_lir_c_backend_data_safety",
-      "status": "completed",
-      "source": "审查驱动/自主发现",
-      "reason": "深度代码审计发现 LIR C 后端数据结构构建存在正确性和安全性问题：nova_adt_new 参数不匹配（2个 vs 运行时期望3个）、元组构建不初始化内存。修复成本低，但对后端正确性和安全性影响大。",
-      "details": "修复 LIR C 后端数据结构构建的两个问题：1) _compile_build_adt 中 nova_adt_new 调用从 2 个参数修正为 3 个参数（type_id, variant_tag, field_count），匹配运行时 API；2) _compile_build_tuple 分配内存后添加 memset 零初始化，防止读取未初始化字段导致的未定义行为。"
-    },
-    {
-      "cycle": 32,
-      "task_id": "refactor_lexer_next_token",
-      "status": "completed",
-      "source": "审查驱动",
-      "reason": "审查日志显示 _next_token 圈复杂度 32，Top 8。第31轮已将双字符操作符表驱动化，本轮收尾：将 single_char_tokens 从函数内字典提升为类常量，移除 ( 的特殊处理（合并入表），消除每次调用都创建字典的性能开销和代码重复。",
-      "details": "Lexer._next_token 优化收尾：1) 将 single_char_tokens 字典（21 个单字符 token）从函数体内提升为类级别常量 _SINGLE_CHAR_TOKENS，消除每次调用都创建字典的开销；2) 移除 ( 的特殊 if 分支（5 行），合并入单字符表，消除代码重复；3) 单字符查找从 'ch in dict' 改为 'dict.get(ch)' 更简洁。_next_token 函数从约 73 行减至约 55 行（-18行，-25%）。"
-    },
-    {
-      "cycle": 31,
-      "task_id": "test_slimming",
-      "status": "completed",
-      "source": "审查驱动",
-      "reason": "审查日志显示 tests 模块问题数 461 个排所有模块第一，test_nova.py（1874行）是全项目最大文件。测试代码也是代码，过大的测试文件维护成本高于收益。按用户反馈'不应该努力膨胀'的方向，启动测试瘦身专项。",
-      "details": "测试文件瘦身：1) 算术/比较/逻辑运算 11 个独立测试合并为 3 个表驱动测试（subTest 分组）；2) match 模式匹配 5 个测试合并为 1 个参数化测试；3) TestErrorFormatting 抽取 _make_error 辅助方法，移除 12 处局部 import 重复；4) TestErrors 删除 6 个与其他测试类重复的错误测试（保留独有场景）。test_nova.py 从 1874 行减至 1764 行（-110行，-6%），测试函数从 212 个减至 190 个，覆盖率无损失。"
-    },
-    {
-      "cycle": 31,
-      "task_id": "backend_dead_code_cleanup",
-      "status": "completed",
-      "source": "审查驱动",
-      "reason": "审查日志和深度代码审计发现后端存在死代码：native_backend.py 中的 LinearScanAllocator 和 SimpleNativeCompiler 从未被生产代码使用，是原型阶段遗留。用户反馈'后端也没有优化膨胀'，启动后端死代码清理。",
-      "details": "后端死代码清理：1) 删除 native_backend.py 中的 LinearScanAllocator 类 + LiveInterval 类（未被生产代码使用，仅测试引用）；2) 删除 native_backend.py 中的 SimpleNativeCompiler 类（死代码，全项目无引用，内部调用不存在的 compile_and_write 方法）；3) 同步删除 test_native_backend.py 中的 TestLinearScanAllocator 测试类（4 个测试）；4) 移除不再使用的 List/Tuple import。native_backend.py 从 538 行减至 428 行（-110行，-20%），测试文件从 486 行减至 435 行（-51行），合计 -161 行。"
-    },
-    {
-      "cycle": 31,
-      "task_id": "frontend_dead_code_cleanup",
-      "status": "completed",
-      "source": "审查驱动",
-      "reason": "审查日志显示前端 5 个文件 4300+ 行代码长期未被优化，用户反馈'前端也没有优化膨胀代码'。深度审计发现 compiler.py 中有死方法和冗余分支，lexer.py 中有可表驱动化的 if 链。",
-      "details": "前端冗余代码治理：1) 删除 compiler.py 中死方法 _compile_pattern_test（43行，从未被调用）和 _compile_pattern_bindings（16行，仅内部递归无外部调用）；2) 删除 compiler.py 管道编译中的冗余 if-else 分支（两个分支完全相同，都是 LOAD_VAR）；3) lexer.py 双字符操作符 11 个 if 分支重构为表驱动查找（_TWO_CHAR_TOKENS 类变量），代码从 36 行减至 8 行。compiler.py 从 961 行减至 898 行（-63行），lexer.py 从 428 行减至 413 行（-15行），合计 -78 行。"
-    },
-    {
-      "cycle": 28,
-      "task_id": "unify_ssa_operand_logic",
-      "status": "completed",
-      "source": "审查驱动",
-      "reason": "审查日志显示 cfg_utils.get_instr_operands 圈复杂度 46（当前 Top 1），与 pass_manager.SSAVerifier._get_used_ssa（CC=39）功能高度重叠，合计 CC=85。统一后一举解决两个复杂度热点，消除重复代码，降低维护成本。第27轮评审规划的第28轮核心任务。",
-      "details": "统一 SSA 操作数收集逻辑：1) 重构 cfg_utils.get_instr_operands 和 get_terminator_used_ssa 为 isinstance 类型分发（替代 hasattr 检查），覆盖 12 种 MIR 指令类型和 5 种终结器类型；2) SSAVerifier._get_used_ssa 和 _get_terminator_used_ssa 改为委托给 cfg_utils 标准 API，消除约 80 行重复代码；3) 同步处理终结指令（Branch、Switch、Jump、Return、MatchJump）的操作数访问。get_instr_operands 复杂度从 46 降至约 28（仍偏高但为类型分发固有开销，后续可进一步优化），SSAVerifier 两处函数完全消除。"
-    },
-    {
-      "cycle": 28,
-      "task_id": "refactor_lir_lowering_dispatch",
-      "status": "completed",
-      "source": "审查驱动",
-      "reason": "审查日志显示 LIRLowering._lower_instruction 圈复杂度 38，是剩余的高复杂度核心分发函数之一。延续调度表化路线，参考 VM、TypeChecker、MIRLowering、LIRCBackend 的成功经验，重构后可大幅降低复杂度，提升可维护性。第27轮评审规划的第28轮任务。",
-      "details": "将 LIRLowering._lower_instruction 从约 20 个 if-isinstance 分支（CC≈38）重构为调度表模式：新增 _build_instr_dispatch_table() 构建 16 种 MIR 指令类型的 handler 映射表；_lower_instruction 简化为查表分发（CC≈4）；按类别拆分为多组独立方法（常量加载1个、全局变量2个、二元运算1个、一元运算1个、函数调用1个、Phi 1个、数据结构4个、访问2个、返回1个）。圈复杂度从约 38 降至约 4，代码结构清晰，易于扩展新指令类型。"
-    },
-    {
-      "cycle": 28,
-      "task_id": "c_backend_listcomp_verify",
-      "status": "completed",
-      "source": "自主规划",
-      "reason": "第27轮评审规划的第28轮任务。C 后端 LIR 路径是当前重点推进方向，列表推导式是 Nova 的重要特性。验证列表推导式在 LIR→C 路径上的正确性，发现并修复潜在 bug，是统一 C 后端的必要步骤。",
-      "details": "C 后端 LIR 路径列表推导式验证与补全，发现并修复 4 个 bug：1) MIR 块表达式控制流链接错误——_lower_block_expr 中每个表达式都使用初始 block 参数，有控制流的表达式（循环/if）改变 current_block 后，后续表达式仍在旧块中生成，修复为跟踪 current_block 并传递给下一个表达式；2) LIR C 后端函数调用参数读取错误——_compile_call 使用 instr.src_locs 而参数存储在 instr.arg_locs 中，导致所有函数调用无参数；3) LIR C 后端 list_append 返回值缺失——_compile_list_append 只调用 nova_list_push 不处理 dst_loc，SSA 语义下 list_append 应返回新列表（C运行时原地修改故返回同一指针）；4) 块命名冲突——列表推导式的块编号从 0 开始与函数入口块 bb0 冲突，修复为从 1 开始。列表推导式（列表迭代器形式）在 LIR→C 路径上现已正确工作。"
-    },
-    {
-      "cycle": 29,
-      "task_id": "fix_syspath_hack",
-      "status": "completed",
-      "source": "审查驱动",
-      "reason": "审查日志第1496轮显示 tests/benchmarks/run_benchmarks.py 有 1 处 sys_path_hack（HIGH 级别），是当前唯一的 HIGH 级别问题。消除后项目完全符合 Python 包管理规范，架构更整洁。成本极低收益极高。",
-      "details": "将 tests 目录纳入 nova 包结构：新增 tests/__init__.py，更新 pyproject.toml 添加 nova.tests 和 nova.tests.benchmarks 包，run_benchmarks.py 改为 from nova.tests.benchmarks.runner import 标准包导入，彻底移除 sys.path.insert hack。唯一 HIGH 级别问题已解决。"
-    },
-    {
-      "cycle": 29,
-      "task_id": "refactor_hir_lowering_dispatch",
-      "status": "completed",
-      "source": "审查驱动",
-      "reason": "审查日志显示 HIRLowering._lower_expr 圈复杂度 32，是最后一个还在用 if-isinstance 链的核心分发函数。延续 VM→TypeChecker→MIRLowering→LIRLowering→LIRCBackend 的调度表化路线，统一架构风格，降低维护成本。",
-      "details": "将 _lower_expr 从约 30 个 if-isinstance 分支（CC≈32）重构为调度表模式：新增 _build_expr_lowerers() 构建 28 种 AST 节点类型的 handler 映射表；_lower_expr 简化为查表分发（CC≈3）；按类别拆分为 7 组独立方法（字面量6个、标识符与运算3个、函数与调用2个、控制流2个、数据结构4个、块与循环5个、列表推导式与赋值3个）。圈复杂度从约 32 降至约 3。"
-    },
-    {
-      "cycle": 29,
-      "task_id": "lir_dce_pass",
-      "status": "completed",
-      "source": "自主规划",
-      "reason": "LIR 层优化 Pass 目前为零，DCE 是最简单的优化 Pass，成本低收益高。实现后三层优化架构（HIR/MIR/LIR）更完整，也为后续 LIR 层更多优化 Pass 打基础。第27轮评审规划的第29轮任务。",
-      "details": "新增 LIRDeadCodeElimination Pass：采用反向扫描策略，从函数体末尾出发收集被使用的寄存器/栈位置，移除未使用且无副作用的指令；副作用判断覆盖 11 种指令类型（存储、调用、控制流、Label、Panic、ListAppend等）；源操作数收集同时处理 src_locs 和 arg_locs（函数调用参数）。已接入 default_optimization_pipeline 和 compiler_pipeline 的 LIR 优化阶段。"
-    },
-    {
-      "cycle": 30,
-      "task_id": "review_cycle_30",
-      "status": "completed",
-      "source": "评审轮",
-      "reason": "第30轮路线图评审，每3轮一次的例行评审。总结第28-29轮开发成果，评估方向/质量/效率/价值/审查对齐五维表现，规划第31-33轮方向。",
-      "details": "完成第30轮路线图评审：五维评估（方向正确、质量提升、效率稳定、价值高、审查对齐良好）；任务池新增 8 个任务（6个审查驱动 + 2个自主发现）；调整 4 个任务优先级；规划第31-33轮方向为'复杂度治理 → 测试深化 → 质量底线'。"
     }
   ],
-  "current_cycle": 33,
+  "current_cycle": 34,
   "baseline_tests": 392,
   "current_tests": 392,
   "last_review_cycle": 33,
@@ -247,7 +170,7 @@
       "priority": 82,
       "category": "engineering",
       "estimated": "3-5 小时",
-      "status": "pending",
+      "status": "completed",
       "depends_on": [],
       "reason": "审查日志显示 eval_expr 圈复杂度 38，排名 Top 3。六大核心分发函数（VM→TypeChecker→MIRLowering→LIRLowering→LIRCBackend→HIRLowering）已全部调度表化，唯独 Evaluator 是最后一块拼图。统一架构风格，降低解释器路径的维护成本。[优先级调整: 72 → 82，六大核心分发函数唯一未重构的，优先级大幅提升][审查驱动]"
     },
@@ -259,7 +182,7 @@
       "priority": 72,
       "category": "engineering",
       "estimated": "3-5 小时",
-      "status": "pending",
+      "status": "completed",
       "depends_on": [
         "refactor_eval_expr_complexity"
       ],

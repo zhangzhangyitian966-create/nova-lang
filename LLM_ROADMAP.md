@@ -1,6 +1,6 @@
 # Nova LLM 智能开发路线图
 
-**更新时间**: 2026-07-22 08:26:00
+**更新时间**: 2026-07-22 08:50:00
 **上次评审**: 第 33 轮（路线图评审）
 
 本路线图由 LLM 智能开发系统动态维护。
@@ -90,8 +90,8 @@
 | ✅ | 测试文件瘦身与拆分 | easy | 68 | 2-3 小时 | - |
 | ✅ | 后端占位代码与死代码清理 | easy | 60 | 1-2 小时 | - |
 | ✅ | 前端冗余代码治理 | easy | 58 | 2-3 小时 | - |
-| ⏳ | 重构 Evaluator.eval_expr 降低圈复杂度 | medium | 82 | 3-5 小时 | - |
-| ⏳ | 重构 Evaluator._match_pattern 降低圈复杂度 | medium | 72 | 3-5 小时 | refactor_eval_expr_complexity |
+| ✅ | 重构 Evaluator.eval_expr 降低圈复杂度 | medium | 82 | 3-5 小时 | - |
+| ✅ | 重构 Evaluator._match_pattern 降低圈复杂度 | medium | 72 | 3-5 小时 | refactor_eval_expr_complexity |
 | ⏳ | 重构 BytecodeCompiler._compile_expr 降低圈复杂度 | medium | 60 | 3-5 小时 | - |
 | ⏳ | 重构 SSAVerifier._verify_function 降低圈复杂度 | medium | 55 | 3-5 小时 | - |
 | ⏳ | 重构 CCodeGen._infer_c_type_from_expr 降低圈复杂度 | medium | 50 | 3-5 小时 | - |
@@ -113,10 +113,10 @@
 
 ---
 
-**进度**: 63/75 (84%)
-**已完成**: 63
+**进度**: 65/75 (87%)
+**已完成**: 65
 **进行中**: 0
-**待开发**: 11
+**待开发**: 9
 **已废弃**: 1
 
-> 注：第33轮为路线图评审轮。新增 5 个任务（4个审查驱动 + 1个自主规划），调整 6 个任务优先级。规划第34-36轮方向为"解释器调度表化 → C后端数据结构验证 → 质量底线建设"。
+> 注：第34轮完成 2 个工程质量任务（Evaluator 调度表化）+ 1 个清理任务（unused_import）。六大核心分发函数调度表化全部完成（VM→TypeChecker→MIRLowering→LIRLowering→LIRCBackend→HIRLowering→Evaluator）。
