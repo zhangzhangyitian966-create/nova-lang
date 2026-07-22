@@ -416,85 +416,120 @@ def _collect_used_vars(expr, used):
 def _has_side_effect_expr(expr, pure_binops, pure_unaryops):
     """判断表达式是否有副作用
 
-    使用递归方式，因为需要根据操作符类型做特殊判断。
+    使用调度表模式，按 HIR 节点类型分发到对应的检查函数。
+    新增节点类型时只需在 _SIDE_EFFECT_HANDLERS 中添加一条映射。
     """
-    # 函数调用有副作用
-    if isinstance(expr, HIRCallExpr):
-        return True
-    # 赋值有副作用
-    if isinstance(expr, HIRAssignExpr):
-        return True
-    # Unwrap 可能 panic
-    if isinstance(expr, HIRUnwrapExpr):
-        return True
-    # For/While 循环体可能有副作用
-    if isinstance(expr, (HIRForExpr, HIRWhileExpr)):
-        return True
-    # 块：检查其中是否有副作用
-    if isinstance(expr, HIRBlockExpr):
-        return any(_has_side_effect_expr(e, pure_binops, pure_unaryops) for e in expr.exprs)
-    # If：两个分支任一有副作用
-    if isinstance(expr, HIRIfExpr):
-        return _has_side_effect_expr(expr.consequence, pure_binops, pure_unaryops) or _has_side_effect_expr(expr.alternative, pure_binops, pure_unaryops)
-    # 纯二元运算
-    if isinstance(expr, HIRBinaryOp):
-        if expr.op in pure_binops:
-            return _has_side_effect_expr(expr.left, pure_binops, pure_unaryops) or _has_side_effect_expr(expr.right, pure_binops, pure_unaryops)
-        return True  # 未知操作符，保守认为有副作用
-    # 纯一元运算
-    if isinstance(expr, HIRUnaryOp):
-        if expr.op in pure_unaryops:
-            return _has_side_effect_expr(expr.operand, pure_binops, pure_unaryops)
-        return True
-    # 字面量/标识符：无副作用
-    if isinstance(
-        expr,
-        (
-            HIRIntLiteral,
-            HIRFloatLiteral,
-            HIRBoolLiteral,
-            HIRStringLiteral,
-            HIRCharLiteral,
-            HIRUnitLiteral,
-            HIRIdentifier,
-        ),
-    ):
-        return False
-    # 列表/元组/映射：检查子表达式
-    if isinstance(expr, (HIRListExpr, HIRTupleExpr)):
-        return any(_has_side_effect_expr(e, pure_binops, pure_unaryops) for e in expr.elements)
-    if isinstance(expr, HIRMapExpr):
-        return any(
-            _has_side_effect_expr(k, pure_binops, pure_unaryops) or _has_side_effect_expr(v, pure_binops, pure_unaryops)
-            for k, v in expr.entries
-        )
-    # 字段/索引访问：纯操作
-    if isinstance(expr, HIRFieldExpr):
-        return _has_side_effect_expr(expr.object, pure_binops, pure_unaryops)
-    if isinstance(expr, HIRIndexExpr):
-        return _has_side_effect_expr(expr.object, pure_binops, pure_unaryops) or _has_side_effect_expr(expr.index, pure_binops, pure_unaryops)
-    # Lambda 本身无副作用（调用才有）
-    if isinstance(expr, HIRLambda):
-        return False
-    # Match：检查 scrutinee 和所有 arm
-    if isinstance(expr, HIRMatchExpr):
-        if _has_side_effect_expr(expr.value, pure_binops, pure_unaryops):
-            return True
-        return any(_has_side_effect_expr(arm.body, pure_binops, pure_unaryops) for arm in expr.arms)
-    # ADT 构造：纯操作
-    if isinstance(expr, HIRADTConstructor):
-        return any(_has_side_effect_expr(a, pure_binops, pure_unaryops) for a in expr.fields)
-    # 管道：取决于两端
-    if isinstance(expr, HIRPipeExpr):
-        return any(_has_side_effect_expr(s, pure_binops, pure_unaryops) for s in expr.stages)
-    # 列表推导式
-    if isinstance(expr, HIRListComprehension):
-        return _has_side_effect_expr(expr.result_expr, pure_binops, pure_unaryops) or _has_side_effect_expr(expr.iterable, pure_binops, pure_unaryops)
-    # let 声明：取决于 value
-    if isinstance(expr, HIRLetDecl):
-        return _has_side_effect_expr(expr.value, pure_binops, pure_unaryops)
+    handler = _SIDE_EFFECT_HANDLERS.get(type(expr))
+    if handler is not None:
+        return handler(expr, pure_binops, pure_unaryops)
     # 保守默认：有副作用
     return True
+
+
+def _side_effect_true(expr, pb, pu):
+    """直接有副作用的节点类型"""
+    return True
+
+
+def _side_effect_false(expr, pb, pu):
+    """无副作用的节点类型"""
+    return False
+
+
+def _side_effect_block(expr, pb, pu):
+    return any(_has_side_effect_expr(e, pb, pu) for e in expr.exprs)
+
+
+def _side_effect_if(expr, pb, pu):
+    return _has_side_effect_expr(expr.consequence, pb, pu) or _has_side_effect_expr(expr.alternative, pb, pu)
+
+
+def _side_effect_binop(expr, pb, pu):
+    if expr.op in pb:
+        return _has_side_effect_expr(expr.left, pb, pu) or _has_side_effect_expr(expr.right, pb, pu)
+    return True  # 未知操作符，保守认为有副作用
+
+
+def _side_effect_unaryop(expr, pb, pu):
+    if expr.op in pu:
+        return _has_side_effect_expr(expr.operand, pb, pu)
+    return True
+
+
+def _side_effect_list_tuple(expr, pb, pu):
+    return any(_has_side_effect_expr(e, pb, pu) for e in expr.elements)
+
+
+def _side_effect_map(expr, pb, pu):
+    return any(
+        _has_side_effect_expr(k, pb, pu) or _has_side_effect_expr(v, pb, pu)
+        for k, v in expr.entries
+    )
+
+
+def _side_effect_field(expr, pb, pu):
+    return _has_side_effect_expr(expr.object, pb, pu)
+
+
+def _side_effect_index(expr, pb, pu):
+    return _has_side_effect_expr(expr.object, pb, pu) or _has_side_effect_expr(expr.index, pb, pu)
+
+
+def _side_effect_match(expr, pb, pu):
+    if _has_side_effect_expr(expr.value, pb, pu):
+        return True
+    return any(_has_side_effect_expr(arm.body, pb, pu) for arm in expr.arms)
+
+
+def _side_effect_adt(expr, pb, pu):
+    return any(_has_side_effect_expr(a, pb, pu) for a in expr.fields)
+
+
+def _side_effect_pipe(expr, pb, pu):
+    return any(_has_side_effect_expr(s, pb, pu) for s in expr.stages)
+
+
+def _side_effect_listcomp(expr, pb, pu):
+    return _has_side_effect_expr(expr.result_expr, pb, pu) or _has_side_effect_expr(expr.iterable, pb, pu)
+
+
+def _side_effect_let(expr, pb, pu):
+    return _has_side_effect_expr(expr.value, pb, pu)
+
+
+# 副作用判断调度表：HIR 节点类型 -> 处理函数
+_SIDE_EFFECT_HANDLERS = {
+    # 直接有副作用
+    HIRCallExpr: _side_effect_true,
+    HIRAssignExpr: _side_effect_true,
+    HIRUnwrapExpr: _side_effect_true,
+    HIRForExpr: _side_effect_true,
+    HIRWhileExpr: _side_effect_true,
+    # 无副作用
+    HIRIntLiteral: _side_effect_false,
+    HIRFloatLiteral: _side_effect_false,
+    HIRBoolLiteral: _side_effect_false,
+    HIRStringLiteral: _side_effect_false,
+    HIRCharLiteral: _side_effect_false,
+    HIRUnitLiteral: _side_effect_false,
+    HIRIdentifier: _side_effect_false,
+    HIRLambda: _side_effect_false,
+    # 需要递归检查子表达式
+    HIRBlockExpr: _side_effect_block,
+    HIRIfExpr: _side_effect_if,
+    HIRBinaryOp: _side_effect_binop,
+    HIRUnaryOp: _side_effect_unaryop,
+    HIRListExpr: _side_effect_list_tuple,
+    HIRTupleExpr: _side_effect_list_tuple,
+    HIRMapExpr: _side_effect_map,
+    HIRFieldExpr: _side_effect_field,
+    HIRIndexExpr: _side_effect_index,
+    HIRMatchExpr: _side_effect_match,
+    HIRADTConstructor: _side_effect_adt,
+    HIRPipeExpr: _side_effect_pipe,
+    HIRListComprehension: _side_effect_listcomp,
+    HIRLetDecl: _side_effect_let,
+}
 
 
 class CommonSubexprElimination(Pass):

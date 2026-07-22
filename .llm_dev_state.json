@@ -1,6 +1,9 @@
 {
-  "cycles": 31,
+  "cycles": 32,
   "completed_tasks": [
+    "refactor_pass_manager_side_effect",
+    "fix_lir_c_backend_data_safety",
+    "refactor_lexer_next_token",
     "unify_ir_naming",
     "for_loop_ssa_normalize",
     "dce_pass",
@@ -74,6 +77,30 @@
   ],
   "failed_tasks": [],
   "task_history": [
+    {
+      "cycle": 32,
+      "task_id": "refactor_pass_manager_side_effect",
+      "status": "completed",
+      "source": "审查驱动",
+      "reason": "审查日志显示 _has_side_effect_expr 圈复杂度 28，Top 10 级别。延续调度表化路线（VM→TypeChecker→MIRLowering→LIRLowering→LIRCBackend→HIRLowering），统一架构风格。成本极低收益高，风险极小。",
+      "details": "将 _has_side_effect_expr 从约 20 个 if-isinstance 分支（CC≈28）重构为调度表模式：新增 _SIDE_EFFECT_HANDLERS 调度表（23 种 HIR 节点类型），按类别拆分为 12 个独立处理函数（直接有副作用5个、无副作用8个、递归检查12个）。_has_side_effect_expr 简化为查表分发（CC≈3）。圈复杂度从约 28 降至约 3，新增节点类型只需添加一条映射。"
+    },
+    {
+      "cycle": 32,
+      "task_id": "fix_lir_c_backend_data_safety",
+      "status": "completed",
+      "source": "审查驱动/自主发现",
+      "reason": "深度代码审计发现 LIR C 后端数据结构构建存在正确性和安全性问题：nova_adt_new 参数不匹配（2个 vs 运行时期望3个）、元组构建不初始化内存。修复成本低，但对后端正确性和安全性影响大。",
+      "details": "修复 LIR C 后端数据结构构建的两个问题：1) _compile_build_adt 中 nova_adt_new 调用从 2 个参数修正为 3 个参数（type_id, variant_tag, field_count），匹配运行时 API；2) _compile_build_tuple 分配内存后添加 memset 零初始化，防止读取未初始化字段导致的未定义行为。"
+    },
+    {
+      "cycle": 32,
+      "task_id": "refactor_lexer_next_token",
+      "status": "completed",
+      "source": "审查驱动",
+      "reason": "审查日志显示 _next_token 圈复杂度 32，Top 8。第31轮已将双字符操作符表驱动化，本轮收尾：将 single_char_tokens 从函数内字典提升为类常量，移除 ( 的特殊处理（合并入表），消除每次调用都创建字典的性能开销和代码重复。",
+      "details": "Lexer._next_token 优化收尾：1) 将 single_char_tokens 字典（21 个单字符 token）从函数体内提升为类级别常量 _SINGLE_CHAR_TOKENS，消除每次调用都创建字典的开销；2) 移除 ( 的特殊 if 分支（5 行），合并入单字符表，消除代码重复；3) 单字符查找从 'ch in dict' 改为 'dict.get(ch)' 更简洁。_next_token 函数从约 73 行减至约 55 行（-18行，-25%）。"
+    },
     {
       "cycle": 31,
       "task_id": "test_slimming",
@@ -155,8 +182,8 @@
       "details": "完成第30轮路线图评审：五维评估（方向正确、质量提升、效率稳定、价值高、审查对齐良好）；任务池新增 8 个任务（6个审查驱动 + 2个自主发现）；调整 4 个任务优先级；规划第31-33轮方向为'复杂度治理 → 测试深化 → 质量底线'。"
     }
   ],
-  "current_cycle": 31,
-  "baseline_tests": 418,
+  "current_cycle": 32,
+  "baseline_tests": 392,
   "current_tests": 392,
   "last_review_cycle": 30,
   "tasks": [
@@ -235,9 +262,9 @@
       "priority": 58,
       "category": "engineering",
       "estimated": "3-5 小时",
-      "status": "in_progress",
+      "status": "completed",
       "depends_on": [],
-      "reason": "审查日志显示 _next_token 圈复杂度 32，是前端最复杂的函数。词法分析是编译器的第一道门，高复杂度增加维护难度。拆分后结构更清晰，也便于添加新的 token 类型。[新增任务 / 审查驱动][第31轮部分完成：双字符操作符已表驱动化]"
+      "reason": "审查日志显示 _next_token 圈复杂度 32，是前端最复杂的函数。词法分析是编译器的第一道门，高复杂度增加维护难度。[第31轮部分完成：双字符操作符表驱动化 / 第32轮全部完成：单字符表驱动化 + LPAREN合并]"
     },
     {
       "id": "refactor_pass_manager_side_effect",
@@ -247,9 +274,9 @@
       "priority": 65,
       "category": "engineering",
       "estimated": "2-3 小时",
-      "status": "pending",
+      "status": "completed",
       "depends_on": [],
-      "reason": "审查日志显示 _has_side_effect_expr 圈复杂度 28，Top 10 级别。延续调度表化路线，重构后新增 HIR 节点类型时只需添加一条映射，不易遗漏。成本低收益高。[新增任务 / 审查驱动]"
+      "reason": "审查日志显示 _has_side_effect_expr 圈复杂度 28，Top 10 级别。延续调度表化路线，重构后新增 HIR 节点类型时只需添加一条映射，不易遗漏。成本低收益高。[第32轮完成 / 审查驱动]"
     },
     {
       "id": "licm_correctness_tests",
@@ -306,6 +333,18 @@
         "c_backend_adt_match"
       ],
       "reason": "深度代码审计发现 LIR C 后端的数据结构构建存在缺陷：列表构建只分配空间不填充元素、元组/ADT 构建只分配不赋值字段。这是统一 C 后端的关键缺口，必须修复才能让 LIR→C 路径真正可用。[新增任务 / 自主发现]"
+    },
+    {
+      "id": "fix_lir_c_backend_data_safety",
+      "name": "修复 LIR C 后端数据结构构建安全性",
+      "description": "修复 LIR C 后端数据结构构建的正确性和安全性问题：nova_adt_new 参数不匹配（2个vs3个）、元组构建不初始化内存",
+      "difficulty": "easy",
+      "priority": 70,
+      "category": "backend",
+      "estimated": "1-2 小时",
+      "status": "completed",
+      "depends_on": [],
+      "reason": "深度代码审计发现 LIR C 后端数据结构构建存在正确性和安全性问题：nova_adt_new 参数不匹配会导致 C 编译错误，元组未初始化内存可能导致未定义行为。修复成本极低，但对后端正确性和安全性影响大。[第32轮完成 / 审查驱动/自主发现]"
     },
     {
       "id": "wasm_global_vars_fix",

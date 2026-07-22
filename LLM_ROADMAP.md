@@ -1,6 +1,6 @@
 # Nova LLM 智能开发路线图
 
-**更新时间**: 2026-07-21 17:01:00
+**更新时间**: 2026-07-22 05:01:00
 **上次评审**: 第 30 轮（路线图评审）
 
 本路线图由 LLM 智能开发系统动态维护。
@@ -84,11 +84,11 @@
 | ✅ | 重构 LIRLowering._lower_instruction 调度表 | medium | 78 | 3-5 小时 | lir_switch_match_lowering |
 | ✅ | 重构 HIRLowering._lower_expr 调度表 | medium | 68 | 3-5 小时 | refactor_visitor_pattern |
 | ✅ | 修复基准测试 sys.path hack | easy | 90 | 1-2 小时 | - |
+| ✅ | 重构 _has_side_effect_expr 调度表化 | easy | 65 | 2-3 小时 | - |
+| ✅ | 重构 Lexer._next_token 降低圈复杂度 | medium | 58 | 3-5 小时 | - |
 | ⏳ | LOW 级问题批量治理（docstring + 魔法数字） | easy | 55 | 2-4 小时 | - |
 | ⏳ | 高复杂度函数补全 docstring | easy | 55 | 2-3 小时 | - |
 | ⏳ | 重构 Evaluator.eval_expr 降低圈复杂度 | medium | 72 | 3-5 小时 | - |
-| ⏳ | 重构 _has_side_effect_expr 调度表化 | easy | 65 | 2-3 小时 | - |
-| ⏳ | 重构 Lexer._next_token 降低圈复杂度 | medium | 58 | 3-5 小时 | - |
 | ⏳ | 重构 CCodeGen._infer_c_type_from_expr 降低圈复杂度 | medium | 50 | 3-5 小时 | - |
 | ⏳ | 重构 NativeCodeGen._compile_body 降低圈复杂度 | medium | 45 | 4-6 小时 | - |
 
@@ -105,10 +105,10 @@
 
 ---
 
-**进度**: 57/69 (83%)
-**已完成**: 57
+**进度**: 60/70 (86%)
+**已完成**: 60
 **进行中**: 0
-**待开发**: 11
+**待开发**: 9
 **已废弃**: 1
 
-> 注：第30轮路线图评审完成。五维评估：方向正确（继续推进质量治理）、质量提升（HIGH 问题清零、CC>25 函数持续减少）、效率稳定（每轮 3 任务零失败）、价值高（67% 审查驱动率）、审查对齐良好。新增 8 个任务（6个审查驱动 + 2个自主发现）。下阶段（第31-33轮）方向：复杂度治理 → 测试深化 → 质量底线。
+> 注：第32轮完成 3 个任务（3 个审查驱动）。调度表化路线继续推进（_has_side_effect_expr + Lexer 收尾），后端安全性问题修复 2 个。下一轮（第33轮）是第33轮评审。

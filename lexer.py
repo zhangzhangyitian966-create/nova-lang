@@ -159,6 +159,32 @@ class Lexer:
         "|": {"|": TokenType.OR, ">": TokenType.PIPE_GT},
     }
 
+    # 单字符 token 映射表（字符 -> TokenType）
+    # 注意: UNIT 类型由 parser 处理，lexer 层面 ( 就是 LPAREN
+    _SINGLE_CHAR_TOKENS: Dict[str, TokenType] = {
+        "+": TokenType.PLUS,
+        "-": TokenType.MINUS,
+        "*": TokenType.STAR,
+        "/": TokenType.SLASH,
+        "%": TokenType.PERCENT,
+        "<": TokenType.LT,
+        ">": TokenType.GT,
+        "!": TokenType.NOT,
+        "|": TokenType.PIPE,
+        "?": TokenType.QUESTION,
+        "=": TokenType.ASSIGN,
+        "(": TokenType.LPAREN,
+        ")": TokenType.RPAREN,
+        "[": TokenType.LBRACKET,
+        "]": TokenType.RBRACKET,
+        "{": TokenType.LBRACE,
+        "}": TokenType.RBRACE,
+        ",": TokenType.COMMA,
+        ";": TokenType.SEMICOLON,
+        ":": TokenType.COLON,
+        ".": TokenType.DOT,
+    }
+
     def __init__(self, source: str):
         self.source = source
         self.pos = 0
@@ -354,11 +380,6 @@ class Lexer:
         if ch.isalpha() or ch == "_":
             return self._read_identifier()
 
-        # ( 始终为 LPAREN（UNIT 由 parser 处理）
-        if ch == "(":
-            self._advance()
-            return Token(TokenType.LPAREN, "(", start_line, start_col)
-
         # 操作符和标点
         self._advance()
 
@@ -371,33 +392,10 @@ class Lexer:
                 self._advance()
                 return Token(token_type, ch + next_ch, start_line, start_col)
 
-        # 单字符 token
-        single_char_tokens = {
-            "+": TokenType.PLUS,
-            "-": TokenType.MINUS,
-            "*": TokenType.STAR,
-            "/": TokenType.SLASH,
-            "%": TokenType.PERCENT,
-            "<": TokenType.LT,
-            ">": TokenType.GT,
-            "!": TokenType.NOT,
-            "|": TokenType.PIPE,
-            "?": TokenType.QUESTION,
-            "=": TokenType.ASSIGN,
-            "(": TokenType.LPAREN,
-            ")": TokenType.RPAREN,
-            "[": TokenType.LBRACKET,
-            "]": TokenType.RBRACKET,
-            "{": TokenType.LBRACE,
-            "}": TokenType.RBRACE,
-            ",": TokenType.COMMA,
-            ";": TokenType.SEMICOLON,
-            ":": TokenType.COLON,
-            ".": TokenType.DOT,
-        }
-
-        if ch in single_char_tokens:
-            return Token(single_char_tokens[ch], ch, start_line, start_col)
+        # 单字符 token（表驱动）
+        token_type = self._SINGLE_CHAR_TOKENS.get(ch)
+        if token_type is not None:
+            return Token(token_type, ch, start_line, start_col)
 
         raise self._make_error(f"非法字符 '{ch}'", start_line, start_col)
 

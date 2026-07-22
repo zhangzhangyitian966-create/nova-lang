@@ -392,11 +392,15 @@ class LIRCBackend:
                 self._emit(f"{dst} = {lst};")
 
     def _compile_build_tuple(self, instr: LIRBuildTuple):
-        """编译元组构建"""
+        """编译元组构建
+
+        分配内存后零初始化，防止读取未初始化字段。
+        """
         dst = self._dst_var_name(instr) if instr.dst_loc else None
         if dst:
             size = instr.count * 8
             self._emit(f"{dst} = (NovaValue*)nova_alloc({size});")
+            self._emit(f"memset({dst}, 0, {size});")
 
     def _compile_build_map(self, instr: LIRBuildMap):
         """编译 Map 构建"""
@@ -405,12 +409,18 @@ class LIRCBackend:
             self._emit(f"{dst} = nova_map_new({instr.entry_count});")
 
     def _compile_build_adt(self, instr: LIRBuildADT):
-        """编译 ADT 构建"""
+        """编译 ADT 构建
+
+        调用 nova_adt_new(type_id, variant_tag, field_count)。
+        当前 LIR 层 type_tag 同时用作 type_id 和 variant_tag（占位实现），
+        待 LIR 类型系统完善后需正确映射。
+        """
         dst = self._dst_var_name(instr) if instr.dst_loc else None
         if dst:
-            tag = instr.type_tag
-            fields_size = instr.field_count * 8 + 8
-            self._emit(f"{dst} = nova_adt_new({tag}, {fields_size});")
+            type_id = instr.type_tag
+            variant_tag = instr.type_tag
+            field_count = instr.field_count
+            self._emit(f"{dst} = nova_adt_new({type_id}, {variant_tag}, {field_count});")
 
     def _compile_field_access(self, instr: LIRFieldAccess):
         """编译字段访问"""
