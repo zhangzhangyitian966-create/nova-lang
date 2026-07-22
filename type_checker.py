@@ -729,17 +729,47 @@ class TypeChecker:
         return right_ty
 
     def _check_field_access(self, expr) -> NovaType:
+        """字段访问的类型检查。
+
+        支持元组的数字索引访问（tuple.0, tuple.1）。
+        对于 ADT 类型，静态检查无法确定具体变体，字段访问需要通过模式匹配进行。
+        所有错误路径均给出精确的错误信息，无不透明的异常吞噬。
+        """
         target_ty = self.check_expr(expr.target)
+        field_name = expr.field
+
+        # --- 元组类型：支持数字索引访问 ---
         if isinstance(target_ty, TupleType):
+            # 尝试将字段名解析为整数索引
             try:
-                idx = int(expr.field)
-                if 0 <= idx < len(target_ty.elements):
-                    return target_ty.elements[idx]
-            # TODO: 审查此异常处理是否合理，避免静默吞噬异常
+                idx = int(field_name)
             except ValueError:
-                pass
-            raise TypeCheckError(f"元组索引 '{expr.field}' 越界")
-        raise TypeCheckError(f"无法对类型 {target_ty} 进行字段访问")
+                raise TypeCheckError(
+                    f"元组访问需要数字索引，收到 '{field_name}'\n"
+                    f"  提示：元组字段使用 .0, .1, .2 ... 形式访问"
+                )
+
+            # 检查索引越界
+            tuple_len = len(target_ty.elements)
+            if idx < 0 or idx >= tuple_len:
+                raise TypeCheckError(
+                    f"元组索引 {idx} 越界：元组有 {tuple_len} 个元素（索引范围 0~{tuple_len - 1}）"
+                )
+
+            return target_ty.elements[idx]
+
+        # --- ADT 类型：静态阶段无法直接字段访问 ---
+        if isinstance(target_ty, ADTType):
+            raise TypeCheckError(
+                f"无法直接访问 ADT 类型 {target_ty} 的字段 '{field_name}'\n"
+                f"  提示：请使用 match 表达式进行模式匹配来访问 ADT 字段"
+            )
+
+        # --- 其他类型：不支持字段访问 ---
+        raise TypeCheckError(
+            f"类型 {target_ty} 不支持字段访问\n"
+            f"  提示：只有元组类型支持 .N 形式的索引访问"
+        )
 
     def _check_try_expr(self, expr) -> NovaType:
         """

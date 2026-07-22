@@ -1,10 +1,12 @@
 {
-  "cycles": 1,
-  "frontend_completed": 1,
-  "backend_completed": 1,
+  "cycles": 2,
+  "frontend_completed": 2,
+  "backend_completed": 2,
   "completed_tasks": [
     "frontend_try_expr_typecheck",
-    "backend_native_label_patch"
+    "backend_native_label_patch",
+    "frontend_field_access_error",
+    "backend_native_float_const"
   ],
   "failed_tasks": [],
   "task_history": [
@@ -29,6 +31,28 @@
       "result": "success",
       "details": "在 _compile_body 中实现两阶段汇编：第一阶段发射指令并记录 label_offsets 和 jump_fixups；第二阶段遍历 jump_fixups 调用 emitter.patch_rel32 回填所有 jmp/jcc 的 rel32 偏移量。",
       "timestamp": "2026-07-22 08:16"
+    },
+    {
+      "cycle": 2,
+      "task_id": "frontend_field_access_error",
+      "name": "修复字段访问异常静默吞噬",
+      "track": "frontend",
+      "difficulty": "easy",
+      "priority": 65,
+      "result": "success",
+      "details": "重写 _check_field_access：消除 ValueError 静默 pass，区分三种错误并给出精确提示——无效索引格式（非数字）、索引越界（含元组长度信息）、ADT 类型需用模式匹配、其他类型不支持字段访问。每条错误均附修复提示。",
+      "timestamp": "2026-07-22 10:06"
+    },
+    {
+      "cycle": 2,
+      "task_id": "backend_native_float_const",
+      "name": "实现原生后端浮点/字符串常量加载",
+      "track": "backend",
+      "difficulty": "medium",
+      "priority": 75,
+      "result": "success",
+      "details": "实现 LIRLoadConst 的 float 和 string 分支：浮点用 movsd [rip+offset] 加载到 XMM 寄存器，字符串用 lea reg, [rip+offset] 加载地址。新增 data_fixups 列表记录数据引用，在 _generate_elf 阶段计算数据段虚拟地址并回填所有 RIP-relative 偏移。常量收集增加去重逻辑（相同值只存一份）。",
+      "timestamp": "2026-07-22 10:12"
     }
   ],
   "tasks": [
@@ -78,7 +102,7 @@
       "difficulty": "easy",
       "priority": 65,
       "estimated_effort": "1-2小时",
-      "status": "pending",
+      "status": "completed",
       "source": "quality_analysis",
       "depends_on": []
     },
@@ -144,7 +168,7 @@
       "difficulty": "medium",
       "priority": 75,
       "estimated_effort": "4-6小时",
-      "status": "pending",
+      "status": "completed",
       "source": "quality_analysis",
       "depends_on": [
         "backend_native_label_patch"

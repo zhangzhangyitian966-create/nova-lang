@@ -67,6 +67,10 @@ class NativeCodeGen:
         self.data_symbols = {}  # name -> offset in data
         self.relocations = []  # [(code_offset, symbol, addend)]
         self.link_calls = []  # [(code_offset, func_name)]
+        self.data_fixups = []  # [(func_name, code_offset_in_func, data_offset, kind)]
+        # 常量值 -> 数据段偏移的映射（用于快速查找）
+        self._float_const_map = {}  # value_str -> data_offset
+        self._string_const_map = {}  # value -> data_offset
 
     def compile(self, lir_module: LIRModule) -> bytes:
         """编译 LIR Module 为 ELF 二进制"""
@@ -85,22 +89,30 @@ class NativeCodeGen:
         return self._generate_elf(func_code, start_code, lir_module)
 
     def _collect_constants(self, module):
-        """收集数据段常量"""
+        """收集数据段常量，并构建值到偏移的映射"""
         offset = 0
         for func in module.functions.values():
             for instr in func.body:
                 if isinstance(instr, LIRLoadConst):
                     if instr.const_type == "float":
                         value_bytes = struct.pack("<d", float(instr.value))
-                        self.float_constants.append((value_bytes, offset))
-                        offset += len(value_bytes)
-                        # 对齐到 8 字节
-                        while offset % 8 != 0:
-                            offset += 1
+                        # 去重：相同值只存一份
+                        key = str(instr.value)
+                        if key not in self._float_const_map:
+                            self.float_constants.append((value_bytes, offset))
+                            self._float_const_map[key] = offset
+                            offset += len(value_bytes)
+                            # 对齐到 8 字节
+                            while offset % 8 != 0:
+                                offset += 1
                     elif instr.const_type == "string":
                         value_bytes = instr.value.encode("utf-8") + b"\x00"
-                        self.string_constants.append((value_bytes, offset))
-                        offset += len(value_bytes)
+                        # 去重：相同字符串只存一份
+                        key = instr.value
+                        if key not in self._string_const_map:
+                            self.string_constants.append((value_bytes, offset))
+                            self._string_const_map[key] = offset
+                            offset += len(value_bytes)
 
     def _compile_function(self, func: LIRFunction) -> bytes:
         """编译单个函数为机器码"""
@@ -172,9 +184,14 @@ class NativeCodeGen:
                 elif instr.const_type == "float":
                     reg = alloc_vreg(f"fconst_{instr.value}", is_float=True)
                     if reg is not None:
-                        # 加载浮点常量（通过 rip-relative 寻址）
-                        # 实际实现需要数据段引用，此处为占位
-                        pass
+                        # 加载浮点常量：movsd xmm, [rip + offset]
+                        fixup_offset = e.movsd_reg_imm(reg, 0)
+                        # 查找数据段偏移
+                        data_off = self._float_const_map.get(str(instr.value))
+                        if data_off is not None:
+                            self.data_fixups.append(
+                                (func.name, fixup_offset, data_off, "float")
+                            )
                 elif instr.const_type == "bool":
                     reg = alloc_vreg(f"bconst_{instr.value}")
                     if reg is not None:
@@ -182,8 +199,14 @@ class NativeCodeGen:
                 elif instr.const_type == "string":
                     reg = alloc_vreg(f"sconst_{instr.value}")
                     if reg is not None:
-                        # lea reg, [rip + string_offset]
-                        pass
+                        # 加载字符串地址：lea reg, [rip + offset]
+                        fixup_offset = e.lea_reg_rip(reg, 0)
+                        # 查找数据段偏移
+                        data_off = self._string_const_map.get(instr.value)
+                        if data_off is not None:
+                            self.data_fixups.append(
+                                (func.name, fixup_offset, data_off, "string")
+                            )
 
             elif isinstance(instr, LIRBinOp):
                 op = instr.op
@@ -388,7 +411,29 @@ class NativeCodeGen:
             p_align=page_size,
         )
 
-        # 5. 组装 ELF
+        # 5. 回填数据段引用（RIP-relative 寻址）
+        #    计算每条指令和每个数据常量的虚拟地址，回填 rel32
+        data_vaddr = (
+            base_addr
+            + ((data_offset + page_size - 1) // page_size) * page_size
+        )
+
+        for func_name, code_off_in_func, data_off, _kind in self.data_fixups:
+            # 计算 rel32 字段在代码段中的偏移
+            if func_name == "_start":
+                patch_pos = code_off_in_func
+            else:
+                patch_pos = func_offsets.get(func_name, 0) + code_off_in_func
+
+            # rel32 = target_vaddr - (rel32_pos_vaddr + 4)
+            rel32_pos_vaddr = base_addr + patch_pos
+            next_instr_vaddr = rel32_pos_vaddr + 4
+            data_const_vaddr = data_vaddr + data_off
+            rel_offset = data_const_vaddr - next_instr_vaddr
+
+            struct.pack_into("<i", code, patch_pos, rel_offset)
+
+        # 6. 组装 ELF
         elf = bytearray(ehdr)
         elf.extend(code_ph)
         elf.extend(data_ph)
