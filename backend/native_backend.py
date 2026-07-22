@@ -66,7 +66,7 @@ class NativeCodeGen:
         self.symbols = {}  # name -> offset in code
         self.data_symbols = {}  # name -> offset in data
         self.relocations = []  # [(code_offset, symbol, addend)]
-        self.link_calls = []  # [(code_offset, func_name)]
+        self.link_calls = []  # [(caller_func_name, code_offset_in_func, target_func_name)]
         self.data_fixups = []  # [(func_name, code_offset_in_func, data_offset, kind)]
         # 常量值 -> 数据段偏移的映射（用于快速查找）
         self._float_const_map = {}  # value_str -> data_offset
@@ -128,7 +128,7 @@ class NativeCodeGen:
             e.sub_rsp_imm(aligned)
 
         # 编译函数体
-        self._compile_body(e, func)
+        self._compile_body(e, func, func.name)
 
         # 函数尾声：恢复 callee-saved，返回
         if func.stack_size > 0:
@@ -142,7 +142,7 @@ class NativeCodeGen:
 
         return bytes(e.code)
 
-    def _compile_body(self, e: X86_64Emitter, func: LIRFunction):
+    def _compile_body(self, e: X86_64Emitter, func: LIRFunction, func_name: str):
         """
         编译函数体指令（两阶段汇编）。
         
@@ -269,7 +269,7 @@ class NativeCodeGen:
 
                 # 调用（函数间调用在 ELF 链接阶段回填）
                 call_offset = e.call_rel32()
-                self.link_calls.append((call_offset, instr.func_name))
+                self.link_calls.append((func_name, call_offset, instr.func_name))
 
             elif isinstance(instr, LIRReturn):
                 # 返回值已在 RAX
@@ -318,16 +318,16 @@ class NativeCodeGen:
 
         # 调用 nova_init
         call_init = e.call_rel32()
-        self.link_calls.append((call_init, "nova_init"))
+        self.link_calls.append(("_start", call_init, "nova_init"))
 
         # 调用 main
         if "main" in func_code:
             call_main = e.call_rel32()
-            self.link_calls.append((call_main, "main"))
+            self.link_calls.append(("_start", call_main, "main"))
 
         # 调用 nova_cleanup
         call_cleanup = e.call_rel32()
-        self.link_calls.append((call_cleanup, "nova_cleanup"))
+        self.link_calls.append(("_start", call_cleanup, "nova_cleanup"))
 
         # exit(0)
         e.mov_reg_imm64(RDI, 0)  # exit code
@@ -373,16 +373,18 @@ class NativeCodeGen:
             data.extend(value_bytes)
 
         # 3. ELF 头 (64 bytes)
+        # 注意：e_entry 必须是虚拟地址，不是文件偏移
+        page_size = 0x1000
+        base_addr = 0x400000
+        entry_vaddr = base_addr + start_offset
         ehdr = self._make_elf_header(
-            entry=start_offset,
+            entry=entry_vaddr,
             phoff=64,  # program headers 紧跟 ELF header
             phnum=3,  # LOAD(code) + LOAD(data) + LOAD(rodata)
             shoff=0,  # 无 section headers（简化）
         )
 
         # 4. Program headers
-        page_size = 0x1000
-        base_addr = 0x400000
 
         # LOAD: 代码段 (RWX)
         code_ph = self._make_program_header(
@@ -430,6 +432,31 @@ class NativeCodeGen:
             next_instr_vaddr = rel32_pos_vaddr + 4
             data_const_vaddr = data_vaddr + data_off
             rel_offset = data_const_vaddr - next_instr_vaddr
+
+            struct.pack_into("<i", code, patch_pos, rel_offset)
+
+        # 5.5 回填函数间调用（link_calls）
+        #    计算每个 call 指令和目标函数的虚拟地址，回填 rel32
+        for caller_name, code_off_in_func, target_name in self.link_calls:
+            # 计算 rel32 字段在代码段中的偏移
+            if caller_name == "_start":
+                patch_pos = code_off_in_func
+            else:
+                patch_pos = func_offsets.get(caller_name, 0) + code_off_in_func
+
+            # 确定目标函数的虚拟地址
+            if target_name in func_offsets:
+                target_vaddr = base_addr + func_offsets[target_name]
+            else:
+                # 外部函数（如 nova_init/nova_cleanup）暂时无法解析
+                # 在完整实现中应通过链接器处理，这里保持 0 偏移
+                continue
+
+            # rel32 = target_vaddr - (patch_pos_vaddr + 4)
+            # call rel32: opcode E8 (1B) + rel32 (4B)，rel32 基准是 rel32 字段末尾
+            rel32_pos_vaddr = base_addr + patch_pos
+            next_instr_vaddr = rel32_pos_vaddr + 4  # rel32 字段长度 = 4 字节
+            rel_offset = target_vaddr - next_instr_vaddr
 
             struct.pack_into("<i", code, patch_pos, rel_offset)
 

@@ -26,9 +26,9 @@ class NovaCompilerPipeline:
 
         # 选择后端
         if target == BACKEND_NATIVE:
-            from .cranelift_backend import CraneliftBackend
+            from .native_backend import NativeCodeGen
 
-            self.backend = CraneliftBackend()
+            self.backend = NativeCodeGen()
         elif target == BACKEND_WASM:
             from .wasm_backend import WasmGCBackend
 
@@ -74,7 +74,12 @@ class NovaCompilerPipeline:
 
         # 8. 后端代码生成
         if self.target == BACKEND_NATIVE:
-            self.backend.compile_to_object(lir_module, output_path)
+            # 自研原生后端：直接生成 ELF 二进制
+            elf_bytes = self.backend.compile(lir_module)
+            with open(output_path, "wb") as f:
+                f.write(elf_bytes)
+            import os
+            os.chmod(output_path, 0o755)
         elif self.target == BACKEND_WASM:
             return self.backend.compile_to_wasm(lir_module, output_path)
         elif self.target == BACKEND_C:

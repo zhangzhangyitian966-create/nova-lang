@@ -4,6 +4,97 @@
 
 ---
 
+## 第 4 轮 — 2026-07-22 16:03 ~ 16:12
+
+### 本轮概览
+- **前端任务**: ✅ 修复 ADT 类型参数相等性比较 (easy, 80)
+- **后端任务**: ✅ 修复原生后端 ELF 入口地址并接入编译管道 + 函数间调用回填 (medium, 96)
+- **测试对比**: 开发前 392 passed → 开发后 392 passed（无回归）
+
+---
+
+### 🎨 前端：修复 ADT 类型参数相等性比较
+
+**为什么选这个？**
+- easy 难度，低风险高收益的类型安全修复
+- P0 级类型安全漏洞：`ADTType.__eq__` 只比较 name，完全忽略 type_params
+- `Option[Int] == Option[String]` 返回 True，所有泛型 ADT 实例类型检查失效
+- 第 3 轮评审中明确标记为高优先级 easy 任务，建议优先做
+
+**实现详情**：
+- **修复 `ADTType.__eq__`**（`type_checker.py` 第 179-184 行）：
+  - 增加 `type_params` 长度检查（长度不同直接不等）
+  - 增加逐元素递归比较（`all(p1 == p2 for p1, p2 in zip(...))`）
+- **同步修复 `__hash__`**：从 `hash(("ADT", self.name))` 改为 `hash(("ADT", self.name, tuple(self.type_params)))`
+  - 确保 `__eq__` 和 `__hash__` 一致，避免 dict/set 行为异常
+- **补充 `_types_compatible` 递归检查**：
+  - 新增 `MapType` 递归兼容（key_type + value_type）
+  - 新增 `TupleType` 递归兼容（长度检查 + 逐元素）
+  - 新增 `ADTType` 递归兼容（name + type_params）
+  - 与已有的 `FnType`、`ListType` 保持一致设计
+
+**结果**: ✅ 成功，测试全部通过
+
+---
+
+### ⚙️ 后端：修复 ELF 入口地址 + 接入编译管道 + link_calls 回填
+
+**为什么选这个？**
+- 优先级 96（所有任务中最高），P0 级 bug
+- 第 3 轮评审明确指出原生后端是"僵尸代码"，首要任务就是让它真正工作
+- 依赖 `backend_native_label_patch` 已在第 1 轮完成，依赖链畅通
+- 三项修复（e_entry、link_calls、接入管道）关联紧密，适合一轮完成
+- 是后续寄存器分配、栈帧管理、调用约定等所有原生后端任务的前置条件
+
+**实现详情**：
+
+**1. 修复 ELF e_entry 虚拟地址 bug**（`native_backend.py`）
+- 原代码：`entry=start_offset`（文件偏移 0）
+- 修复后：`entry=base_addr + start_offset`（虚拟地址 0x400000）
+- 将 `page_size` 和 `base_addr` 定义提前到 ELF 头生成之前
+
+**2. 实现 link_calls 函数间调用回填**
+- 修改 `link_calls` 数据结构：从 `(code_offset, func_name)` 改为 `(caller_func_name, code_offset_in_func, target_func_name)`
+  - 与 `data_fixups` 设计一致，支持多函数场景
+- 修改 `_compile_body` 签名：增加 `func_name` 参数
+- 修改 `_generate_start` 中三处 `link_calls.append`：增加 `"_start"` 调用者名
+- 在 `_generate_elf` 中新增回填逻辑（参照 `data_fixups` 模式）：
+  - 计算每个 call 指令在代码段中的绝对偏移
+  - 查找目标函数的虚拟地址
+  - 计算 rel32 = target_vaddr - (patch_pos_vaddr + 4)
+  - 使用 `struct.pack_into` 回填
+
+**3. 接入编译管道**（`compiler_pipeline.py`）
+- `BACKEND_NATIVE` 后端从 `CraneliftBackend` 切换为 `NativeCodeGen`
+- 适配接口：`compile()` 返回 bytes → 写入文件 + chmod 755
+- `--target native` 现在真正使用自研原生后端
+
+**结果**: ✅ 成功，测试全部通过
+
+---
+
+### 测试对比
+
+| 指标 | 开发前 | 开发后 | 变化 |
+|------|--------|--------|------|
+| 总通过数 | 392 | 392 | ±0 |
+| 失败数 | 0 | 0 | ±0 |
+| 回归 | - | 无 | - |
+
+---
+
+### 下一步计划
+
+**前端下一步**：
+- 优先考虑 `frontend_eq_op_typecheck`（easy, 75）— 修复 `==/!=` 比较运算符类型检查，继续清理 easy 高收益类型安全 bug
+- 或 `frontend_type_unification`（hard, 95）— 攻坚类型合一算法，这是前端类型系统的核心瓶颈
+
+**后端下一步**：
+- 优先考虑 `backend_native_reg_alloc`（hard, 94）— 攻坚寄存器分配器，让虚拟寄存器真正映射到物理寄存器
+- 或 `backend_phi_edge_block_fix`（medium, 82）— 修复 Phi 节点降级的边缘块正确性 bug
+
+---
+
 ## 🔍 第 3 轮评审 — 2026-07-22 13:00 ~ 13:15
 
 > 三轮回顾评审：第 1-2 轮总结 + 双线路线图调整

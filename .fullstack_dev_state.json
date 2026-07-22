@@ -1,14 +1,16 @@
 {
-  "cycles": 2,
-  "frontend_completed": 2,
-  "backend_completed": 2,
-  "last_review_cycle": 0,
-  "current_review_cycle": 3,
+  "cycles": 4,
+  "frontend_completed": 3,
+  "backend_completed": 3,
+  "last_review_cycle": 3,
+  "current_review_cycle": 6,
   "completed_tasks": [
     "frontend_try_expr_typecheck",
     "backend_native_label_patch",
     "frontend_field_access_error",
-    "backend_native_float_const"
+    "backend_native_float_const",
+    "frontend_adt_type_param_eq",
+    "backend_native_elf_entry_fix"
   ],
   "failed_tasks": [],
   "deprecated_tasks": [
@@ -58,6 +60,39 @@
       "result": "success",
       "details": "实现 LIRLoadConst 的 float 和 string 分支：浮点用 movsd [rip+offset] 加载到 XMM 寄存器，字符串用 lea reg, [rip+offset] 加载地址。新增 data_fixups 列表记录数据引用，在 _generate_elf 阶段计算数据段虚拟地址并回填所有 RIP-relative 偏移。常量收集增加去重逻辑（相同值只存一份）。",
       "timestamp": "2026-07-22 10:12"
+    },
+    {
+      "cycle": 3,
+      "task_id": "review_cycle_3",
+      "name": "第 3 轮 - 双线路线图评审",
+      "track": "review",
+      "difficulty": "review",
+      "priority": 0,
+      "result": "success",
+      "details": "首次三轮回顾评审。发现原生后端未接入编译管道（P0 bug）、ADT 类型参数相等 bug、==/!= 类型检查缺失等问题。任务池从 15 个扩充到 18 个，后端优先级大幅调整。下阶段重点：后端攻坚（让原生后端真正工作）+ 前端类型安全修复。",
+      "timestamp": "2026-07-22 13:00"
+    },
+    {
+      "cycle": 4,
+      "task_id": "frontend_adt_type_param_eq",
+      "name": "修复 ADT 类型参数相等性比较",
+      "track": "frontend",
+      "difficulty": "easy",
+      "priority": 80,
+      "result": "success",
+      "details": "修复 ADTType.__eq__ 只比较 name 不比较 type_params 的严重 bug：增加 type_params 长度检查和逐元素递归比较；同步修复 __hash__ 包含 type_params。同时补充 _types_compatible 中缺失的 MapType、TupleType、ADTType 递归兼容检查，与 ListType/FnType 保持一致。",
+      "timestamp": "2026-07-22 16:07"
+    },
+    {
+      "cycle": 4,
+      "task_id": "backend_native_elf_entry_fix",
+      "name": "修复原生后端 ELF 入口地址并接入编译管道",
+      "track": "backend",
+      "difficulty": "medium",
+      "priority": 96,
+      "result": "success",
+      "details": "完成三项 P0 修复：(1) 修复 ELF e_entry 从文件偏移 0 改为虚拟地址 0x400000 + start_offset；(2) 实现 link_calls 回填机制——修改 link_calls 数据结构增加调用者函数名，在 _generate_elf 中参照 data_fixups 模式回填所有 call rel32 偏移；(3) 将 BACKEND_NATIVE 从 CraneliftBackend 切换为 NativeCodeGen，原生后端正式接入编译管道。",
+      "timestamp": "2026-07-22 16:10"
     }
   ],
   "tasks": [
@@ -93,7 +128,7 @@
       "difficulty": "easy",
       "priority": 80,
       "estimated_effort": "1-2小时",
-      "status": "pending",
+      "status": "completed",
       "source": "review_3",
       "depends_on": []
     },
@@ -141,7 +176,7 @@
       "difficulty": "medium",
       "priority": 96,
       "estimated_effort": "1-2天",
-      "status": "pending",
+      "status": "completed",
       "source": "review_3",
       "depends_on": [
         "backend_native_label_patch"
@@ -197,7 +232,7 @@
       "difficulty": "medium",
       "priority": 85,
       "estimated_effort": "4-6小时",
-      "status": "pending",
+      "status": "completed",
       "source": "review_3",
       "depends_on": [
         "backend_native_label_patch"
@@ -218,7 +253,7 @@
     {
       "task_id": "backend_wasm_stack_balance",
       "name": "实现 Wasm 后端栈平衡验证器",
-      "description": "为 WasmGC 后端添加栈深度跟踪与验证：编译每条指令时维护操作数栈深度计数器，确保生成的 Wasm 代码栈平衡。当前栈机映射是"凭感觉"的，复杂程序大概率栈不平衡导致验证失败。",
+      "description": "为 WasmGC 后端添加栈深度跟踪与验证：编译每条指令时维护操作数栈深度计数器，确保生成的 Wasm 代码栈平衡。当前栈机映射是\"凭感觉\"的，复杂程序大概率栈不平衡导致验证失败。",
       "track": "backend",
       "difficulty": "medium",
       "priority": 74,

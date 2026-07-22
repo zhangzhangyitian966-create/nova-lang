@@ -177,10 +177,14 @@ class ADTType(NovaType):
         self.type_params = type_params or []
 
     def __eq__(self, other):
-        return isinstance(other, ADTType) and self.name == other.name
+        if not isinstance(other, ADTType) or self.name != other.name:
+            return False
+        if len(self.type_params) != len(other.type_params):
+            return False
+        return all(p1 == p2 for p1, p2 in zip(self.type_params, other.type_params))
 
     def __hash__(self):
-        return hash(("ADT", self.name))
+        return hash(("ADT", self.name, tuple(self.type_params)))
 
     def __repr__(self):
         if self.type_params:
@@ -1053,4 +1057,23 @@ class TypeChecker:
         # 递归检查 ListType
         if isinstance(a, ListType) and isinstance(b, ListType):
             return self._types_compatible(a.elem_type, b.elem_type)
+        # 递归检查 MapType
+        if isinstance(a, MapType) and isinstance(b, MapType):
+            return self._types_compatible(a.key_type, b.key_type) and self._types_compatible(a.value_type, b.value_type)
+        # 递归检查 TupleType
+        if isinstance(a, TupleType) and isinstance(b, TupleType):
+            if len(a.element_types) != len(b.element_types):
+                return False
+            return all(
+                self._types_compatible(e1, e2)
+                for e1, e2 in zip(a.element_types, b.element_types)
+            )
+        # 递归检查 ADTType
+        if isinstance(a, ADTType) and isinstance(b, ADTType):
+            if a.name != b.name or len(a.type_params) != len(b.type_params):
+                return False
+            return all(
+                self._types_compatible(p1, p2)
+                for p1, p2 in zip(a.type_params, b.type_params)
+            )
         return False
