@@ -1,0 +1,200 @@
+{
+  "cycles": 0,
+  "frontend_completed": 0,
+  "backend_completed": 0,
+  "completed_tasks": [],
+  "failed_tasks": [],
+  "task_history": [],
+  "tasks": [
+    {
+      "task_id": "frontend_type_unification",
+      "name": "实现真正的类型合一（unification）算法",
+      "description": "将简化版 HM 类型推断升级为真正的合一算法。TypeVar 从身份比较改为结构合一，支持完整的泛型实例化和类型推导。",
+      "track": "frontend",
+      "difficulty": "hard",
+      "priority": 90,
+      "estimated_effort": "3-5天",
+      "status": "pending",
+      "source": "quality_analysis",
+      "depends_on": []
+    },
+    {
+      "task_id": "frontend_pattern_exhaustiveness",
+      "name": "实现模式匹配完备性检查",
+      "description": "为 match 表达式添加完备性检查，确保所有构造器都被覆盖，检测冗余分支和不可达分支，给出精确的错误提示。",
+      "track": "frontend",
+      "difficulty": "hard",
+      "priority": 82,
+      "estimated_effort": "2-3天",
+      "status": "pending",
+      "source": "quality_analysis",
+      "depends_on": []
+    },
+    {
+      "task_id": "frontend_try_expr_typecheck",
+      "name": "完善 ? 操作符类型检查",
+      "description": "修复 _check_try_expr 简化实现，真正验证 Option/Result 类型传播，确保错误传播的类型安全。要求：? 只能用于 Option/Result 类型，返回值类型正确推导。",
+      "track": "frontend",
+      "difficulty": "medium",
+      "priority": 78,
+      "estimated_effort": "4-6小时",
+      "status": "pending",
+      "source": "quality_analysis",
+      "depends_on": []
+    },
+    {
+      "task_id": "frontend_type_var_strict",
+      "name": "收紧 TypeVar 兼容性判断",
+      "description": "修复 _types_compatible 中'只要一方是 TypeVar 就返回 True'的过宽逻辑，实现严格的类型变量兼容检查，确保类型安全。",
+      "track": "frontend",
+      "difficulty": "medium",
+      "priority": 72,
+      "estimated_effort": "3-5小时",
+      "status": "pending",
+      "source": "quality_analysis",
+      "depends_on": [
+        "frontend_type_unification"
+      ]
+    },
+    {
+      "task_id": "frontend_field_access_error",
+      "name": "修复字段访问异常静默吞噬",
+      "description": "修复 _check_field_access 中 ValueError 被静默 pass 的问题，正确报告元组索引越界、字段不存在等错误。",
+      "track": "frontend",
+      "difficulty": "easy",
+      "priority": 65,
+      "estimated_effort": "1-2小时",
+      "status": "pending",
+      "source": "quality_analysis",
+      "depends_on": []
+    },
+    {
+      "task_id": "frontend_parser_error_recovery",
+      "name": "增强解析器错误恢复能力",
+      "description": "为 parser 添加错误恢复：语法错误时尝试同步到下一个语句边界（换行/分号/右花括号），报告多个错误而不是第一个就停。",
+      "track": "frontend",
+      "difficulty": "medium",
+      "priority": 60,
+      "estimated_effort": "4-6小时",
+      "status": "pending",
+      "source": "quality_analysis",
+      "depends_on": []
+    },
+    {
+      "task_id": "backend_native_label_patch",
+      "name": "实现原生后端两阶段汇编与标签回填",
+      "description": "实现两阶段汇编：第一阶段发射指令并记录标签位置和跳转引用，第二阶段回填 jmp/jcc 的 rel32 偏移量。这是原生后端可用的基础。",
+      "track": "backend",
+      "difficulty": "medium",
+      "priority": 92,
+      "estimated_effort": "1-2天",
+      "status": "pending",
+      "source": "quality_analysis",
+      "depends_on": []
+    },
+    {
+      "task_id": "backend_native_reg_alloc",
+      "name": "实现原生后端线性扫描寄存器分配器",
+      "description": "实现线性扫描寄存器分配：计算虚拟寄存器活跃区间，分配到物理寄存器（RAX/RBX/RCX/RDX/RSI/RDI/R8-R15），溢出到栈槽。",
+      "track": "backend",
+      "difficulty": "hard",
+      "priority": 88,
+      "estimated_effort": "3-5天",
+      "status": "pending",
+      "source": "quality_analysis",
+      "depends_on": [
+        "backend_native_label_patch"
+      ]
+    },
+    {
+      "task_id": "backend_native_stack_frame",
+      "name": "实现原生后端栈帧管理",
+      "description": "实现完整栈帧管理：prologue/epilogue 生成、栈槽分配、局部变量寻址、溢出槽管理、16字节栈指针对齐。",
+      "track": "backend",
+      "difficulty": "hard",
+      "priority": 86,
+      "estimated_effort": "2-3天",
+      "status": "pending",
+      "source": "quality_analysis",
+      "depends_on": [
+        "backend_native_reg_alloc"
+      ]
+    },
+    {
+      "task_id": "backend_native_call_abi",
+      "name": "实现原生后端 System V AMD64 ABI",
+      "description": "实现 System V AMD64 调用约定：前6个参数用寄存器（RDI/RSI/RDX/RCX/R8/R9），其余栈传，返回值 RAX，调用者/被调用者保存寄存器管理。",
+      "track": "backend",
+      "difficulty": "hard",
+      "priority": 84,
+      "estimated_effort": "2-3天",
+      "status": "pending",
+      "source": "quality_analysis",
+      "depends_on": [
+        "backend_native_stack_frame"
+      ]
+    },
+    {
+      "task_id": "backend_native_float_const",
+      "name": "实现原生后端浮点/字符串常量加载",
+      "description": "实现 LIRFloatConst（movsd 从常量池加载）和 LIRStringConst（lea 指向 .rodata 段）的原生代码生成。",
+      "track": "backend",
+      "difficulty": "medium",
+      "priority": 75,
+      "estimated_effort": "4-6小时",
+      "status": "pending",
+      "source": "quality_analysis",
+      "depends_on": [
+        "backend_native_label_patch"
+      ]
+    },
+    {
+      "task_id": "backend_wasm_indirect_multiarg",
+      "name": "实现 Wasm 多参数闭包调用",
+      "description": "修复 wasm_backend 中 LIRCallIndirect 多参数直接 pass 的问题，实现多参数间接调用：table.get 获取函数引用 + 多参数调用。",
+      "track": "backend",
+      "difficulty": "medium",
+      "priority": 72,
+      "estimated_effort": "4-6小时",
+      "status": "pending",
+      "source": "quality_analysis",
+      "depends_on": []
+    },
+    {
+      "task_id": "backend_wasm_gc_types",
+      "name": "完善 WasmGC 原生类型定义",
+      "description": "扩展 WasmGC 类型系统：增加 List/Map/ADT 的原生 struct/array 类型定义，真正利用 GC 托管堆，替代运行时函数调用。",
+      "track": "backend",
+      "difficulty": "hard",
+      "priority": 68,
+      "estimated_effort": "3-5天",
+      "status": "pending",
+      "source": "quality_analysis",
+      "depends_on": []
+    },
+    {
+      "task_id": "backend_unify_c_codegen",
+      "name": "统一 C 后端（旧路径迁移到 LIR 路径）",
+      "description": "将旧的 c_codegen.py（AST级C代码生成）功能迁移到 lir_c_backend.py（LIR级C代码生成），淘汰旧路径，消除双轨维护成本。",
+      "track": "backend",
+      "difficulty": "hard",
+      "priority": 70,
+      "estimated_effort": "2-3天",
+      "status": "pending",
+      "source": "quality_analysis",
+      "depends_on": []
+    },
+    {
+      "task_id": "backend_lir_phi_lowering_verify",
+      "name": "验证 Phi 节点 LIR 降级正确性",
+      "description": "系统验证 MIR Phi 节点降级到 LIR 线性指令序列的正确性，编写针对性测试用例，确保 SSA 语义在降级后保持。",
+      "track": "backend",
+      "difficulty": "medium",
+      "priority": 65,
+      "estimated_effort": "3-5小时",
+      "status": "pending",
+      "source": "quality_analysis",
+      "depends_on": []
+    }
+  ]
+}
