@@ -1,7 +1,7 @@
 {
-  "cycles": 10,
-  "frontend_completed": 7,
-  "backend_completed": 7,
+  "cycles": 11,
+  "frontend_completed": 8,
+  "backend_completed": 8,
   "last_review_cycle": 9,
   "current_review_cycle": 12,
   "completed_tasks": [
@@ -18,13 +18,37 @@
     "frontend_type_unification",
     "backend_phi_edge_block_fix",
     "frontend_mut_type_annotation",
-    "backend_native_elf_phnum"
+    "backend_native_elf_phnum",
+    "frontend_map_literal_parse",
+    "backend_phi_matchjump_successors"
   ],
   "failed_tasks": [],
   "deprecated_tasks": [
     "frontend_type_var_strict"
   ],
   "task_history": [
+    {
+      "cycle": 11,
+      "task_id": "frontend_map_literal_parse",
+      "name": "实现 Map 字面量解析与类型检查",
+      "track": "frontend",
+      "difficulty": "medium",
+      "priority": 58,
+      "result": "success",
+      "details": "填补 Map 类型断层：parser.py 新增 _parse_map_expr 方法解析 {key: value, ...} 语法，在 _parse_primary_expr 中通过 lookahead 区分 Map 字面量与代码块（空{}是代码块，非空且首表达式后为 COLON 则为 Map）；type_checker.py 新增 _check_map_expr 方法检查键类型一致性和值类型一致性，返回 MapType(key_type, value_type)。AST 和 HIR 降级路径已就绪，无需修改。392 测试全部通过，无回归。",
+      "timestamp": "2026-07-23 13:10"
+    },
+    {
+      "cycle": 11,
+      "task_id": "backend_phi_matchjump_successors",
+      "name": "修复 Phi 降级 MIRMatchJump 后继块计算不全",
+      "track": "backend",
+      "difficulty": "medium",
+      "priority": 93,
+      "result": "success",
+      "details": "修复 lir_lowering.py 中 _get_successor_blocks 对 MIRMatchJump 只返回 [default_target] 而忽略 variant_tests 中各个 case 目标块的 bug。修复方案与 cfg_utils.py 中正确的 get_successors 实现保持一致：targets = [test[2] for test in terminator.variant_tests]，再视情况追加 default_target。修复仅 3 行，解决 match 分支 Phi 节点边缘块判断错误的问题，确保 SSA 语义在 match + Phi 组合场景下保持正确。392 测试全部通过，无回归。",
+      "timestamp": "2026-07-23 13:08"
+    },
     {
       "cycle": 10,
       "task_id": "frontend_mut_type_annotation",
@@ -250,7 +274,7 @@
       "difficulty": "medium",
       "priority": 93,
       "estimated_effort": "2-4小时",
-      "status": "pending",
+      "status": "completed",
       "source": "review_9",
       "depends_on": [
         "backend_phi_edge_block_fix"
@@ -402,7 +426,7 @@
       "difficulty": "medium",
       "priority": 58,
       "estimated_effort": "1-2天",
-      "status": "pending",
+      "status": "completed",
       "source": "review_3",
       "depends_on": []
     }

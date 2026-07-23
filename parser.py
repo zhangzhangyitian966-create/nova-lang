@@ -33,6 +33,7 @@ from .ast_nodes import (
     LetBinding,
     ListComprehension,
     ListExpr,
+    MapExpr,
     MatchArm,
     MatchExpr,
     MutBinding,
@@ -893,8 +894,22 @@ class Parser:
         if tok.type == TokenType.LPAREN:
             return self._parse_tuple_or_grouped()
 
-        # 代码块
+        # 代码块或 Map 字面量
         if tok.type == TokenType.LBRACE:
+            # 区分 Map 字面量 {key: value, ...} 和代码块 { ... }
+            # 空 {} 是代码块；非空且第一个表达式后是 COLON 则为 Map
+            if self._peek_type() == TokenType.RBRACE:
+                return self._parse_block()
+            saved_pos = self.pos
+            self._advance()  # skip {
+            try:
+                self._parse_expression()
+                if self._peek_type() == TokenType.COLON:
+                    self.pos = saved_pos
+                    return self._parse_map_expr()
+            except ParseError:
+                pass
+            self.pos = saved_pos
             return self._parse_block()
 
         raise ParseError(
@@ -946,6 +961,26 @@ class Parser:
             elems.append(self._parse_expression())
         self._expect(TokenType.RBRACKET)
         return ListExpr(elements=elems, span=self._span(tok))
+
+    def _parse_map_expr(self):
+        """解析 Map 字面量：{key: value, key2: value2, ...}"""
+        tok = self._expect(TokenType.LBRACE)
+        pairs = []
+
+        if self._peek_type() != TokenType.RBRACE:
+            key = self._parse_expression()
+            self._expect(TokenType.COLON)
+            value = self._parse_expression()
+            pairs.append((key, value))
+
+            while self._match(TokenType.COMMA):
+                key = self._parse_expression()
+                self._expect(TokenType.COLON)
+                value = self._parse_expression()
+                pairs.append((key, value))
+
+        self._expect(TokenType.RBRACE)
+        return MapExpr(pairs=pairs, span=self._span(tok))
 
     def _parse_list_comprehension(self, bracket_tok, expr) -> ListComprehension:
         """解析列表推导式的 for 部分及可选 if 过滤

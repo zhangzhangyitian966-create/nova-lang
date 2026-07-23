@@ -37,6 +37,7 @@ from .ast_nodes import (
     LetBinding,
     ListComprehension,
     ListExpr,
+    MapExpr,
     MatchExpr,
     MutBinding,
     PipeExpr,
@@ -480,6 +481,7 @@ class TypeChecker:
             # 数据结构
             ListExpr: self._check_list_expr,
             TupleExpr: self._check_tuple_expr,
+            MapExpr: self._check_map_expr,
             # 运算
             BinaryOp: self._check_binary_op,
             UnaryOp: self._check_unary_op,
@@ -591,6 +593,31 @@ class TypeChecker:
     def _check_tuple_expr(self, expr) -> NovaType:
         elem_types = [self.check_expr(e) for e in expr.elements]
         return TupleType(elem_types)
+
+    def _check_map_expr(self, expr) -> NovaType:
+        """检查 Map 表达式的键类型一致性和值类型一致性，返回 MapType。
+
+        空 Map 返回 MapType(TypeVar("unknown_map_key"), TypeVar("unknown_map_value"))。
+        """
+        if not expr.pairs:
+            return MapType(
+                TypeVar("unknown_map_key"), TypeVar("unknown_map_value")
+            )
+        key_types = [self.check_expr(k) for k, _ in expr.pairs]
+        value_types = [self.check_expr(v) for _, v in expr.pairs]
+        first_key = key_types[0]
+        first_value = value_types[0]
+        for i, kt in enumerate(key_types[1:], 1):
+            if not self._types_compatible(kt, first_key):
+                raise TypeCheckError(
+                    f"Map 键类型不一致：键 0 为 {first_key}，键 {i} 为 {kt}"
+                )
+        for i, vt in enumerate(value_types[1:], 1):
+            if not self._types_compatible(vt, first_value):
+                raise TypeCheckError(
+                    f"Map 值类型不一致：值 0 为 {first_value}，值 {i} 为 {vt}"
+                )
+        return MapType(first_key, first_value)
 
     # ------------------------------------------------------------------
     # 运算检查

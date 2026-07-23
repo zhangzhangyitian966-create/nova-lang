@@ -328,7 +328,10 @@ class LIRLowering:
                 targets.append(target)
             return targets
         elif isinstance(terminator, MIRMatchJump):
-            return [terminator.default_target] if terminator.default_target else []
+            targets = [test[2] for test in terminator.variant_tests]
+            if terminator.default_target:
+                targets.append(terminator.default_target)
+            return targets
         elif isinstance(terminator, MIRReturn):
             return []
         elif isinstance(terminator, MIRPanic):

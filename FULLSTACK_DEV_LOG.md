@@ -4,6 +4,48 @@
 
 ---
 
+## 第 11 轮开发 — 2026-07-23 13:05 ~ 13:15
+
+---
+
+### 🎨 前端任务：实现 Map 字面量解析与类型检查
+
+- **任务**: `frontend_map_literal_parse` (medium, priority: 58)
+- **结果**: ✅ 成功
+- **为什么选这个**: 第 9 轮评审发现的 Map 类型断层（AST 有 MapExpr 但 parser 完全缺失）。本轮前端需要一个 medium 难度、改动明确、风险低的任务来平衡后端的 P0 bug 修复。Map 字面量是填补功能断层的理想选择——AST 和 HIR 降级路径已就绪，只需补 parser 和 type_checker。
+- **详情**:
+  - `parser.py`：在 `_parse_primary_expr` 的 `LBRACE` 分支中通过 lookahead 区分 Map 字面量与代码块。空 `{}` 仍为代码块；非空 `{}` 先尝试解析一个表达式，若下一个 token 是 `COLON` 则判定为 Map，回退并调用 `_parse_map_expr`。
+  - 新增 `_parse_map_expr()` 方法：解析 `{ key_expr: value_expr (, key_expr: value_expr)* }`，结构与列表解析高度一致。
+  - `type_checker.py`：在 `_build_expr_checkers` 调度表中添加 `MapExpr: self._check_map_expr`。
+  - 新增 `_check_map_expr()` 方法：检查所有 key 类型一致性、所有 value 类型一致性，空 Map 返回 `MapType(TypeVar, TypeVar)`，非空返回 `MapType(first_key, first_value)`。
+  - 新增代码约 80 行（parser 50 行 + type_checker 30 行），392 测试全部通过，无回归。
+
+### ⚙️ 后端任务：修复 Phi 降级 MIRMatchJump 后继块计算不全
+
+- **任务**: `backend_phi_matchjump_successors` (medium, priority: 93)
+- **结果**: ✅ 成功
+- **为什么选这个**: 第 9 轮评审发现的 P0 正确性 bug。`_get_successor_blocks` 对 `MIRMatchJump` 只返回 `default_target`，完全忽略 `variant_tests` 中各 case 的目标块。这导致 match 分支的 Phi 节点边缘块判断错误，所有互斥路径的 Phi 拷贝都会被错误执行，严重破坏 SSA 语义。优先级 93（pending 中最高），且修复仅需 2-3 行，必须优先处理。
+- **详情**:
+  - `ir/lir_lowering.py` 第 330-331 行：将 `return [terminator.default_target] if terminator.default_target else []` 替换为与 `cfg_utils.py` 中正确实现一致的逻辑：`targets = [test[2] for test in terminator.variant_tests]`，再视情况追加 `default_target`。
+  - 修复仅 3 行，解决 match + Phi 组合场景下的 critical edge 判断错误，确保多分支 match 的 Phi 拷贝被正确放入边缘块。
+  - 392 测试全部通过，无回归。
+
+### 📊 测试对比
+
+| 阶段 | 结果 |
+|------|------|
+| 基线测试 | 392 passed, 20 subtests passed |
+| 开发后测试 | 392 passed, 20 subtests passed |
+| 回归 | 无 |
+
+### 🧭 下一步计划
+
+**前端**: 前端 8/11 任务已完成（72.7%）。剩余 3 个待完成任务：`frontend_type_unify_deepen`（hard/94，核心任务）、`frontend_pattern_exhaustiveness`（hard/82）、`frontend_parser_error_recovery`（medium/60）。下轮（第 12 轮）是评审轮，将进行全面回顾和规划。
+
+**后端**: 后端 9/17 任务已完成（52.9%）。剩余 pending 任务中优先级最高的是 `backend_native_stack_frame`（hard/96，调用约定前置依赖），其次是 `backend_native_call_abi`（hard/99，依赖栈帧）。下轮是评审轮，将评估是否在第 13 轮启动栈帧管理攻坚。
+
+---
+
 ## 第 10 轮开发 — 2026-07-23 10:10 ~ 10:20
 
 ---
