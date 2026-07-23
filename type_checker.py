@@ -380,7 +380,7 @@ class TypeChecker:
             ty = self.check_expr(decl.value)
             if decl.type_annotation:
                 annotated = self._from_ast_type(decl.type_annotation)
-                if not self._types_compatible(ty, annotated):
+                if not self._unify_types(ty, annotated):
                     line = decl.span.line if decl.span else -1
                     col = decl.span.column if decl.span else -1
                     raise TypeCheckError(
@@ -388,17 +388,17 @@ class TypeChecker:
                         line,
                         col,
                     )
-            self.env.define(decl.name, ty)
+            self.env.define(decl.name, self._unify_and_resolve(ty))
 
         elif isinstance(decl, MutBinding):
             ty = self.check_expr(decl.value)
             if decl.type_annotation:
                 annotated = self._from_ast_type(decl.type_annotation)
-                if not self._types_compatible(ty, annotated):
+                if not self._unify_types(ty, annotated):
                     raise TypeCheckError(
                         f"mut 绑定 '{decl.name}' 的推断类型 {ty} 与标注类型 {annotated} 不匹配"
                     )
-            self.env.define(decl.name, ty)
+            self.env.define(decl.name, self._unify_and_resolve(ty))
 
         elif isinstance(decl, FnDef):
             # 注册函数类型（支持递归）
@@ -419,7 +419,7 @@ class TypeChecker:
 
             if decl.return_type:
                 expected = self._from_ast_type(decl.return_type)
-                if not self._types_compatible(body_type, expected):
+                if not self._unify_types(body_type, expected):
                     raise TypeCheckError(
                         f"函数 '{decl.name}' 返回类型 {body_type} 与声明的 {expected} 不匹配"
                     )
@@ -584,11 +584,11 @@ class TypeChecker:
         elem_types = [self.check_expr(e) for e in expr.elements]
         first = elem_types[0]
         for i, et in enumerate(elem_types[1:], 1):
-            if not self._types_compatible(et, first):
+            if not self._unify_types(et, first):
                 raise TypeCheckError(
                     f"列表元素类型不一致：元素 0 为 {first}，元素 {i} 为 {et}"
                 )
-        return ListType(first)
+        return ListType(self._unify_and_resolve(first))
 
     def _check_tuple_expr(self, expr) -> NovaType:
         elem_types = [self.check_expr(e) for e in expr.elements]
@@ -608,16 +608,16 @@ class TypeChecker:
         first_key = key_types[0]
         first_value = value_types[0]
         for i, kt in enumerate(key_types[1:], 1):
-            if not self._types_compatible(kt, first_key):
+            if not self._unify_types(kt, first_key):
                 raise TypeCheckError(
                     f"Map 键类型不一致：键 0 为 {first_key}，键 {i} 为 {kt}"
                 )
         for i, vt in enumerate(value_types[1:], 1):
-            if not self._types_compatible(vt, first_value):
+            if not self._unify_types(vt, first_value):
                 raise TypeCheckError(
                     f"Map 值类型不一致：值 0 为 {first_value}，值 {i} 为 {vt}"
                 )
-        return MapType(first_key, first_value)
+        return MapType(self._unify_and_resolve(first_key), self._unify_and_resolve(first_value))
 
     # ------------------------------------------------------------------
     # 运算检查
@@ -629,16 +629,16 @@ class TypeChecker:
         无 else 分支时返回 UNIT_T。
         """
         cond_ty = self.check_expr(expr.condition)
-        if not self._types_compatible(cond_ty, BOOL_T):
+        if not self._unify_types(cond_ty, BOOL_T):
             raise TypeCheckError(f"if 条件必须是 Bool 类型，得到 {cond_ty}")
         then_ty = self.check_expr(expr.then_branch)
         if expr.else_branch:
             else_ty = self.check_expr(expr.else_branch)
-            if not self._types_compatible(then_ty, else_ty):
+            if not self._unify_types(then_ty, else_ty):
                 raise TypeCheckError(
                     f"if 分支类型不一致：then 为 {then_ty}，else 为 {else_ty}"
                 )
-            return then_ty
+            return self._unify_and_resolve(then_ty)
         return UNIT_T
 
     def _check_match_expr(self, expr) -> NovaType:
@@ -652,11 +652,11 @@ class TypeChecker:
             arm_ty = self.check_match_arm(arm, subject_ty, expr)
             if result_type is None:
                 result_type = arm_ty
-            elif not self._types_compatible(arm_ty, result_type):
+            elif not self._unify_types(arm_ty, result_type):
                 raise TypeCheckError(
                     f"match 分支 {i} 类型 {arm_ty} 与第一个分支 {result_type} 不一致"
                 )
-        return result_type or UNIT_T
+        return self._unify_and_resolve(result_type) if result_type else UNIT_T
 
     def _check_block(self, expr) -> NovaType:
         for stmt in expr.statements:
@@ -692,7 +692,7 @@ class TypeChecker:
 
     def _check_while_expr(self, expr) -> NovaType:
         cond_ty = self.check_expr(expr.condition)
-        if not self._types_compatible(cond_ty, BOOL_T):
+        if not self._unify_types(cond_ty, BOOL_T):
             raise TypeCheckError(f"while 条件必须是 Bool 类型，得到 {cond_ty}")
         return self.check_expr(expr.body)
 
@@ -714,11 +714,11 @@ class TypeChecker:
         val_ty = self.check_expr(expr.value)
         if expr.type_annotation:
             annotated = self._from_ast_type(expr.type_annotation)
-            if not self._types_compatible(val_ty, annotated):
+            if not self._unify_types(val_ty, annotated):
                 raise TypeCheckError(
                     f"let 绑定类型不匹配：推断为 {val_ty}，标注为 {annotated}"
                 )
-        self.env.define(expr.name, val_ty)
+        self.env.define(expr.name, self._unify_and_resolve(val_ty))
         return UNIT_T
 
     def _check_mut_binding(self, expr) -> NovaType:
@@ -726,11 +726,11 @@ class TypeChecker:
         val_ty = self.check_expr(expr.value)
         if expr.type_annotation:
             annotated = self._from_ast_type(expr.type_annotation)
-            if not self._types_compatible(val_ty, annotated):
+            if not self._unify_types(val_ty, annotated):
                 raise TypeCheckError(
                     f"mut 绑定类型不匹配：推断为 {val_ty}，标注为 {annotated}"
                 )
-        self.env.define(expr.name, val_ty)
+        self.env.define(expr.name, self._unify_and_resolve(val_ty))
         return UNIT_T
 
     def _check_assignment(self, expr) -> NovaType:
@@ -739,7 +739,7 @@ class TypeChecker:
         existing = self.env.lookup(expr.name)
         if existing is None:
             raise TypeCheckError(f"赋值目标 '{expr.name}' 未定义")
-        if not self._types_compatible(val_ty, existing):
+        if not self._unify_types(val_ty, existing):
             raise TypeCheckError(
                 f"赋值类型不匹配：'{expr.name}' 为 {existing}，值为 {val_ty}"
             )
@@ -831,10 +831,10 @@ class TypeChecker:
                 )
                 # 也检查第一个参数（直接调用场景）
                 first_param = right_ty.param_types[0]
-                if self._types_compatible(
+                if self._unify_types(
                     left_ty, last_param
-                ) or self._types_compatible(left_ty, first_param):
-                    return right_ty.return_type
+                ) or self._unify_types(left_ty, first_param):
+                    return self._unify_and_resolve(right_ty.return_type)
         # 如果无法确定，返回右侧类型
         return right_ty
 
@@ -932,7 +932,7 @@ class TypeChecker:
             old_env = self.env
             self.env = child_env
             cond_ty = self.check_expr(expr.filter_cond)
-            if not self._types_compatible(cond_ty, BOOL_T):
+            if not self._unify_types(cond_ty, BOOL_T):
                 raise TypeCheckError(f"列表推导式过滤条件必须是 Bool 类型")
             self.env = old_env
 
@@ -971,15 +971,15 @@ class TypeChecker:
             return
 
         elif isinstance(pattern, PatternInt):
-            if not self._types_compatible(subject_type, INT_T):
+            if not self._unify_types(subject_type, INT_T):
                 raise TypeCheckError(f"整数模式与类型 {subject_type} 不匹配")
 
         elif isinstance(pattern, PatternBool):
-            if not self._types_compatible(subject_type, BOOL_T):
+            if not self._unify_types(subject_type, BOOL_T):
                 raise TypeCheckError(f"布尔模式与类型 {subject_type} 不匹配")
 
         elif isinstance(pattern, PatternString):
-            if not self._types_compatible(subject_type, STRING_T):
+            if not self._unify_types(subject_type, STRING_T):
                 raise TypeCheckError(f"字符串模式与类型 {subject_type} 不匹配")
 
         elif isinstance(pattern, PatternIdentifier):
@@ -1028,11 +1028,11 @@ class TypeChecker:
 
         # 算术操作
         if expr.op in ("+", "-", "*", "/"):
-            if self._types_compatible(left_ty, INT_T) and self._types_compatible(
+            if self._unify_types(left_ty, INT_T) and self._unify_types(
                 right_ty, INT_T
             ):
                 return INT_T
-            if self._types_compatible(left_ty, FLOAT_T) and self._types_compatible(
+            if self._unify_types(left_ty, FLOAT_T) and self._unify_types(
                 right_ty, FLOAT_T
             ):
                 return FLOAT_T
@@ -1041,7 +1041,7 @@ class TypeChecker:
             )
 
         if expr.op == "%":
-            if self._types_compatible(left_ty, INT_T) and self._types_compatible(
+            if self._unify_types(left_ty, INT_T) and self._unify_types(
                 right_ty, INT_T
             ):
                 return INT_T
@@ -1049,7 +1049,7 @@ class TypeChecker:
 
         # 字符串拼接
         if expr.op == "++":
-            if self._types_compatible(left_ty, STRING_T) and self._types_compatible(
+            if self._unify_types(left_ty, STRING_T) and self._unify_types(
                 right_ty, STRING_T
             ):
                 return STRING_T
@@ -1058,15 +1058,15 @@ class TypeChecker:
         # 比较操作
         if expr.op in ("==", "!=", "<", ">", "<=", ">="):
             # 所有比较操作都要求左右操作数类型兼容
-            if not self._types_compatible(left_ty, right_ty):
+            if not self._unify_types(left_ty, right_ty):
                 raise TypeCheckError(
                     f"操作符 '{expr.op}' 的操作数类型不兼容：{left_ty} 和 {right_ty}"
                 )
             # 有序比较（< > <= >=）额外要求数值类型
             if expr.op in ("<", ">", "<=", ">="):
                 if not (
-                    self._types_compatible(left_ty, INT_T)
-                    or self._types_compatible(left_ty, FLOAT_T)
+                    self._unify_types(left_ty, INT_T)
+                    or self._unify_types(left_ty, FLOAT_T)
                 ):
                     raise TypeCheckError(
                         f"操作符 '{expr.op}' 需要数值类型操作数，得到 {left_ty}"
@@ -1075,9 +1075,9 @@ class TypeChecker:
 
         # 逻辑操作
         if expr.op in ("&&", "||"):
-            if not self._types_compatible(left_ty, BOOL_T):
+            if not self._unify_types(left_ty, BOOL_T):
                 raise TypeCheckError(f"'&&' 左侧必须是 Bool，得到 {left_ty}")
-            if not self._types_compatible(right_ty, BOOL_T):
+            if not self._unify_types(right_ty, BOOL_T):
                 raise TypeCheckError(f"'&&' 右侧必须是 Bool，得到 {right_ty}")
             return BOOL_T
 
@@ -1087,13 +1087,13 @@ class TypeChecker:
         """检查一元操作"""
         operand_ty = self.check_expr(expr.operand)
         if expr.op == "-":
-            if self._types_compatible(operand_ty, INT_T):
+            if self._unify_types(operand_ty, INT_T):
                 return INT_T
-            if self._types_compatible(operand_ty, FLOAT_T):
+            if self._unify_types(operand_ty, FLOAT_T):
                 return FLOAT_T
             raise TypeCheckError(f"一元 '-' 需要 Int 或 Float，得到 {operand_ty}")
         if expr.op == "!":
-            if self._types_compatible(operand_ty, BOOL_T):
+            if self._unify_types(operand_ty, BOOL_T):
                 return BOOL_T
             raise TypeCheckError(f"一元 '!' 需要 Bool，得到 {operand_ty}")
         raise TypeCheckError(f"未知的一元操作符 '{expr.op}'")
@@ -1348,8 +1348,27 @@ class TypeChecker:
 
         return instantiate_rec(ty)
 
+    def _unify_types(self, a: NovaType, b: NovaType) -> bool:
+        """合一驱动的类型兼容检查。
+
+        先展开替换表中的类型变量，再尝试合一。
+        成功时替换表会被更新（产生新的类型约束），失败时返回 False。
+        这是对旧 _types_compatible 的升级版本，TypeVar 不再被直接放行。
+        """
+        a_resolved = self._apply_subst(a)
+        b_resolved = self._apply_subst(b)
+        return self._unify(a_resolved, b_resolved)
+
+    def _unify_and_resolve(self, ty: NovaType) -> NovaType:
+        """合一后解析类型：应用替换表，获得最终的完全展开类型。"""
+        return self._apply_subst(ty)
+
     def _types_compatible(self, a: NovaType, b: NovaType) -> bool:
-        """检查两个类型是否兼容"""
+        """检查两个类型是否兼容（遗留方法，仅在非关键路径使用）。
+
+        注意：此方法对 TypeVar 直接放行（鸭子类型），不产生类型约束。
+        新代码应优先使用 _unify_types 进行合一驱动的类型检查。
+        """
         if isinstance(a, TypeVar) or isinstance(b, TypeVar):
             return True
         if a == b:

@@ -172,24 +172,50 @@ class NativeCodeGen:
                             offset += len(value_bytes)
 
     def _compile_function(self, func: LIRFunction) -> bytes:
-        """编译单个函数为机器码"""
+        """编译单个函数为机器码。
+
+        栈帧布局（System V AMD64 ABI）：
+          高地址
+          ┌──────────────────┐
+          │ 调用者栈帧        │ ← call 前 RSP
+          │ 返回地址 (8B)     │ ← call 压入
+          ├──────────────────┤ ← 函数入口 RSP ≡ 8 (mod 16)
+          │ callee-saved (48B)│ ← 6 个 push (RBX, RBP, R12-15)
+          ├──────────────────┤ ← push 后 RSP ≡ 8 (mod 16) (8+48=56)
+          │ 对齐填充 (0-15B) │ ← 确保 sub 后 RSP ≡ 0 (mod 16)
+          ├──────────────────┤
+          │ 溢出槽区         │ ← 虚拟寄存器溢出位置
+          │ [stack_offset]   │   RSP 正偏移寻址
+          ├──────────────────┤ ← sub 后 RSP ≡ 0 (mod 16)
+          │ (可能预留参数区) │
+          └──────────────────┘ ← 当前 RSP
+          低地址
+        """
         e = X86_64Emitter()
 
-        # 函数序言：保存 callee-saved，分配栈帧
+        # 函数序言：保存 callee-saved 寄存器（6 个，48 字节）
         for reg in CALLEE_SAVED:
             e.push_reg(reg)
 
+        # 计算 16 字节对齐的栈帧大小
+        # push 6 个 callee-saved = 48 字节
+        # 函数入口 RSP ≡ 8 (mod 16)，push 后 RSP ≡ 8 + 48 = 56 ≡ 8 (mod 16)
+        # 需要 sub (stack_size + 8) 向上对齐到 16，使 RSP ≡ 0 (mod 16)
         if func.stack_size > 0:
-            # 对齐到 16 字节
-            aligned = (func.stack_size + 15) & ~15
+            total = func.stack_size + 8  # +8 补偿 push 后的 8 (mod 16) 偏移
+            aligned = (total + 15) & ~15
+            func._native_frame_pad = aligned - 8  # 实际填充量（对齐贡献）
             e.sub_rsp_imm(aligned)
+        else:
+            func._native_frame_pad = 0
 
         # 编译函数体
         self._compile_body(e, func, func.name)
 
-        # 函数尾声：恢复 callee-saved，返回
+        # 函数尾声：恢复栈帧，恢复 callee-saved，返回
         if func.stack_size > 0:
-            aligned = (func.stack_size + 15) & ~15
+            total = func.stack_size + 8
+            aligned = (total + 15) & ~15
             e.add_rsp_imm(aligned)
 
         for reg in reversed(CALLEE_SAVED):
@@ -502,7 +528,13 @@ class NativeCodeGen:
             ctx.store_from_reg(dst_name, RAX)
 
     def _emit_call(self, instr, ctx: "_EmitContext"):
-        """编译函数调用指令。"""
+        """编译函数调用指令。
+
+        当前实现：直接 call（参数传递将在 backend_native_call_abi 中实现）。
+        调用后从 RAX/XMM0 捕获返回值。
+        注意：caller-saved 寄存器（RCX, RDX, RSI, RDI, R8-R11）的值
+        在 call 后可能被破坏，寄存器分配器已在活跃区间计算中考虑了这一点。
+        """
         e = ctx.e
         call_offset = e.call_rel32()
         self.link_calls.append((ctx.func_name, call_offset, instr.func_name))
@@ -558,11 +590,15 @@ class NativeCodeGen:
                 ctx.e.patch_rel32(fixup_offset, target_offset)
 
     def _generate_start(self, func_code: Dict[str, bytes], module: LIRModule):
-        """生成 _start 入口函数"""
+        """生成 _start 入口函数。
+
+        Linux 内核进入 _start 时 RSP 已 16 字节对齐（≡ 0 mod 16）。
+        call 指令压入 8B 返回地址后，被调用函数看到 RSP ≡ 8 (mod 16)，
+        符合 System V ABI 要求。因此直接 call 即可，无需额外对齐。
+        """
         e = X86_64Emitter()
 
-        # 设置参数
-        # argc 在 [RSP], argv 在 [RSP+8]
+        # 设置参数：argc 在 [RSP], argv 在 [RSP+8]
         e.mov_reg_mem(RDI, RSP, 8)  # argv[0] = program name
 
         # 调用 nova_init

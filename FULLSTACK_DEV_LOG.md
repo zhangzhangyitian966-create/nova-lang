@@ -4,6 +4,73 @@
 
 ---
 
+## 第 14 轮 — 2026-07-24 15:15 ~ 15:30
+
+> 普通轮 | 前端 + 后端双线推进
+
+---
+
+### 前端任务：深化类型合一——全面替换 _types_compatible
+
+- **任务 ID**: `frontend_type_unify_deepen`
+- **难度**: hard | **优先级**: 94
+- **结果**: 成功
+
+**为什么选这个**：这是前端最高价值任务（优先级 94）。合一基础设施已在 cycle 8 就绪（_unify/_apply_subst/_instantiate），但接入面极窄——仅在函数调用参数匹配中使用，其余 30+ 处仍用 _types_compatible（TypeVar 直接放行 = 鸭子类型）。工作模式机械（逐个替换调用点），可增量推进，成功后类型推断产生质的飞跃。
+
+**详情**：将 type_checker.py 中所有关键路径的 `_types_compatible` 替换为合一驱动的类型检查：
+1. 新增 `_unify_types` 辅助方法——先 `_apply_subst` 展开类型变量再 `_unify`，成功时产生类型约束，TypeVar 不再被直接放行
+2. 新增 `_unify_and_resolve` 辅助方法——合一后应用替换表获得最终完全展开的类型
+3. 替换了 30+ 处关键路径：
+   - let/mut 绑定类型标注（check_decl + _check_let_binding + _check_mut_binding）
+   - 函数返回类型检查
+   - 列表元素一致性、Map 键值一致性
+   - if 条件和分支类型、match 分支类型
+   - while 条件、赋值兼容、管道表达式
+   - 模式匹配 PatternInt/Bool/String 的 subject 类型检查
+   - 全部二元运算（算术/取余/字符串拼接/比较/逻辑）
+   - 一元运算、列表推导过滤条件
+4. `env.define` 时用 `_unify_and_resolve` 确保绑定的类型完全展开
+5. 返回类型时用 `_unify_and_resolve` 确保返回值不含未解析的 TypeVar
+6. 保留 `_types_compatible` 作为遗留方法（向后兼容），添加文档标注其局限性
+
+---
+
+### 后端任务：实现原生后端完整栈帧管理
+
+- **任务 ID**: `backend_native_stack_frame`
+- **难度**: hard | **优先级**: 96
+- **结果**: 成功
+
+**为什么选这个**：依赖 `backend_native_regalloc_fix`（已完成，cycle 7），是 `backend_native_call_abi`（优先级 99）的前置条件。当前栈帧对齐计算有 bug——未考虑 6 个 callee-saved 压栈后的 48 字节偏移，导致 RSP 不满足 System V ABI 的 16 字节对齐要求。修复后解除调用约定任务的阻塞。
+
+**详情**：修复并规范化 native_backend.py 的栈帧管理：
+1. 修正 prologue/epilogue 对齐计算——原来 `(stack_size + 15) & ~15`，未考虑 push 后偏移；修复为 `(stack_size + 8 + 15) & ~15`，正确补偿 48 字节 push 使 RSP ≡ 0 (mod 16)
+2. 添加完整的栈帧布局 ASCII 文档注释，明确各区域作用和对齐要求
+3. 记录 `_native_frame_pad` 属性供后续调用约定使用
+4. 规范化 `_generate_start` 入口的栈对齐说明（Linux 内核入口 RSP ≡ 0 mod 16）
+5. 改进 `_emit_call` 注释，明确 caller-saved 寄存器破坏语义
+
+---
+
+### 测试对比
+
+| 指标 | 开发前 | 开发后 | 变化 |
+|------|--------|--------|------|
+| 测试通过数 | 392 | 392 | - |
+| 测试失败数 | 0 | 0 | - |
+| 通过率 | 100% | 100% | - |
+
+---
+
+### 下一步计划
+
+**前端下一步**：`frontend_pattern_exhaustiveness`（hard/82）——模式匹配完备性检查。类型合一深化已完成，TypeVar 不再放行，下一个最有价值的任务是模式匹配安全性。
+
+**后端下一步**：`backend_native_call_abi`（hard/99）——System V AMD64 调用约定。栈帧管理已完成，参数传递的阻塞条件已解除。这是原生后端从"原型"到"可用"的最后一步。
+
+---
+
 ## 第 13 轮 — 2026-07-24 03:00 ~ 03:10
 
 > 普通轮 | 前端 + 后端双线推进
