@@ -695,7 +695,14 @@ class TypeChecker:
         return UNIT_T
 
     def _check_mut_binding(self, expr) -> NovaType:
+        """检查 mut 绑定表达式。若有类型注解，推断类型必须与注解兼容。返回 UNIT_T。"""
         val_ty = self.check_expr(expr.value)
+        if expr.type_annotation:
+            annotated = self._from_ast_type(expr.type_annotation)
+            if not self._types_compatible(val_ty, annotated):
+                raise TypeCheckError(
+                    f"mut 绑定类型不匹配：推断为 {val_ty}，标注为 {annotated}"
+                )
         self.env.define(expr.name, val_ty)
         return UNIT_T
 

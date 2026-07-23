@@ -1,7 +1,7 @@
 {
-  "cycles": 9,
-  "frontend_completed": 6,
-  "backend_completed": 6,
+  "cycles": 10,
+  "frontend_completed": 7,
+  "backend_completed": 7,
   "last_review_cycle": 9,
   "current_review_cycle": 12,
   "completed_tasks": [
@@ -16,13 +16,37 @@
     "frontend_tuple_compat_bug",
     "backend_native_regalloc_fix",
     "frontend_type_unification",
-    "backend_phi_edge_block_fix"
+    "backend_phi_edge_block_fix",
+    "frontend_mut_type_annotation",
+    "backend_native_elf_phnum"
   ],
   "failed_tasks": [],
   "deprecated_tasks": [
     "frontend_type_var_strict"
   ],
   "task_history": [
+    {
+      "cycle": 10,
+      "task_id": "frontend_mut_type_annotation",
+      "name": "修复 Mut 绑定忽略类型注解 bug",
+      "track": "frontend",
+      "difficulty": "easy",
+      "priority": 80,
+      "result": "success",
+      "details": "修复 _check_mut_binding（第697-700行）完全忽略 type_annotation 字段的 bug。添加与 _check_let_binding 一致的类型注解检查逻辑：若有注解则用 _from_ast_type 转换并用 _types_compatible 验证推断类型与注解类型兼容，不兼容时抛出 TypeCheckError。修复仅 7 行，模式与 let 绑定完全一致，392 测试全部通过。",
+      "timestamp": "2026-07-23 10:15"
+    },
+    {
+      "cycle": 10,
+      "task_id": "backend_native_elf_phnum",
+      "name": "修复原生后端 ELF phnum 不匹配 bug",
+      "track": "backend",
+      "difficulty": "easy",
+      "priority": 95,
+      "result": "success",
+      "details": "修复 _generate_elf 中 phnum=3（声明 LOAD(code) + LOAD(data) + LOAD(rodata) 三个 program header）但实际只创建并写入 code_ph 和 data_ph 两个的 P0 正确性 bug。ELF 头期望 3×56=168 字节 program headers 但只提供 2×56=112 字节，差 56 字节导致后续代码段数据被 ELF 加载器误解为第三个 program header。修复：将 phnum 从 3 改为 2，与实际写入数量一致。修复仅 1 行，392 测试全部通过。",
+      "timestamp": "2026-07-23 10:18"
+    },
     {
       "cycle": 9,
       "task_id": "review_cycle_9",
@@ -212,7 +236,7 @@
       "difficulty": "easy",
       "priority": 95,
       "estimated_effort": "30分钟",
-      "status": "pending",
+      "status": "completed",
       "source": "review_6",
       "depends_on": [
         "backend_native_label_patch"
@@ -280,7 +304,7 @@
       "difficulty": "easy",
       "priority": 80,
       "estimated_effort": "30分钟",
-      "status": "pending",
+      "status": "completed",
       "source": "review_9",
       "depends_on": []
     },

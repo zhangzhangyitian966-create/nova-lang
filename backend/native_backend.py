@@ -629,7 +629,7 @@ class NativeCodeGen:
         ehdr = self._make_elf_header(
             entry=entry_vaddr,
             phoff=64,  # program headers 紧跟 ELF header
-            phnum=3,  # LOAD(code) + LOAD(data) + LOAD(rodata)
+            phnum=2,  # LOAD(code) + LOAD(data)
             shoff=0,  # 无 section headers（简化）
         )
 
