@@ -1,7 +1,7 @@
 {
-  "cycles": 7,
-  "frontend_completed": 5,
-  "backend_completed": 5,
+  "cycles": 8,
+  "frontend_completed": 6,
+  "backend_completed": 6,
   "last_review_cycle": 6,
   "current_review_cycle": 9,
   "completed_tasks": [
@@ -14,13 +14,37 @@
     "frontend_eq_op_typecheck",
     "backend_native_reg_alloc",
     "frontend_tuple_compat_bug",
-    "backend_native_regalloc_fix"
+    "backend_native_regalloc_fix",
+    "frontend_type_unification",
+    "backend_phi_edge_block_fix"
   ],
   "failed_tasks": [],
   "deprecated_tasks": [
     "frontend_type_var_strict"
   ],
   "task_history": [
+    {
+      "cycle": 8,
+      "task_id": "frontend_type_unification",
+      "name": "实现真正的类型合一（unification）算法",
+      "track": "frontend",
+      "difficulty": "hard",
+      "priority": 95,
+      "result": "success",
+      "details": "实现完整的类型合一算法基础设施并接入关键路径：(1) union-find 替换表 _subst + 路径压缩的 _find 方法；(2) _unify 合一算法——支持 PrimType/ListType/MapType/TupleType/FnType/ADTType 全部 9 种情况，含 TypeVar 双向绑定；(3) _occur_check 发生检查——防止无限递归类型；(4) _apply_subst 替换应用——递归展开所有类型变量；(5) _instantiate 泛型实例化——let-polymorphism，每次引用泛型函数创建 fresh 副本；(6) _check_fn_call 升级为合一驱动参数匹配，返回类型应用替换后再返回；(7) _check_identifier 增加泛型实例化——包含 TypeVar 的类型每次引用自动实例化。类型系统从\"兼容检查\"升级为\"合一推断\"的第一步，392 测试全部通过。",
+      "timestamp": "2026-07-23 04:15"
+    },
+    {
+      "cycle": 8,
+      "task_id": "backend_phi_edge_block_fix",
+      "name": "修复 Phi 节点降级的边缘块问题",
+      "track": "backend",
+      "difficulty": "medium",
+      "priority": 86,
+      "result": "success",
+      "details": "修复 lir_lowering.py 中 Phi 节点降级的 critical edge bug：原代码将所有后继块的 Phi 拷贝都放在前驱块末尾（终结指令前），对于条件分支（两后继）场景，两条互斥路径的 Phi 拷贝都会被执行，导致值被错误覆盖。修复方案：实现 critical edge splitting——当有多后继的前驱块跳转到含 Phi 的后继时，为每条边插入边缘块（edge block），Phi 拷贝放在对应边缘块中，边缘块末尾再跳转到真正的目标。支持 MIRBranch（两分支）和 MIRSwitch/MIRMatchJump（多分支）两种场景。新增 _insert_phi_copies 和 _lower_terminator_with_targets 两个辅助方法。392 测试全部通过。",
+      "timestamp": "2026-07-23 04:18"
+    },
     {
       "cycle": 7,
       "task_id": "frontend_tuple_compat_bug",
@@ -156,18 +180,6 @@
   ],
   "tasks": [
     {
-      "task_id": "frontend_type_unification",
-      "name": "实现真正的类型合一（unification）算法",
-      "description": "将简化版 HM 类型推断升级为真正的合一算法。TypeVar 从身份比较改为结构合一，支持 substitution、occur check、let-polymorphism 和泛型实例化。这是类型系统的核心基石。",
-      "track": "frontend",
-      "difficulty": "hard",
-      "priority": 95,
-      "estimated_effort": "5-7天",
-      "status": "pending",
-      "source": "review_3",
-      "depends_on": []
-    },
-    {
       "task_id": "frontend_pattern_exhaustiveness",
       "name": "实现模式匹配完备性检查",
       "description": "为 match 表达式添加完备性检查，确保所有构造器都被覆盖，检测冗余分支和不可达分支，给出精确的错误提示（缺失哪些变体）。",
@@ -178,6 +190,18 @@
       "status": "pending",
       "source": "quality_analysis",
       "depends_on": []
+    },
+    {
+      "task_id": "frontend_type_unify_deepen",
+      "name": "深化类型合一：全面替换 _types_compatible",
+      "description": "在类型合一基础设施就绪后，将所有使用 _types_compatible 的地方逐步替换为真正的合一驱动检查：let 绑定类型标注、if 分支类型、match 分支类型、赋值、列表元素一致性等。让类型推断真正从调用上下文反向传播。",
+      "track": "frontend",
+      "difficulty": "hard",
+      "priority": 88,
+      "estimated_effort": "2-3天",
+      "status": "pending",
+      "source": "cycle_8",
+      "depends_on": ["frontend_type_unification"]
     },
     {
       "task_id": "frontend_parser_error_recovery",
@@ -230,18 +254,6 @@
       "depends_on": [
         "backend_native_stack_frame"
       ]
-    },
-    {
-      "task_id": "backend_phi_edge_block_fix",
-      "name": "修复 Phi 节点降级的边缘块问题",
-      "description": "修复 lir_lowering.py 中 Phi 拷贝插入位置错误：对于条件分支的两个后继，Phi 拷贝都被插入到同一个前驱块末尾（互斥路径不应都执行）。需要为每个分支创建边缘块（edge block）放置 Phi 拷贝，或拆分关键边（critical edge splitting）。",
-      "track": "backend",
-      "difficulty": "medium",
-      "priority": 86,
-      "estimated_effort": "1-2天",
-      "status": "pending",
-      "source": "review_3",
-      "depends_on": []
     },
     {
       "task_id": "backend_native_elf_phnum",

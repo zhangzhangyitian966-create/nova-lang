@@ -12,6 +12,7 @@ Nova 编程语言 - 类型检查器
 """
 
 from typing import Dict, List, Optional
+import copy
 
 from .ast_nodes import (
     AliasDef,
@@ -271,6 +272,9 @@ class TypeChecker:
         self.env = TypeEnv()
         self._source = source
         self._expr_checkers = self._build_expr_checkers()
+        # 类型合一的替换表：TypeVar 的 id -> 绑定的类型
+        # 使用 union-find 结构，支持路径压缩
+        self._subst: Dict[int, "NovaType"] = {}
         self._setup_builtins()
 
     def _setup_builtins(self):
@@ -531,7 +535,33 @@ class TypeChecker:
         ty = self.env.lookup(expr.name)
         if ty is None:
             raise TypeCheckError(f"未定义的标识符 '{expr.name}'")
+        # 泛型实例化（let-polymorphism）：
+        # 如果类型包含 TypeVar（即泛型），每次引用时创建 fresh 副本
+        # 这样不同调用点可以独立实例化出不同的类型
+        if self._contains_typevar(ty):
+            return self._instantiate(ty)
         return ty
+
+    def _contains_typevar(self, ty: "NovaType") -> bool:
+        """检查类型中是否包含未绑定的类型变量（用于判断是否需要实例化）。"""
+        if isinstance(ty, TypeVar):
+            root = self._find(ty)
+            return isinstance(root, TypeVar)
+        if isinstance(ty, ListType):
+            return self._contains_typevar(ty.elem_type)
+        if isinstance(ty, MapType):
+            return self._contains_typevar(ty.key_type) or self._contains_typevar(
+                ty.value_type
+            )
+        if isinstance(ty, TupleType):
+            return any(self._contains_typevar(e) for e in ty.elements)
+        if isinstance(ty, FnType):
+            return any(
+                self._contains_typevar(p) for p in ty.param_types
+            ) or self._contains_typevar(ty.return_type)
+        if isinstance(ty, ADTType):
+            return any(self._contains_typevar(p) for p in ty.type_params)
+        return False
 
     # ------------------------------------------------------------------
     # 数据结构检查
@@ -669,20 +699,28 @@ class TypeChecker:
                 raise TypeCheckError(
                     f"函数期望至多 {len(callee_ty.param_types)} 个参数，但传入了 {len(arg_types)} 个"
                 )
+            # 使用合一算法进行参数类型匹配
             for i, (arg_t, param_t) in enumerate(
                 zip(arg_types, callee_ty.param_types)
             ):
-                if not self._types_compatible(arg_t, param_t):
+                if not self._unify(arg_t, param_t):
+                    # 合一失败，应用替换后给出更精确的错误信息
+                    expected = self._apply_subst(param_t)
+                    actual = self._apply_subst(arg_t)
                     raise TypeCheckError(
-                        f"参数 {i} 类型不匹配：期望 {param_t}，得到 {arg_t}"
+                        f"参数 {i} 类型不匹配：期望 {expected}，得到 {actual}"
                     )
             if len(arg_types) == len(callee_ty.param_types):
-                return callee_ty.return_type
+                # 完全应用：返回应用替换后的返回类型
+                return self._apply_subst(callee_ty.return_type)
             else:
-                # 部分应用：返回剩余参数 -> 返回值 的函数类型
-                return FnType(
-                    callee_ty.param_types[len(arg_types) :], callee_ty.return_type
-                )
+                # 部分应用：返回剩余参数 -> 返回值 的函数类型（应用替换后）
+                remaining_params = [
+                    self._apply_subst(p)
+                    for p in callee_ty.param_types[len(arg_types) :]
+                ]
+                ret_ty = self._apply_subst(callee_ty.return_type)
+                return FnType(remaining_params, ret_ty)
         elif isinstance(callee_ty, TypeVar):
             # 未类型化的参数（duck typing）：允许任意调用
             # 返回一个 TypeVar 表示结果类型
@@ -1045,6 +1083,198 @@ class TypeChecker:
                 self._from_ast_type(type_node.return_type),
             )
         raise TypeCheckError(f"未知的类型注解: {type(type_node).__name__}")
+
+    # ------------------------------------------------------------------
+    # 类型合一（Unification）算法
+    # ------------------------------------------------------------------
+
+    def _find(self, tv: "TypeVar") -> "NovaType":
+        """查找类型变量的最终绑定（union-find 路径压缩）。
+
+        如果类型变量已被绑定，返回其最终代表元；否则返回自身。
+        路径压缩：将查找路径上的所有节点直接指向根，加速后续查找。
+        """
+        current = tv
+        path = []
+        while isinstance(current, TypeVar) and id(current) in self._subst:
+            path.append(id(current))
+            current = self._subst[id(current)]
+        # 路径压缩
+        for vid in path:
+            self._subst[vid] = current
+        return current
+
+    def _occur_check(self, tv: "TypeVar", ty: "NovaType") -> bool:
+        """检查类型变量 tv 是否出现在类型 ty 中（用于防止递归类型）。
+
+        返回 True 表示 tv 出现在 ty 中（即发生检查失败，不能合一）。
+        """
+        ty_root = self._find(ty) if isinstance(ty, TypeVar) else ty
+        if isinstance(ty_root, TypeVar):
+            return tv is ty_root
+        if isinstance(ty_root, ListType):
+            return self._occur_check(tv, ty_root.elem_type)
+        if isinstance(ty_root, MapType):
+            return self._occur_check(tv, ty_root.key_type) or self._occur_check(
+                tv, ty_root.value_type
+            )
+        if isinstance(ty_root, TupleType):
+            return any(self._occur_check(tv, e) for e in ty_root.elements)
+        if isinstance(ty_root, FnType):
+            return any(
+                self._occur_check(tv, p) for p in ty_root.param_types
+            ) or self._occur_check(tv, ty_root.return_type)
+        if isinstance(ty_root, ADTType):
+            return any(self._occur_check(tv, p) for p in ty_root.type_params)
+        return False
+
+    def _unify(self, a: "NovaType", b: "NovaType") -> bool:
+        """合一两个类型，返回是否合一成功。
+
+        合一成功后，替换表 self._subst 会被更新。
+        合一失败时返回 False（不抛异常，由调用者决定错误处理）。
+
+        算法：
+        1. 首先通过 _find 找到两个类型的根
+        2. 如果任一根是 TypeVar，则将其绑定到另一个类型
+        3. 否则按结构递归合一
+        4. 发生检查：防止创建无限递归类型
+        """
+        a_root = self._find(a) if isinstance(a, TypeVar) else a
+        b_root = self._find(b) if isinstance(b, TypeVar) else b
+
+        # 情况 1：两侧都是未绑定的 TypeVar
+        if isinstance(a_root, TypeVar) and isinstance(b_root, TypeVar):
+            if a_root is b_root:
+                return True  # 同一个变量，无需绑定
+            # 将较小 id 的绑定到较大 id 的（任意选择，保持稳定）
+            self._subst[id(a_root)] = b_root
+            return True
+
+        # 情况 2：左侧是未绑定的 TypeVar
+        if isinstance(a_root, TypeVar):
+            if self._occur_check(a_root, b_root):
+                return False  # 无限类型
+            self._subst[id(a_root)] = b_root
+            return True
+
+        # 情况 3：右侧是未绑定的 TypeVar
+        if isinstance(b_root, TypeVar):
+            if self._occur_check(b_root, a_root):
+                return False  # 无限类型
+            self._subst[id(b_root)] = a_root
+            return True
+
+        # 情况 4：基本类型
+        if isinstance(a_root, PrimType) and isinstance(b_root, PrimType):
+            return a_root.name == b_root.name
+
+        # 情况 5：ListType
+        if isinstance(a_root, ListType) and isinstance(b_root, ListType):
+            return self._unify(a_root.elem_type, b_root.elem_type)
+
+        # 情况 6：MapType
+        if isinstance(a_root, MapType) and isinstance(b_root, MapType):
+            return self._unify(a_root.key_type, b_root.key_type) and self._unify(
+                a_root.value_type, b_root.value_type
+            )
+
+        # 情况 7：TupleType
+        if isinstance(a_root, TupleType) and isinstance(b_root, TupleType):
+            if len(a_root.elements) != len(b_root.elements):
+                return False
+            return all(
+                self._unify(e1, e2)
+                for e1, e2 in zip(a_root.elements, b_root.elements)
+            )
+
+        # 情况 8：FnType
+        if isinstance(a_root, FnType) and isinstance(b_root, FnType):
+            if len(a_root.param_types) != len(b_root.param_types):
+                return False
+            return all(
+                self._unify(p1, p2)
+                for p1, p2 in zip(a_root.param_types, b_root.param_types)
+            ) and self._unify(a_root.return_type, b_root.return_type)
+
+        # 情况 9：ADTType
+        if isinstance(a_root, ADTType) and isinstance(b_root, ADTType):
+            if a_root.name != b_root.name:
+                return False
+            if len(a_root.type_params) != len(b_root.type_params):
+                return False
+            return all(
+                self._unify(p1, p2)
+                for p1, p2 in zip(a_root.type_params, b_root.type_params)
+            )
+
+        # 情况 10：不兼容的类型构造器
+        return False
+
+    def _apply_subst(self, ty: "NovaType") -> "NovaType":
+        """将替换表应用到类型上，返回所有类型变量都被替换后的类型。
+
+        递归遍历类型结构，将每个 TypeVar 替换为其最终绑定（通过 _find）。
+        如果 TypeVar 未绑定，则保持不变。
+        """
+        if isinstance(ty, TypeVar):
+            root = self._find(ty)
+            if root is ty:
+                return ty  # 未绑定，返回自身
+            return self._apply_subst(root)  # 递归应用（确保完全展开）
+        if isinstance(ty, ListType):
+            return ListType(self._apply_subst(ty.elem_type))
+        if isinstance(ty, MapType):
+            return MapType(
+                self._apply_subst(ty.key_type), self._apply_subst(ty.value_type)
+            )
+        if isinstance(ty, TupleType):
+            return TupleType([self._apply_subst(e) for e in ty.elements])
+        if isinstance(ty, FnType):
+            return FnType(
+                [self._apply_subst(p) for p in ty.param_types],
+                self._apply_subst(ty.return_type),
+            )
+        if isinstance(ty, ADTType):
+            return ADTType(ty.name, [self._apply_subst(p) for p in ty.type_params])
+        # PrimType 等不可变类型直接返回
+        return ty
+
+    def _fresh_type_var(self, prefix: str = "t") -> "TypeVar":
+        """创建一个新的类型变量（带唯一计数器）。"""
+        return TypeVar(f"{prefix}_{TypeVar._counter}")
+
+    def _instantiate(self, ty: "NovaType") -> "NovaType":
+        """泛型实例化：创建类型的一个 fresh 副本，将其中所有 TypeVar 替换为新的 TypeVar。
+
+        用于 let-polymorphism：每次引用泛型函数时，创建一个新的实例，
+        使不同调用点可以有不同的类型实例。
+        """
+        mapping: Dict[int, "TypeVar"] = {}
+
+        def instantiate_rec(t: "NovaType") -> "NovaType":
+            if isinstance(t, TypeVar):
+                if id(t) not in mapping:
+                    mapping[id(t)] = TypeVar(f"inst_{t.name}")
+                return mapping[id(t)]
+            if isinstance(t, ListType):
+                return ListType(instantiate_rec(t.elem_type))
+            if isinstance(t, MapType):
+                return MapType(
+                    instantiate_rec(t.key_type), instantiate_rec(t.value_type)
+                )
+            if isinstance(t, TupleType):
+                return TupleType([instantiate_rec(e) for e in t.elements])
+            if isinstance(t, FnType):
+                return FnType(
+                    [instantiate_rec(p) for p in t.param_types],
+                    instantiate_rec(t.return_type),
+                )
+            if isinstance(t, ADTType):
+                return ADTType(t.name, [instantiate_rec(p) for p in t.type_params])
+            return t
+
+        return instantiate_rec(ty)
 
     def _types_compatible(self, a: NovaType, b: NovaType) -> bool:
         """检查两个类型是否兼容"""

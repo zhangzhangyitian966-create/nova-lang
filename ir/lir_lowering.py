@@ -152,55 +152,168 @@ class LIRLowering:
             if phi_list:
                 phi_info[bb.label] = phi_list
 
-        # 第二阶段：生成 LIR 指令
-        body = []
-        for bb in mir_fn.basic_blocks:
-            label_instr = LIRLabel(name=bb.label)
-            body.append(label_instr)
+        # 第二阶段 + 第三阶段：生成 LIR 指令，处理 Phi 节点拷贝
+        #
+        # Phi 节点降级策略：critical edge splitting
+        # - 无条件跳转（单后继）：Phi 拷贝放在前驱块末尾（跳转前）
+        # - 条件分支/switch（多后继）：插入边缘块（edge block）
+        #   Phi 拷贝放在对应的边缘块中，确保每条路径只执行自己的拷贝
+        #
+        # 背景：原来的实现把所有后继的 Phi 拷贝都放在前驱块末尾（终结指令前），
+        # 这在条件分支场景下是错误的——两条互斥路径的 Phi 拷贝都会被执行。
+        final_body = []
+        edge_block_counter = 0
 
+        for bb in mir_fn.basic_blocks:
+            # 添加标签
+            final_body.append(LIRLabel(name=bb.label))
+
+            # 添加非终结指令
             for instr in bb.instructions:
-                # Phi 节点不在此处生成指令（在前驱块末尾插入拷贝）
                 if isinstance(instr, MIRPhi):
                     continue
                 lir_instrs = self._lower_instruction(instr)
-                body.extend(lir_instrs)
+                final_body.extend(lir_instrs)
 
-            # 在终结指令前，为后继块的 Phi 节点插入拷贝指令
+            # 处理终结指令和 Phi 拷贝
             if bb.terminator:
-                # 找出当前块跳转到哪些后继块
                 succ_blocks = self._get_successor_blocks(bb.terminator)
-                # 为每个后继块的 Phi 节点插入拷贝
-                for succ_label in succ_blocks:
-                    if succ_label in phi_info:
-                        for phi_result_name, phi_result_type, sources in phi_info[
-                            succ_label
-                        ]:
-                            # 找到从前驱块（当前块）来的 source
-                            src_ssa = None
-                            for pred_label, ssa_name in sources:
-                                if pred_label == bb.label:
-                                    src_ssa = ssa_name
-                                    break
-                            if src_ssa and src_ssa in self.ssa_to_loc:
-                                src_loc = self.ssa_to_loc[src_ssa]
-                                dst_loc = self.ssa_to_loc[phi_result_name]
-                                # 生成 LoadReg + StoreReg 实现拷贝
-                                # 用 LIRLoadReg 从 src 加载，然后通过 StoreReg 存入 dst
-                                # 实际上我们用 LIRLoadReg 的 dst 就是目标位置
-                                # 但更简单的方式是：生成一条 LIRLoadReg，src 是源位置，dst 是目标位置
-                                copy_instr = LIRLoadReg()
-                                copy_instr.src_locs = [(src_loc, phi_result_type)]
-                                copy_instr.dst_loc = (dst_loc, phi_result_type)
-                                body.append(copy_instr)
 
-                lir_term = self._lower_terminator(bb.terminator)
-                body.append(lir_term)
+                # 检查是否需要边缘块：
+                # 如果有多个后继（条件分支）且任一后继有 Phi 节点，则需要边缘块
+                needs_edge_blocks = len(succ_blocks) > 1 and any(
+                    s in phi_info for s in succ_blocks
+                )
 
-        lir_fn.body = body
+                if needs_edge_blocks:
+                    # 条件分支 + 后继有 Phi：创建边缘块
+                    # 将原终结指令改为跳转到边缘块
+                    # 边缘块中执行 Phi 拷贝，然后跳转到真正的目标
+
+                    if isinstance(bb.terminator, MIRBranch):
+                        true_target = bb.terminator.true_target
+                        false_target = bb.terminator.false_target
+
+                        # 创建 true 分支边缘块
+                        true_edge_label = f"_edge_true_{edge_block_counter}"
+                        edge_block_counter += 1
+                        # 创建 false 分支边缘块
+                        false_edge_label = f"_edge_false_{edge_block_counter}"
+                        edge_block_counter += 1
+
+                        # 修改条件分支：跳转到边缘块
+                        lir_branch = LIRBranch()
+                        lir_branch.true_target = true_edge_label
+                        lir_branch.false_target = false_edge_label
+                        if bb.terminator.condition:
+                            lir_branch.src_locs = [
+                                (
+                                    self.ssa_to_loc.get(bb.terminator.condition, ""),
+                                    BOOL_TYPE,
+                                )
+                            ]
+                        final_body.append(lir_branch)
+
+                        # 生成 true 边缘块（Phi 拷贝 + 跳转到真正目标）
+                        final_body.append(LIRLabel(name=true_edge_label))
+                        self._insert_phi_copies(
+                            final_body, bb.label, true_target, phi_info
+                        )
+                        final_body.append(LIRJump(target=true_target))
+
+                        # 生成 false 边缘块（Phi 拷贝 + 跳转到真正目标）
+                        final_body.append(LIRLabel(name=false_edge_label))
+                        self._insert_phi_copies(
+                            final_body, bb.label, false_target, phi_info
+                        )
+                        final_body.append(LIRJump(target=false_target))
+
+                    elif isinstance(bb.terminator, (MIRSwitch, MIRMatchJump)):
+                        # switch 也有多后继，处理方式类似
+                        # 对于 switch，每个 case 和 default 都可能需要边缘块
+                        targets = self._get_successor_blocks(bb.terminator)
+                        edge_labels = {}
+                        for tgt in targets:
+                            edge_label = f"_edge_switch_{edge_block_counter}"
+                            edge_block_counter += 1
+                            edge_labels[tgt] = edge_label
+
+                        # 生成修改目标后的终结指令
+                        lir_term = self._lower_terminator_with_targets(
+                            bb.terminator, edge_labels
+                        )
+                        final_body.append(lir_term)
+
+                        # 生成每个边缘块
+                        for tgt in targets:
+                            final_body.append(LIRLabel(name=edge_labels[tgt]))
+                            self._insert_phi_copies(
+                                final_body, bb.label, tgt, phi_info
+                            )
+                            final_body.append(LIRJump(target=tgt))
+                    else:
+                        # 其他多后继情况，降级处理
+                        lir_term = self._lower_terminator(bb.terminator)
+                        final_body.append(lir_term)
+                else:
+                    # 单后继或后继无 Phi：直接在前驱块末尾插入 Phi 拷贝
+                    for succ_label in succ_blocks:
+                        if succ_label in phi_info:
+                            self._insert_phi_copies(
+                                final_body, bb.label, succ_label, phi_info
+                            )
+                    # 添加终结指令
+                    lir_term = self._lower_terminator(bb.terminator)
+                    final_body.append(lir_term)
+            # 无终结指令的块（理论上不应该有）
+
+        lir_fn.body = final_body
         lir_fn.reg_alloc = dict(self.ssa_to_loc)
         lir_fn.stack_size = self.loc_counter * 8
 
         return lir_fn
+
+    def _insert_phi_copies(self, body, pred_label, succ_label, phi_info):
+        """在 body 末尾插入从前驱 pred_label 到后继 succ_label 的所有 Phi 拷贝指令。"""
+        if succ_label not in phi_info:
+            return
+        for phi_result_name, phi_result_type, sources in phi_info[succ_label]:
+            # 找到从前驱块来的 source
+            src_ssa = None
+            for src_pred_label, ssa_name in sources:
+                if src_pred_label == pred_label:
+                    src_ssa = ssa_name
+                    break
+            if src_ssa and src_ssa in self.ssa_to_loc:
+                src_loc = self.ssa_to_loc[src_ssa]
+                dst_loc = self.ssa_to_loc[phi_result_name]
+                # 生成 LIRLoadReg 实现寄存器到寄存器的拷贝
+                copy_instr = LIRLoadReg()
+                copy_instr.src_locs = [(src_loc, phi_result_type)]
+                copy_instr.dst_loc = (dst_loc, phi_result_type)
+                body.append(copy_instr)
+
+    def _lower_terminator_with_targets(self, term, target_map):
+        """降低终结指令，但将目标标签替换为 target_map 中的映射（用于边缘块）。"""
+        if isinstance(term, MIRSwitch):
+            lir = LIRSwitch()
+            lir.default_target = target_map.get(term.default_target, term.default_target)
+            if term.value:
+                lir.src_locs = [(self.ssa_to_loc.get(term.value, ""), INT_TYPE)]
+            lir.cases = [(val, target_map.get(tgt, tgt)) for val, tgt in term.cases]
+            return lir
+        elif isinstance(term, MIRMatchJump):
+            lir = LIRSwitch()
+            lir.default_target = target_map.get(term.default_target, term.default_target)
+            if term.value:
+                val_type = self.ssa_types.get(term.value, UNIT_TYPE)
+                lir.src_locs = [(self.ssa_to_loc.get(term.value, ""), val_type)]
+            lir.cases = [
+                (variant_name, target_map.get(tgt, tgt))
+                for variant_name, _fields, tgt in term.variant_tests
+            ]
+            return lir
+        return self._lower_terminator(term)
 
     def _get_successor_blocks(self, terminator):
         """获取终结指令跳转到的后继块标签列表"""

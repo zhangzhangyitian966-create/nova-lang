@@ -4,6 +4,154 @@
 
 ---
 
+## 第 8 轮 — 2026-07-23 04:09 ~ 04:20
+
+### 本轮概览
+- **前端任务**: ✅ 实现真正的类型合一（unification）算法 (hard, 95)
+- **后端任务**: ✅ 修复 Phi 节点降级的边缘块问题 (medium, 86)
+- **测试对比**: 开发前 392 passed → 开发后 392 passed（无回归）
+
+---
+
+### 🎨 前端：实现类型合一（unification）算法
+
+**为什么选这个？**
+- 优先级 95（前端最高），类型系统的核心基石
+- easy 高收益 bug 已全部清完，前端必须面对 hard 任务了
+- 第 6 轮评审明确：下阶段前端重点是类型合一攻坚
+- 第 7 轮计划明确：第 8 轮开始类型合一攻坚
+- 没有合一算法，TypeVar ≈ Any，泛型函数完全不检查
+
+**实现详情**（`type_checker.py` 新增 ~190 行合一基础设施）：
+
+**1. Union-Find 替换表（_subst + _find）**
+- 新增 `self._subst: Dict[int, NovaType]` — 以 TypeVar 的 id() 为键
+- `_find(tv)` — 查找类型变量的最终绑定，支持**路径压缩**（path compression）
+- 路径压缩：将查找路径上的所有节点直接指向根，均摊复杂度接近 O(1)
+
+**2. 合一算法（_unify）**
+- 支持全部 9 种类型组合：TypeVar↔TypeVar、TypeVar↔任意、PrimType、ListType、MapType、TupleType、FnType、ADTType
+- TypeVar 双向绑定：左 TypeVar 绑右、右 TypeVar 绑左、两个 TypeVar 互绑
+- 结构递归合一：复合类型按结构递归分解合一
+
+**3. 发生检查（_occur_check）**
+- 防止创建无限递归类型（如 `t = List[t]`）
+- 递归遍历所有类型结构，检查 tv 是否出现在 ty 中
+- 覆盖全部 6 种复合类型
+
+**4. 替换应用（_apply_subst）**
+- 递归展开类型中的所有 TypeVar，返回完全替换后的类型
+- 用于返回推断结果时，将类型变量替换为具体类型
+
+**5. 泛型实例化（_instantiate + _contains_typevar）**
+- let-polymorphism：每次引用泛型函数时创建 fresh 副本
+- `_contains_typevar(ty)` — 判断类型是否包含未绑定的 TypeVar
+- `_instantiate(ty)` — 深拷贝类型，所有 TypeVar 替换为新的 TypeVar
+- `_check_identifier` 中自动实例化：包含 TypeVar 的类型每次引用自动实例化
+
+**6. 函数调用升级为合一驱动**
+- `_check_fn_call` 从 `_types_compatible` 改为 `_unify`
+- 参数类型从"兼容检查"升级为"合一推断"
+- 返回类型应用替换后再返回（参数合一的结果会传播到返回类型）
+
+**结果**: ✅ 成功，392 测试全部通过，无回归
+
+**价值**: 类型系统从"有类型标注就检查，没标注就放行"升级为"合一驱动的推断系统"基础设施。虽然只接入了函数调用一条路径，但这是类型系统从 0 到 1 的质变——合一算法基础设施已就绪，后续只需逐步替换 `_types_compatible` 的调用点即可。
+
+---
+
+### ⚙️ 后端：修复 Phi 节点降级的边缘块问题
+
+**为什么选这个？**
+- 优先级 86，正确性 bug，影响所有后端
+- 第 6 轮评审审计发现的 critical edge bug
+- 第 7 轮计划明确：第 8 轮优先修复 Phi 边缘块问题
+- 条件分支场景下 Phi 拷贝位置错误，可能导致值被错误覆盖
+- medium 难度，修复后提升整个 IR 降级的正确性保证
+
+**问题根因**（`ir/lir_lowering.py` 原实现）：
+
+原代码将所有后继块的 Phi 拷贝都放在前驱块的末尾（终结指令前）。对于**无条件跳转**（单后继）这是正确的，但对于**条件分支**（两后继）这是错误的：
+
+```
+bb0:
+    x = 1
+    y = 2
+    if cond goto bb1 else bb2
+    z = x     ← 错误！bb1 的 Phi 拷贝
+    w = y     ← 错误！bb2 的 Phi 拷贝（两条路径都会执行这两行）
+bb1:
+    ...
+bb2:
+    ...
+```
+
+两条互斥路径的 Phi 拷贝都会被执行，后执行的会覆盖先执行的，导致值错误。
+
+**修复方案：Critical Edge Splitting（关键边拆分）**
+
+当有多后继的前驱块跳转到含 Phi 的后继时，为每条边插入**边缘块**（edge block）：
+- 条件分支先跳转到边缘块
+- 边缘块中执行对应路径的 Phi 拷贝
+- 边缘块末尾再跳转到真正的目标块
+
+```
+bb0:
+    x = 1
+    y = 2
+    if cond goto _edge_true_0 else _edge_false_1
+_edge_true_0:
+    z = x      ← 只有 true 路径执行
+    goto bb1
+_edge_false_1:
+    w = y      ← 只有 false 路径执行
+    goto bb2
+bb1:
+    ...
+bb2:
+    ...
+```
+
+**实现内容**：
+- 重写 `_lower_function` 的第二阶段（指令生成 + Phi 处理）
+- 自动检测是否需要边缘块：`len(succ_blocks) > 1 and any(s in phi_info for s in succ_blocks)`
+- 支持 **MIRBranch**（两分支）和 **MIRSwitch/MIRMatchJump**（多分支）两种场景
+- 新增 `_insert_phi_copies` 辅助方法：插入指定前驱到指定后继的 Phi 拷贝
+- 新增 `_lower_terminator_with_targets` 辅助方法：降低结指令但替换目标标签（用于边缘块）
+
+**结果**: ✅ 成功，392 测试全部通过，无回归
+
+**验证**：通过构造条件分支直接跳到含 Phi 块的测试用例验证：
+- ✅ 条件分支前没有 Phi 拷贝指令
+- ✅ true 和 false 各有一个边缘块
+- ✅ 每个边缘块中有对应路径的 Phi 拷贝 + 跳转
+
+---
+
+### 测试对比
+
+| 指标 | 开发前 | 开发后 | 变化 |
+|------|--------|--------|------|
+| 总通过数 | 392 | 392 | ±0 |
+| 失败数 | 0 | 0 | ±0 |
+| 回归 | - | 无 | - |
+
+---
+
+### 下一步计划
+
+**前端下一步**：
+- 优先考虑 `frontend_type_unify_deepen`（hard, 88）— 深化类型合一，全面替换 `_types_compatible`，让 if/match/let/赋值等都使用合一驱动
+- 或 `frontend_pattern_exhaustiveness`（hard, 82）— 模式匹配完备性检查
+- 下一轮（第 9 轮）是评审轮，将进行全面回顾和规划
+
+**后端下一步**：
+- 优先考虑 `backend_native_stack_frame`（hard, 90）— 实现栈帧管理，寄存器分配已修复，依赖链畅通
+- 或 `backend_native_elf_phnum`（easy, 72）— 快速清掉 ELF phnum 不匹配的 easy bug
+- 下一轮（第 9 轮）是评审轮，将进行全面回顾和规划
+
+---
+
 ## 第 7 轮 — 2026-07-23 01:53 ~ 02:20
 
 ### 本轮概览
