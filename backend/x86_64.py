@@ -287,6 +287,40 @@ class X86_64Emitter:
         # 记录需要回填的位置
         return self.current_offset() - 4
 
+    def movsd_reg_mem(self, reg, base, offset):
+        """movsd reg, [base + offset]  （从内存加载双精度浮点数到 XMM 寄存器）"""
+        self.emit_byte(0xF2)
+        # REX 前缀：需要 base >= 8 或 reg >= 8 时扩展
+        rex_r = (reg >> 3) & 1
+        rex_b = (base >> 3) & 1
+        if rex_r or rex_b:
+            self._rex(0, rex_r, 0, rex_b)
+        self.emit_byte(0x0F)
+        self.emit_byte(0x10)  # movsd xmm, [mem]  opcode
+        if -128 <= offset <= 127:
+            self.emit_byte(self._modrm(0b01, reg & 7, base & 7))
+            self.emit_int8(offset)
+        else:
+            self.emit_byte(self._modrm(0b10, reg & 7, base & 7))
+            self.emit_int32(offset)
+
+    def movsd_mem_reg(self, base, offset, reg):
+        """movsd [base + offset], reg  （将 XMM 寄存器中的双精度浮点数存储到内存）"""
+        self.emit_byte(0xF2)
+        # REX 前缀
+        rex_r = (reg >> 3) & 1
+        rex_b = (base >> 3) & 1
+        if rex_r or rex_b:
+            self._rex(0, rex_r, 0, rex_b)
+        self.emit_byte(0x0F)
+        self.emit_byte(0x11)  # movsd [mem], xmm  opcode
+        if -128 <= offset <= 127:
+            self.emit_byte(self._modrm(0b01, reg & 7, base & 7))
+            self.emit_int8(offset)
+        else:
+            self.emit_byte(self._modrm(0b10, reg & 7, base & 7))
+            self.emit_int32(offset)
+
     def addsd_reg_reg(self, dst, src):
         """addsd dst, src"""
         self.emit_byte(0xF2)

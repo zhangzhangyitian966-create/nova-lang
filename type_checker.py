@@ -1068,11 +1068,11 @@ class TypeChecker:
             return self._types_compatible(a.key_type, b.key_type) and self._types_compatible(a.value_type, b.value_type)
         # 递归检查 TupleType
         if isinstance(a, TupleType) and isinstance(b, TupleType):
-            if len(a.element_types) != len(b.element_types):
+            if len(a.elements) != len(b.elements):
                 return False
             return all(
                 self._types_compatible(e1, e2)
-                for e1, e2 in zip(a.element_types, b.element_types)
+                for e1, e2 in zip(a.elements, b.elements)
             )
         # 递归检查 ADTType
         if isinstance(a, ADTType) and isinstance(b, ADTType):

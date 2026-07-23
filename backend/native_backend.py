@@ -197,8 +197,9 @@ class NativeCodeGen:
                 dst_name, dst_type = instr.dst_loc
                 is_float = dst_type.kind == IRType.FLOAT
                 _note_vreg(dst_name, is_float, idx)
-            # LIRLoadConst 特殊处理：值本身是一个隐式 vreg
-            if isinstance(instr, LIRLoadConst):
+            # LIRLoadConst 无 dst_loc 时的兼容处理：用常量值作为临时 vname
+            # （正常 lir_lowering 流程会设置 dst_loc，此分支仅兼容手工构建的 LIR）
+            elif isinstance(instr, LIRLoadConst):
                 is_float = instr.const_type == "float"
                 vname = f"const_{instr.value}" if not is_float else f"fconst_{instr.value}"
                 _note_vreg(vname, is_float, idx)
@@ -312,8 +313,11 @@ class NativeCodeGen:
             """获取虚拟寄存器的物理位置：("reg", phys_reg) 或 ("stack", offset)"""
             if vreg_name in vreg_alloc:
                 return vreg_alloc[vreg_name]
-            # 未在分配表中（可能是特殊寄存器或外部引用），尝试旧的 vreg 机制
-            return ("reg", RAX)  # fallback
+            # 未在分配表中 - 抛出异常而不是静默 fallback，防止难以调试的错误
+            raise ValueError(
+                f"寄存器分配错误：虚拟寄存器 '{vreg_name}' 未找到分配记录。"
+                f"已分配的 vreg: {list(vreg_alloc.keys())[:10]}..."
+            )
 
         def load_to_reg(vreg_name, target_reg, is_float=False):
             """将 vreg 的值加载到目标物理寄存器"""
@@ -329,9 +333,7 @@ class NativeCodeGen:
                 offset = loc[1]
                 if is_float:
                     # movsd xmm, [rsp + offset]
-                    e.movsd_reg_imm(target_reg, 0)  # 简化：暂时用 RIP-relative 方式占位
-                    # 注意：栈相对寻址需要更复杂的 SIB 编码，这里先预留位置
-                    # 实际实现应使用 movsd xmm, [rsp + offset]
+                    e.movsd_reg_mem(target_reg, RSP, offset)
                 else:
                     e.mov_reg_mem(target_reg, RSP, offset)
 
@@ -349,7 +351,7 @@ class NativeCodeGen:
                 offset = loc[1]
                 if is_float:
                     # movsd [rsp + offset], xmm
-                    pass  # 待实现
+                    e.movsd_mem_reg(RSP, offset, source_reg)
                 else:
                     e.mov_mem_reg(RSP, offset, source_reg)
 
@@ -364,14 +366,13 @@ class NativeCodeGen:
         # ====== 第一阶段：发射指令并记录标签和跳转 ======
         for idx, instr in enumerate(func.body):
             if isinstance(instr, LIRLoadConst):
-                # 确定目标位置
                 is_float = instr.const_type == "float"
-                if is_float:
-                    vname = f"fconst_{instr.value}"
+                # 优先使用 dst_loc（正常流程），无 dst_loc 时用常量值命名（兼容旧测试）
+                if instr.dst_loc:
+                    dst_name, _ = instr.dst_loc
                 else:
-                    vname = f"const_{instr.value}"
-
-                dst_loc = get_loc(vname)
+                    dst_name = f"fconst_{instr.value}" if is_float else f"const_{instr.value}"
+                dst_loc = get_loc(dst_name)
 
                 if instr.const_type == "int":
                     if dst_loc[0] == "reg":
@@ -384,8 +385,9 @@ class NativeCodeGen:
                     if dst_loc[0] == "reg":
                         fixup_offset = e.movsd_reg_imm(dst_loc[1], 0)
                     else:
-                        # 先加载到 XMM0 再存栈（简化：暂直接用 XMM0）
+                        # 先加载到 XMM0 再存栈
                         fixup_offset = e.movsd_reg_imm(XMM0, 0)
+                        e.movsd_mem_reg(RSP, dst_loc[1], XMM0)
                     data_off = self._float_const_map.get(str(instr.value))
                     if data_off is not None:
                         self.data_fixups.append(

@@ -1,7 +1,7 @@
 {
-  "cycles": 6,
-  "frontend_completed": 4,
-  "backend_completed": 4,
+  "cycles": 7,
+  "frontend_completed": 5,
+  "backend_completed": 5,
   "last_review_cycle": 6,
   "current_review_cycle": 9,
   "completed_tasks": [
@@ -12,7 +12,9 @@
     "frontend_adt_type_param_eq",
     "backend_native_elf_entry_fix",
     "frontend_eq_op_typecheck",
-    "backend_native_reg_alloc"
+    "backend_native_reg_alloc",
+    "frontend_tuple_compat_bug",
+    "backend_native_regalloc_fix"
   ],
   "failed_tasks": [],
   "deprecated_tasks": [
@@ -20,81 +22,37 @@
   ],
   "task_history": [
     {
-      "cycle": 1,
-      "task_id": "frontend_try_expr_typecheck",
-      "name": "完善 ? 操作符类型检查",
-      "track": "frontend",
-      "difficulty": "medium",
-      "priority": 78,
-      "result": "success",
-      "details": "修复 _check_try_expr 从占位实现升级为真正的类型检查：验证表达式为 Option/Result ADT 类型，提取内部值类型返回；非 Option/Result 类型使用 ? 报类型错误。TypeVar 暂时放行以保持兼容。",
-      "timestamp": "2026-07-22 08:15"
-    },
-    {
-      "cycle": 1,
-      "task_id": "backend_native_label_patch",
-      "name": "实现原生后端两阶段汇编与标签回填",
-      "track": "backend",
-      "difficulty": "medium",
-      "priority": 92,
-      "result": "success",
-      "details": "在 _compile_body 中实现两阶段汇编：第一阶段发射指令并记录 label_offsets 和 jump_fixups；第二阶段遍历 jump_fixups 调用 emitter.patch_rel32 回填所有 jmp/jcc 的 rel32 偏移量。",
-      "timestamp": "2026-07-22 08:16"
-    },
-    {
-      "cycle": 2,
-      "task_id": "frontend_field_access_error",
-      "name": "修复字段访问异常静默吞噬",
+      "cycle": 7,
+      "task_id": "frontend_tuple_compat_bug",
+      "name": "修复 TupleType 兼容检查属性名 bug",
       "track": "frontend",
       "difficulty": "easy",
-      "priority": 65,
+      "priority": 85,
       "result": "success",
-      "details": "重写 _check_field_access：消除 ValueError 静默 pass，区分三种错误并给出精确提示——无效索引格式（非数字）、索引越界（含元组长度信息）、ADT 类型需用模式匹配、其他类型不支持字段访问。每条错误均附修复提示。",
-      "timestamp": "2026-07-22 10:06"
+      "details": "修复 _types_compatible 中 TupleType 分支使用 a.element_types / b.element_types 的属性名错误——TupleType 的实际属性名是 elements（而非 element_types）。此 bug 会导致元组类型递归兼容检查抛出 AttributeError。修复仅需 2 行改动，测试全部通过。",
+      "timestamp": "2026-07-23 02:05"
     },
     {
-      "cycle": 2,
-      "task_id": "backend_native_float_const",
-      "name": "实现原生后端浮点/字符串常量加载",
+      "cycle": 7,
+      "task_id": "backend_native_regalloc_fix",
+      "name": "修复原生后端寄存器分配设计缺陷",
       "track": "backend",
-      "difficulty": "medium",
-      "priority": 75,
+      "difficulty": "hard",
+      "priority": 98,
       "result": "success",
-      "details": "实现 LIRLoadConst 的 float 和 string 分支：浮点用 movsd [rip+offset] 加载到 XMM 寄存器，字符串用 lea reg, [rip+offset] 加载地址。新增 data_fixups 列表记录数据引用，在 _generate_elf 阶段计算数据段虚拟地址并回填所有 RIP-relative 偏移。常量收集增加去重逻辑（相同值只存一份）。",
-      "timestamp": "2026-07-22 10:12"
+      "details": "修复寄存器分配器的三个设计级严重 bug：(1) LIRLoadConst vname 命名错误——改用 dst_loc[0] 而非 const_* 常量值命名，使分配结果与使用位置匹配；(2) 浮点栈加载/存储未实现——在 x86_64.py 新增 movsd_reg_mem 和 movsd_mem_reg 方法，load_to_reg/store_from_reg 的浮点栈分支用真正的 movsd [rsp+offset] 指令；(3) get_loc 静默 fallback 到 RAX——改为抛出 ValueError 异常，防止难以调试的静默数据损坏。同时修复 float 常量栈存储时只加载不存栈的遗漏 bug。",
+      "timestamp": "2026-07-23 02:12"
     },
     {
-      "cycle": 3,
-      "task_id": "review_cycle_3",
-      "name": "第 3 轮 - 双线路线图评审",
+      "cycle": 6,
+      "task_id": "review_cycle_6",
+      "name": "第 6 轮 - 双线路线图评审",
       "track": "review",
       "difficulty": "review",
       "priority": 0,
       "result": "success",
-      "details": "首次三轮回顾评审。发现原生后端未接入编译管道（P0 bug）、ADT 类型参数相等 bug、==/!= 类型检查缺失等问题。任务池从 15 个扩充到 18 个，后端优先级大幅调整。下阶段重点：后端攻坚（让原生后端真正工作）+ 前端类型安全修复。",
-      "timestamp": "2026-07-22 13:00"
-    },
-    {
-      "cycle": 4,
-      "task_id": "frontend_adt_type_param_eq",
-      "name": "修复 ADT 类型参数相等性比较",
-      "track": "frontend",
-      "difficulty": "easy",
-      "priority": 80,
-      "result": "success",
-      "details": "修复 ADTType.__eq__ 只比较 name 不比较 type_params 的严重 bug：增加 type_params 长度检查和逐元素递归比较；同步修复 __hash__ 包含 type_params。同时补充 _types_compatible 中缺失的 MapType、TupleType、ADTType 递归兼容检查，与 ListType/FnType 保持一致。",
-      "timestamp": "2026-07-22 16:07"
-    },
-    {
-      "cycle": 4,
-      "task_id": "backend_native_elf_entry_fix",
-      "name": "修复原生后端 ELF 入口地址并接入编译管道",
-      "track": "backend",
-      "difficulty": "medium",
-      "priority": 96,
-      "result": "success",
-      "details": "完成三项 P0 修复：(1) 修复 ELF e_entry 从文件偏移 0 改为虚拟地址 0x400000 + start_offset；(2) 实现 link_calls 回填机制——修改 link_calls 数据结构增加调用者函数名，在 _generate_elf 中参照 data_fixups 模式回填所有 call rel32 偏移；(3) 将 BACKEND_NATIVE 从 CraneliftBackend 切换为 NativeCodeGen，原生后端正式接入编译管道。",
-      "timestamp": "2026-07-22 16:10"
+      "details": "第二次三轮回顾评审（第 4-6 轮）。深度代码审计发现多个关键问题：前端 TupleType 属性名 bug、类型合一仍缺失；后端原生寄存器分配有设计级缺陷（vname 命名错误、浮点栈操作为占位）、ELF phnum 不匹配、Phi 降级 critical edge bug、WasmGC 名不副实。任务池新增 3 个 bug 修复任务，原生后端优先级重新排序。下阶段重点：修复原生后端寄存器分配（最优先）+ 前端类型合一攻坚。",
+      "timestamp": "2026-07-22 22:10"
     },
     {
       "cycle": 5,
@@ -119,15 +77,81 @@
       "timestamp": "2026-07-22 19:12"
     },
     {
-      "cycle": 6,
-      "task_id": "review_cycle_6",
-      "name": "第 6 轮 - 双线路线图评审",
+      "cycle": 4,
+      "task_id": "frontend_adt_type_param_eq",
+      "name": "修复 ADT 类型参数相等性比较",
+      "track": "frontend",
+      "difficulty": "easy",
+      "priority": 80,
+      "result": "success",
+      "details": "修复 ADTType.__eq__ 只比较 name 不比较 type_params 的严重 bug：增加 type_params 长度检查和逐元素递归比较；同步修复 __hash__ 包含 type_params。同时补充 _types_compatible 中缺失的 MapType、TupleType、ADTType 递归兼容检查，与 ListType/FnType 保持一致。",
+      "timestamp": "2026-07-22 16:07"
+    },
+    {
+      "cycle": 4,
+      "task_id": "backend_native_elf_entry_fix",
+      "name": "修复原生后端 ELF 入口地址并接入编译管道",
+      "track": "backend",
+      "difficulty": "medium",
+      "priority": 96,
+      "result": "success",
+      "details": "完成三项 P0 修复：(1) 修复 ELF e_entry 从文件偏移 0 改为虚拟地址 0x400000 + start_offset；(2) 实现 link_calls 回填机制——修改 link_calls 数据结构增加调用者函数名，在 _generate_elf 中参照 data_fixups 模式回填所有 call rel32 偏移；(3) 将 BACKEND_NATIVE 从 CraneliftBackend 切换为 NativeCodeGen，原生后端正式接入编译管道。",
+      "timestamp": "2026-07-22 16:10"
+    },
+    {
+      "cycle": 3,
+      "task_id": "review_cycle_3",
+      "name": "第 3 轮 - 双线路线图评审",
       "track": "review",
       "difficulty": "review",
       "priority": 0,
       "result": "success",
-      "details": "第二次三轮回顾评审（第 4-6 轮）。深度代码审计发现多个关键问题：前端 TupleType 属性名 bug、类型合一仍缺失；后端原生寄存器分配有设计级缺陷（vname 命名错误、浮点栈操作为占位）、ELF phnum 不匹配、Phi 降级 critical edge bug、WasmGC 名不副实。任务池新增 3 个 bug 修复任务，原生后端优先级重新排序。下阶段重点：修复原生后端寄存器分配（最优先）+ 前端类型合一攻坚。",
-      "timestamp": "2026-07-22 22:10"
+      "details": "首次三轮回顾评审。发现原生后端未接入编译管道（P0 bug）、ADT 类型参数相等 bug、==/!= 类型检查缺失等问题。任务池从 15 个扩充到 18 个，后端优先级大幅调整。下阶段重点：后端攻坚（让原生后端真正工作）+ 前端类型安全修复。",
+      "timestamp": "2026-07-22 13:00"
+    },
+    {
+      "cycle": 2,
+      "task_id": "frontend_field_access_error",
+      "name": "修复字段访问异常静默吞噬",
+      "track": "frontend",
+      "difficulty": "easy",
+      "priority": 65,
+      "result": "success",
+      "details": "重写 _check_field_access：消除 ValueError 静默 pass，区分三种错误并给出精确提示——无效索引格式（非数字）、索引越界（含元组长度信息）、ADT 类型需用模式匹配、其他类型不支持字段访问。每条错误均附修复提示。",
+      "timestamp": "2026-07-22 10:06"
+    },
+    {
+      "cycle": 2,
+      "task_id": "backend_native_float_const",
+      "name": "实现原生后端浮点/字符串常量加载",
+      "track": "backend",
+      "difficulty": "medium",
+      "priority": 75,
+      "result": "success",
+      "details": "实现 LIRLoadConst 的 float 和 string 分支：浮点用 movsd [rip+offset] 加载到 XMM 寄存器，字符串用 lea reg, [rip+offset] 加载地址。新增 data_fixups 列表记录数据引用，在 _generate_elf 阶段计算数据段虚拟地址并回填所有 RIP-relative 偏移。常量收集增加去重逻辑（相同值只存一份）。",
+      "timestamp": "2026-07-22 10:12"
+    },
+    {
+      "cycle": 1,
+      "task_id": "frontend_try_expr_typecheck",
+      "name": "完善 ? 操作符类型检查",
+      "track": "frontend",
+      "difficulty": "medium",
+      "priority": 78,
+      "result": "success",
+      "details": "修复 _check_try_expr 从占位实现升级为真正的类型检查：验证表达式为 Option/Result ADT 类型，提取内部值类型返回；非 Option/Result 类型使用 ? 报类型错误。TypeVar 暂时放行以保持兼容。",
+      "timestamp": "2026-07-22 08:15"
+    },
+    {
+      "cycle": 1,
+      "task_id": "backend_native_label_patch",
+      "name": "实现原生后端两阶段汇编与标签回填",
+      "track": "backend",
+      "difficulty": "medium",
+      "priority": 92,
+      "result": "success",
+      "details": "在 _compile_body 中实现两阶段汇编：第一阶段发射指令并记录 label_offsets 和 jump_fixups；第二阶段遍历 jump_fixups 调用 emitter.patch_rel32 回填所有 jmp/jcc 的 rel32 偏移量。",
+      "timestamp": "2026-07-22 08:16"
     }
   ],
   "tasks": [
@@ -156,18 +180,6 @@
       "depends_on": []
     },
     {
-      "task_id": "frontend_tuple_compat_bug",
-      "name": "修复 TupleType 兼容检查属性名 bug",
-      "description": "修复 _types_compatible 中 TupleType 分支使用 a.element_types / b.element_types 的属性名错误——TupleType 的实际属性名是 elements（而非 element_types）。此 bug 会导致元组类型递归兼容检查抛出 AttributeError。",
-      "track": "frontend",
-      "difficulty": "easy",
-      "priority": 85,
-      "estimated_effort": "30分钟",
-      "status": "pending",
-      "source": "review_6",
-      "depends_on": []
-    },
-    {
       "task_id": "frontend_parser_error_recovery",
       "name": "增强解析器错误恢复能力",
       "description": "为 parser 添加错误恢复：语法错误时尝试同步到下一个语句边界（换行/分号/右花括号），报告多个错误而不是第一个就停。",
@@ -190,20 +202,6 @@
       "status": "pending",
       "source": "review_3",
       "depends_on": []
-    },
-    {
-      "task_id": "backend_native_regalloc_fix",
-      "name": "修复原生后端寄存器分配设计缺陷",
-      "description": "修复第 5 轮实现的寄存器分配器的多个设计级 bug：(1) LIRLoadConst 的 vname 用常量值命名（如 const_42），应该用 dst_loc 的位置名，导致分配结果与使用位置不匹配；(2) 浮点栈加载/存储是空实现（pass 占位），浮点溢出会生成错误代码；(3) get_loc fallback 到 RAX 会导致静默数据损坏。这是当前原生后端最严重的正确性 bug。",
-      "track": "backend",
-      "difficulty": "hard",
-      "priority": 98,
-      "estimated_effort": "2-3天",
-      "status": "pending",
-      "source": "review_6",
-      "depends_on": [
-        "backend_native_reg_alloc"
-      ]
     },
     {
       "task_id": "backend_native_stack_frame",

@@ -4,6 +4,103 @@
 
 ---
 
+## 第 7 轮 — 2026-07-23 01:53 ~ 02:20
+
+### 本轮概览
+- **前端任务**: ✅ 修复 TupleType 兼容检查属性名 bug (easy, 85)
+- **后端任务**: ✅ 修复原生后端寄存器分配设计缺陷 (hard, 98)
+- **测试对比**: 开发前 392 passed → 开发后 392 passed（无回归）
+
+---
+
+### 🎨 前端：修复 TupleType 兼容检查属性名 bug
+
+**为什么选这个？**
+- easy 难度，低风险高收益的正确性修复
+- 第 6 轮评审中审计发现的 AttributeError bug
+- `_types_compatible` 中 TupleType 分支用了 `element_types` 属性名，但 TupleType 的实际属性是 `elements`
+- 触发时会直接崩溃，影响所有元组类型兼容性检查场景
+- 第 6 轮评审计划明确：第 7 轮先清掉这个 easy bug
+
+**实现详情**（`type_checker.py` 第 1069-1076 行）：
+
+**修复内容**：2 行代码改动
+- 第 1071 行：`len(a.element_types)` → `len(a.elements)`
+- 第 1075 行：`zip(a.element_types, b.element_types)` → `zip(a.elements, b.elements)`
+
+**影响范围**：
+- 修复前：任何触发 TupleType 兼容检查的代码都会抛 AttributeError 崩溃
+- 修复后：元组类型递归兼容检查正常工作（长度检查 + 逐元素递归）
+- 同步验证：其他类型（ListType/MapType/FnType/ADTType）的属性访问均正确
+
+**结果**: ✅ 成功，测试全部通过
+
+---
+
+### ⚙️ 后端：修复原生后端寄存器分配设计缺陷
+
+**为什么选这个？**
+- 优先级 98（所有任务中最高），P0 级正确性 bug
+- 第 6 轮评审深度审计发现的设计级缺陷——寄存器分配器"看起来工作了"但实际上核心机制是错的
+- 第 5 轮刚实现了寄存器分配，但审计发现 3 个严重设计 bug
+- 是后续栈帧管理、调用约定、指令选择等所有原生后端任务的前置依赖
+- 第 6 轮评审计划明确：第 7 轮最优先修复此问题
+
+**实现详情**：
+
+**Bug 1: LIRLoadConst vname 命名错误（最严重）**
+- 位置：`native_backend.py` 活跃区间收集 + 代码发射阶段
+- 问题：用 `const_42`/`fconst_3.14` 等常量值命名 vreg，而不是用 `dst_loc[0]`（如 `r0`）
+- 后果：分配结果绑定到 `const_42`，但后续指令引用 `r0`，导致 `get_loc("r0")` 找不到，fallback 到 RAX
+- 修复：删除活跃区间收集中的 LIRLoadConst 特殊处理（dst_loc 已在通用路径中处理），代码发射阶段改用 `instr.dst_loc[0]`
+- 兼容处理：手工构建的 LIR（无 dst_loc）仍用常量值命名，保持向后兼容
+
+**Bug 2: 浮点栈加载/存储未实现**
+- 位置：`load_to_reg` / `store_from_reg` 的浮点栈分支
+- 问题：加载用错了 `movsd_reg_imm`（RIP-relative）而非栈相对寻址；存储直接是 `pass` 空实现
+- 后果：浮点寄存器溢出到栈后，值既读不出来也写不进去，浮点运算全部错误
+- 修复：
+  - `x86_64.py` 新增 `movsd_reg_mem(reg, base, offset)` — `movsd xmm, [base+offset]`
+  - `x86_64.py` 新增 `movsd_mem_reg(base, offset, reg)` — `movsd [base+offset], xmm`
+  - `load_to_reg` 浮点栈分支改用 `e.movsd_reg_mem(target_reg, RSP, offset)`
+  - `store_from_reg` 浮点栈分支改用 `e.movsd_mem_reg(RSP, offset, source_reg)`
+  - 同时修复 LIRLoadConst float 栈情况：只加载不存栈的遗漏 bug
+
+**Bug 3: get_loc 静默 fallback 到 RAX**
+- 位置：`get_loc` 函数
+- 问题：vreg 不在分配表中时静默返回 `("reg", RAX)`，掩盖了 Bug 1，也导致任何分配错误都变成难以调试的"结果不对"
+- 修复：改为抛出 `ValueError` 异常，附带已分配 vreg 列表的前 10 个，便于快速定位
+
+**额外修复**: LIRLoadConst float 栈路径只加载到 XMM0 但不存储到栈位置的遗漏 bug
+
+**结果**: ✅ 成功，392 测试全部通过，无回归
+
+---
+
+### 测试对比
+
+| 指标 | 开发前 | 开发后 | 变化 |
+|------|--------|--------|------|
+| 总通过数 | 392 | 392 | ±0 |
+| 失败数 | 0 | 0 | ±0 |
+| 回归 | - | 无 | - |
+
+---
+
+### 下一步计划
+
+**前端下一步**：
+- 优先考虑 `frontend_type_unification`（hard, 95）— 攻坚类型合一算法，easy 任务已全部清完，这是前端最后的核心硬骨头
+- 或 `frontend_pattern_exhaustiveness`（hard, 82）— 模式匹配完备性检查，安全性高价值功能
+- 或 `frontend_map_literal_parse`（medium, 58）— 填补 Map 字面量断层
+
+**后端下一步**：
+- 优先考虑 `backend_phi_edge_block_fix`（medium, 86）— 修复 Phi 节点降级的边缘块问题，正确性 bug，影响所有后端
+- 或 `backend_native_stack_frame`（hard, 90）— 实现栈帧管理，寄存器分配已修复，依赖链畅通
+- 或 `backend_native_elf_phnum`（easy, 72）— 快速清掉 ELF phnum 不匹配的 easy bug
+
+---
+
 ## 🔍 第 6 轮评审 — 2026-07-22 22:03 ~ 22:15
 
 > 三轮回顾评审：第 4-5 轮总结 + 双线路线图调整
