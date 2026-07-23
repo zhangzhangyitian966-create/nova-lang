@@ -1,5 +1,5 @@
 {
-  "cycles": 38,
+  "cycles": 39,
   "completed_tasks": [
     "refactor_eval_expr_complexity",
     "refactor_evaluator_match_pattern",
@@ -87,10 +87,19 @@
     "c_backend_closure_phase1",
     "wasm_global_vars_fix",
     "high_complexity_docstrings",
-    "refactor_native_compile_body"
+    "refactor_native_compile_body",
+    "review_cycle_39"
   ],
   "failed_tasks": [],
   "task_history": [
+    {
+      "cycle": 39,
+      "task_id": "review_cycle_39",
+      "status": "completed",
+      "source": "评审轮",
+      "reason": "第39轮路线图评审，每3轮一次的例行评审。总结第37-38轮开发成果，评估方向/质量/效率/价值/审查对齐五维表现，规划第40-42轮方向。",
+      "details": "完成第39轮路线图评审：五维评估（方向正确、质量持续提升且LOW问题首次下降、效率稳定、价值高、审查对齐优秀）；任务池新增1个任务（cfg_utils调度表化），修正1个任务状态（high_complexity_docstrings→completed），调整4个任务优先级；规划第40-42轮方向为'C后端闭包Phase2 → 质量门禁落地 → 类型系统重构'。"
+    },
     {
       "cycle": 38,
       "task_id": "wasm_global_vars_fix",
@@ -204,10 +213,10 @@
       "details": "完成第33轮路线图评审：五维评估（方向正确、质量提升、效率稳定、价值高、审查对齐优秀）；任务池新增 5 个任务（4个审查驱动 + 1个自主规划）；调整 4 个任务优先级；规划第34-36轮方向为'解释器调度表化 → C后端数据结构验证 → 质量底线建设'。"
     }
   ],
-  "current_cycle": 38,
+  "current_cycle": 39,
   "baseline_tests": 392,
   "current_tests": 392,
-  "last_review_cycle": 36,
+  "last_review_cycle": 39,
   "tasks": [
     {
       "id": "unify_c_backend",
@@ -282,7 +291,7 @@
       "name": "重构 TypeChecker._unify 降低圈复杂度",
       "description": "TypeChecker._unify 圈复杂度 38（全项目 Top 6），类型系统的核心合一算法。按类型类别拆分为独立方法（基础类型、复合类型、ADT、函数类型等），引入调度表模式降低复杂度",
       "difficulty": "medium",
-      "priority": 62,
+      "priority": 60,
       "category": "engineering",
       "estimated": "3-5 小时",
       "status": "pending",
@@ -323,7 +332,7 @@
       "name": "CFG 基础设施单元测试",
       "description": "为 ir/cfg_utils.py 编写单元测试，覆盖：CFG 遍历（前向/后向）、支配树计算、回边检测、自然循环识别、指令操作数访问、副作用判断、后继块获取等核心功能",
       "difficulty": "medium",
-      "priority": 58,
+      "priority": 56,
       "category": "test",
       "estimated": "3-5 小时",
       "status": "pending",
@@ -333,23 +342,35 @@
       "reason": "深度代码审计发现 cfg_utils.py（799行）是循环优化的核心基础设施，但缺乏直接测试。所有循环优化（LICM 等）都依赖它，基础设施的正确性是上层优化正确的前提。[优先级调整: 60 → 58][自主发现]"
     },
     {
+      "id": "refactor_cfg_utils_dispatch",
+      "name": "重构 cfg_utils 操作数访问调度表化",
+      "description": "ir/cfg_utils.py 中的 get_instr_operands 和 replace_instr_operands 圈复杂度均为 25（全项目 Top 8-9），使用 15+ 个 if-isinstance 分支处理不同指令类型的操作数提取/替换。构建指令类型到操作数处理函数的调度表，与 lir_c_backend.py 已实现的调度表模式一致",
+      "difficulty": "medium",
+      "priority": 55,
+      "category": "engineering",
+      "estimated": "3-5 小时",
+      "status": "pending",
+      "depends_on": [],
+      "reason": "深度代码审计发现 cfg_utils.py 是循环优化的核心基础设施，get_instr_operands/replace_instr_operands 使用长 if-isinstance 链，与项目调度表化战略不一致。调度表化后可降低复杂度并统一架构风格。[新增任务 / 审查驱动]"
+    },
+    {
       "id": "high_complexity_docstrings",
       "name": "高复杂度函数补全 docstring",
-      "description": "为 29 个圈复杂度 >15 的高复杂度函数补充 docstring，说明函数用途、输入输出语义、算法简述、关键设计决策。优先处理 Top 10 最复杂函数",
+      "description": "为 29 个圈复杂度 >15 的高复杂度函数补充 docstring，说明函数用途、输入输出语义、算法简述、关键设计决策。优先处理 Top 10 最复杂函数。第38轮已完成核心编译管道 19 个关键方法的 docstring 补全",
       "difficulty": "easy",
       "priority": 55,
       "category": "engineering",
       "estimated": "2-3 小时",
-      "status": "pending",
+      "status": "completed",
       "depends_on": [],
-      "reason": "高复杂度函数是理解成本最高的代码，也是 bug 高发区。补充文档可以大幅降低维护成本，帮助未来的重构工作。属于 LOW 级问题治理中价值最高的部分。[优先级调整: 58 → 55][审查驱动]"
+      "reason": "高复杂度函数是理解成本最高的代码，也是 bug 高发区。补充文档可以大幅降低维护成本，帮助未来的重构工作。第38轮已完成 19 个关键方法（type_checker 10 个 + evaluator 2 个 + parser 7 个）。[状态修正: pending → completed][审查驱动]"
     },
     {
       "id": "c_backend_closure_support",
       "name": "C 后端闭包功能对齐",
       "description": "将旧 C 后端的闭包实现迁移到 LIR→C 路径：闭包环境捕获、函数指针包装、upvar 访问、闭包生命周期管理。确保闭包在 LIR C 后端正确工作。Phase 1 已完成：新增 LIRClosureCreate 指令 + 正确降级 + C 后端 nova_closure_new 调用（函数指针暂为 NULL）",
       "difficulty": "hard",
-      "priority": 75,
+      "priority": 78,
       "category": "backend",
       "estimated": "1-2 天",
       "status": "in_progress",
@@ -389,7 +410,7 @@
       "name": "建立代码质量门禁（docstring + 命名规范）",
       "description": "在 auto_review.py 中增加增量质量检查：新增代码必须有 docstring（公共 API）、不得引入新的魔法数字、命名规范检查。设定 LOW 问题增长率上限，防止技术债持续累积",
       "difficulty": "medium",
-      "priority": 60,
+      "priority": 62,
       "category": "engineering",
       "estimated": "3-5 小时",
       "status": "pending",

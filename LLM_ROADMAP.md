@@ -1,7 +1,7 @@
 # Nova LLM 智能开发路线图
 
-**更新时间**: 2026-07-23 05:02:00
-**上次评审**: 第 36 轮（路线图评审）
+**更新时间**: 2026-07-23 12:05:00
+**上次评审**: 第 39 轮（路线图评审）
 
 本路线图由 LLM 智能开发系统动态维护。
 
@@ -58,8 +58,8 @@
 | ✅ | C 后端 LIR 路径 ADT/match 支持 | hard | 72 | 1-2 天 | lir_switch_match_lowering, unify_c_backend |
 | ✅ | C 后端 LIR 路径列表推导式支持 | medium | 72 | 3-5 小时 | c_backend_adt_match, unify_c_backend |
 | ✅ | C 后端数据结构构建正确性验证 | medium | 80 | 3-5 小时 | c_backend_listcomp_verify, c_backend_adt_match |
-| ⏳ | C 后端闭包功能对齐 | hard | 75 | 1-2 天 | c_backend_data_verify |
-| ⏳ | 修复 Wasm 后端全局变量声明缺失 | easy | 62 | 1-2 小时 | wasm_control_flow_rewrite |
+| ⏳ | C 后端闭包功能对齐 | hard | 78 | 1-2 天 | c_backend_data_verify |
+| ✅ | 修复 Wasm 后端全局变量声明缺失 | easy | 62 | 1-2 小时 | wasm_control_flow_rewrite |
 | ✅ | 重构 Wasm 后端指令编译调度表化 | medium | 72 | 3-5 小时 | wasm_control_flow_rewrite |
 | ⏳ | 实现原生后端函数调用 ABI | hard | 20 | 3-5 天 | fix_mir_ssa |
 
@@ -95,12 +95,13 @@
 | ✅ | 重构 Evaluator._match_pattern 降低圈复杂度 | medium | 72 | 3-5 小时 | refactor_eval_expr_complexity |
 | ✅ | 重构 BytecodeCompiler._compile_expr 降低圈复杂度 | medium | 60 | 3-5 小时 | - |
 | ✅ | 重构 SSAVerifier._verify_function 降低圈复杂度 | medium | 65 | 3-5 小时 | - |
-| ⏳ | 重构 TypeChecker._unify 降低圈复杂度 | medium | 62 | 3-5 小时 | - |
+| ⏳ | 重构 TypeChecker._unify 降低圈复杂度 | medium | 60 | 3-5 小时 | - |
 | ⏳ | 重构 CCodeGen._infer_c_type_from_expr 降低圈复杂度 | medium | 48 | 3-5 小时 | - |
-| ⏳ | 重构 NativeCodeGen._compile_body 降低圈复杂度 | medium | 40 | 4-6 小时 | - |
+| ✅ | 重构 NativeCodeGen._compile_body 降低圈复杂度 | medium | 40 | 4-6 小时 | - |
 | ⏳ | LOW 级问题批量治理（docstring + 魔法数字） | easy | 52 | 2-4 小时 | - |
-| ⏳ | 高复杂度函数补全 docstring | easy | 55 | 2-3 小时 | - |
-| ⏳ | 建立代码质量门禁（docstring + 命名规范） | medium | 60 | 3-5 小时 | low_quality_issues_cleanup |
+| ✅ | 高复杂度函数补全 docstring | easy | 55 | 2-3 小时 | - |
+| ⏳ | 重构 cfg_utils 操作数访问调度表化 | medium | 55 | 3-5 小时 | - |
+| ⏳ | 建立代码质量门禁（docstring + 命名规范） | medium | 62 | 3-5 小时 | low_quality_issues_cleanup |
 
 ## 🧪 测试完善
 
@@ -111,14 +112,14 @@
 | ✅ | 建立后端性能基准测试框架 | medium | 60 | 3-5 小时 | unify_c_backend |
 | ⏳ | 基准测试框架增强（C/Wasm执行时间+优化对比） | medium | 58 | 3-5 小时 | backend_benchmark_framework |
 | ⏳ | LICM 优化正确性测试 | medium | 68 | 3-5 小时 | implement_licm_pass, ssa_verifier_tests |
-| ⏳ | CFG 基础设施单元测试 | medium | 58 | 3-5 小时 | mir_cfg_loop_analysis |
+| ⏳ | CFG 基础设施单元测试 | medium | 56 | 3-5 小时 | mir_cfg_loop_analysis |
 
 ---
 
-**进度**: 73/78 (94%)
-- **已完成**: 73
+**进度**: 76/79 (96%)
+- **已完成**: 76
 - **进行中**: 1
 - **待开发**: 4
 - **已废弃**: 1
 
-> 注：第37轮完成 3 个任务（2 个审查驱动 + 1 个自主规划）：SSAVerifier 重构、Wasm 后端调度表化、C 后端闭包 Phase 1（进行中）。新增 LIRClosureCreate 指令替代占位方案。
+> 注：第39轮为评审轮，完成路线图评审和任务池更新。新增 1 个任务（cfg_utils 调度表化），修正 1 个任务状态，调整 4 个任务优先级。规划第40-42轮方向为"C后端闭包Phase2 → 质量门禁落地 → 类型系统重构"。
