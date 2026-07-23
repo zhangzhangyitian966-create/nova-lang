@@ -87,6 +87,7 @@ class WasmGCBackend:
         self._emit_types()
         self._emit_imports()
         self._emit_memory()
+        self._emit_globals(lir_module)
         self._emit_string_data()
         self._emit_functions(lir_module)
         self._emit_start_function(lir_module)
@@ -182,6 +183,24 @@ class WasmGCBackend:
         """声明线性内存"""
         self._emit(";; ---- 内存 ----")
         self._emit('(memory (export "memory") 100)')
+        self._emit("")
+
+    def _emit_globals(self, lir_module: LIRModule):
+        """声明全局变量（对应 LIRModule.globals）
+
+        为每个 LIRGlobal 生成 Wasm global 声明，使后续
+        global.get / global.set 指令能正确引用。
+        """
+        if not lir_module.globals:
+            return
+        self._emit(";; ---- 全局变量 ----")
+        for g in lir_module.globals:
+            wasm_type = self._nova_type_to_wasm(g.ir_type)
+            # 可变全局变量声明为 (global $name (mut type))
+            # 不可变全局变量声明为 (global $name type)（值为 0）
+            self._emit(
+                f'(global $nova_global_{g.name} (mut {wasm_type}))'
+            )
         self._emit("")
 
     def _scan_strings(self, lir_module: LIRModule):

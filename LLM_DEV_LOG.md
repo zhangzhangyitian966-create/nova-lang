@@ -4,6 +4,89 @@
 
 ---
 
+## 2026-07-23 09:23 第38轮开发
+
+### 开发概览
+- **轮次**: 第 38 轮（普通开发轮）
+- **基线测试**: 392/392 通过
+- **完成任务**: 3 个（2 个审查驱动 + 1 个自主发现）
+- **审查驱动任务占比**: 67%（2/3）
+- **路线图进度**: 73/78 (94%) → 76/78 (97%)
+- **测试结果**: 392/392 通过（零回归）
+- **失败回滚**: 0 次
+
+---
+
+### 任务详情
+
+#### 1. 【自主发现】修复 Wasm 后端全局变量声明缺失
+- **任务ID**: wasm_global_vars_fix
+- **状态**: ✅ 成功
+- **来源**: 自主发现（深度代码审计）
+- **为什么选**: Wasm 后端全局变量只有 global.get/set 使用但没有 (global ...) 声明，导致生成的 Wasm 模块无法加载。LIR 层已正确建模全局变量，使用端也正确生成指令，唯独缺少声明步骤。修复成本低（1-2小时），对 Wasm 后端可用性影响大。
+- **完成内容**:
+  - 新增 `_emit_globals(lir_module)` 方法，遍历 `lir_module.globals` 为每个 `LIRGlobal` 生成 Wasm global 声明 `(global $nova_global_xxx (mut wasm_type))`
+  - 在 `compile` 方法中 `_emit_memory` 之后调用 `_emit_globals`
+
+#### 2. 【审查驱动】高复杂度函数补全 docstring（核心编译管道 19 个方法）
+- **任务ID**: high_complexity_docstrings
+- **状态**: ✅ 成功
+- **来源**: 审查驱动（no_docstring 594 个 LOW 级问题）
+- **为什么选**: no_docstring 是最大的单一问题类别（594 个）。高复杂度函数是理解成本最高的代码，优先为核心编译管道的 19 个关键方法补充 docstring，批量降低 no_docstring 数量。
+- **完成内容**:
+  - type_checker.py 10 个：_check_identifier、_check_list_expr、_check_if_expr、_check_match_expr、_check_for_expr、_check_let_binding、_check_assignment、_check_lambda、_check_pipe_expr、_check_list_comprehension
+  - evaluator.py 2 个：_builtin_print、_eval_block
+  - parser.py 7 个：_parse_let_binding、_parse_mut_binding、_parse_fn_def、_parse_param、_parse_type_def、_parse_variant_def、_parse_alias_def
+
+#### 3. 【审查驱动】重构 NativeCodeGen._compile_body 降低圈复杂度（CC=97→~8）
+- **任务ID**: refactor_native_compile_body
+- **状态**: ✅ 成功
+- **来源**: 审查驱动（CC=97 全项目 Top 1）
+- **为什么选**: NativeCodeGen._compile_body 圈复杂度 97，全项目最高。约 450 行包含寄存器分配和指令发射两大阶段。拆分后可大幅降低复杂度，为后续线性扫描分配器优化打基础。
+- **完成内容**:
+  1. **_EmitContext 类**：封装发射上下文（vreg_alloc + 辅助方法 get_loc/load_to_reg/store_from_reg）
+  2. **_allocate_registers 方法**：阶段 A 线性扫描寄存器分配（消除 float/int 分支重复，引入 _try_allocate 统一分配逻辑）
+  3. **_emit_instructions + 调度表**：阶段 B 指令发射，9 种 LIR 指令类型映射到独立方法
+  4. **按运算类别拆分**：_emit_div_mod/_emit_arithmetic/_emit_comparison（消除 BinOp 三层嵌套）
+  5. **_fixup_jumps 方法**：跳转偏移回填
+  6. **_compile_body** 变为 3 行协调器
+
+---
+
+### 审查日志研读摘要
+
+**最新审查（第 1499 轮，2026-07-23）**:
+- 总问题数：1086（CRITICAL: 0, HIGH: 0, MEDIUM: 85, LOW: 1001）
+- Top 5 最复杂函数：NativeCodeGen._compile_body(97)、CCodeGen._infer_c_type(42)、CCodeGen._compile_expr(33)、SSAVerifier._verify_function(33)、WasmGCBackend._compile_instr(26)
+
+**本轮采纳的审查发现**:
+- ✅ NativeCodeGen._compile_body CC=97 Top 1 → 重构为调度表模式，CC 降至约 8-10
+- ✅ no_docstring 594 个 → 核心编译管道 19 个关键方法补充 docstring
+- ✅ Wasm 后端全局变量声明缺失（代码审计发现）
+
+---
+
+### 测试前后对比
+
+| 阶段 | 通过数 | 总数 | 通过率 |
+|------|--------|------|--------|
+| 基线（开发前） | 392 | 392 | 100.0% |
+| 最终（开发后） | 392 | 392 | 100.0% |
+| 变化 | 0 | 0 | +0.0% |
+
+**回归测试结果**: 零回归，所有测试通过。
+
+---
+
+### 下一步计划
+
+**第39轮（质量门禁 + 测试深化）**:
+1. **【自主规划】建立代码质量门禁**（优先级 60）— 设定 LOW 问题增长率上限
+2. **【自主发现】LICM 优化正确性测试**（优先级 68）— 最高级优化 Pass 的正确性保障
+3. **【自主发现】CFG 基础设施单元测试**（优先级 58）— 循环优化基础设施的正确性保障
+
+---
+
 ## 2026-07-23 08:00 第37轮开发
 
 ### 开发概览

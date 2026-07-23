@@ -532,6 +532,11 @@ class TypeChecker:
     # ------------------------------------------------------------------
 
     def _check_identifier(self, expr) -> NovaType:
+        """查找标识符的类型，泛型类型进行 let-polymorphism 实例化。
+
+        若标识符未定义则抛出 TypeCheckError。
+        若类型包含 TypeVar，创建 fresh 副本以支持多态使用。
+        """
         ty = self.env.lookup(expr.name)
         if ty is None:
             raise TypeCheckError(f"未定义的标识符 '{expr.name}'")
@@ -568,6 +573,10 @@ class TypeChecker:
     # ------------------------------------------------------------------
 
     def _check_list_expr(self, expr) -> NovaType:
+        """检查列表表达式的元素类型一致性，返回统一元素类型的 ListType。
+
+        空列表返回 ListType(TypeVar("unknown_list_elem"))。
+        """
         if not expr.elements:
             return ListType(TypeVar("unknown_list_elem"))
         elem_types = [self.check_expr(e) for e in expr.elements]
@@ -588,6 +597,10 @@ class TypeChecker:
     # ------------------------------------------------------------------
 
     def _check_if_expr(self, expr) -> NovaType:
+        """检查 if 表达式：条件必须为 Bool，then/else 分支类型一致。
+
+        无 else 分支时返回 UNIT_T。
+        """
         cond_ty = self.check_expr(expr.condition)
         if not self._types_compatible(cond_ty, BOOL_T):
             raise TypeCheckError(f"if 条件必须是 Bool 类型，得到 {cond_ty}")
@@ -602,6 +615,10 @@ class TypeChecker:
         return UNIT_T
 
     def _check_match_expr(self, expr) -> NovaType:
+        """检查 match 表达式，验证各分支体类型一致。
+
+        返回各分支的统一类型；无分支时返回 UNIT_T。
+        """
         subject_ty = self.check_expr(expr.subject)
         result_type = None
         for i, arm in enumerate(expr.arms):
@@ -622,6 +639,10 @@ class TypeChecker:
         return UNIT_T
 
     def _check_for_expr(self, expr) -> NovaType:
+        """检查 for 表达式（range 和列表遍历），返回 List[body_type]。
+
+        range 循环验证起止步类型；列表遍历验证迭代器类型。
+        """
         # for 循环：返回 List[元素类型]
         if isinstance(expr.iterable, tuple) and expr.iterable[0] == "range":
             # 范围循环：iterable 是 ("range", start, end, step)
@@ -659,6 +680,10 @@ class TypeChecker:
     # ------------------------------------------------------------------
 
     def _check_let_binding(self, expr) -> NovaType:
+        """检查 let 绑定，验证值类型与注解一致性，绑定到环境。
+
+        若有类型注解，推断类型必须与注解兼容。返回 UNIT_T。
+        """
         val_ty = self.check_expr(expr.value)
         if expr.type_annotation:
             annotated = self._from_ast_type(expr.type_annotation)
@@ -675,6 +700,7 @@ class TypeChecker:
         return UNIT_T
 
     def _check_assignment(self, expr) -> NovaType:
+        """检查赋值表达式，确保目标已定义且类型兼容。返回 UNIT_T。"""
         val_ty = self.check_expr(expr.value)
         existing = self.env.lookup(expr.name)
         if existing is None:
@@ -729,6 +755,10 @@ class TypeChecker:
             raise TypeCheckError(f"无法对非函数类型 {callee_ty} 进行调用")
 
     def _check_lambda(self, expr) -> NovaType:
+        """检查 lambda 表达式，在子作用域中解析参数类型，返回 FnType。
+
+        有注解用注解类型，否则用 TypeVar 占位。
+        """
         param_types = []
         child_env = self.env.child()
         for param in expr.params:
@@ -751,6 +781,10 @@ class TypeChecker:
     # ------------------------------------------------------------------
 
     def _check_pipe_expr(self, expr) -> NovaType:
+        """检查管道表达式 expr |> f，验证左侧值与右侧函数参数兼容。
+
+        返回右侧函数的返回类型。
+        """
         # expr |> f  等价于 f(expr)
         left_ty = self.check_expr(expr.left)
         right_ty = self.check_expr(expr.right)
@@ -847,6 +881,10 @@ class TypeChecker:
         )
 
     def _check_list_comprehension(self, expr) -> NovaType:
+        """检查列表推导式，验证迭代器和过滤条件类型，返回 List[expr_type]。
+
+        过滤条件必须为 Bool 类型。
+        """
         # 列表推导式：返回 List[expr 类型]
         if isinstance(expr.iterable, tuple) and expr.iterable[0] == "range":
             self.check_expr(expr.iterable[1])

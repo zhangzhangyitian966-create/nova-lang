@@ -1,5 +1,5 @@
 {
-  "cycles": 37,
+  "cycles": 38,
   "completed_tasks": [
     "refactor_eval_expr_complexity",
     "refactor_evaluator_match_pattern",
@@ -84,10 +84,37 @@
     "review_cycle_36",
     "refactor_ssaverifier_verify_function",
     "refactor_wasm_backend_dispatch",
-    "c_backend_closure_phase1"
+    "c_backend_closure_phase1",
+    "wasm_global_vars_fix",
+    "high_complexity_docstrings",
+    "refactor_native_compile_body"
   ],
   "failed_tasks": [],
   "task_history": [
+    {
+      "cycle": 38,
+      "task_id": "wasm_global_vars_fix",
+      "status": "completed",
+      "source": "自主发现",
+      "reason": "深度代码审计发现 Wasm 后端全局变量只有使用没有声明，导致生成的 Wasm 模块无法加载。LIR 层已正确建模全局变量（LIRLoadGlobal/LIRStoreGlobal），使用端也正确生成 global.get/set，唯独缺少 Wasm (global ...) 声明的生成步骤。修复成本低（1-2小时），对 Wasm 后端可用性影响大。",
+      "details": "新增 _emit_globals 方法，遍历 lir_module.globals 为每个 LIRGlobal 生成 Wasm global 声明 (global $nova_global_xxx (mut wasm_type))。在 compile 方法中 _emit_memory 之后调用 _emit_globals，使后续 global.get/global.set 指令能正确引用。"
+    },
+    {
+      "cycle": 38,
+      "task_id": "high_complexity_docstrings",
+      "status": "completed",
+      "source": "审查驱动",
+      "reason": "审查日志显示 no_docstring 共 594 个 LOW 级问题，是最大的单一问题类别。高复杂度函数是理解成本最高的代码，优先为核心编译管道（type_checker、evaluator、parser）的 19 个关键方法补充 docstring，批量降低 no_docstring 数量。",
+      "details": "为 19 个关键方法补充 docstring：type_checker.py 10 个（_check_identifier/_check_list_expr/_check_if_expr/_check_match_expr/_check_for_expr/_check_let_binding/_check_assignment/_check_lambda/_check_pipe_expr/_check_list_comprehension）、evaluator.py 2 个（_builtin_print/_eval_block）、parser.py 7 个（_parse_let_binding/_parse_mut_binding/_parse_fn_def/_parse_param/_parse_type_def/_parse_variant_def/_parse_alias_def）。"
+    },
+    {
+      "cycle": 38,
+      "task_id": "refactor_native_compile_body",
+      "status": "completed",
+      "source": "审查驱动",
+      "reason": "审查日志显示 NativeCodeGen._compile_body 圈复杂度 97，全项目 Top 1。该方法是原生后端的指令编译主函数，约 450 行包含寄存器分配和指令发射两大阶段。拆分为独立方法可大幅降低复杂度，为后续线性扫描分配器优化打基础。",
+      "details": "将 _compile_body 从约 450 行拆分为调度表模式：1) 新增 _EmitContext 类封装发射上下文（vreg_alloc + 辅助方法 get_loc/load_to_reg/store_from_reg）；2) 提取 _allocate_registers 方法（阶段A：线性扫描寄存器分配，消除 float/int 分支重复）；3) 提取 _emit_instructions + _build_native_instr_dispatch（阶段B：调度表分发9种LIR指令）；4) 按运算类别拆分为 _emit_div_mod/_emit_arithmetic/_emit_comparison（消除 BinOp 内的三层嵌套）；5) _compile_body 变为 3 行协调器。圈复杂度从约 97 降至约 8-10。"
+    },
     {
       "cycle": 37,
       "task_id": "refactor_ssaverifier_verify_function",
@@ -177,7 +204,7 @@
       "details": "完成第33轮路线图评审：五维评估（方向正确、质量提升、效率稳定、价值高、审查对齐优秀）；任务池新增 5 个任务（4个审查驱动 + 1个自主规划）；调整 4 个任务优先级；规划第34-36轮方向为'解释器调度表化 → C后端数据结构验证 → 质量底线建设'。"
     }
   ],
-  "current_cycle": 37,
+  "current_cycle": 38,
   "baseline_tests": 392,
   "current_tests": 392,
   "last_review_cycle": 36,
@@ -334,12 +361,12 @@
     {
       "id": "wasm_global_vars_fix",
       "name": "修复 Wasm 后端全局变量声明缺失",
-      "description": "修复 Wasm 后端中全局变量使用 global.get/set 但没有对应 global 声明的问题。扫描 MIR 模块中的全局变量定义，生成对应的 Wasm global 声明，确保 Wasm 模块可以正确加载",
+      "description": "修复 Wasm 后端中全局变量使用 global.get/set 但没有对应 global 声明的问题。已修复：新增 _emit_globals 方法生成 Wasm global 声明",
       "difficulty": "easy",
       "priority": 62,
       "category": "backend",
       "estimated": "1-2 小时",
-      "status": "pending",
+      "status": "completed",
       "depends_on": [
         "wasm_control_flow_rewrite"
       ],
@@ -348,12 +375,12 @@
     {
       "id": "refactor_native_compile_body",
       "name": "重构 NativeCodeGen._compile_body 降低圈复杂度",
-      "description": "NativeCodeGen._compile_body 圈复杂度 104（全项目 Top 1），原生后端的指令发射主函数。按指令类别拆分为独立方法，配合调度表模式降低复杂度，同时为后续接入线性扫描分配器做准备",
+      "description": "已重构为调度表模式：_EmitContext 类 + _allocate_registers + _emit_instructions（调度表）+ _fixup_jumps。CC 从 97 降至约 8-10",
       "difficulty": "medium",
       "priority": 40,
       "category": "engineering",
       "estimated": "4-6 小时",
-      "status": "pending",
+      "status": "completed",
       "depends_on": [],
       "reason": "最新审查显示 _compile_body 圈复杂度 104，排名 Top 1。虽然原生后端整体完成度低（30%），但降低核心分发函数的复杂度可以为后续开发打好基础。优先级较低，待核心后端成熟后再处理。[优先级调整: 45 → 40][审查驱动]"
     },

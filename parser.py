@@ -177,6 +177,7 @@ class Parser:
     # ----------------------------------------------------------
 
     def _parse_let_binding(self) -> LetBinding:
+        """解析不可变 let 绑定：let name [: Type] = expr。"""
         tok = self._expect(TokenType.LET)
         name_tok = self._expect(TokenType.IDENT)
         name = name_tok.value
@@ -193,6 +194,7 @@ class Parser:
         )
 
     def _parse_mut_binding(self) -> MutBinding:
+        """解析可变 mut 绑定：mut name [: Type] = expr。"""
         tok = self._expect(TokenType.MUT)
         name_tok = self._expect(TokenType.IDENT)
         name = name_tok.value
@@ -212,6 +214,7 @@ class Parser:
     # ----------------------------------------------------------
 
     def _parse_fn_def(self) -> FnDef:
+        """解析函数定义：fn name(params) [-> RetType] body。"""
         tok = self._expect(TokenType.FN)
         name_tok = self._expect(TokenType.IDENT)
         name = name_tok.value
@@ -248,6 +251,7 @@ class Parser:
         return params
 
     def _parse_param(self) -> Param:
+        """解析单个函数参数：name [: Type]。"""
         tok = self._cur()
         name_tok = self._expect(TokenType.IDENT)
         type_ann = None
@@ -262,6 +266,7 @@ class Parser:
     # ----------------------------------------------------------
 
     def _parse_type_def(self) -> TypeDef:
+        """解析 ADT 类型定义：type Name { Variant1 | Variant2 ... }。"""
         tok = self._expect(TokenType.TYPE)
         name_tok = self._expect(TokenType.IDENT)
         name = name_tok.value
@@ -283,6 +288,7 @@ class Parser:
         return TypeDef(name=name, variants=variants, span=self._span(tok))
 
     def _parse_variant_def(self) -> VariantDef:
+        """解析单个 ADT 变体：VariantName [(field1: Type1, ...)]。"""
         tok = self._cur()
         name_tok = self._expect(TokenType.IDENT)
         fields = []
@@ -306,6 +312,7 @@ class Parser:
         return VariantDef(name=name_tok.value, fields=fields, span=self._span(tok))
 
     def _parse_alias_def(self) -> AliasDef:
+        """解析类型别名：alias Name = TargetType。"""
         tok = self._expect(TokenType.ALIAS)
         name_tok = self._expect(TokenType.IDENT)
         self._expect(TokenType.ASSIGN)

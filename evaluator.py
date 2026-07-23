@@ -216,6 +216,7 @@ class Evaluator:
     # ----------------------------------------------------------
 
     def _builtin_print(self, *args):
+        """内置 print 函数，格式化首个参数后输出到控制台和缓冲区。"""
         val = self._format_value(args[0])
         print(val)
         self._output.append(val)
@@ -704,6 +705,10 @@ class Evaluator:
     # --- 块与绑定求值 ---
 
     def _eval_block(self, expr: Block) -> Any:
+        """在子作用域中依次求值块内语句和尾部表达式。
+
+        创建子环境，执行所有语句后恢复原环境。返回尾部表达式结果或 UNIT_VALUE。
+        """
         child_env = self.env.child()
         old_env = self.env
         self.env = child_env
