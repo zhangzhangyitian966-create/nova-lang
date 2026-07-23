@@ -74,12 +74,25 @@ from .lexer import Token, TokenType
 
 
 class Parser:
-    """Nova 语法分析器"""
+    """Nova 语法分析器（带错误恢复）"""
+
+    # 顶层声明起始的关键字 token 类型，用于错误恢复时的同步标记
+    _DECL_START_TOKENS = frozenset({
+        TokenType.LET, TokenType.MUT, TokenType.FN, TokenType.TYPE,
+        TokenType.ALIAS, TokenType.IMPORT, TokenType.EXPORT,
+        TokenType.FOR, TokenType.WHILE,
+    })
+    # 语句边界 token 类型，用于块内错误恢复时的同步标记
+    _STMT_BOUNDARY_TOKENS = frozenset({
+        TokenType.LET, TokenType.MUT, TokenType.FOR, TokenType.WHILE,
+        TokenType.IF, TokenType.MATCH, TokenType.RBRACE, TokenType.EOF,
+    })
 
     def __init__(self, tokens: List[Token], source: str = ""):
         self.tokens = tokens
         self.pos = 0
         self._source = source
+        self._errors: List[ParseError] = []  # 收集的所有解析错误
 
     # ----------------------------------------------------------
     # 工具方法
@@ -123,14 +136,65 @@ class Parser:
         return Span(tok.line, tok.column)
 
     # ----------------------------------------------------------
+    # 错误恢复
+    # ----------------------------------------------------------
+
+    def _synchronize_to_declaration_boundary(self):
+        """Panic mode: 跳过 token 直到遇到下一个顶层声明起始关键字。
+
+        用于 _parse_top_level 失败后恢复：丢弃当前有误的声明，
+        定位到下一个声明开头，继续解析后续声明。
+        """
+        while self._peek_type() != TokenType.EOF:
+            # 如果当前 token 是声明起始关键字，停止（不跳过它）
+            if self._peek_type() in self._DECL_START_TOKENS:
+                break
+            # 也检查 IDENT（可能是表达式语句的开头）
+            if self._peek_type() == TokenType.IDENT:
+                break
+            self._advance()
+
+    def _synchronize_to_statement_boundary(self):
+        """Panic mode: 在块内跳过 token 直到遇到语句边界。
+
+        用于 _parse_block 内部语句失败后恢复：丢弃当前有误的语句，
+        定位到下一条语句的开头或块的结尾。
+        """
+        while self._peek_type() != TokenType.EOF:
+            if self._peek_type() in self._STMT_BOUNDARY_TOKENS:
+                break
+            # IDENT 可能是赋值语句或表达式语句的开头
+            if self._peek_type() == TokenType.IDENT:
+                break
+            # SEMICOLON 本身是语句终止符，跳过它
+            if self._peek_type() == TokenType.SEMICOLON:
+                self._advance()
+                break
+            self._advance()
+
+    # ----------------------------------------------------------
     # 程序入口
     # ----------------------------------------------------------
 
     def parse(self) -> Program:
-        """解析整个程序"""
+        """解析整个程序（带错误恢复，收集多个错误）"""
         decls = []
+        self._errors = []
+
         while self._peek_type() != TokenType.EOF:
-            decls.append(self._parse_top_level())
+            try:
+                decl = self._parse_top_level()
+                if decl is not None:
+                    decls.append(decl)
+            except ParseError as e:
+                # 记录错误并同步到下一个声明边界
+                self._errors.append(e)
+                self._synchronize_to_declaration_boundary()
+
+        # 如果收集了错误，抛出第一个以保持向后兼容
+        # （调用方可以检查 parser._errors 获取完整错误列表）
+        if self._errors:
+            raise self._errors[0]
         return Program(declarations=decls)
 
     def _parse_top_level(self):
@@ -424,41 +488,48 @@ class Parser:
         return self._parse_expression()
 
     def _parse_block(self) -> Block:
-        """解析代码块"""
+        """解析代码块（带语句级错误恢复）"""
         tok = self._expect(TokenType.LBRACE)
         stmts = []
         tail = None
 
         while self._peek_type() != TokenType.RBRACE:
-            # 检查赋值：ident = expr
-            if (
-                self._peek_type() == TokenType.IDENT
-                and self.pos + 1 < len(self.tokens)
-                and self.tokens[self.pos + 1].type == TokenType.ASSIGN
-            ):
-                stmts.append(self._parse_assignment())
-                self._match(TokenType.SEMICOLON)
-                continue
+            try:
+                # 检查赋值：ident = expr
+                if (
+                    self._peek_type() == TokenType.IDENT
+                    and self.pos + 1 < len(self.tokens)
+                    and self.tokens[self.pos + 1].type == TokenType.ASSIGN
+                ):
+                    stmts.append(self._parse_assignment())
+                    self._match(TokenType.SEMICOLON)
+                    continue
 
-            # 检查 let/mut 绑定
-            if self._peek_type() in (TokenType.LET, TokenType.MUT):
-                if self._peek_type() == TokenType.LET:
-                    stmts.append(self._parse_let_binding())
+                # 检查 let/mut 绑定
+                if self._peek_type() in (TokenType.LET, TokenType.MUT):
+                    if self._peek_type() == TokenType.LET:
+                        stmts.append(self._parse_let_binding())
+                    else:
+                        stmts.append(self._parse_mut_binding())
+                    self._match(TokenType.SEMICOLON)
+                    continue
+
+                expr = self._parse_expression()
+
+                # 用分号分隔语句
+                if self._match(TokenType.SEMICOLON):
+                    stmts.append(expr)
+                elif self._peek_type() == TokenType.RBRACE:
+                    tail = expr
+                    break
                 else:
-                    stmts.append(self._parse_mut_binding())
+                    stmts.append(expr)
+            except ParseError as e:
+                # 块内语句解析失败：记录错误，同步到下一条语句边界
+                self._errors.append(e)
+                self._synchronize_to_statement_boundary()
+                # 跳过分号（如果有）
                 self._match(TokenType.SEMICOLON)
-                continue
-
-            expr = self._parse_expression()
-
-            # 用分号分隔语句
-            if self._match(TokenType.SEMICOLON):
-                stmts.append(expr)
-            elif self._peek_type() == TokenType.RBRACE:
-                tail = expr
-                break
-            else:
-                stmts.append(expr)
 
         self._expect(TokenType.RBRACE)
         return Block(statements=stmts, tail_expression=tail, span=self._span(tok))

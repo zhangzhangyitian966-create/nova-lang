@@ -1,7 +1,7 @@
 {
-  "cycles": 12,
-  "frontend_completed": 8,
-  "backend_completed": 9,
+  "cycles": 13,
+  "frontend_completed": 9,
+  "backend_completed": 10,
   "last_review_cycle": 12,
   "current_review_cycle": 15,
   "completed_tasks": [
@@ -20,13 +20,37 @@
     "frontend_mut_type_annotation",
     "backend_native_elf_phnum",
     "frontend_map_literal_parse",
-    "backend_phi_matchjump_successors"
+    "backend_phi_matchjump_successors",
+    "frontend_parser_error_recovery",
+    "backend_wasm_return_fix"
   ],
   "failed_tasks": [],
   "deprecated_tasks": [
     "frontend_type_var_strict"
   ],
   "task_history": [
+    {
+      "cycle": 13,
+      "task_id": "frontend_parser_error_recovery",
+      "name": "增强解析器错误恢复能力",
+      "track": "frontend",
+      "difficulty": "medium",
+      "priority": 60,
+      "result": "success",
+      "details": "为 parser.py 实现完整的 panic mode 错误恢复：(1) Parser 新增 _errors 列表收集所有 ParseError；(2) 新增 _synchronize_to_declaration_boundary 方法——顶层声明失败后跳到下一个声明起始关键字（let/mut/fn/type/alias/import/export/for/while/ident）；(3) 新增 _synchronize_to_statement_boundary 方法——块内语句失败后跳到语句边界（关键字/RBRACE/SEMICOLON/IDENT）；(4) parse() 方法改为 try/except 包裹 _parse_top_level，收集错误后同步继续，最终抛出第一个错误保持向后兼容；(5) _parse_block 添加语句级 try/except，单条语句失败不影响后续语句解析。实测验证：含多个错误的代码可以正确报告所有错误（如 4 行代码中 2 个错误均被捕获并报告）。392 测试全部通过，无回归。",
+      "timestamp": "2026-07-24 03:05"
+    },
+    {
+      "cycle": 13,
+      "task_id": "backend_wasm_return_fix",
+      "name": "修复 Wasm 后端 LIRReturn 返回值处理 bug",
+      "track": "backend",
+      "difficulty": "medium",
+      "priority": 88,
+      "result": "success",
+      "details": "修复 wasm_backend.py 中两处 LIRReturn 返回值缺失问题：(1) dispatch loop 路径（_compile_function 中 elif LIRReturn 分支）——在 br $exit 前添加 local.get 压入返回值；(2) _compile_return 方法——在 (return) 前添加 local.get 压入返回值。两处修复逻辑一致：检查 instr.src_locs 是否有值，若有则取第一个 src_loc 用 local.get 压栈。与 native_backend.py 的 _emit_return 实现对齐（原生后端正确处理了 src_locs）。392 测试全部通过，无回归。",
+      "timestamp": "2026-07-24 03:02"
+    },
     {
       "cycle": 12,
       "task_id": "review_cycle_12",
@@ -259,9 +283,7 @@
       "estimated_effort": "2-3天",
       "status": "pending",
       "source": "review_9",
-      "depends_on": [
-        "backend_native_stack_frame"
-      ]
+      "depends_on": ["backend_native_stack_frame"]
     },
     {
       "task_id": "backend_native_stack_frame",
@@ -273,9 +295,7 @@
       "estimated_effort": "1-2天",
       "status": "pending",
       "source": "review_9",
-      "depends_on": [
-        "backend_native_regalloc_fix"
-      ]
+      "depends_on": ["backend_native_regalloc_fix"]
     },
     {
       "task_id": "frontend_type_unify_deepen",
@@ -287,21 +307,7 @@
       "estimated_effort": "2-3天",
       "status": "pending",
       "source": "review_9",
-      "depends_on": [
-        "frontend_type_unification"
-      ]
-    },
-    {
-      "task_id": "backend_wasm_return_fix",
-      "name": "修复 Wasm 后端 LIRReturn 返回值处理 bug",
-      "description": "修复 wasm_backend.py 中 _compile_function 处理 LIRReturn 时只生成 (br $exit) 但未将返回值留在 Wasm 栈上的 bug，导致有返回值的函数返回 undefined。需要在 br 前将返回值压入 Wasm 操作数栈。",
-      "track": "backend",
-      "difficulty": "medium",
-      "priority": 88,
-      "estimated_effort": "2-4小时",
-      "status": "pending",
-      "source": "review_12",
-      "depends_on": []
+      "depends_on": ["frontend_type_unification"]
     },
     {
       "task_id": "frontend_pattern_exhaustiveness",
@@ -361,9 +367,7 @@
       "estimated_effort": "2-4小时",
       "status": "pending",
       "source": "review_3",
-      "depends_on": [
-        "backend_native_regalloc_fix"
-      ]
+      "depends_on": ["backend_native_regalloc_fix"]
     },
     {
       "task_id": "backend_wasm_gc_types",
@@ -385,18 +389,6 @@
       "difficulty": "medium",
       "priority": 65,
       "estimated_effort": "3-5小时",
-      "status": "pending",
-      "source": "quality_analysis",
-      "depends_on": []
-    },
-    {
-      "task_id": "frontend_parser_error_recovery",
-      "name": "增强解析器错误恢复能力",
-      "description": "为 parser 添加错误恢复：语法错误时尝试同步到下一个语句边界（换行/分号/右花括号），报告多个错误而不是第一个就停。",
-      "track": "frontend",
-      "difficulty": "medium",
-      "priority": 60,
-      "estimated_effort": "4-6小时",
       "status": "pending",
       "source": "quality_analysis",
       "depends_on": []

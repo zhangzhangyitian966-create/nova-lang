@@ -469,7 +469,10 @@ class WasmGCBackend:
                 self._emit("")
 
             elif isinstance(instr, LIRReturn):
-                # 返回：跳出 exit 块（即函数返回）
+                # 返回：先将返回值压入 Wasm 栈，再跳出 exit 块
+                if instr.src_locs:
+                    ret_loc = instr.src_locs[0][0]
+                    self._emit(f"(local.get ${ret_loc})")
                 self._emit("(br $exit)")
                 # 关闭当前 block
                 self.indent_level -= 1
@@ -617,7 +620,10 @@ class WasmGCBackend:
         self._emit("(call $nova_closure_call)")
 
     def _compile_return(self, instr: LIRReturn):
-        """编译返回指令"""
+        """编译返回指令（将返回值压入 Wasm 栈后 return）"""
+        if instr.src_locs:
+            ret_loc = instr.src_locs[0][0]
+            self._emit(f"(local.get ${ret_loc})")
         self._emit("(return)")
 
     def _compile_build_list(self, instr: LIRBuildList):

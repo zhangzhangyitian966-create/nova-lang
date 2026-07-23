@@ -4,6 +4,54 @@
 
 ---
 
+## 第 13 轮 — 2026-07-24 03:00 ~ 03:10
+
+> 普通轮 | 前端 + 后端双线推进
+
+---
+
+### 后端任务：修复 Wasm 后端 LIRReturn 返回值处理 bug
+
+- **任务 ID**: `backend_wasm_return_fix`
+- **难度**: medium | **优先级**: 88
+- **结果**: 成功
+
+**为什么选这个**：第 12 轮评审中发现的高优先级 bug，修复简单（~15 分钟），价值高——所有有返回值的 Wasm 函数都会受影响。无依赖，可以快速完成。
+
+**详情**：修复 `wasm_backend.py` 中两处 LIRReturn 返回值缺失问题：(1) dispatch loop 路径（`_compile_function` 中 `elif LIRReturn` 分支，第 471 行）——在 `br $exit` 前添加 `local.get` 压入返回值；(2) `_compile_return` 方法（第 619 行）——在 `(return)` 前添加 `local.get` 压入返回值。两处修复逻辑一致：检查 `instr.src_locs` 是否有值，若有则取第一个 src_loc 用 `local.get` 压栈。与 `native_backend.py` 的 `_emit_return` 实现对齐。
+
+---
+
+### 前端任务：增强解析器错误恢复能力
+
+- **任务 ID**: `frontend_parser_error_recovery`
+- **难度**: medium | **优先级**: 60
+- **结果**: 成功
+
+**为什么选这个**：解析器错误恢复是开发体验的基础功能。当前 parser 在第一个语法错误就终止，无法报告多个错误。优先级虽不是最高，但 medium 难度可独立完成，不依赖其他任务。且前端 pending 的 3 个任务中另两个都是 hard，本轮选一个 medium 做平衡。
+
+**详情**：为 `parser.py` 实现完整的 panic mode 错误恢复：(1) Parser 新增 `_errors` 列表收集所有 ParseError；(2) 新增 `_synchronize_to_declaration_boundary` 方法——顶层声明失败后跳到下一个声明起始关键字；(3) 新增 `_synchronize_to_statement_boundary` 方法——块内语句失败后跳到语句边界；(4) `parse()` 方法改为 try/except 包裹 `_parse_top_level`，收集错误后同步继续，最终抛出第一个错误保持向后兼容；(5) `_parse_block` 添加语句级 try/except。实测验证：含 4 行代码中 2 个语法错误的场景，正确报告了所有 2 个错误并恢复了后续声明的解析。
+
+---
+
+### 测试对比
+
+| 指标 | 开发前 | 开发后 | 变化 |
+|------|--------|--------|------|
+| 测试通过数 | 392 | 392 | - |
+| 测试失败数 | 0 | 0 | - |
+| 通过率 | 100% | 100% | - |
+
+---
+
+### 下一步计划
+
+**前端下一步**：`frontend_type_unify_deepen`（hard/94）——类型合一深化，全面替换 `_types_compatible`。这是当前前端最高价值任务，类型系统的"质变"关键。
+
+**后端下一步**：`backend_native_stack_frame`（hard/96）——原生后端栈帧管理。依赖 `backend_native_regalloc_fix`（已完成），是 `backend_native_call_abi`（优先级 99）的前置条件。
+
+---
+
 ## 第 12 轮评审 — 2026-07-24 07:05 ~ 07:20
 
 > 三轮回顾评审：第 10-12 轮总结 + 双线路线图调整
