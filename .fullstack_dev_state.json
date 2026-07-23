@@ -1,9 +1,9 @@
 {
-  "cycles": 8,
+  "cycles": 9,
   "frontend_completed": 6,
   "backend_completed": 6,
-  "last_review_cycle": 6,
-  "current_review_cycle": 9,
+  "last_review_cycle": 9,
+  "current_review_cycle": 12,
   "completed_tasks": [
     "frontend_try_expr_typecheck",
     "backend_native_label_patch",
@@ -23,6 +23,17 @@
     "frontend_type_var_strict"
   ],
   "task_history": [
+    {
+      "cycle": 9,
+      "task_id": "review_cycle_9",
+      "name": "第 9 轮 - 双线路线图评审",
+      "track": "review",
+      "difficulty": "review",
+      "priority": 0,
+      "result": "success",
+      "details": "第三次三轮回顾评审（第 7-9 轮）。深度代码审计有重大发现：前端——合一算法接入面极窄（仅函数调用）、_types_compatible 中 TypeVar 直接放行（duck typing）、缺少 let 泛化和递归函数类型更新、Mut 绑定忽略类型注解、无模式匹配完备性检查、Map 字面量解析缺失；后端——原生后端调用约定几乎未实现（参数传递完全缺失）、ELF phnum 不匹配（声明3个实际2个）、寄存器分配不考虑 CFG 和调用约定、栈帧对齐计算错误、Phi 降级 MIRMatchJump 后继块不全、WasmGC 名不副实（完全没用到 GC 类型）、Wasm 多参数闭包调用未实现、C 后端双轨并存。任务池新增 7 个任务，优先级大幅调整。下阶段重点：后端攻坚（调用约定 + ELF bug 修复 + Phi MatchJump 修复）+ 前端合一深化（全面替换 _types_compatible）。",
+      "timestamp": "2026-07-23 07:05"
+    },
     {
       "cycle": 8,
       "task_id": "frontend_type_unification",
@@ -75,7 +86,7 @@
       "difficulty": "review",
       "priority": 0,
       "result": "success",
-      "details": "第二次三轮回顾评审（第 4-6 轮）。深度代码审计发现多个关键问题：前端 TupleType 属性名 bug、类型合一仍缺失；后端原生寄存器分配有设计级缺陷（vname 命名错误、浮点栈操作为占位）、ELF phnum 不匹配、Phi 降级 critical edge bug、WasmGC 名不副实。任务池新增 3 个 bug 修复任务，原生后端优先级重新排序。下阶段重点：修复原生后端寄存器分配（最优先）+ 前端类型合一攻坚。",
+      "details": "第二次三轮回顾评审（第 4-6 轮）。深度代码审计发现多个关键问题：前端 TupleType 属性名 bug、类型合一仍缺失；后端原生寄存器分配有设计级缺陷（vname 命名错误、浮点栈占位）、ELF phnum 不匹配、Phi 降级 critical edge bug、WasmGC 名不副实。任务池新增 3 个 bug 修复任务，原生后端优先级重新排序。下阶段重点：修复原生后端寄存器分配（最优先）+ 前端类型合一攻坚。",
       "timestamp": "2026-07-22 22:10"
     },
     {
@@ -180,9 +191,79 @@
   ],
   "tasks": [
     {
+      "task_id": "backend_native_call_abi",
+      "name": "实现原生后端 System V AMD64 ABI 调用约定",
+      "description": "实现 System V AMD64 调用约定的参数传递：前6个整型参数用 RDI/RSI/RDX/RCX/R8/R9，前8个浮点参数用 XMM0-XMM7，其余栈传；返回值 RAX/XMM0；调用前保存 caller-saved 寄存器，函数序言保存 callee-saved 寄存器。原生后端当前参数传递完全缺失，是可用性的最大瓶颈。",
+      "track": "backend",
+      "difficulty": "hard",
+      "priority": 99,
+      "estimated_effort": "2-3天",
+      "status": "pending",
+      "source": "review_9",
+      "depends_on": [
+        "backend_native_stack_frame"
+      ]
+    },
+    {
+      "task_id": "backend_native_elf_phnum",
+      "name": "修复原生后端 ELF phnum 不匹配 bug",
+      "description": "修复 _generate_elf 中 phnum=3（声明3个 program header）但实际只写入 code_ph 和 data_ph 两个的 bug。第三个 header 缺失会导致 ELF 解析器读取越界，产生未定义行为。P0 级正确性 bug，easy 难度高收益。",
+      "track": "backend",
+      "difficulty": "easy",
+      "priority": 95,
+      "estimated_effort": "30分钟",
+      "status": "pending",
+      "source": "review_6",
+      "depends_on": [
+        "backend_native_label_patch"
+      ]
+    },
+    {
+      "task_id": "backend_phi_matchjump_successors",
+      "name": "修复 Phi 降级 MIRMatchJump 后继块计算不全",
+      "description": "修复 lir_lowering.py 中 _get_successor_blocks 对 MIRMatchJump 只返回 [default_target] 而忽略 variant_tests 中各个 case 目标块的 bug。导致 match 分支的 Phi 节点边缘块判断错误，Phi 拷贝被放在错误位置（所有路径都执行），破坏 SSA 语义。",
+      "track": "backend",
+      "difficulty": "medium",
+      "priority": 93,
+      "estimated_effort": "2-4小时",
+      "status": "pending",
+      "source": "review_9",
+      "depends_on": [
+        "backend_phi_edge_block_fix"
+      ]
+    },
+    {
+      "task_id": "backend_native_stack_frame",
+      "name": "实现原生后端完整栈帧管理",
+      "description": "实现完整栈帧管理：修正 prologue/epilogue 的 16 字节对齐（考虑 callee-saved 寄存器压栈影响）、栈槽分配与寻址、溢出槽管理、调用参数栈区预留。当前栈帧对齐计算有 bug（未考虑 push callee-saved 寄存器后的偏移），且调用约定依赖正确的栈帧布局。",
+      "track": "backend",
+      "difficulty": "hard",
+      "priority": 96,
+      "estimated_effort": "1-2天",
+      "status": "pending",
+      "source": "review_9",
+      "depends_on": [
+        "backend_native_regalloc_fix"
+      ]
+    },
+    {
+      "task_id": "frontend_type_unify_deepen",
+      "name": "深化类型合一：全面替换 _types_compatible",
+      "description": "将类型检查中所有使用 _types_compatible 的关键路径替换为真正的合一驱动检查：let 绑定类型标注、if 分支类型一致性、match 分支类型、赋值兼容性、列表元素一致性、二元/一元运算、管道表达式等。当前合一算法仅在函数调用参数匹配中使用，大部分检查仍是弱兼容模式（TypeVar 直接放行）。替换后类型推断能力将产生质的飞跃。",
+      "track": "frontend",
+      "difficulty": "hard",
+      "priority": 94,
+      "estimated_effort": "2-3天",
+      "status": "pending",
+      "source": "review_9",
+      "depends_on": [
+        "frontend_type_unification"
+      ]
+    },
+    {
       "task_id": "frontend_pattern_exhaustiveness",
       "name": "实现模式匹配完备性检查",
-      "description": "为 match 表达式添加完备性检查，确保所有构造器都被覆盖，检测冗余分支和不可达分支，给出精确的错误提示（缺失哪些变体）。",
+      "description": "为 match 表达式添加完备性检查，确保所有构造器都被覆盖，检测冗余分支和不可达分支，给出精确的错误提示（缺失哪些变体）。当前完全没有完备性检查，不完备的 match 只会在运行时 panic。",
       "track": "frontend",
       "difficulty": "hard",
       "priority": 82,
@@ -192,81 +273,29 @@
       "depends_on": []
     },
     {
-      "task_id": "frontend_type_unify_deepen",
-      "name": "深化类型合一：全面替换 _types_compatible",
-      "description": "在类型合一基础设施就绪后，将所有使用 _types_compatible 的地方逐步替换为真正的合一驱动检查：let 绑定类型标注、if 分支类型、match 分支类型、赋值、列表元素一致性等。让类型推断真正从调用上下文反向传播。",
+      "task_id": "frontend_mut_type_annotation",
+      "name": "修复 Mut 绑定忽略类型注解 bug",
+      "description": "修复 _check_mut_binding 完全忽略 type_annotation 字段的 bug：应检查赋值表达式类型与注解类型是否兼容（合一），不兼容时报类型错误。当前 mut 绑定的类型注解形同虚设。",
       "track": "frontend",
-      "difficulty": "hard",
-      "priority": 88,
-      "estimated_effort": "2-3天",
-      "status": "pending",
-      "source": "cycle_8",
-      "depends_on": ["frontend_type_unification"]
-    },
-    {
-      "task_id": "frontend_parser_error_recovery",
-      "name": "增强解析器错误恢复能力",
-      "description": "为 parser 添加错误恢复：语法错误时尝试同步到下一个语句边界（换行/分号/右花括号），报告多个错误而不是第一个就停。",
-      "track": "frontend",
-      "difficulty": "medium",
-      "priority": 60,
-      "estimated_effort": "4-6小时",
-      "status": "pending",
-      "source": "quality_analysis",
-      "depends_on": []
-    },
-    {
-      "task_id": "frontend_map_literal_parse",
-      "name": "实现 Map 字面量解析与类型检查",
-      "description": "填补 Map 类型断层：parser 中添加 {key: value, ...} map 字面量解析，type_checker 中添加 Map 表达式类型推导。当前 AST 有 MapExpr 但 parser 完全缺失。",
-      "track": "frontend",
-      "difficulty": "medium",
-      "priority": 58,
-      "estimated_effort": "1-2天",
-      "status": "pending",
-      "source": "review_3",
-      "depends_on": []
-    },
-    {
-      "task_id": "backend_native_stack_frame",
-      "name": "实现原生后端栈帧管理",
-      "description": "实现完整栈帧管理：prologue/epilogue 生成、栈槽分配、局部变量寻址、溢出槽管理、16字节栈指针对齐。寄存器分配的必要配套。",
-      "track": "backend",
-      "difficulty": "hard",
-      "priority": 90,
-      "estimated_effort": "2-3天",
-      "status": "pending",
-      "source": "quality_analysis",
-      "depends_on": [
-        "backend_native_regalloc_fix"
-      ]
-    },
-    {
-      "task_id": "backend_native_call_abi",
-      "name": "实现原生后端 System V AMD64 ABI",
-      "description": "实现 System V AMD64 调用约定：前6个参数用寄存器（RDI/RSI/RDX/RCX/R8/R9），其余栈传，返回值 RAX，浮点返回 XMM0，调用者/被调用者保存寄存器管理。",
-      "track": "backend",
-      "difficulty": "hard",
-      "priority": 88,
-      "estimated_effort": "2-3天",
-      "status": "pending",
-      "source": "quality_analysis",
-      "depends_on": [
-        "backend_native_stack_frame"
-      ]
-    },
-    {
-      "task_id": "backend_native_elf_phnum",
-      "name": "修复原生后端 ELF phnum 不匹配 bug",
-      "description": "修复 _generate_elf 中 phnum=3（声明3个 program header）但实际只写入 code_ph 和 data_ph 两个的 bug。第三个 header 缺失会导致 ELF 解析器读取越界。",
-      "track": "backend",
       "difficulty": "easy",
-      "priority": 72,
+      "priority": 80,
       "estimated_effort": "30分钟",
       "status": "pending",
-      "source": "review_6",
+      "source": "review_9",
+      "depends_on": []
+    },
+    {
+      "task_id": "backend_native_instr_selection",
+      "name": "实现原生后端指令选择优化",
+      "description": "添加指令选择优化：xor eax, eax 替代 mov rax, 0（节省 5 字节且更快）、test reg, reg 替代 cmp reg, 0、使用 LEA 做加法+移位组合。低难度高收益的代码质量优化。",
+      "track": "backend",
+      "difficulty": "easy",
+      "priority": 68,
+      "estimated_effort": "2-4小时",
+      "status": "pending",
+      "source": "review_3",
       "depends_on": [
-        "backend_native_label_patch"
+        "backend_native_regalloc_fix"
       ]
     },
     {
@@ -284,7 +313,7 @@
     {
       "task_id": "backend_wasm_indirect_multiarg",
       "name": "实现 Wasm 多参数闭包调用",
-      "description": "修复 wasm_backend 中 LIRCallIndirect 多参数直接 pass 的问题，实现多参数间接调用：table.get 获取函数引用 + 多参数调用。",
+      "description": "修复 wasm_backend 中 LIRCallIndirect 多参数直接 pass 的问题，实现多参数间接调用：table.get 获取函数引用 + 多参数调用。当前多参数闭包调用是空实现。",
       "track": "backend",
       "difficulty": "medium",
       "priority": 72,
@@ -304,20 +333,6 @@
       "status": "pending",
       "source": "quality_analysis",
       "depends_on": []
-    },
-    {
-      "task_id": "backend_native_instr_selection",
-      "name": "实现原生后端指令选择优化",
-      "description": "添加指令选择优化：如 xor eax, eax 替代 mov rax, 0（节省 5 字节）、使用 LEA 做加法+移位组合、test reg, reg 替代 cmp reg, 0 等。低难度高收益的代码质量优化。",
-      "track": "backend",
-      "difficulty": "easy",
-      "priority": 68,
-      "estimated_effort": "2-4小时",
-      "status": "pending",
-      "source": "review_3",
-      "depends_on": [
-        "backend_native_regalloc_fix"
-      ]
     },
     {
       "task_id": "backend_wasm_gc_types",
@@ -341,6 +356,30 @@
       "estimated_effort": "3-5小时",
       "status": "pending",
       "source": "quality_analysis",
+      "depends_on": []
+    },
+    {
+      "task_id": "frontend_parser_error_recovery",
+      "name": "增强解析器错误恢复能力",
+      "description": "为 parser 添加错误恢复：语法错误时尝试同步到下一个语句边界（换行/分号/右花括号），报告多个错误而不是第一个就停。",
+      "track": "frontend",
+      "difficulty": "medium",
+      "priority": 60,
+      "estimated_effort": "4-6小时",
+      "status": "pending",
+      "source": "quality_analysis",
+      "depends_on": []
+    },
+    {
+      "task_id": "frontend_map_literal_parse",
+      "name": "实现 Map 字面量解析与类型检查",
+      "description": "填补 Map 类型断层：parser 中添加 {key: value, ...} map 字面量解析，type_checker 中添加 Map 表达式类型推导。当前 AST 有 MapExpr 但 parser 完全缺失，类型检查也缺失。",
+      "track": "frontend",
+      "difficulty": "medium",
+      "priority": 58,
+      "estimated_effort": "1-2天",
+      "status": "pending",
+      "source": "review_3",
       "depends_on": []
     }
   ]
