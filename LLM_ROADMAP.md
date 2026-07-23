@@ -1,7 +1,7 @@
 # Nova LLM 智能开发路线图
 
-**更新时间**: 2026-07-24 12:20:00
-**上次评审**: 第 39 轮（路线图评审）
+**更新时间**: 2026-07-24 21:03:00
+**上次评审**: 第 42 轮（路线图评审）
 
 本路线图由 LLM 智能开发系统动态维护。
 
@@ -95,7 +95,9 @@
 | ✅ | 重构 Evaluator._match_pattern 降低圈复杂度 | medium | 72 | 3-5 小时 | refactor_eval_expr_complexity |
 | ✅ | 重构 BytecodeCompiler._compile_expr 降低圈复杂度 | medium | 60 | 3-5 小时 | - |
 | ✅ | 重构 SSAVerifier._verify_function 降低圈复杂度 | medium | 65 | 3-5 小时 | - |
-| ⏳ | 重构 TypeChecker._unify 降低圈复杂度 | medium | 60 | 3-5 小时 | - |
+| ⏳ | 重构 TypeChecker._unify 降低圈复杂度 | medium | 65 | 3-5 小时 | - |
+| ⏳ | 重构 CCodeGen._compile_expr 降低圈复杂度 | medium | 55 | 3-5 小时 | - |
+| ⏳ | 批量清理未使用导入 v3 | easy | 58 | 1-2 小时 | - |
 | ✅ | 重构 CCodeGen._infer_c_type_from_expr 降低圈复杂度 | medium | 48 | 3-5 小时 | - |
 | ✅ | 重构 NativeCodeGen._compile_body 降低圈复杂度 | medium | 40 | 4-6 小时 | - |
 | ⏳ | LOW 级问题批量治理（docstring + 魔法数字） | easy | 52 | 2-4 小时 | - |
@@ -116,10 +118,10 @@
 
 ---
 
-**进度**: 78/81 (96%)
+**进度**: 78/84 (93%)
 - **已完成**: 78
 - **进行中**: 1
-- **待开发**: 2
+- **待开发**: 4
 - **已废弃**: 1
 
-> 注：第41轮完成 CCodeGen._infer_c_type_from_expr 和 _compile_fn_call 调度表化重构，全项目 Top2 和 Top7 复杂度问题消除。
+> 注：第42轮评审新增 2 个审查驱动任务（CCodeGen._compile_expr 重构 + unused_import v3 清理），TypeChecker._unify 优先级上调至 65。Top10 复杂函数中已有 7 个完成调度表化重构，剩余 3 个（_compile_expr/33、_unify/38、WasmGC._compile_function/25）。

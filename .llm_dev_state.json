@@ -1,5 +1,5 @@
 {
-  "cycles": 41,
+  "cycles": 42,
   "completed_tasks": [
     "refactor_eval_expr_complexity",
     "refactor_evaluator_match_pattern",
@@ -92,10 +92,19 @@
     "refactor_cfg_utils_dispatch",
     "c_backend_closure_phase2_env",
     "refactor_ccodegen_infer_type",
-    "refactor_ccodegen_fn_call"
+    "refactor_ccodegen_fn_call",
+    "review_cycle_42"
   ],
   "failed_tasks": [],
   "task_history": [
+    {
+      "cycle": 42,
+      "task_id": "review_cycle_42",
+      "status": "completed",
+      "source": "评审轮",
+      "reason": "第42轮路线图评审，每3轮一次的例行评审。总结第40-41轮开发成果，评估方向/质量/效率/价值/审查对齐五维表现，规划第43-45轮方向。",
+      "details": "完成第42轮路线图评审：五维评估（方向正确、质量持续提升MEDIUM再降LOW持平、效率稳定2任务/轮、价值高、审查对齐优秀75%）；任务池新增2个任务（CCodeGen._compile_expr重构+unused_import批量清理），调整3个任务优先级，标记1个任务状态修正；规划第43-45轮方向为'Top10复杂度收尾 → MEDIUM消化 → 质量门禁建设'。"
+    },
     {
       "cycle": 41,
       "task_id": "refactor_ccodegen_infer_type",
@@ -249,11 +258,35 @@
       "details": "完成第33轮路线图评审：五维评估（方向正确、质量提升、效率稳定、价值高、审查对齐优秀）；任务池新增 5 个任务（4个审查驱动 + 1个自主规划）；调整 4 个任务优先级；规划第34-36轮方向为'解释器调度表化 → C后端数据结构验证 → 质量底线建设'。"
     }
   ],
-  "current_cycle": 41,
+  "current_cycle": 42,
   "baseline_tests": 392,
   "current_tests": 392,
-  "last_review_cycle": 39,
+  "last_review_cycle": 42,
   "tasks": [
+    {
+      "id": "refactor_ccodegen_compile_expr",
+      "name": "重构 CCodeGen._compile_expr 降低圈复杂度",
+      "description": "CCodeGen._compile_expr 圈复杂度 33（审查日志 Top 3），是旧 C 后端的主表达式编译分发函数。与已完成的 _infer_c_type_from_expr 同文件，可沿用调度表模式重构",
+      "difficulty": "medium",
+      "priority": 55,
+      "category": "engineering",
+      "estimated": "3-5 小时",
+      "status": "pending",
+      "depends_on": [],
+      "reason": "审查日志（第1499轮）显示 _compile_expr 圈复杂度 33，Top 3。与 _infer_c_type_from_expr 和 _compile_fn_call 同属 c_codegen.py，连续重构可最大化减少维护成本。旧 C 后端最终将被废弃，但当前仍是功能最完整路径。[新增任务 / 审查驱动]"
+    },
+    {
+      "id": "clean_unused_imports_v3",
+      "name": "批量清理未使用导入 v3",
+      "description": "审查日志显示 unused_import 共 26 个 MEDIUM 级别问题（从 30 降至 26），继续批量清理剩余的未使用导入，目标降至 15 以下",
+      "difficulty": "easy",
+      "priority": 58,
+      "category": "engineering",
+      "estimated": "1-2 小时",
+      "status": "pending",
+      "depends_on": [],
+      "reason": "unused_import 是 MEDIUM 级别中数量最多的单一类别（26 个），且清理风险低、收益明确。v2 已清理 4 个，v3 继续推进。[新增任务 / 审查驱动]"
+    },
     {
       "id": "unify_c_backend",
       "name": "统一 C 后端（LIR 路径功能对齐）",
@@ -327,7 +360,7 @@
       "name": "重构 TypeChecker._unify 降低圈复杂度",
       "description": "TypeChecker._unify 圈复杂度 38（全项目 Top 6），类型系统的核心合一算法。按类型类别拆分为独立方法（基础类型、复合类型、ADT、函数类型等），引入调度表模式降低复杂度",
       "difficulty": "medium",
-      "priority": 60,
+      "priority": 65,
       "category": "engineering",
       "estimated": "3-5 小时",
       "status": "pending",
