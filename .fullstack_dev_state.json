@@ -1,9 +1,9 @@
 {
-  "cycles": 11,
+  "cycles": 12,
   "frontend_completed": 8,
-  "backend_completed": 8,
-  "last_review_cycle": 9,
-  "current_review_cycle": 12,
+  "backend_completed": 9,
+  "last_review_cycle": 12,
+  "current_review_cycle": 15,
   "completed_tasks": [
     "frontend_try_expr_typecheck",
     "backend_native_label_patch",
@@ -27,6 +27,17 @@
     "frontend_type_var_strict"
   ],
   "task_history": [
+    {
+      "cycle": 12,
+      "task_id": "review_cycle_12",
+      "name": "第 12 轮 - 双线路线图评审",
+      "track": "review",
+      "difficulty": "review",
+      "priority": 0,
+      "result": "success",
+      "details": "第四次三轮回顾评审（第 10-12 轮）。深度代码审计重大发现：前端——合一算法接入面仍极窄（仅函数调用）、_types_compatible 中 TypeVar 仍直接放行、模式匹配完备性完全缺失、解析器错误恢复为零；后端——原生后端参数传递完全缺失（blocking bug）、栈帧调用级缺失、Phi 降级正确、Wasm LIRReturn 返回值处理有 bug、WasmGC 仍名不副实、C 后端双轨并存。新增 1 个 Wasm 返回值修复任务，调整多项优先级。下阶段重点：后端攻坚原生调用约定 + 前端合一深化全面替换 _types_compatible。",
+      "timestamp": "2026-07-24 07:15"
+    },
     {
       "cycle": 11,
       "task_id": "frontend_map_literal_parse",
@@ -68,7 +79,7 @@
       "difficulty": "easy",
       "priority": 95,
       "result": "success",
-      "details": "修复 _generate_elf 中 phnum=3（声明 LOAD(code) + LOAD(data) + LOAD(rodata) 三个 program header）但实际只创建并写入 code_ph 和 data_ph 两个的 P0 正确性 bug。ELF 头期望 3×56=168 字节 program headers 但只提供 2×56=112 字节，差 56 字节导致后续代码段数据被 ELF 加载器误解为第三个 program header。修复：将 phnum 从 3 改为 2，与实际写入数量一致。修复仅 1 行，392 测试全部通过。",
+      "details": "修复 _generate_elf 中 phnum=3（声明 LOAD(code) + LOAD(data) + LOAD(rodata) 三个 program header）但实际只创建并写入 code_ph 和 data_ph 两个的 P0 正确性 bug。ELF 头期望 3x56=168 字节 program headers 但只提供 2x56=112 字节，差 56 字节导致后续代码段数据被 ELF 加载器误解为第三个 program header。修复：将 phnum 从 3 改为 2，与实际写入数量一致。修复仅 1 行，392 测试全部通过。",
       "timestamp": "2026-07-23 10:18"
     },
     {
@@ -101,7 +112,7 @@
       "difficulty": "medium",
       "priority": 86,
       "result": "success",
-      "details": "修复 lir_lowering.py 中 Phi 节点降级的 critical edge bug：原代码将所有后继块的 Phi 拷贝都放在前驱块末尾（终结指令前），对于条件分支（两后继）场景，两条互斥路径的 Phi 拷贝都会被执行，导致值被错误覆盖。修复方案：实现 critical edge splitting——当有多后继的前驱块跳转到含 Phi 的后继时，为每条边插入边缘块（edge block），Phi 拷贝放在对应边缘块中，边缘块末尾再跳转到真正的目标。支持 MIRBranch（两分支）和 MIRSwitch/MIRMatchJump（多分支）两种场景。新增 _insert_phi_copies 和 _lower_terminator_with_targets 两个辅助方法。392 测试全部通过。",
+      "details": "修复 lir_lowering.py 中 Phi 节点降级的 critical edge bug：原代码将所有后继块的 Phi 拷贝都放在前驱块末尾（终结指令前），对于条件分支（两后继）场景，两条互斥路径的 Phi 拷贝都会被执行，导致值被错误覆盖。修复方案：实现 critical edge splitting——当有多后继的前驱块跳转到含 Phi 的后继时，为每条边插入边缘块（edge block），Phi 拷贝放在对应边缘块中，边缘块末尾再跳转到真正的目标。支持 MIRBranch（两分支）和 MIRSwitch/MIRMatchJump（多分支）两种场景。新增 _insert_phi_copies 和 _lower_terminator_with_targets 两个辅助方法。392 测试全部通过，无回归。",
       "timestamp": "2026-07-23 04:18"
     },
     {
@@ -253,34 +264,6 @@
       ]
     },
     {
-      "task_id": "backend_native_elf_phnum",
-      "name": "修复原生后端 ELF phnum 不匹配 bug",
-      "description": "修复 _generate_elf 中 phnum=3（声明3个 program header）但实际只写入 code_ph 和 data_ph 两个的 bug。第三个 header 缺失会导致 ELF 解析器读取越界，产生未定义行为。P0 级正确性 bug，easy 难度高收益。",
-      "track": "backend",
-      "difficulty": "easy",
-      "priority": 95,
-      "estimated_effort": "30分钟",
-      "status": "completed",
-      "source": "review_6",
-      "depends_on": [
-        "backend_native_label_patch"
-      ]
-    },
-    {
-      "task_id": "backend_phi_matchjump_successors",
-      "name": "修复 Phi 降级 MIRMatchJump 后继块计算不全",
-      "description": "修复 lir_lowering.py 中 _get_successor_blocks 对 MIRMatchJump 只返回 [default_target] 而忽略 variant_tests 中各个 case 目标块的 bug。导致 match 分支的 Phi 节点边缘块判断错误，Phi 拷贝被放在错误位置（所有路径都执行），破坏 SSA 语义。",
-      "track": "backend",
-      "difficulty": "medium",
-      "priority": 93,
-      "estimated_effort": "2-4小时",
-      "status": "completed",
-      "source": "review_9",
-      "depends_on": [
-        "backend_phi_edge_block_fix"
-      ]
-    },
-    {
       "task_id": "backend_native_stack_frame",
       "name": "实现原生后端完整栈帧管理",
       "description": "实现完整栈帧管理：修正 prologue/epilogue 的 16 字节对齐（考虑 callee-saved 寄存器压栈影响）、栈槽分配与寻址、溢出槽管理、调用参数栈区预留。当前栈帧对齐计算有 bug（未考虑 push callee-saved 寄存器后的偏移），且调用约定依赖正确的栈帧布局。",
@@ -309,6 +292,18 @@
       ]
     },
     {
+      "task_id": "backend_wasm_return_fix",
+      "name": "修复 Wasm 后端 LIRReturn 返回值处理 bug",
+      "description": "修复 wasm_backend.py 中 _compile_function 处理 LIRReturn 时只生成 (br $exit) 但未将返回值留在 Wasm 栈上的 bug，导致有返回值的函数返回 undefined。需要在 br 前将返回值压入 Wasm 操作数栈。",
+      "track": "backend",
+      "difficulty": "medium",
+      "priority": 88,
+      "estimated_effort": "2-4小时",
+      "status": "pending",
+      "source": "review_12",
+      "depends_on": []
+    },
+    {
       "task_id": "frontend_pattern_exhaustiveness",
       "name": "实现模式匹配完备性检查",
       "description": "为 match 表达式添加完备性检查，确保所有构造器都被覆盖，检测冗余分支和不可达分支，给出精确的错误提示（缺失哪些变体）。当前完全没有完备性检查，不完备的 match 只会在运行时 panic。",
@@ -319,32 +314,6 @@
       "status": "pending",
       "source": "quality_analysis",
       "depends_on": []
-    },
-    {
-      "task_id": "frontend_mut_type_annotation",
-      "name": "修复 Mut 绑定忽略类型注解 bug",
-      "description": "修复 _check_mut_binding 完全忽略 type_annotation 字段的 bug：应检查赋值表达式类型与注解类型是否兼容（合一），不兼容时报类型错误。当前 mut 绑定的类型注解形同虚设。",
-      "track": "frontend",
-      "difficulty": "easy",
-      "priority": 80,
-      "estimated_effort": "30分钟",
-      "status": "completed",
-      "source": "review_9",
-      "depends_on": []
-    },
-    {
-      "task_id": "backend_native_instr_selection",
-      "name": "实现原生后端指令选择优化",
-      "description": "添加指令选择优化：xor eax, eax 替代 mov rax, 0（节省 5 字节且更快）、test reg, reg 替代 cmp reg, 0、使用 LEA 做加法+移位组合。低难度高收益的代码质量优化。",
-      "track": "backend",
-      "difficulty": "easy",
-      "priority": 68,
-      "estimated_effort": "2-4小时",
-      "status": "pending",
-      "source": "review_3",
-      "depends_on": [
-        "backend_native_regalloc_fix"
-      ]
     },
     {
       "task_id": "backend_wasm_stack_balance",
@@ -383,6 +352,20 @@
       "depends_on": []
     },
     {
+      "task_id": "backend_native_instr_selection",
+      "name": "实现原生后端指令选择优化",
+      "description": "添加指令选择优化：xor eax, eax 替代 mov rax, 0（节省 5 字节且更快）、test reg, reg 替代 cmp reg, 0、使用 LEA 做加法+移位组合。低难度高收益的代码质量优化。",
+      "track": "backend",
+      "difficulty": "easy",
+      "priority": 68,
+      "estimated_effort": "2-4小时",
+      "status": "pending",
+      "source": "review_3",
+      "depends_on": [
+        "backend_native_regalloc_fix"
+      ]
+    },
+    {
       "task_id": "backend_wasm_gc_types",
       "name": "完善 WasmGC 原生类型定义",
       "description": "扩展 WasmGC 类型系统：增加 List/Map/ADT 的原生 struct/array 类型定义，真正利用 GC 托管堆，替代运行时函数调用。当前 WasmGC 名不副实，复合类型全部映射为 i32 指针。",
@@ -416,18 +399,6 @@
       "estimated_effort": "4-6小时",
       "status": "pending",
       "source": "quality_analysis",
-      "depends_on": []
-    },
-    {
-      "task_id": "frontend_map_literal_parse",
-      "name": "实现 Map 字面量解析与类型检查",
-      "description": "填补 Map 类型断层：parser 中添加 {key: value, ...} map 字面量解析，type_checker 中添加 Map 表达式类型推导。当前 AST 有 MapExpr 但 parser 完全缺失，类型检查也缺失。",
-      "track": "frontend",
-      "difficulty": "medium",
-      "priority": 58,
-      "estimated_effort": "1-2天",
-      "status": "completed",
-      "source": "review_3",
       "depends_on": []
     }
   ]
