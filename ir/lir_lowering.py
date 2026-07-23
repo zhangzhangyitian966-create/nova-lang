@@ -15,6 +15,7 @@ from .ir_nodes import (
     LIRBuildList,
     LIRBuildMap,
     LIRBuildTuple,
+    LIRClosureCreate,
     LIRCall,
     LIRData,
     LIRFieldAccess,
@@ -449,10 +450,14 @@ class LIRLowering:
         result.append(lir)
 
     def _lower_closure_create(self, instr, result):
-        """降级闭包创建（作为常量处理）"""
-        lir = LIRLoadConst()
-        lir.value = "<closure:%s>" % instr.fn_name
-        lir.const_type = "closure"
+        """降级闭包创建
+
+        将 MIRClosureCreate 降级为 LIRClosureCreate。
+        传递函数名和捕获数量（当前捕获变量暂不传递，待后续实现）。
+        """
+        lir = LIRClosureCreate()
+        lir.fn_name = instr.fn_name
+        lir.capture_count = len(instr.captures) if hasattr(instr, "captures") else 0
         if instr.result_name:
             lir.dst_loc = (
                 self.ssa_to_loc.get(instr.result_name, ""),

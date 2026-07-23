@@ -60,7 +60,7 @@
 | ✅ | C 后端数据结构构建正确性验证 | medium | 80 | 3-5 小时 | c_backend_listcomp_verify, c_backend_adt_match |
 | ⏳ | C 后端闭包功能对齐 | hard | 75 | 1-2 天 | c_backend_data_verify |
 | ⏳ | 修复 Wasm 后端全局变量声明缺失 | easy | 62 | 1-2 小时 | wasm_control_flow_rewrite |
-| ⏳ | 重构 Wasm 后端指令编译调度表化 | medium | 72 | 3-5 小时 | wasm_control_flow_rewrite |
+| ✅ | 重构 Wasm 后端指令编译调度表化 | medium | 72 | 3-5 小时 | wasm_control_flow_rewrite |
 | ⏳ | 实现原生后端函数调用 ABI | hard | 20 | 3-5 天 | fix_mir_ssa |
 
 ## 🛠️ 工程质量
@@ -94,7 +94,7 @@
 | ✅ | 重构 Evaluator.eval_expr 降低圈复杂度 | medium | 82 | 3-5 小时 | - |
 | ✅ | 重构 Evaluator._match_pattern 降低圈复杂度 | medium | 72 | 3-5 小时 | refactor_eval_expr_complexity |
 | ✅ | 重构 BytecodeCompiler._compile_expr 降低圈复杂度 | medium | 60 | 3-5 小时 | - |
-| ⏳ | 重构 SSAVerifier._verify_function 降低圈复杂度 | medium | 65 | 3-5 小时 | - |
+| ✅ | 重构 SSAVerifier._verify_function 降低圈复杂度 | medium | 65 | 3-5 小时 | - |
 | ⏳ | 重构 TypeChecker._unify 降低圈复杂度 | medium | 62 | 3-5 小时 | - |
 | ⏳ | 重构 CCodeGen._infer_c_type_from_expr 降低圈复杂度 | medium | 48 | 3-5 小时 | - |
 | ⏳ | 重构 NativeCodeGen._compile_body 降低圈复杂度 | medium | 40 | 4-6 小时 | - |
@@ -115,10 +115,10 @@
 
 ---
 
-**进度**: 71/78 (91%)
-- **已完成**: 71
-- **进行中**: 0
-- **待开发**: 6
+**进度**: 73/78 (94%)
+- **已完成**: 73
+- **进行中**: 1
+- **待开发**: 4
 - **已废弃**: 1
 
-> 注：第36轮为评审轮，完成路线图评审和任务池更新。新增 3 个任务（refactor_type_checker_unify、refactor_wasm_backend_dispatch、refactor_wasm_backend_dispatch 调度表化），调整 7 个任务优先级。下一轮（第37轮）将启动 C 后端闭包攻坚。
+> 注：第37轮完成 3 个任务（2 个审查驱动 + 1 个自主规划）：SSAVerifier 重构、Wasm 后端调度表化、C 后端闭包 Phase 1（进行中）。新增 LIRClosureCreate 指令替代占位方案。

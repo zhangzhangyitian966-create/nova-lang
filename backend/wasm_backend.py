@@ -19,6 +19,7 @@ from ..ir.ir_nodes import (
     LIRBuildTuple,
     LIRCall,
     LIRCallIndirect,
+    LIRClosureCreate,
     LIRFieldAccess,
     LIRFunction,
     LIRIndex,
@@ -64,12 +65,14 @@ class WasmGCBackend:
     def __init__(self):
         """初始化 WasmGC 后端代码生成器
 
-        初始化输出行列表、缩进级别、字符串常量表和字符串计数器。
+        初始化输出行列表、缩进级别、字符串常量表、字符串计数器，
+        以及 LIR 指令调度表。
         """
         self.output_lines: List[str] = []
         self.indent_level = 0
         self.string_table: Dict[str, int] = {}  # 字符串 -> 数据段偏移
         self.string_counter = 0
+        self._instr_dispatch = self._build_instr_dispatch_table()
 
     def compile(self, lir_module: LIRModule) -> str:
         """将 LIR Module 编译为 WAT（WebAssembly Text Format）"""
@@ -484,105 +487,185 @@ class WasmGCBackend:
         self._emit(")")
         self._emit("")
 
+    def _build_instr_dispatch_table(self) -> dict:
+        """构建 LIR 指令类型 → 编译方法 的调度表
+
+        使用类型 → 方法 的调度表模式替代长 if-isinstance 链，
+        圈复杂度从 ~19 降至 ~3，提升可维护性和可扩展性。
+        """
+        return {
+            # 常量与加载/存储
+            LIRLoadConst: self._compile_load_const,
+            LIRLoadReg: self._compile_load_reg,
+            LIRStoreReg: self._compile_store_reg,
+            LIRLoadGlobal: self._compile_load_global,
+            LIRStoreGlobal: self._compile_store_global,
+            # 运算
+            LIRBinOp: self._compile_binop,
+            LIRUnaryOp: self._compile_unary_op,
+            # 函数调用
+            LIRCall: self._compile_call,
+            LIRCallIndirect: self._compile_call_indirect,
+            # 返回
+            LIRReturn: self._compile_return,
+            # 数据结构构建
+            LIRBuildList: self._compile_build_list,
+            LIRBuildMap: self._compile_build_map,
+            LIRBuildTuple: self._compile_build_tuple,
+            LIRBuildADT: self._compile_build_adt,
+            # 闭包
+            LIRClosureCreate: self._compile_closure_create,
+            # 访问
+            LIRFieldAccess: self._compile_field_access,
+            LIRIndex: self._compile_index_access,
+            # 列表操作
+            LIRListAppend: self._compile_list_append,
+            # 杂项
+            LIRPanic: self._compile_panic,
+        }
+
     def _compile_instr(self, instr: LIRInstr, func: LIRFunction):
-        """编译非控制流指令"""
-        if isinstance(instr, LIRLoadConst):
-            self._emit_load_const(instr)
+        """编译非控制流指令（调度表分发）
 
-        elif isinstance(instr, LIRBinOp):
-            self._emit_binop(instr)
+        使用类型 → 方法 的调度表模式替代长 if-isinstance 链，
+        圈复杂度从 ~19 降至 ~3。
+        """
+        handler = self._instr_dispatch.get(type(instr))
+        if handler:
+            handler(instr)
+        else:
+            self._emit(
+                f"(;; TODO: LIR instruction {type(instr).__name__} not implemented ;;)"
+            )
 
-        elif isinstance(instr, LIRUnaryOp):
-            if instr.op == "-":
-                if instr.src_locs:
-                    src_ty = instr.src_locs[0][1] if instr.src_locs else INT_TYPE
-                    if src_ty.kind == IRType.FLOAT:
-                        self._emit("(f64.neg)")
-                    else:
-                        self._emit("(i64.neg)")
-            elif instr.op == "!":
-                self._emit("(i32.eqz)")
+    # ---- 各指令类型的独立编译方法 ----
 
-        elif isinstance(instr, LIRCall):
-            self._emit_call(instr)
+    def _compile_load_const(self, instr: LIRLoadConst):
+        """编译常量加载"""
+        self._emit_load_const(instr)
 
-        elif isinstance(instr, LIRReturn):
-            self._emit("(return)")
+    def _compile_load_reg(self, instr: LIRLoadReg):
+        """编译寄存器加载"""
+        if instr.src_locs:
+            self._emit(f"(local.get ${instr.src_locs[0][0]})")
 
-        elif isinstance(instr, LIRBuildList):
-            self._emit(f"(i32.const {instr.count})")
-            self._emit("(call $nova_list_new)")
+    def _compile_store_reg(self, instr: LIRStoreReg):
+        """编译寄存器存储"""
+        if instr.dst_loc:
+            self._emit(f"(local.set ${instr.dst_loc[0]})")
 
-        elif isinstance(instr, LIRBuildMap):
-            self._emit(f"(i32.const {instr.entry_count})")
-            self._emit("(call $nova_map_new)")
+    def _compile_load_global(self, instr: LIRLoadGlobal):
+        """编译全局变量加载"""
+        self._emit(f"(global.get $nova_global_{instr.global_name})")
 
-        elif isinstance(instr, LIRBuildTuple):
-            self._emit(f"(i32.const {instr.count * 8})")
-            self._emit("(call $nova_alloc)")
+    def _compile_store_global(self, instr: LIRStoreGlobal):
+        """编译全局变量存储"""
+        self._emit(f"(global.set $nova_global_{instr.global_name})")
 
-        elif isinstance(instr, LIRBuildADT):
-            self._emit(f"(i32.const {instr.type_tag})")
-            self._emit(f"(i32.const {instr.field_count * 8 + 8})")
-            self._emit("(call $nova_alloc)")
+    def _compile_binop(self, instr: LIRBinOp):
+        """编译二元运算"""
+        self._emit_binop(instr)
 
-        elif isinstance(instr, LIRFieldAccess):
-            # 字段索引乘以 8（每个字段 8 字节，NovaValue 大小）
-            offset = instr.offset * 8
-            self._emit(f"(i32.const {offset})")
-            self._emit("(i32.add)")
-            self._emit("(i64.load align=8)")
-
-        elif isinstance(instr, LIRIndex):
-            # 索引访问：base + index * 8（每个元素 8 字节）
-            # 栈上已有 [base_ptr, index]，需要计算 base + index * 8
-            self._emit("(i64.const 8)")
-            self._emit("(i64.mul)")
-            self._emit("(i32.wrap_i64)")
-            self._emit("(i32.add)")
-            self._emit("(i64.load align=8)")
-
-        elif isinstance(instr, LIRPanic):
-            self._emit("(i32.const 0)")
-            self._emit("(call $nova_panic)")
-            self._emit("(unreachable)")
-
-        elif isinstance(instr, LIRLoadReg):
+    def _compile_unary_op(self, instr: LIRUnaryOp):
+        """编译一元运算"""
+        if instr.op == "-":
             if instr.src_locs:
-                self._emit(f"(local.get ${instr.src_locs[0][0]})")
+                src_ty = instr.src_locs[0][1] if instr.src_locs else INT_TYPE
+                if src_ty.kind == IRType.FLOAT:
+                    self._emit("(f64.neg)")
+                else:
+                    self._emit("(i64.neg)")
+        elif instr.op == "!":
+            self._emit("(i32.eqz)")
 
-        elif isinstance(instr, LIRStoreReg):
-            if instr.dst_loc:
-                self._emit(f"(local.set ${instr.dst_loc[0]})")
+    def _compile_call(self, instr: LIRCall):
+        """编译函数调用"""
+        self._emit_call(instr)
 
-        elif isinstance(instr, LIRLoadGlobal):
-            # 全局变量加载：Wasm 中使用 global.get
-            self._emit(f"(global.get $nova_global_{instr.global_name})")
+    def _compile_call_indirect(self, instr: LIRCallIndirect):
+        """编译间接调用（闭包调用）
 
-        elif isinstance(instr, LIRStoreGlobal):
-            # 全局变量存储：Wasm 中使用 global.set
-            self._emit(f"(global.set $nova_global_{instr.global_name})")
+        调用 nova_closure_call(closure, args_array, arg_count)。
+        简化实现：零参数闭包直接调用，多参数暂不支持。
+        """
+        if instr.arg_count > 0:
+            # 对于多参数闭包调用，需要打包参数数组
+            # 简化处理：暂不支持多参数间接调用，使用占位
+            pass
+        # 零参数闭包：直接调用
+        self._emit("(i32.const 0)")  # 空参数数组指针
+        self._emit("(i32.const 0)")  # 参数数量 0
+        self._emit("(call $nova_closure_call)")
 
-        elif isinstance(instr, LIRListAppend):
-            # 列表追加元素：调用 nova_list_push(list_ptr, elem_value)
-            # 栈上已有 [list_ptr, elem_value]，但 list_push 需要 i32 指针和 i64 值
-            # 参数顺序：list(i32), elem(i64) -> void，结果是修改列表
-            # 由于 LIRListAppend 通常有 2 个 src_locs（list, elem），栈上已经是正确顺序
-            self._emit("(call $nova_list_push)")
+    def _compile_return(self, instr: LIRReturn):
+        """编译返回指令"""
+        self._emit("(return)")
 
-        elif isinstance(instr, LIRCallIndirect):
-            # 间接调用（闭包调用）：调用 nova_closure_call(closure, args_array, arg_count)
-            # 简化实现：第一个参数是闭包指针，后续是参数
-            # 由于 Wasm 中需要将参数打包为数组，这里使用简化方式
-            # 栈上已有 [closure_ptr, arg1, arg2, ...]
-            if instr.arg_count > 0:
-                # 对于多参数闭包调用，需要打包参数数组
-                # 简化处理：暂不支持多参数间接调用，使用占位
-                pass
-            # 零参数闭包：直接调用
-            self._emit("(i32.const 0)")  # 空参数数组指针
-            self._emit("(i32.const 0)")  # 参数数量 0
-            self._emit("(call $nova_closure_call)")
+    def _compile_build_list(self, instr: LIRBuildList):
+        """编译列表构建"""
+        self._emit(f"(i32.const {instr.count})")
+        self._emit("(call $nova_list_new)")
+
+    def _compile_build_map(self, instr: LIRBuildMap):
+        """编译映射构建"""
+        self._emit(f"(i32.const {instr.entry_count})")
+        self._emit("(call $nova_map_new)")
+
+    def _compile_build_tuple(self, instr: LIRBuildTuple):
+        """编译元组构建"""
+        self._emit(f"(i32.const {instr.count * 8})")
+        self._emit("(call $nova_alloc)")
+
+    def _compile_build_adt(self, instr: LIRBuildADT):
+        """编译 ADT 构建"""
+        self._emit(f"(i32.const {instr.type_tag})")
+        self._emit(f"(i32.const {instr.field_count * 8 + 8})")
+        self._emit("(call $nova_alloc)")
+
+    def _compile_closure_create(self, instr: LIRClosureCreate):
+        """编译闭包创建
+
+        当前阶段：占位实现，返回空指针（i32.const 0）。
+        lambda 函数体的 Wasm 编译待后续实现。
+        """
+        # 占位：返回空闭包指针
+        self._emit("(i32.const 0)")
+
+    def _compile_field_access(self, instr: LIRFieldAccess):
+        """编译字段访问
+
+        字段索引乘以 8（每个字段 8 字节，NovaValue 大小）。
+        """
+        offset = instr.offset * 8
+        self._emit(f"(i32.const {offset})")
+        self._emit("(i32.add)")
+        self._emit("(i64.load align=8)")
+
+    def _compile_index_access(self, instr: LIRIndex):
+        """编译索引访问
+
+        索引访问：base + index * 8（每个元素 8 字节）。
+        栈上已有 [base_ptr, index]，需要计算 base + index * 8。
+        """
+        self._emit("(i64.const 8)")
+        self._emit("(i64.mul)")
+        self._emit("(i32.wrap_i64)")
+        self._emit("(i32.add)")
+        self._emit("(i64.load align=8)")
+
+    def _compile_list_append(self, instr: LIRListAppend):
+        """编译列表追加元素
+
+        调用 nova_list_push(list_ptr, elem_value)。
+        栈上已有 [list_ptr, elem_value]，顺序正确。
+        """
+        self._emit("(call $nova_list_push)")
+
+    def _compile_panic(self, instr: LIRPanic):
+        """编译 Panic 指令"""
+        self._emit("(i32.const 0)")
+        self._emit("(call $nova_panic)")
+        self._emit("(unreachable)")
 
     def _emit_load_const(self, instr: LIRLoadConst):
         if instr.const_type == "int":
@@ -594,8 +677,6 @@ class WasmGCBackend:
         elif instr.const_type == "string":
             offset = self._get_string_offset(str(instr.value))
             self._emit(f"(i32.const {offset})")
-        elif instr.const_type == "closure":
-            self._emit("(i32.const 0)")
         # unit: 无值
 
     def _emit_binop(self, instr: LIRBinOp):

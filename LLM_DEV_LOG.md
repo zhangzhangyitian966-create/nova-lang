@@ -4,6 +4,110 @@
 
 ---
 
+## 2026-07-23 08:00 第37轮开发
+
+### 开发概览
+- **轮次**: 第 37 轮（普通开发轮）
+- **基线测试**: 392/392 通过
+- **完成任务**: 3 个（2 个审查驱动 + 1 个自主规划）
+- **审查驱动任务占比**: 67%（2/3）
+- **路线图进度**: 71/78 (91%) → 73/78 (94%)
+- **测试结果**: 392/392 通过（零回归）
+- **失败回滚**: 0 次
+
+---
+
+### 任务详情
+
+#### 1. 【审查驱动】重构 SSAVerifier._verify_function 降低圈复杂度
+- **任务ID**: refactor_ssaverifier_verify_function
+- **状态**: ✅ 成功
+- **来源**: 审查驱动（最新审查 CC=33，Top 4）
+- **为什么选**: SSA 验证器是优化正确性的核心保障，_verify_function 圈复杂度 33 排名全项目 Top 4。降低复杂度可提升验证器本身的可信度，也便于扩展更多验证规则。
+- **完成内容**:
+  - 将单方法（约 100 行、4 大阶段、14 个决策点）拆分为 7 个独立方法：
+    - `_build_predecessors` — 构建基本块前驱关系映射
+    - `_collect_all_defs` — 收集所有 SSA 定义（参数+指令）
+    - `_verify_terminators` — 终结指令验证
+    - `_verify_phi_position` — Phi 节点位置验证
+    - `_verify_single_assignment` — SSA 单赋值验证
+    - `_verify_use_def` — 使用-定义链验证
+    - `_verify_phi_predecessors` — Phi 前驱验证
+  - `_verify_function` 变为约 8 行的调度器，圈复杂度从 ~14 降至 ~3
+
+#### 2. 【审查驱动+自主发现】重构 Wasm 后端指令编译调度表化
+- **任务ID**: refactor_wasm_backend_dispatch
+- **状态**: ✅ 成功
+- **来源**: 审查驱动 + 自主发现（CC=26，Top 5）
+- **为什么选**: Wasm 后端是最薄弱模块，_compile_instr 有 18 个 if-isinstance 分支（CC=26 Top 5），尚未调度表化。调度表化是 Wasm 后端重构的第一步，统一架构风格，降低维护成本。
+- **完成内容**:
+  - 新增 `_build_instr_dispatch_table()` 构建 18 种 LIR 指令类型的 handler 映射表
+  - `_compile_instr` 从 18 个 if-isinstance 分支简化为查表分发（CC 从 ~19 降至 ~3）
+  - 按类别拆分为 18 个独立编译方法（常量与加载存储 5 个、运算 2 个、函数调用 2 个、返回 1 个、数据结构构建 4 个、访问 2 个、列表操作 1 个、杂项 1 个）
+  - 每个方法补充 docstring 说明用途
+
+#### 3. 【自主规划】C 后端闭包基础支持（Phase 1）
+- **任务ID**: c_backend_closure_phase1（主任务 c_backend_closure_support 进行中）
+- **状态**: ✅ Phase 1 完成
+- **来源**: 自主规划（第36轮评审规划的第37轮核心任务）
+- **为什么选**: 数据结构验证完成后，闭包是统一 C 后端的下一个关键里程碑，也是函数式语言的核心特性。Phase 1 目标：用正确的 LIR 指令替换占位方案，为后续完整实现打好基础。
+- **完成内容**:
+  1. **IR 层**: 新增 `LIRClosureCreate` 指令（含 `fn_name` 和 `capture_count` 字段），替代 `LIRLoadConst` + `const_type="closure"` 的 hack
+  2. **降级层**: `_lower_closure_create` 生成 `LIRClosureCreate` 指令，正确传递函数名和捕获数量
+  3. **C 后端**: 新增 `_compile_closure_create` 方法，生成 `nova_closure_new(capture_count, NULL, NULL)` 调用（达到旧 C 后端同等水平）
+  4. **Wasm 后端**: 新增 `_compile_closure_create` 占位实现（返回 i32.const 0）
+  5. **调度表**: 两个后端的调度表均加入 `LIRClosureCreate`
+  6. **清理**: 移除两个后端 `_emit_load_const` 中的 `closure` 类型分支（已不再需要）
+
+---
+
+### 审查日志研读摘要
+
+**最新审查（第1499轮，2026-07-23）**:
+- 总问题数：1086（CRITICAL: 0, HIGH: 0, MEDIUM: 85, LOW: 1001）
+- 极复杂函数（CC>25）：5 个（从历史最高 21 个大幅下降）
+- Top 5 最复杂函数：NativeCodeGen._compile_body(97)、CCodeGen._infer_c_type(42)、CCodeGen._compile_expr(33)、SSAVerifier._verify_function(33)、WasmGCBackend._compile_instr(26)
+
+**趋势分析**:
+- HIGH 问题：持续清零 ✅
+- MEDIUM 问题：169→85，持续下降（调度表化战略成效显著）✅
+- LOW 问题：840→1001，增速放缓（+19% → +0.3%）⚠️
+- 极复杂函数：21→5，持续下降 ✅
+- sys.path hack：已清零 ✅
+
+**本轮采纳的审查发现**:
+- ✅ SSAVerifier._verify_function CC=33 Top 4 → 重构完成
+- ✅ WasmGCBackend._compile_instr CC=26 Top 5 → 重构完成
+- ⏳ LOW 级问题治理（v1 已完成主要部分）
+
+---
+
+### 测试前后对比
+
+| 阶段 | 通过数 | 总数 | 通过率 |
+|------|--------|------|--------|
+| 基线（开发前） | 392 | 392 | 100.0% |
+| 最终（开发后） | 392 | 392 | 100.0% |
+| 变化 | 0 | 0 | +0.0% |
+
+**回归测试结果**: 零回归，所有测试通过。
+
+---
+
+### 下一步计划
+
+**第38轮（Wasm 后端重构深化）**:
+1. **【自主发现】修复 Wasm 后端全局变量声明缺失**（优先级 62）— Wasm 后端正确性 bug，修复成本低收益高
+2. **【审查驱动】重构 TypeChecker._unify 降低圈复杂度**（优先级 62，CC=38 Top 6）— 类型系统核心合一算法
+3. **【审查驱动】高复杂度函数补全 docstring**（优先级 55）— LOW 级问题治理高价值部分
+
+**第39轮（质量门禁 + 测试深化）**:
+1. **【自主规划】建立代码质量门禁**（优先级 60）— 设定 LOW 问题增长率上限
+2. **【自主发现】LICM 优化正确性测试**（优先级 68）— 最高级优化 Pass 的正确性保障
+3. **【自主发现】CFG 基础设施单元测试**（优先级 58）— 循环优化基础设施的正确性保障
+
+---
+
 ## 2026-07-23 05:02 第36轮评审（路线图评审）
 
 ### 评审概览

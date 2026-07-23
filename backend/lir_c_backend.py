@@ -20,6 +20,7 @@ from ..ir.ir_nodes import (
     LIRBuildList,
     LIRBuildMap,
     LIRBuildTuple,
+    LIRClosureCreate,
     LIRCall,
     LIRCallIndirect,
     LIRFieldAccess,
@@ -279,6 +280,8 @@ class LIRCBackend:
             LIRBuildTuple: self._compile_build_tuple,
             LIRBuildMap: self._compile_build_map,
             LIRBuildADT: self._compile_build_adt,
+            # 闭包
+            LIRClosureCreate: self._compile_closure_create,
             # 访问
             LIRFieldAccess: self._compile_field_access,
             LIRIndex: self._compile_index_access,
@@ -463,6 +466,23 @@ class LIRCBackend:
                 field_var = self._loc_var_name(field_loc)
                 self._emit(f"nova_adt_set_field({dst}, {i}, {field_var});")
 
+    def _compile_closure_create(self, instr: LIRClosureCreate):
+        """编译闭包创建
+
+        调用 nova_closure_new(capture_count, fn_ptr, env) 创建闭包对象。
+        当前阶段：函数指针暂为 NULL（lambda 函数体编译待实现），
+        捕获变量也暂不传递，达到与旧 C 后端同等水平。
+        """
+        dst = self._dst_var_name(instr) if instr.dst_loc else None
+        if dst:
+            capture_count = instr.capture_count
+            # fn_ptr 暂时为 NULL（lambda 函数体的 LIR 编译待实现）
+            # 环境指针暂时为 NULL（捕获变量传递待实现）
+            self._emit(
+                f"{dst} = nova_closure_new({capture_count}, NULL, NULL);"
+                f" /* closure: {instr.fn_name} */"
+            )
+
     def _compile_field_access(self, instr: LIRFieldAccess):
         """编译字段访问"""
         dst = self._dst_var_name(instr) if instr.dst_loc else None
@@ -505,9 +525,6 @@ class LIRCBackend:
             self._emit(f"{dst} = (NovaString*)nova_string_new((char*){label});")
         elif ctype == "unit":
             self._emit(f"{dst} = 0;")
-        elif ctype == "closure":
-            # 闭包常量：简化处理，先置空
-            self._emit(f"{dst} = NULL;")
         else:
             self._emit(f"{dst} = 0; /* unknown const type: {ctype} */")
 

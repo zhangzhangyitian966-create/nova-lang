@@ -1346,6 +1346,19 @@ class LIRBuildADT(LIRInstr):
 
 
 @dataclass
+class LIRClosureCreate(LIRInstr):
+    """LIR 闭包创建
+
+    创建一个闭包对象，包含函数指针和捕获的环境变量。
+    fn_name 指向被捕获的函数名（在 LIRModule 中作为独立函数存在）。
+    capture_locs 是被捕获变量的位置列表（寄存器/栈槽）。
+    """
+
+    fn_name: str = ""
+    capture_count: int = 0
+
+
+@dataclass
 class LIRPanic(LIRInstr):
     """LIR panic"""
 

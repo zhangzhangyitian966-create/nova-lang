@@ -998,41 +998,74 @@ class SSAVerifier(Pass):
         return len(self.errors) == 0
 
     def _verify_function(self, fn_name, mir_fn):
-        """验证单个函数的 SSA 性质"""
-        # 1. 收集所有定义的 SSA 名
-        all_defs = {}  # ssa_name -> (block_label, instr_index)
+        """验证单个函数的 SSA 性质
 
-        # 1.1 函数参数也是 SSA 定义（在入口块之前就已定义）
-        for param_name, param_type, ssa_name in mir_fn.params:
-            if ssa_name:
-                all_defs[ssa_name] = ("<params>", -1)
+        依次执行以下验证步骤：
+        1. 终结指令验证（每个块必须有终结指令）
+        2. Phi 位置验证（Phi 必须在块开头）
+        3. 单赋值验证（每个 SSA 名只定义一次）
+        4. 使用-定义链验证（所有使用的 SSA 名都已定义）
+        5. Phi 前驱验证（Phi 的 source 块必须是当前块的前驱）
+        """
+        # 构建前驱关系（供 Phi 前驱验证使用）
+        predecessors = self._build_predecessors(mir_fn)
 
-        # 构建块名 -> 块对象的映射
-        block_map = {}
-        for bb in mir_fn.basic_blocks:
-            block_map[bb.label] = bb
+        # 收集所有 SSA 定义（供单赋值验证和使用-定义链验证使用）
+        all_defs = self._collect_all_defs(fn_name, mir_fn)
 
-        # 构建前驱关系
-        predecessors = {}  # block_label -> [predecessor_labels
+        # 执行各项验证
+        self._verify_terminators(fn_name, mir_fn)
+        self._verify_phi_position(fn_name, mir_fn)
+        self._verify_single_assignment(fn_name, mir_fn, all_defs)
+        self._verify_use_def(fn_name, mir_fn, all_defs)
+        self._verify_phi_predecessors(fn_name, mir_fn, predecessors)
+
+    def _build_predecessors(self, mir_fn):
+        """构建基本块的前驱关系映射
+
+        返回: {block_label: [predecessor_label, ...]}
+        """
+        predecessors = {}
         for bb in mir_fn.basic_blocks:
             predecessors[bb.label] = []
         for bb in mir_fn.basic_blocks:
             if bb.terminator is None:
                 continue
-            # 收集终结指令的后继
             succs = self._get_successors(bb.terminator)
             for succ_label in succs:
                 if succ_label in predecessors:
                     predecessors[succ_label].append(bb.label)
+        return predecessors
 
-        # 2. 检查每个基本块
+    def _collect_all_defs(self, fn_name, mir_fn):
+        """收集函数中所有 SSA 定义（包括参数和指令定义）
+
+        返回: {ssa_name: (block_label, instr_index)}
+        注意：参数定义的 instr_index 为 -1，block_label 为 "<params>"
+        """
+        all_defs = {}
+        # 函数参数也是 SSA 定义（在入口块之前就已定义）
+        for param_name, param_type, ssa_name in mir_fn.params:
+            if ssa_name:
+                all_defs[ssa_name] = ("<params>", -1)
+        # 指令中的 SSA 定义
         for bb in mir_fn.basic_blocks:
-            # 2.1 终结指令检查
+            for idx, instr in enumerate(bb.instructions):
+                if hasattr(instr, "result_name") and instr.result_name:
+                    ssa_name = instr.result_name
+                    if ssa_name not in all_defs:
+                        all_defs[ssa_name] = (bb.label, idx)
+        return all_defs
+
+    def _verify_terminators(self, fn_name, mir_fn):
+        """验证每个基本块都有终结指令"""
+        for bb in mir_fn.basic_blocks:
             if bb.terminator is None:
                 self._error(fn_name, bb.label, -1, "基本块缺少终结指令")
-                continue
 
-            # 2.2 检查 Phi 位置：所有 Phi 必须在块开头
+    def _verify_phi_position(self, fn_name, mir_fn):
+        """验证所有 Phi 节点都位于基本块开头"""
+        for bb in mir_fn.basic_blocks:
             seen_non_phi = False
             for idx, instr in enumerate(bb.instructions):
                 is_phi = hasattr(instr, "sources") and hasattr(instr, "result_name")
@@ -1042,24 +1075,39 @@ class SSAVerifier(Pass):
                 else:
                     seen_non_phi = True
 
-            # 2.3 收集定义
+    def _verify_single_assignment(self, fn_name, mir_fn, all_defs):
+        """验证每个 SSA 名只被定义一次
+
+        使用预收集的 all_defs 检测重复定义。
+        """
+        seen = {}
+        # 参数定义
+        for param_name, param_type, ssa_name in mir_fn.params:
+            if ssa_name:
+                seen[ssa_name] = ("<params>", -1)
+        # 指令定义
+        for bb in mir_fn.basic_blocks:
             for idx, instr in enumerate(bb.instructions):
                 if hasattr(instr, "result_name") and instr.result_name:
                     ssa_name = instr.result_name
-                    if ssa_name in all_defs:
+                    if ssa_name in seen:
                         self._error(
                             fn_name,
                             bb.label,
                             idx,
                             "SSA 名 %s 被多次定义（之前定义在 %s）"
-                            % (ssa_name, all_defs[ssa_name][0]),
+                            % (ssa_name, seen[ssa_name][0]),
                         )
                     else:
-                        all_defs[ssa_name] = (bb.label, idx)
+                        seen[ssa_name] = (bb.label, idx)
 
-        # 3. 检查使用
+    def _verify_use_def(self, fn_name, mir_fn, all_defs):
+        """验证所有使用的 SSA 名都已定义（使用-定义链）
+
+        包括指令中的使用和终结指令中的使用。
+        """
         for bb in mir_fn.basic_blocks:
-            # 3.1 指令中的使用
+            # 指令中的使用
             for idx, instr in enumerate(bb.instructions):
                 used = self._get_used_ssa(instr)
                 for used_name in used:
@@ -1070,8 +1118,7 @@ class SSAVerifier(Pass):
                             idx,
                             "使用了未定义的 SSA 名: %s" % used_name,
                         )
-
-            # 3.2 终结指令中的使用
+            # 终结指令中的使用
             if bb.terminator is not None:
                 used = self._get_terminator_used_ssa(bb.terminator)
                 for used_name in used:
@@ -1083,7 +1130,8 @@ class SSAVerifier(Pass):
                             "终结指令使用了未定义的 SSA 名: %s" % used_name,
                         )
 
-        # 4. 检查 Phi 的 source 块是否是前驱
+    def _verify_phi_predecessors(self, fn_name, mir_fn, predecessors):
+        """验证 Phi 节点的 source 块确实是当前块的前驱"""
         for bb in mir_fn.basic_blocks:
             pred_labels = predecessors.get(bb.label, [])
             for idx, instr in enumerate(bb.instructions):

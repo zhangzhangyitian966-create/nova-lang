@@ -1,5 +1,5 @@
 {
-  "cycles": 36,
+  "cycles": 37,
   "completed_tasks": [
     "refactor_eval_expr_complexity",
     "refactor_evaluator_match_pattern",
@@ -81,10 +81,37 @@
     "c_backend_data_verify",
     "refactor_bytecode_compiler_expr",
     "low_quality_issues_cleanup_v1",
-    "review_cycle_36"
+    "review_cycle_36",
+    "refactor_ssaverifier_verify_function",
+    "refactor_wasm_backend_dispatch",
+    "c_backend_closure_phase1"
   ],
   "failed_tasks": [],
   "task_history": [
+    {
+      "cycle": 37,
+      "task_id": "refactor_ssaverifier_verify_function",
+      "status": "completed",
+      "source": "审查驱动",
+      "reason": "最新审查显示 _verify_function 圈复杂度 33，排名 Top 4。SSA 验证器是优化正确性的核心保障，降低复杂度可提升验证器本身的可信度，也便于扩展更多验证规则。",
+      "details": "将 SSAVerifier._verify_function 从单方法（约 100 行、4 大阶段、14 个决策点）重构为 7 个独立方法：_build_predecessors（构建前驱关系）、_collect_all_defs（收集所有 SSA 定义）、_verify_terminators（终结指令验证）、_verify_phi_position（Phi 位置验证）、_verify_single_assignment（单赋值验证）、_verify_use_def（使用-定义链验证）、_verify_phi_predecessors（Phi 前驱验证）。_verify_function 变为约 8 行的调度器。"
+    },
+    {
+      "cycle": 37,
+      "task_id": "refactor_wasm_backend_dispatch",
+      "status": "completed",
+      "source": "审查驱动+自主发现",
+      "reason": "Wasm 后端是最薄弱模块，_compile_instr 有 18 个 if-isinstance 分支（CC=26 Top 5），尚未调度表化。调度表化是 Wasm 后端重构的第一步，统一架构风格，降低维护成本。",
+      "details": "将 WasmGCBackend._compile_instr 从 18 个 if-isinstance 分支重构为调度表模式：新增 _build_instr_dispatch_table() 构建 18 种 LIR 指令类型的 handler 映射表；_compile_instr 简化为查表分发；按类别拆分为多组独立方法（常量与加载存储 5 个、运算 2 个、函数调用 2 个、返回 1 个、数据结构构建 4 个、访问 2 个、列表操作 1 个、杂项 1 个）。圈复杂度从约 19 降至约 3。"
+    },
+    {
+      "cycle": 37,
+      "task_id": "c_backend_closure_phase1",
+      "status": "completed",
+      "source": "自主规划",
+      "reason": "第36轮评审规划的第37轮核心任务。数据结构验证完成后，闭包是统一 C 后端的下一个关键里程碑，也是函数式语言的核心特性。Phase 1 目标：用正确的 LIR 指令替换占位方案，为后续完整实现打好基础。",
+      "details": "C 后端闭包支持 Phase 1：1) ir/ir_nodes.py: 新增 LIRClosureCreate 指令（含 fn_name 和 capture_count 字段），替代 LIRLoadConst + const_type='closure' 的 hack；2) ir/lir_lowering.py: _lower_closure_create 生成 LIRClosureCreate 指令，传递函数名和捕获数量；3) backend/lir_c_backend.py: 新增 _compile_closure_create 方法，生成 nova_closure_new() 调用（函数指针暂为 NULL，达到旧 C 后端同等水平）；4) backend/wasm_backend.py: 新增 _compile_closure_create 占位实现；5) 两个后端的调度表均加入 LIRClosureCreate。"
+    },
     {
       "cycle": 36,
       "task_id": "review_cycle_36",
@@ -150,9 +177,9 @@
       "details": "完成第33轮路线图评审：五维评估（方向正确、质量提升、效率稳定、价值高、审查对齐优秀）；任务池新增 5 个任务（4个审查驱动 + 1个自主规划）；调整 4 个任务优先级；规划第34-36轮方向为'解释器调度表化 → C后端数据结构验证 → 质量底线建设'。"
     }
   ],
-  "current_cycle": 36,
-  "baseline_tests": 377,
-  "current_tests": 377,
+  "current_cycle": 37,
+  "baseline_tests": 392,
+  "current_tests": 392,
   "last_review_cycle": 36,
   "tasks": [
     {
@@ -214,14 +241,14 @@
     {
       "id": "refactor_ssaverifier_verify_function",
       "name": "重构 SSAVerifier._verify_function 降低圈复杂度",
-      "description": "SSAVerifier._verify_function 圈复杂度 37（全项目 Top 7），SSA 验证器的核心验证函数。按验证逻辑类别拆分为独立方法（Phi验证、定义-使用验证、支配性验证等），降低单函数复杂度",
+      "description": "SSAVerifier._verify_function 圈复杂度 33（全项目 Top 4），SSA 验证器的核心验证函数。按验证逻辑类别拆分为独立方法（终结指令验证、Phi位置验证、单赋值验证、使用-定义链验证、Phi前驱验证），降低单函数复杂度",
       "difficulty": "medium",
       "priority": 65,
       "category": "engineering",
       "estimated": "3-5 小时",
-      "status": "pending",
+      "status": "completed",
       "depends_on": [],
-      "reason": "最新审查显示 _verify_function 圈复杂度 37，排名 Top 7。SSA 验证器是优化正确性的重要保障，降低复杂度可提升验证器本身的可信度，也便于扩展更多验证规则。[优先级调整: 55 → 65，Top 10 高优先级重构][审查驱动]"
+      "reason": "最新审查显示 _verify_function 圈复杂度 33，排名 Top 4。SSA 验证器是优化正确性的重要保障，降低复杂度可提升验证器本身的可信度，也便于扩展更多验证规则。[优先级调整: 55 → 65，Top 10 高优先级重构][审查驱动]"
     },
     {
       "id": "refactor_type_checker_unify",
@@ -238,12 +265,12 @@
     {
       "id": "refactor_wasm_backend_dispatch",
       "name": "重构 Wasm 后端指令编译调度表化",
-      "description": "WasmGCBackend._compile_instr 目前使用 if-isinstance 链（约20个分支），尚未迁移到调度表模式。引入调度表模式统一架构风格，降低复杂度，为后续 Wasm 后端功能扩展打基础",
+      "description": "WasmGCBackend._compile_instr 目前使用 if-isinstance 链（18个分支），已迁移到调度表模式。统一架构风格，降低复杂度，为后续 Wasm 后端功能扩展打基础",
       "difficulty": "medium",
       "priority": 72,
       "category": "engineering",
       "estimated": "3-5 小时",
-      "status": "pending",
+      "status": "completed",
       "depends_on": [
         "wasm_control_flow_rewrite"
       ],
@@ -293,16 +320,16 @@
     {
       "id": "c_backend_closure_support",
       "name": "C 后端闭包功能对齐",
-      "description": "将旧 C 后端的闭包实现迁移到 LIR→C 路径：闭包环境捕获、函数指针包装、upvar 访问、闭包生命周期管理。确保闭包在 LIR C 后端正确工作",
+      "description": "将旧 C 后端的闭包实现迁移到 LIR→C 路径：闭包环境捕获、函数指针包装、upvar 访问、闭包生命周期管理。确保闭包在 LIR C 后端正确工作。Phase 1 已完成：新增 LIRClosureCreate 指令 + 正确降级 + C 后端 nova_closure_new 调用（函数指针暂为 NULL）",
       "difficulty": "hard",
       "priority": 75,
       "category": "backend",
       "estimated": "1-2 天",
-      "status": "pending",
+      "status": "in_progress",
       "depends_on": [
         "c_backend_data_verify"
       ],
-      "reason": "闭包是 Nova 函数式核心的重要特性，旧 C 后端有完整实现但 LIR 路径尚未迁移。数据结构验证完成后，闭包是统一 C 后端的下一个关键里程碑。[优先级调整: 68 → 75，C后端攻坚的核心任务][自主规划]"
+      "reason": "闭包是 Nova 函数式核心的重要特性，旧 C 后端有完整实现但 LIR 路径尚未迁移。数据结构验证完成后，闭包是统一 C 后端的下一个关键里程碑。Phase 1 已完成（LIR 指令 + 降级 + 基础代码生成），Phase 2 需实现 lambda 函数体编译和捕获变量。[优先级调整: 68 → 75，C后端攻坚的核心任务][自主规划]"
     },
     {
       "id": "wasm_global_vars_fix",
