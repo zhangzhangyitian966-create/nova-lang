@@ -833,125 +833,65 @@ class CCodeGen:
         return "Unknown"
 
     def _compile_fn_call(self, expr: FnCall) -> str:
-        """编译函数调用"""
-        # 检查是否是 ADT 构造器调用
+        """编译函数调用，使用注册表分发内置函数"""
         if isinstance(expr.callee, Identifier):
             callee_name = expr.callee.name
-            # 检查是否是 ADT 构造器
+
+            # 1. ADT 构造器
             adt_name = self._find_adt_name(callee_name)
             if adt_name != "Unknown" and callee_name in [
                 v[0] for v in self.adt_info.get(adt_name, [])
             ]:
                 return self._compile_adt_constructor(adt_name, callee_name, expr.args)
 
-            # 内置函数特殊处理
-            if callee_name == "print":
-                if expr.args:
-                    arg_c = self._compile_expr(expr.args[0])
-                    return f"nova_print({arg_c})"
-                return "((void)0)"
+            # 2. 带特殊逻辑的内置函数（print/println 参数可选、filter/map 参数顺序交换）
+            special = self._compile_special_builtin(callee_name, expr.args)
+            if special is not None:
+                return special
 
-            if callee_name == "println":
-                if expr.args:
-                    arg_c = self._compile_expr(expr.args[0])
-                    return f"nova_println({arg_c})"
-                return 'nova_print(nova_string_new("\\n"))'
-
-            if callee_name == "int_to_str":
+            # 3. 一元内置函数注册表（单参数 → 直接 C 函数调用）
+            if callee_name in _UNARY_BUILTINS:
                 arg_c = self._compile_expr(expr.args[0])
-                return f"nova_int_to_string({arg_c})"
+                return f"{_UNARY_BUILTINS[callee_name]}({arg_c})"
 
-            if callee_name == "float_to_str":
-                arg_c = self._compile_expr(expr.args[0])
-                return f"nova_float_to_string({arg_c})"
-
-            if callee_name == "str_len":
-                arg_c = self._compile_expr(expr.args[0])
-                return f"nova_string_length({arg_c})"
-
-            if callee_name == "list_length":
-                arg_c = self._compile_expr(expr.args[0])
-                return f"nova_list_length({arg_c})"
-
-            if callee_name == "filter":
-                if len(expr.args) == 2:
-                    fn_arg = self._compile_expr(expr.args[0])
-                    list_arg = self._compile_expr(expr.args[1])
-                    return f"nova_list_filter({list_arg}, {fn_arg})"
-
-            if callee_name == "map":
-                if len(expr.args) == 2:
-                    fn_arg = self._compile_expr(expr.args[0])
-                    list_arg = self._compile_expr(expr.args[1])
-                    return f"nova_list_map({list_arg}, {fn_arg})"
-
-            if callee_name == "sum":
-                arg_c = self._compile_expr(expr.args[0])
-                return f"nova_list_sum({arg_c})"
-
-            if callee_name == "head":
-                arg_c = self._compile_expr(expr.args[0])
-                return f"nova_list_head({arg_c})"
-
-            if callee_name == "tail":
-                arg_c = self._compile_expr(expr.args[0])
-                return f"nova_list_tail({arg_c})"
-
-            if callee_name == "read_line":
-                return "nova_read_line()"
-
-            if callee_name == "str_to_int":
-                arg_c = self._compile_expr(expr.args[0])
-                return f"nova_str_to_int({arg_c})"
-
-            # 数学内置函数
-            math_builtins = {
-                "abs": "nova_abs",
-                "sqrt": "nova_sqrt",
-                "pow": "nova_pow",
-                "log": "nova_log",
-                "log10": "nova_log10",
-                "exp": "nova_exp",
-                "sin": "nova_sin",
-                "cos": "nova_cos",
-                "tan": "nova_tan",
-                "floor": "nova_floor",
-                "ceil": "nova_ceil",
-                "round": "nova_round",
-                "min": "nova_min",
-                "max": "nova_max",
-            }
-            if callee_name in math_builtins:
+            # 4. 多元内置函数注册表（math / io / 常量）
+            if callee_name in _VARIADIC_BUILTINS:
                 args_c = ", ".join(self._compile_expr(a) for a in expr.args)
-                return f"{math_builtins[callee_name]}({args_c})"
+                return f"{_VARIADIC_BUILTINS[callee_name]}({args_c})"
 
-            if callee_name == "pi":
-                return "nova_pi()"
-
-            # I/O 内置函数
-            io_builtins = {
-                "read_file": "nova_read_file",
-                "write_file": "nova_write_file",
-                "file_exists": "nova_file_exists",
-                "list_dir": "nova_list_dir",
-                "json_parse": "nova_json_parse",
-                "json_stringify": "nova_json_stringify",
-            }
-            if callee_name in io_builtins:
-                args_c = ", ".join(self._compile_expr(a) for a in expr.args)
-                return f"{io_builtins[callee_name]}({args_c})"
-
-        # 普通函数调用
-        callee_c = self._compile_expr(expr.callee)
-        args_c = ", ".join(self._compile_expr(a) for a in expr.args)
-
-        # 如果 callee 是变量（可能是闭包），使用 nova_closure_call
-        if isinstance(expr.callee, Identifier):
-            # 使用函数名转换（nova_fn_ 前缀）
-            c_name = self._mangle_fn_name(expr.callee.name)
+            # 5. 用户定义函数
+            args_c = ", ".join(self._compile_expr(a) for a in expr.args)
+            c_name = self._mangle_fn_name(callee_name)
             return f"{c_name}({args_c})"
 
+        # 非标识符 callee（闭包调用等）
+        callee_c = self._compile_expr(expr.callee)
+        args_c = ", ".join(self._compile_expr(a) for a in expr.args)
         return f"{callee_c}({args_c})"
+
+    def _compile_special_builtin(self, name: str, args: list) -> Optional[str]:
+        """编译带特殊逻辑的内置函数，返回 None 表示非特殊内置"""
+        if name == "print":
+            if args:
+                return f"nova_print({self._compile_expr(args[0])})"
+            return "((void)0)"
+        if name == "println":
+            if args:
+                return f"nova_println({self._compile_expr(args[0])})"
+            return 'nova_print(nova_string_new("\\n"))'
+        if name == "filter" and len(args) == 2:
+            fn_arg = self._compile_expr(args[0])
+            list_arg = self._compile_expr(args[1])
+            return f"nova_list_filter({list_arg}, {fn_arg})"
+        if name == "map" and len(args) == 2:
+            fn_arg = self._compile_expr(args[0])
+            list_arg = self._compile_expr(args[1])
+            return f"nova_list_map({list_arg}, {fn_arg})"
+        if name == "read_line":
+            return "nova_read_line()"
+        if name == "pi":
+            return "nova_pi()"
+        return None
 
     def _compile_adt_constructor(
         self, adt_name: str, variant_name: str, args: list
@@ -1305,90 +1245,86 @@ class CCodeGen:
         return "int64_t"
 
     def _infer_c_type_from_expr(self, expr) -> str:
-        """从表达式推断 C 类型"""
-        if isinstance(expr, IntLiteral):
-            return "int64_t"
-        elif isinstance(expr, FloatLiteral):
-            return "double"
-        elif isinstance(expr, StringLiteral):
-            return "NovaString*"
-        elif isinstance(expr, CharLiteral):
-            return "char"
-        elif isinstance(expr, BoolLiteral):
-            return "bool"
-        elif isinstance(expr, UnitLiteral):
-            return "void"
-        elif isinstance(expr, ListExpr):
-            return "NovaList*"
-        elif isinstance(expr, ListComprehension):
-            return "NovaList*"
-        elif isinstance(expr, TupleExpr):
-            return "NovaTuple*"
-        elif isinstance(expr, MapExpr):
-            return "NovaMap*"
-        elif isinstance(expr, Lambda):
-            return "NovaClosure*"
-        elif isinstance(expr, Identifier):
-            return "int64_t"  # 默认
-        elif isinstance(expr, BinaryOp):
-            if expr.op == "++":
-                return "NovaString*"
-            if expr.op in ("==", "!=", "<", ">", "<=", ">=", "&&", "||"):
-                return "bool"
-            if isinstance(expr.left, FloatLiteral) or isinstance(
-                expr.right, FloatLiteral
-            ):
-                return "double"
-            return "int64_t"
-        elif isinstance(expr, UnaryOp):
-            if expr.op == "!":
-                return "bool"
-            return "int64_t"
-        elif isinstance(expr, IfExpr):
-            if expr.then_branch and expr.else_branch:
-                return self._infer_c_type_from_expr(expr.then_branch)
-            return "void"
-        elif isinstance(expr, FnCall):
-            if isinstance(expr.callee, Identifier):
-                name = expr.callee.name
-                if name in ("print", "println"):
-                    return "void"
-                if name == "int_to_str":
-                    return "NovaString*"
-                if name == "str_len":
-                    return "int64_t"
-                if name == "list_length":
-                    return "int64_t"
-                if name == "read_line":
-                    return "NovaString*"
-                # 检查 ADT 构造器
-                adt_name = self._find_adt_name(name)
-                if adt_name != "Unknown":
-                    return f"NovaADT_{adt_name}"
-            return "int64_t"
-        elif isinstance(expr, Block):
-            if expr.tail_expression:
-                return self._infer_c_type_from_expr(expr.tail_expression)
-            return "void"
-        elif isinstance(expr, MatchExpr):
-            if expr.arms:
-                return self._infer_c_type_from_expr(expr.arms[0].body)
-            return "void"
-        elif isinstance(expr, PipeExpr):
-            return self._infer_c_type_from_expr(expr.right)
-        elif isinstance(expr, ForExpr):
-            return "NovaList*"
-        elif isinstance(expr, WhileExpr):
-            return self._infer_c_type_from_expr(expr.body)
-        elif isinstance(expr, LetBinding):
-            return self._infer_c_type_from_expr(expr.value)
-        elif isinstance(expr, MutBinding):
-            return self._infer_c_type_from_expr(expr.value)
-        elif isinstance(expr, Assignment):
-            return "void"
-        elif isinstance(expr, TryExpr):
-            return self._infer_c_type_from_expr(expr.expr)
+        """从表达式推断 C 类型，使用调度表模式分发"""
+        handler = _EXPR_TYPE_DISPATCH.get(type(expr))
+        if handler is not None:
+            return handler(self, expr)
         return "int64_t"  # 默认
+
+    # ------------------------------------------------------------------
+    # _infer_c_type_from_expr 的子 handler（按类别组织）
+    # ------------------------------------------------------------------
+
+    def _infer_type_binary_op(self, expr: BinaryOp) -> str:
+        """推断二元运算的 C 类型"""
+        if expr.op == "++":
+            return "NovaString*"
+        if expr.op in ("==", "!=", "<", ">", "<=", ">=", "&&", "||"):
+            return "bool"
+        if isinstance(expr.left, FloatLiteral) or isinstance(
+            expr.right, FloatLiteral
+        ):
+            return "double"
+        return "int64_t"
+
+    def _infer_type_unary_op(self, expr: UnaryOp) -> str:
+        """推断一元运算的 C 类型"""
+        if expr.op == "!":
+            return "bool"
+        return "int64_t"
+
+    def _infer_type_if_expr(self, expr: IfExpr) -> str:
+        """推断 if 表达式的 C 类型"""
+        if expr.then_branch and expr.else_branch:
+            return self._infer_c_type_from_expr(expr.then_branch)
+        return "void"
+
+    def _infer_type_fn_call(self, expr: FnCall) -> str:
+        """推断函数调用的 C 类型"""
+        if not isinstance(expr.callee, Identifier):
+            return "int64_t"
+        name = expr.callee.name
+        # 内置函数返回类型查找表
+        builtin_ret = _BUILTIN_RET_TYPES.get(name)
+        if builtin_ret is not None:
+            return builtin_ret
+        # 检查 ADT 构造器
+        adt_name = self._find_adt_name(name)
+        if adt_name != "Unknown":
+            return f"NovaADT_{adt_name}"
+        return "int64_t"
+
+    def _infer_type_block(self, expr: Block) -> str:
+        """推断 Block 的 C 类型（穿透到尾表达式）"""
+        if expr.tail_expression:
+            return self._infer_c_type_from_expr(expr.tail_expression)
+        return "void"
+
+    def _infer_type_match_expr(self, expr: MatchExpr) -> str:
+        """推断 match 表达式的 C 类型"""
+        if expr.arms:
+            return self._infer_c_type_from_expr(expr.arms[0].body)
+        return "void"
+
+    def _infer_type_pipe_expr(self, expr: PipeExpr) -> str:
+        """推断管道表达式的 C 类型"""
+        return self._infer_c_type_from_expr(expr.right)
+
+    def _infer_type_while_expr(self, expr: WhileExpr) -> str:
+        """推断 while 表达式的 C 类型"""
+        return self._infer_c_type_from_expr(expr.body)
+
+    def _infer_type_let_binding(self, expr: LetBinding) -> str:
+        """推断 let 绑定的 C 类型"""
+        return self._infer_c_type_from_expr(expr.value)
+
+    def _infer_type_mut_binding(self, expr: MutBinding) -> str:
+        """推断 mut 绑定的 C 类型"""
+        return self._infer_c_type_from_expr(expr.value)
+
+    def _infer_type_try_expr(self, expr: TryExpr) -> str:
+        """推断 try 表达式的 C 类型"""
+        return self._infer_c_type_from_expr(expr.expr)
 
     # ----------------------------------------------------------
     # 名称处理
@@ -1485,3 +1421,86 @@ class CCodeGen:
     def is_c_keyword(name: str) -> bool:
         """检查名称是否是 C 关键字"""
         return name in C_KEYWORDS
+
+
+# ============================================================
+# _infer_c_type_from_expr 调度表
+# ============================================================
+
+# 简单常量类型映射（返回固定字符串的 AST 节点类型）
+_EXPR_TYPE_DISPATCH = {
+    IntLiteral: lambda self, e: "int64_t",
+    FloatLiteral: lambda self, e: "double",
+    StringLiteral: lambda self, e: "NovaString*",
+    CharLiteral: lambda self, e: "char",
+    BoolLiteral: lambda self, e: "bool",
+    UnitLiteral: lambda self, e: "void",
+    ListExpr: lambda self, e: "NovaList*",
+    ListComprehension: lambda self, e: "NovaList*",
+    TupleExpr: lambda self, e: "NovaTuple*",
+    MapExpr: lambda self, e: "NovaMap*",
+    Lambda: lambda self, e: "NovaClosure*",
+    Identifier: lambda self, e: "int64_t",
+    BinaryOp: CCodeGen._infer_type_binary_op,
+    UnaryOp: CCodeGen._infer_type_unary_op,
+    IfExpr: CCodeGen._infer_type_if_expr,
+    FnCall: CCodeGen._infer_type_fn_call,
+    Block: CCodeGen._infer_type_block,
+    MatchExpr: CCodeGen._infer_type_match_expr,
+    PipeExpr: CCodeGen._infer_type_pipe_expr,
+    ForExpr: lambda self, e: "NovaList*",
+    WhileExpr: CCodeGen._infer_type_while_expr,
+    LetBinding: CCodeGen._infer_type_let_binding,
+    MutBinding: CCodeGen._infer_type_mut_binding,
+    Assignment: lambda self, e: "void",
+    TryExpr: CCodeGen._infer_type_try_expr,
+}
+
+# 一元内置函数注册表：Nova 函数名 → C 运行时函数名（单参数直接转发）
+_UNARY_BUILTINS = {
+    "int_to_str": "nova_int_to_string",
+    "float_to_str": "nova_float_to_string",
+    "str_len": "nova_string_length",
+    "list_length": "nova_list_length",
+    "sum": "nova_list_sum",
+    "head": "nova_list_head",
+    "tail": "nova_list_tail",
+    "str_to_int": "nova_str_to_int",
+}
+
+# 多元内置函数注册表：Nova 函数名 → C 运行时函数名（参数列表直接转发）
+_VARIADIC_BUILTINS = {
+    # 数学函数
+    "abs": "nova_abs",
+    "sqrt": "nova_sqrt",
+    "pow": "nova_pow",
+    "log": "nova_log",
+    "log10": "nova_log10",
+    "exp": "nova_exp",
+    "sin": "nova_sin",
+    "cos": "nova_cos",
+    "tan": "nova_tan",
+    "floor": "nova_floor",
+    "ceil": "nova_ceil",
+    "round": "nova_round",
+    "min": "nova_min",
+    "max": "nova_max",
+    # I/O 函数
+    "read_file": "nova_read_file",
+    "write_file": "nova_write_file",
+    "file_exists": "nova_file_exists",
+    "list_dir": "nova_list_dir",
+    "json_parse": "nova_json_parse",
+    "json_stringify": "nova_json_stringify",
+}
+
+# 内置函数返回类型查找表（用于 _infer_type_fn_call）
+_BUILTIN_RET_TYPES = {
+    "print": "void",
+    "println": "void",
+    "int_to_str": "NovaString*",
+    "float_to_str": "NovaString*",
+    "str_len": "int64_t",
+    "list_length": "int64_t",
+    "read_line": "NovaString*",
+}

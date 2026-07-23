@@ -96,7 +96,7 @@
 | ✅ | 重构 BytecodeCompiler._compile_expr 降低圈复杂度 | medium | 60 | 3-5 小时 | - |
 | ✅ | 重构 SSAVerifier._verify_function 降低圈复杂度 | medium | 65 | 3-5 小时 | - |
 | ⏳ | 重构 TypeChecker._unify 降低圈复杂度 | medium | 60 | 3-5 小时 | - |
-| ⏳ | 重构 CCodeGen._infer_c_type_from_expr 降低圈复杂度 | medium | 48 | 3-5 小时 | - |
+| ✅ | 重构 CCodeGen._infer_c_type_from_expr 降低圈复杂度 | medium | 48 | 3-5 小时 | - |
 | ✅ | 重构 NativeCodeGen._compile_body 降低圈复杂度 | medium | 40 | 4-6 小时 | - |
 | ⏳ | LOW 级问题批量治理（docstring + 魔法数字） | easy | 52 | 2-4 小时 | - |
 | ✅ | 高复杂度函数补全 docstring | easy | 55 | 2-3 小时 | - |
@@ -116,10 +116,10 @@
 
 ---
 
-**进度**: 76/79 (96%)
-- **已完成**: 76
+**进度**: 78/81 (96%)
+- **已完成**: 78
 - **进行中**: 1
-- **待开发**: 4
+- **待开发**: 2
 - **已废弃**: 1
 
-> 注：第39轮为评审轮，完成路线图评审和任务池更新。新增 1 个任务（cfg_utils 调度表化），修正 1 个任务状态，调整 4 个任务优先级。规划第40-42轮方向为"C后端闭包Phase2 → 质量门禁落地 → 类型系统重构"。
+> 注：第41轮完成 CCodeGen._infer_c_type_from_expr 和 _compile_fn_call 调度表化重构，全项目 Top2 和 Top7 复杂度问题消除。
