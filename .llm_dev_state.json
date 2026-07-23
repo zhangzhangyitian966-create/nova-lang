@@ -1,5 +1,5 @@
 {
-  "cycles": 39,
+  "cycles": 40,
   "completed_tasks": [
     "refactor_eval_expr_complexity",
     "refactor_evaluator_match_pattern",
@@ -88,10 +88,28 @@
     "wasm_global_vars_fix",
     "high_complexity_docstrings",
     "refactor_native_compile_body",
-    "review_cycle_39"
+    "review_cycle_39",
+    "refactor_cfg_utils_dispatch",
+    "c_backend_closure_phase2_env"
   ],
   "failed_tasks": [],
   "task_history": [
+    {
+      "cycle": 40,
+      "task_id": "refactor_cfg_utils_dispatch",
+      "status": "completed",
+      "source": "审查驱动",
+      "reason": "审查日志（第1499轮）显示 get_instr_operands 和 replace_instr_operands 圈复杂度均为25，全项目Top8-9，使用15+个if-isinstance分支，与项目调度表化战略不一致。",
+      "details": "将 ir/cfg_utils.py 的 get_instr_operands（105行→5行）和 replace_instr_operands（85行→5行）重构为调度表模式：新增 _build_operand_dispatch_tables() 构建15种MIR指令类型的提取/替换函数映射表；模块级缓存 _INSTR_OPERAND_EXTRACTORS 和 _INSTR_OPERAND_REPLACERS 避免重复构建。圈复杂度从16/13降至约2/3，与 lir_lowering.py、lir_c_backend.py、native_backend.py 的调度表化实践一致。"
+    },
+    {
+      "cycle": 40,
+      "task_id": "c_backend_closure_phase2_env",
+      "status": "completed",
+      "source": "自主规划",
+      "reason": "第39轮评审规划的第40轮核心方向：C后端闭包Phase2。Phase1已完成LIR指令+基础代码生成（空壳），Phase2需实现捕获变量环境填充，使闭包能访问外部变量。",
+      "details": "闭包环境填充实现：1) ir/lir_lowering.py: _lower_closure_create 通过 src_locs 传递捕获变量位置（loc + type）；2) backend/lir_c_backend.py: _compile_closure_create 读取 src_locs，为每个捕获变量生成 C 代码：分配 void** 环境数组、循环填充 env[i] = (void*)capture_var、传入 nova_closure_new。无捕获变量时保持 NULL 环境。377测试全部通过，零回归。"
+    },
     {
       "cycle": 39,
       "task_id": "review_cycle_39",
@@ -344,14 +362,14 @@
     {
       "id": "refactor_cfg_utils_dispatch",
       "name": "重构 cfg_utils 操作数访问调度表化",
-      "description": "ir/cfg_utils.py 中的 get_instr_operands 和 replace_instr_operands 圈复杂度均为 25（全项目 Top 8-9），使用 15+ 个 if-isinstance 分支处理不同指令类型的操作数提取/替换。构建指令类型到操作数处理函数的调度表，与 lir_c_backend.py 已实现的调度表模式一致",
+      "description": "ir/cfg_utils.py 中的 get_instr_operands 和 replace_instr_operands 已从 if-isinstance 链重构为调度表模式。新增 _build_operand_dispatch_tables() 构建15种MIR指令类型的提取/替换函数映射表，模块级缓存避免重复构建。",
       "difficulty": "medium",
       "priority": 55,
       "category": "engineering",
       "estimated": "3-5 小时",
-      "status": "pending",
+      "status": "completed",
       "depends_on": [],
-      "reason": "深度代码审计发现 cfg_utils.py 是循环优化的核心基础设施，get_instr_operands/replace_instr_operands 使用长 if-isinstance 链，与项目调度表化战略不一致。调度表化后可降低复杂度并统一架构风格。[新增任务 / 审查驱动]"
+      "reason": "深度代码审计发现 cfg_utils.py 是循环优化的核心基础设施，get_instr_operands/replace_instr_operands 使用长 if-isinstance 链，与项目调度表化战略不一致。调度表化后可降低复杂度并统一架构风格。[已完成 / 审查驱动]"
     },
     {
       "id": "high_complexity_docstrings",
@@ -368,7 +386,7 @@
     {
       "id": "c_backend_closure_support",
       "name": "C 后端闭包功能对齐",
-      "description": "将旧 C 后端的闭包实现迁移到 LIR→C 路径：闭包环境捕获、函数指针包装、upvar 访问、闭包生命周期管理。确保闭包在 LIR C 后端正确工作。Phase 1 已完成：新增 LIRClosureCreate 指令 + 正确降级 + C 后端 nova_closure_new 调用（函数指针暂为 NULL）",
+      "description": "将旧 C 后端的闭包实现迁移到 LIR→C 路径：闭包环境捕获、函数指针包装、upvar 访问、闭包生命周期管理。Phase 1 已完成：新增 LIRClosureCreate 指令 + 正确降级 + C 后端 nova_closure_new 调用。Phase 2 已完成：捕获变量环境填充（通过 src_locs 传递捕获值，生成 void** 环境数组）。剩余：lambda 函数体独立编译（函数指针非 NULL）、闭包调用协议统一。",
       "difficulty": "hard",
       "priority": 78,
       "category": "backend",
@@ -377,7 +395,7 @@
       "depends_on": [
         "c_backend_data_verify"
       ],
-      "reason": "闭包是 Nova 函数式核心的重要特性，旧 C 后端有完整实现但 LIR 路径尚未迁移。数据结构验证完成后，闭包是统一 C 后端的下一个关键里程碑。Phase 1 已完成（LIR 指令 + 降级 + 基础代码生成），Phase 2 需实现 lambda 函数体编译和捕获变量。[优先级调整: 68 → 75，C后端攻坚的核心任务][自主规划]"
+      "reason": "闭包是 Nova 函数式核心的重要特性，旧 C 后端有完整实现但 LIR 路径尚未迁移。数据结构验证完成后，闭包是统一 C 后端的下一个关键里程碑。Phase 1+2 已完成（LIR 指令 + 降级 + 环境填充），剩余 lambda 函数体编译。[优先级调整: 68 → 75，C后端攻坚的核心任务][自主规划]"
     },
     {
       "id": "wasm_global_vars_fix",

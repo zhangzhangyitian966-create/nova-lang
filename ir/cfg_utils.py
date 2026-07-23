@@ -15,12 +15,14 @@ from .ir_nodes import (
     MIRBranch,
     MIRCall,
     MIRClosureCreate,
+    MIRConst,
     MIRFieldAccess,
     MIRFunction,
     MIRIndexAccess,
     MIRJump,
     MIRListAppend,
     MIRListBuild,
+    MIRLoad,
     MIRMapBuild,
     MIRMatchJump,
     MIRPhi,
@@ -478,110 +480,175 @@ def analyze_loops(fn: MIRFunction) -> LoopInfo:
 # ============================================================
 
 
-def get_instr_operands(instr) -> List[str]:
+def _build_operand_dispatch_tables():
+    """构建指令操作数提取与替换的调度表。
+
+    返回两个字典：
+    - extractors: {MIR指令类型 -> 提取函数(instr)}
+    - replacers:  {MIR指令类型 -> 替换函数(instr, replacements)}
+
+    调度表模式消除了 get_instr_operands 和 replace_instr_operands
+    中的长 if-isinstance 链，与项目中其他模块的调度表化实践一致。
     """
-    获取一条 MIR 指令使用的所有 SSA 操作数。
 
-    返回 SSA 名列表（不含 result_name）。
-    使用 isinstance 类型分发，与 replace_instr_operands 保持一致。
-    """
-    # 常量加载：无操作数
-    from .ir_nodes import MIRConst
-    if isinstance(instr, MIRConst):
-        return []
+    def _extract_store(i):
+        return [i.value] if i.value else []
 
-    # 变量加载：无 SSA 操作数（name 是变量名字符串）
-    from .ir_nodes import MIRLoad
-    if isinstance(instr, MIRLoad):
-        return []
+    def _replace_store(i, r):
+        if i.value in r:
+            i.value = r[i.value]
 
-    # 变量存储：value 是 SSA 操作数
-    from .ir_nodes import MIRStore
-    if isinstance(instr, MIRStore):
-        return [instr.value] if instr.value else []
+    def _extract_binop(i):
+        return [n for n in (i.left, i.right) if n]
 
-    # 二元运算
-    from .ir_nodes import MIRBinOp
-    if isinstance(instr, MIRBinOp):
+    def _replace_binop(i, r):
+        if i.left in r:
+            i.left = r[i.left]
+        if i.right in r:
+            i.right = r[i.right]
+
+    def _extract_unaryop(i):
+        return [i.operand] if i.operand else []
+
+    def _replace_unaryop(i, r):
+        if i.operand in r:
+            i.operand = r[i.operand]
+
+    def _extract_call(i):
+        return [a for a in i.args if a]
+
+    def _replace_call(i, r):
+        i.args = [r[a] if a in r else a for a in i.args]
+        if i.callee in r:
+            i.callee = r[i.callee]
+
+    def _extract_closure_create(i):
+        return [c for c in i.captures if c]
+
+    def _replace_closure_create(i, r):
+        i.captures = [r[c] if c in r else c for c in i.captures]
+
+    def _extract_list_build(i):
+        return [e for e in i.elements if e]
+
+    def _replace_list_build(i, r):
+        i.elements = [r[e] if e in r else e for e in i.elements]
+
+    def _extract_list_append(i):
+        return [n for n in (i.list_ssa, i.element_ssa) if n]
+
+    def _replace_list_append(i, r):
+        if i.list_ssa in r:
+            i.list_ssa = r[i.list_ssa]
+        if i.element_ssa in r:
+            i.element_ssa = r[i.element_ssa]
+
+    def _extract_tuple_build(i):
+        return [e for e in i.elements if e]
+
+    def _replace_tuple_build(i, r):
+        i.elements = [r[e] if e in r else e for e in i.elements]
+
+    def _extract_map_build(i):
         used = []
-        if instr.left:
-            used.append(instr.left)
-        if instr.right:
-            used.append(instr.right)
-        return used
-
-    # 一元运算
-    from .ir_nodes import MIRUnaryOp
-    if isinstance(instr, MIRUnaryOp):
-        return [instr.operand] if instr.operand else []
-
-    # 函数调用：args 是 SSA 操作数，callee 可能是函数名（非 SSA）
-    from .ir_nodes import MIRCall
-    if isinstance(instr, MIRCall):
-        return [a for a in instr.args if a]
-
-    # 闭包创建：captures 是 SSA 操作数
-    from .ir_nodes import MIRClosureCreate
-    if isinstance(instr, MIRClosureCreate):
-        return [c for c in instr.captures if c]
-
-    # 列表构建
-    from .ir_nodes import MIRListBuild
-    if isinstance(instr, MIRListBuild):
-        return [e for e in instr.elements if e]
-
-    # 列表追加
-    from .ir_nodes import MIRListAppend
-    if isinstance(instr, MIRListAppend):
-        used = []
-        if instr.list_ssa:
-            used.append(instr.list_ssa)
-        if instr.element_ssa:
-            used.append(instr.element_ssa)
-        return used
-
-    # 元组构建
-    from .ir_nodes import MIRTupleBuild
-    if isinstance(instr, MIRTupleBuild):
-        return [e for e in instr.elements if e]
-
-    # Map 构建
-    from .ir_nodes import MIRMapBuild
-    if isinstance(instr, MIRMapBuild):
-        used = []
-        for key_ssa, val_ssa in instr.entries:
+        for key_ssa, val_ssa in i.entries:
             if key_ssa:
                 used.append(key_ssa)
             if val_ssa:
                 used.append(val_ssa)
         return used
 
-    # ADT 构建
-    from .ir_nodes import MIRADTBuild
-    if isinstance(instr, MIRADTBuild):
-        return [f for f in instr.fields if f]
+    def _replace_map_build(i, r):
+        i.entries = [
+            (
+                r[k] if k in r else k,
+                r[v] if v in r else v,
+            )
+            for k, v in i.entries
+        ]
 
-    # 字段访问
-    from .ir_nodes import MIRFieldAccess
-    if isinstance(instr, MIRFieldAccess):
-        return [instr.object] if instr.object else []
+    def _extract_adt_build(i):
+        return [f for f in i.fields if f]
 
-    # 索引访问
-    from .ir_nodes import MIRIndexAccess
-    if isinstance(instr, MIRIndexAccess):
-        used = []
-        if instr.object:
-            used.append(instr.object)
-        if instr.index:
-            used.append(instr.index)
-        return used
+    def _replace_adt_build(i, r):
+        i.fields = [r[f] if f in r else f for f in i.fields]
 
-    # Phi 节点
-    from .ir_nodes import MIRPhi
-    if isinstance(instr, MIRPhi):
-        return [ssa for _, ssa in instr.sources if ssa]
+    def _extract_field_access(i):
+        return [i.object] if i.object else []
 
-    # 默认：返回空列表
+    def _replace_field_access(i, r):
+        if i.object in r:
+            i.object = r[i.object]
+
+    def _extract_index_access(i):
+        return [n for n in (i.object, i.index) if n]
+
+    def _replace_index_access(i, r):
+        if i.object in r:
+            i.object = r[i.object]
+        if i.index in r:
+            i.index = r[i.index]
+
+    def _extract_phi(i):
+        return [ssa for _, ssa in i.sources if ssa]
+
+    def _replace_phi(i, r):
+        i.sources = [
+            (label, r[ssa] if ssa in r else ssa)
+            for label, ssa in i.sources
+        ]
+
+    extractors = {
+        MIRConst: lambda i: [],
+        MIRLoad: lambda i: [],
+        MIRStore: _extract_store,
+        MIRBinOp: _extract_binop,
+        MIRUnaryOp: _extract_unaryop,
+        MIRCall: _extract_call,
+        MIRClosureCreate: _extract_closure_create,
+        MIRListBuild: _extract_list_build,
+        MIRListAppend: _extract_list_append,
+        MIRTupleBuild: _extract_tuple_build,
+        MIRMapBuild: _extract_map_build,
+        MIRADTBuild: _extract_adt_build,
+        MIRFieldAccess: _extract_field_access,
+        MIRIndexAccess: _extract_index_access,
+        MIRPhi: _extract_phi,
+    }
+
+    replacers = {
+        MIRBinOp: _replace_binop,
+        MIRUnaryOp: _replace_unaryop,
+        MIRCall: _replace_call,
+        MIRClosureCreate: _replace_closure_create,
+        MIRListBuild: _replace_list_build,
+        MIRListAppend: _replace_list_append,
+        MIRTupleBuild: _replace_tuple_build,
+        MIRMapBuild: _replace_map_build,
+        MIRADTBuild: _replace_adt_build,
+        MIRFieldAccess: _replace_field_access,
+        MIRIndexAccess: _replace_index_access,
+        MIRStore: _replace_store,
+        MIRPhi: _replace_phi,
+    }
+
+    return extractors, replacers
+
+
+# 模块级调度表：避免每次调用时重建
+_INSTR_OPERAND_EXTRACTORS, _INSTR_OPERAND_REPLACERS = _build_operand_dispatch_tables()
+
+
+def get_instr_operands(instr) -> List[str]:
+    """
+    获取一条 MIR 指令使用的所有 SSA 操作数。
+
+    返回 SSA 名列表（不含 result_name）。
+    使用调度表模式按指令类型分发，与 replace_instr_operands 保持一致。
+    """
+    extractor = _INSTR_OPERAND_EXTRACTORS.get(type(instr))
+    if extractor is not None:
+        return extractor(instr)
     return []
 
 
@@ -689,7 +756,7 @@ def replace_instr_operands(instr, replacements: Dict[str, str]):
     替换指令中的操作数 SSA 名（统一 API）。
 
     将出现在 replacements 字典中的 SSA 名替换为对应的值。
-    使用 isinstance 类型检查，比 hasattr 更安全可靠。
+    使用调度表模式按指令类型分发，与 get_instr_operands 保持一致。
 
     Args:
         instr: MIR 指令对象
@@ -697,78 +764,9 @@ def replace_instr_operands(instr, replacements: Dict[str, str]):
     """
     if not replacements:
         return
-
-    if isinstance(instr, MIRBinOp):
-        if instr.left in replacements:
-            instr.left = replacements[instr.left]
-        if instr.right in replacements:
-            instr.right = replacements[instr.right]
-
-    elif isinstance(instr, MIRUnaryOp):
-        if instr.operand in replacements:
-            instr.operand = replacements[instr.operand]
-
-    elif isinstance(instr, MIRCall):
-        instr.args = [
-            replacements[a] if a in replacements else a for a in instr.args
-        ]
-        if instr.callee in replacements:
-            instr.callee = replacements[instr.callee]
-
-    elif isinstance(instr, MIRFieldAccess):
-        if instr.object in replacements:
-            instr.object = replacements[instr.object]
-
-    elif isinstance(instr, MIRIndexAccess):
-        if instr.object in replacements:
-            instr.object = replacements[instr.object]
-        if instr.index in replacements:
-            instr.index = replacements[instr.index]
-
-    elif isinstance(instr, MIRListBuild):
-        instr.elements = [
-            replacements[e] if e in replacements else e for e in instr.elements
-        ]
-
-    elif isinstance(instr, MIRListAppend):
-        if instr.list_ssa in replacements:
-            instr.list_ssa = replacements[instr.list_ssa]
-        if instr.element_ssa in replacements:
-            instr.element_ssa = replacements[instr.element_ssa]
-
-    elif isinstance(instr, MIRTupleBuild):
-        instr.elements = [
-            replacements[e] if e in replacements else e for e in instr.elements
-        ]
-
-    elif isinstance(instr, MIRMapBuild):
-        instr.entries = [
-            (
-                replacements[k] if k in replacements else k,
-                replacements[v] if v in replacements else v,
-            )
-            for k, v in instr.entries
-        ]
-
-    elif isinstance(instr, MIRADTBuild):
-        instr.fields = [
-            replacements[f] if f in replacements else f for f in instr.fields
-        ]
-
-    elif isinstance(instr, MIRClosureCreate):
-        instr.captures = [
-            replacements[c] if c in replacements else c for c in instr.captures
-        ]
-
-    elif isinstance(instr, MIRStore):
-        if instr.value in replacements:
-            instr.value = replacements[instr.value]
-
-    elif isinstance(instr, MIRPhi):
-        instr.sources = [
-            (label, replacements[ssa] if ssa in replacements else ssa)
-            for label, ssa in instr.sources
-        ]
+    replacer = _INSTR_OPERAND_REPLACERS.get(type(instr))
+    if replacer is not None:
+        replacer(instr, replacements)
 
 
 def replace_terminator_operands(terminator, replacements: Dict[str, str]):

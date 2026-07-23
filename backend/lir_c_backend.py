@@ -470,18 +470,31 @@ class LIRCBackend:
         """编译闭包创建
 
         调用 nova_closure_new(capture_count, fn_ptr, env) 创建闭包对象。
-        当前阶段：函数指针暂为 NULL（lambda 函数体编译待实现），
-        捕获变量也暂不传递，达到与旧 C 后端同等水平。
+        当前阶段：函数指针暂为 NULL（lambda 函数体的 LIR 编译待实现），
+        但捕获变量环境已通过 src_locs 传递，可正确填充。
         """
         dst = self._dst_var_name(instr) if instr.dst_loc else None
-        if dst:
-            capture_count = instr.capture_count
-            # fn_ptr 暂时为 NULL（lambda 函数体的 LIR 编译待实现）
-            # 环境指针暂时为 NULL（捕获变量传递待实现）
+        if not dst:
+            return
+
+        capture_count = instr.capture_count
+        env_var = None
+
+        # 如果有捕获变量，生成环境数组分配与填充代码
+        if instr.src_locs and capture_count > 0:
+            env_var = f"_nova_env_{self._tmp_counter()}"
             self._emit(
-                f"{dst} = nova_closure_new({capture_count}, NULL, NULL);"
-                f" /* closure: {instr.fn_name} */"
+                f"void** {env_var} = nova_alloc(sizeof(void*) * {capture_count});"
             )
+            for i, (loc, _) in enumerate(instr.src_locs[:capture_count]):
+                cap_var = self._loc_var_name(loc)
+                self._emit(f"{env_var}[{i}] = (void*){cap_var};")
+
+        env_arg = env_var if env_var else "NULL"
+        self._emit(
+            f"{dst} = nova_closure_new({capture_count}, NULL, {env_arg});"
+            f" /* closure: {instr.fn_name} */"
+        )
 
     def _compile_field_access(self, instr: LIRFieldAccess):
         """编译字段访问"""

@@ -456,11 +456,17 @@ class LIRLowering:
         """降级闭包创建
 
         将 MIRClosureCreate 降级为 LIRClosureCreate。
-        传递函数名和捕获数量（当前捕获变量暂不传递，待后续实现）。
+        传递函数名、捕获数量，并通过 src_locs 传递所有捕获变量的位置，
+        使 C 后端能够生成环境数组填充代码。
         """
         lir = LIRClosureCreate()
         lir.fn_name = instr.fn_name
         lir.capture_count = len(instr.captures) if hasattr(instr, "captures") else 0
+        # 通过 src_locs 传递捕获变量的位置，供后端生成环境数组
+        for cap_ssa in instr.captures:
+            loc = self.ssa_to_loc.get(cap_ssa, cap_ssa)
+            cap_type = self.ssa_types.get(cap_ssa, INT_TYPE)
+            lir.src_locs.append((loc, cap_type))
         if instr.result_name:
             lir.dst_loc = (
                 self.ssa_to_loc.get(instr.result_name, ""),

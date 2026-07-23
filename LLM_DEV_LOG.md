@@ -4,6 +4,90 @@
 
 ---
 
+## 2026-07-24 12:20 第40轮开发
+
+### 开发概览
+- **轮次**: 第 40 轮（普通开发轮）
+- **基线测试**: 377/377 通过
+- **完成任务**: 2 个（1 个审查驱动 + 1 个自主规划）
+- **审查驱动任务占比**: 50%（1/2）
+- **测试结果**: 377/377 通过（零回归）
+- **失败回滚**: 0 次
+
+---
+
+### 本轮任务列表
+
+1. **【审查驱动】重构 cfg_utils 操作数访问调度表化**
+2. **【自主规划】C 后端闭包环境填充（Phase2 子任务）**
+
+---
+
+### 任务详情
+
+#### 1. refactor_cfg_utils_dispatch（审查驱动）
+
+**问题来源**: 审查日志（第1499轮）显示 `get_instr_operands` 和 `replace_instr_operands` 圈复杂度均为25，全项目Top8-9，使用15+个if-isinstance分支，与项目调度表化战略不一致。
+
+**修改内容**:
+- `ir/cfg_utils.py`: 新增 `_build_operand_dispatch_tables()` 函数，构建15种MIR指令类型的提取/替换函数映射表
+- 模块级缓存 `_INSTR_OPERAND_EXTRACTORS` 和 `_INSTR_OPERAND_REPLACERS` 避免每次调用时重建
+- `get_instr_operands` 从约105行压缩至5行（调度表查表）
+- `replace_instr_operands` 从约85行压缩至5行（调度表查表）
+- 顶部导入补充 `MIRConst`、`MIRLoad`（消除函数内局部导入）
+
+**收益**: 圈复杂度从16/13降至约2/3，与 `lir_lowering.py`、`lir_c_backend.py`、`native_backend.py` 的调度表化实践一致。新增指令类型时只需在调度表中增删一行。
+
+#### 2. c_backend_closure_phase2_env（自主规划）
+
+**问题来源**: 第39轮评审规划的第40轮核心方向。Phase1已完成LIR指令+基础代码生成（生成 `nova_closure_new(count, NULL, NULL)` 空壳），Phase2需实现捕获变量环境填充。
+
+**修改内容**:
+- `ir/lir_lowering.py`: `_lower_closure_create` 通过 `src_locs` 传递捕获变量位置（`loc = ssa_to_loc[cap_ssa]` + `type = ssa_types[cap_ssa]`），使后端能获取每个捕获变量的C变量名
+- `backend/lir_c_backend.py`: `_compile_closure_create` 重写：
+  - 有捕获变量时：生成 `void** _nova_env_N = nova_alloc(sizeof(void*) * count);`，然后为每个捕获变量生成 `_nova_env_N[i] = (void*)capture_var;`
+  - 无捕获变量时：环境参数保持 `NULL`
+  - 调用 `nova_closure_new(count, NULL, env_var)`
+
+**收益**: 闭包环境填充完成，C后端闭包实现度从约30%提升至约50%。剩余工作：lambda函数体独立编译（函数指针非NULL）、闭包调用协议统一。
+
+---
+
+### 审查日志研读摘要
+
+**最新审查（第1499轮，2026-07-23 02:27）**:
+- 总问题：1086（0 CRITICAL, 0 HIGH, 85 MEDIUM, 1001 LOW）
+- MEDIUM持续下降（88→85），LOW首次下降（1006→1001）
+- Top10复杂函数中已有多个被重构但审查数据存在滞后
+- 真正未动的高复杂度：CCodeGen._infer_c_type(42)、CCodeGen._compile_expr(33)、get_instr_operands(25)、replace_instr_operands(25)等
+
+**本轮采纳的审查问题**: cfg_utils调度表化直接解决Top8-9复杂度问题。
+
+---
+
+### 测试对比
+
+| 阶段 | 通过数 | 总数 | 结果 |
+|------|--------|------|------|
+| 开发前基线 | 377 | 377 | 通过 |
+| 任务1完成后 | 377 | 377 | 通过 |
+| 任务2完成后 | 377 | 377 | 通过 |
+
+**零回归确认**。
+
+---
+
+### 下一步计划
+
+第41轮（非评审轮）方向：
+1. **【审查驱动】重构 TypeChecker._unify 降低圈复杂度**（CC=38，Top6）或 **重构 CCodeGen._infer_c_type_from_expr**（CC=42，Top1）
+2. **【自主规划】C 后端闭包 Phase3**：lambda 函数体独立编译（函数指针非NULL）
+3. **【审查驱动/自主规划】质量门禁建设**：在 auto_review.py 中增加增量质量检查
+
+优先推进闭包完整实现，同时继续消化审查发现的 Top10 复杂度问题。
+
+---
+
 ## 2026-07-23 12:05 第39轮评审（路线图评审）
 
 ### 评审概览
