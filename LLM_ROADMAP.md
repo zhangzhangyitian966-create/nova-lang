@@ -1,6 +1,6 @@
 # Nova LLM 智能开发路线图
 
-**更新时间**: 2026-07-24 15:30:00
+**更新时间**: 2026-07-24 16:30:00
 **上次评审**: 第 45 轮（路线图评审）
 
 本路线图由 LLM 智能开发系统动态维护。
@@ -106,7 +106,7 @@
 | ✅ | 重构 cfg_utils 操作数访问调度表化 | medium | 55 | 3-5 小时 | - |
 | ✅ | 重构 CraneliftBackend._compile_instr 调度表化 | medium | 65 | 3-5 小时 | - |
 | ⏳ | 建立代码质量门禁（docstring + 命名规范） | medium | 72 | 3-5 小时 | low_quality_issues_cleanup |
-| ⏳ | 重构 TypeChecker._check_pattern 调度表化 | medium | 70 | 2-3 小时 | - |
+| ✅ | 重构 TypeChecker._check_pattern 调度表化 | medium | 70 | 2-3 小时 | - |
 | ⏳ | 重构 WasmGCBackend._compile_function 分层拆分 | medium | 68 | 3-5 小时 | - |
 | ⏳ | 批量清理 print_debug（104 个 LOW） | easy | 60 | 2-3 小时 | - |
 | ⏳ | 重构 MIRLowering._lower_if_expr 拆分 | medium | 55 | 2-3 小时 | - |
@@ -118,16 +118,16 @@
 | ✅ | 修复原生后端测试导入 | easy | 85 | 30 分钟 | |
 | ✅ | 为 SSA 验证器编写完整测试 | easy | 78 | 2-3 小时 | mir_ssa_verifier, extract_loop_ssa |
 | ✅ | 建立后端性能基准测试框架 | medium | 60 | 3-5 小时 | unify_c_backend |
+| ✅ | LICM 优化正确性测试 | medium | 60 | 3-5 小时 | implement_licm_pass, ssa_verifier_tests |
 | ⏳ | 基准测试框架增强（C/Wasm执行时间+优化对比） | medium | 58 | 3-5 小时 | backend_benchmark_framework |
-| ⏳ | LICM 优化正确性测试 | medium | 60 | 3-5 小时 | implement_licm_pass, ssa_verifier_tests |
 | ⏳ | CFG 基础设施单元测试 | medium | 56 | 3-5 小时 | mir_cfg_loop_analysis |
 
 ---
 
-**进度**: 82/90 (91%)
-- **已完成**: 82
+**进度**: 84/91 (92%)
+- **已完成**: 84
 - **进行中**: 1
-- **待开发**: 6
+- **待开发**: 5
 - **已废弃**: 1
 
 > 注：第45轮路线图评审。Top10 复杂度调度表化战略基本完成（里程碑）。新增 5 个任务：TypeChecker._check_pattern 调度表化（CC=24）、WasmGCBackend._compile_function 分层拆分（CC=26）、print_debug 清理（104个）、MIRLowering._lower_if_expr 拆分（CC=22）、C 后端闭包 Phase3。质量门禁优先级从 62 提升至 72（三次推迟强制推进）。下阶段方向：新一代复杂度治理 + LOW 级遏制 + 质量门禁落地。

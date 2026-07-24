@@ -272,6 +272,7 @@ class TypeChecker:
         self.env = TypeEnv()
         self._source = source
         self._expr_checkers = self._build_expr_checkers()
+        self._pattern_checkers = self._build_pattern_checkers()
         # 类型合一的替换表：TypeVar 的 id -> 绑定的类型
         # 使用 union-find 结构，支持路径压缩
         self._subst: Dict[int, "NovaType"] = {}
@@ -504,6 +505,38 @@ class TypeChecker:
             FieldAccess: self._check_field_access,
             TryExpr: self._check_try_expr,
             ListComprehension: self._check_list_comprehension,
+        }
+
+    def _build_pattern_checkers(self):
+        """构建模式类型检查调度表
+
+        按模式节点类型映射到对应的检查方法，替代 if-isinstance 链。
+        新增模式类型时只需在调度表中添加一条映射。
+        """
+        from .ast_nodes import (
+            PatternBool,
+            PatternChar,
+            PatternConstructor,
+            PatternFloat,
+            PatternIdentifier,
+            PatternInt,
+            PatternList,
+            PatternString,
+            PatternTuple,
+            PatternWildcard,
+        )
+
+        return {
+            PatternWildcard: self._check_pattern_wildcard,
+            PatternInt: self._check_pattern_int,
+            PatternFloat: self._check_pattern_float,
+            PatternBool: self._check_pattern_bool,
+            PatternString: self._check_pattern_string,
+            PatternChar: self._check_pattern_char,
+            PatternIdentifier: self._check_pattern_identifier,
+            PatternConstructor: self._check_pattern_constructor,
+            PatternTuple: self._check_pattern_tuple,
+            PatternList: self._check_pattern_list,
         }
 
     # ------------------------------------------------------------------
@@ -1064,71 +1097,88 @@ class TypeChecker:
             )
 
     def _check_pattern(self, pattern, subject_type: NovaType, env: TypeEnv, match_expr):
-        """检查模式与类型的匹配"""
-        from .ast_nodes import (
-            PatternBool,
-            PatternConstructor,
-            PatternIdentifier,
-            PatternInt,
-            PatternList,
-            PatternString,
-            PatternTuple,
-            PatternWildcard,
-        )
+        """检查模式与类型的匹配
 
-        if isinstance(pattern, PatternWildcard):
-            return
+        使用调度表模式分发到对应的检查方法，圈复杂度 O(1)。
+        """
+        checker = self._pattern_checkers.get(type(pattern))
+        if checker is not None:
+            return checker(pattern, subject_type, env, match_expr)
+        raise TypeCheckError(f"未知的模式类型: {type(pattern).__name__}")
 
-        elif isinstance(pattern, PatternInt):
-            if not self._unify_types(subject_type, INT_T):
-                raise TypeCheckError(f"整数模式与类型 {subject_type} 不匹配")
+    # --- 模式检查方法 ---
 
-        elif isinstance(pattern, PatternBool):
-            if not self._unify_types(subject_type, BOOL_T):
-                raise TypeCheckError(f"布尔模式与类型 {subject_type} 不匹配")
+    def _check_pattern_wildcard(self, pattern, subject_type: NovaType, env: TypeEnv, match_expr):
+        """通配符 _ 匹配任何类型"""
+        return
 
-        elif isinstance(pattern, PatternString):
-            if not self._unify_types(subject_type, STRING_T):
-                raise TypeCheckError(f"字符串模式与类型 {subject_type} 不匹配")
+    def _check_pattern_int(self, pattern, subject_type: NovaType, env: TypeEnv, match_expr):
+        """整数模式要求 subject 为 Int 类型"""
+        if not self._unify_types(subject_type, INT_T):
+            raise TypeCheckError(f"整数模式与类型 {subject_type} 不匹配")
 
-        elif isinstance(pattern, PatternIdentifier):
-            env.define(pattern.name, subject_type)
+    def _check_pattern_float(self, pattern, subject_type: NovaType, env: TypeEnv, match_expr):
+        """浮点数模式要求 subject 为 Float 类型"""
+        if not self._unify_types(subject_type, FLOAT_T):
+            raise TypeCheckError(f"浮点数模式与类型 {subject_type} 不匹配")
 
-        elif isinstance(pattern, PatternConstructor):
-            # 查找构造器对应的类型
-            variants_info = None
-            for adt_name, variants in self.env.get_all_adt_variants().items():
-                for vname, ftypes in variants:
-                    if vname == pattern.name:
-                        variants_info = (adt_name, ftypes)
-                        break
-                if variants_info:
+    def _check_pattern_bool(self, pattern, subject_type: NovaType, env: TypeEnv, match_expr):
+        """布尔模式要求 subject 为 Bool 类型"""
+        if not self._unify_types(subject_type, BOOL_T):
+            raise TypeCheckError(f"布尔模式与类型 {subject_type} 不匹配")
+
+    def _check_pattern_string(self, pattern, subject_type: NovaType, env: TypeEnv, match_expr):
+        """字符串模式要求 subject 为 String 类型"""
+        if not self._unify_types(subject_type, STRING_T):
+            raise TypeCheckError(f"字符串模式与类型 {subject_type} 不匹配")
+
+    def _check_pattern_char(self, pattern, subject_type: NovaType, env: TypeEnv, match_expr):
+        """字符模式要求 subject 为 Char 类型"""
+        if not self._unify_types(subject_type, CHAR_T):
+            raise TypeCheckError(f"字符模式与类型 {subject_type} 不匹配")
+
+    def _check_pattern_identifier(self, pattern, subject_type: NovaType, env: TypeEnv, match_expr):
+        """标识符模式将 subject 类型绑定到变量名"""
+        env.define(pattern.name, subject_type)
+
+    def _check_pattern_constructor(self, pattern, subject_type: NovaType, env: TypeEnv, match_expr):
+        """构造器模式：查找 ADT 定义，递归检查字段类型"""
+        # 查找构造器对应的类型
+        variants_info = None
+        for adt_name, variants in self.env.get_all_adt_variants().items():
+            for vname, ftypes in variants:
+                if vname == pattern.name:
+                    variants_info = (adt_name, ftypes)
                     break
+            if variants_info:
+                break
 
-            if variants_info is None:
-                raise TypeCheckError(f"未知的构造器 '{pattern.name}'")
+        if variants_info is None:
+            raise TypeCheckError(f"未知的构造器 '{pattern.name}'")
 
-            adt_name, field_types = variants_info
-            if len(pattern.fields) != len(field_types):
-                raise TypeCheckError(
-                    f"构造器 '{pattern.name}' 期望 {len(field_types)} 个字段，得到 {len(pattern.fields)} 个"
-                )
-            for p, ft in zip(pattern.fields, field_types):
-                self._check_pattern(p, ft, env, match_expr)
+        adt_name, field_types = variants_info
+        if len(pattern.fields) != len(field_types):
+            raise TypeCheckError(
+                f"构造器 '{pattern.name}' 期望 {len(field_types)} 个字段，得到 {len(pattern.fields)} 个"
+            )
+        for p, ft in zip(pattern.fields, field_types):
+            self._check_pattern(p, ft, env, match_expr)
 
-        elif isinstance(pattern, PatternTuple):
-            if not isinstance(subject_type, TupleType):
-                raise TypeCheckError(f"元组模式与类型 {subject_type} 不匹配")
-            if len(pattern.elements) != len(subject_type.elements):
-                raise TypeCheckError("元组模式长度不匹配")
-            for p, t in zip(pattern.elements, subject_type.elements):
-                self._check_pattern(p, t, env, match_expr)
+    def _check_pattern_tuple(self, pattern, subject_type: NovaType, env: TypeEnv, match_expr):
+        """元组模式要求 subject 为 Tuple 类型，且长度匹配"""
+        if not isinstance(subject_type, TupleType):
+            raise TypeCheckError(f"元组模式与类型 {subject_type} 不匹配")
+        if len(pattern.elements) != len(subject_type.elements):
+            raise TypeCheckError("元组模式长度不匹配")
+        for p, t in zip(pattern.elements, subject_type.elements):
+            self._check_pattern(p, t, env, match_expr)
 
-        elif isinstance(pattern, PatternList):
-            if not isinstance(subject_type, ListType):
-                raise TypeCheckError(f"列表模式与类型 {subject_type} 不匹配")
-            for p in pattern.elements:
-                self._check_pattern(p, subject_type.elem_type, env, match_expr)
+    def _check_pattern_list(self, pattern, subject_type: NovaType, env: TypeEnv, match_expr):
+        """列表模式要求 subject 为 List 类型"""
+        if not isinstance(subject_type, ListType):
+            raise TypeCheckError(f"列表模式与类型 {subject_type} 不匹配")
+        for p in pattern.elements:
+            self._check_pattern(p, subject_type.elem_type, env, match_expr)
 
     def _check_binary_op(self, expr: BinaryOp) -> NovaType:
         """检查二元操作"""

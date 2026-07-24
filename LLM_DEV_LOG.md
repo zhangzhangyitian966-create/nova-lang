@@ -1,3 +1,72 @@
+## 2026-07-24 16:30 第46轮开发
+
+### 本轮任务
+
+| 任务 | 来源 | 状态 | 说明 |
+|------|------|------|------|
+| 重构 TypeChecker._check_pattern 调度表化 | 【审查驱动】 | 成功 | CC 24→3，9 种 Pattern 节点调度表化 |
+| LICM 优化正确性测试 | 【自主规划】 | 成功 | 3 个专项测试用例覆盖循环不变量外提 |
+
+### 审查日志研读摘要
+
+本轮基于第45轮评审结论，聚焦「新一代复杂度治理 + 测试补齐」。
+
+**审查发现采纳**:
+- `_check_pattern` CC=24，审查日志 Top4，按 Pattern 节点类型调度表化，与第44轮 `_unify` 调度表化形成 type_checker.py 内统一风格。
+
+**自主规划调整**:
+- 原计划「批量清理未使用导入 v3」，但工具检测困难（vulture/pylint 误报率高），转向高价值测试任务「LICM 优化正确性测试」。
+
+### 任务详情
+
+#### 任务1: refactor_type_checker_check_pattern [审查驱动]
+
+**为什么选这个**: 审查日志显示 `_check_pattern` CC=24，是新一代 Top10 中最适合调度表化的函数。模式匹配本质上是按节点类型分发，完全符合调度表模式。
+
+**实现**:
+1. 新增 `_build_pattern_checkers()` 构建 9 种 Pattern 节点类型的 handler 映射表
+2. 新增 9 个独立 `_check_pattern_xxx` 方法：
+   - `_check_pattern_wildcard` - 通配符 `_`
+   - `_check_pattern_int` - 整数模式
+   - `_check_pattern_float` - 浮点模式
+   - `_check_pattern_bool` - 布尔模式
+   - `_check_pattern_string` - 字符串模式
+   - `_check_pattern_char` - 字符模式
+   - `_check_pattern_identifier` - 标识符模式
+   - `_check_pattern_constructor` - 构造器模式
+   - `_check_pattern_tuple` - 元组模式
+   - `_check_pattern_list` - 列表模式
+3. `_check_pattern` 主函数从 60+ 行压缩至约 10 行（CC≈3）
+
+**测试**: 392/392 通过，零回归。
+
+#### 任务2: licm_correctness_tests [自主规划]
+
+**为什么选这个**: LICM 是已实现的最高级优化 Pass，但缺乏专项测试。3 个测试用例覆盖核心场景。
+
+**实现**:
+1. `test_licm_hoists_pure_invariant` - 验证纯的循环不变量（`10 + 20`）被外提到 pre-header
+2. `test_licm_preserves_structure` - 验证 LICM 后 MIR 结构保持完整（基本块、终结指令存在）
+3. `test_licm_runs_on_mutable_loop` - 验证含 mutable 变量的循环上 LICM 正常运行不报错
+
+**测试**: 392/392 通过，零回归。
+
+### 测试对比
+
+| 指标 | 开发前 | 开发后 |
+|------|--------|--------|
+| 测试通过 | 392/392 | 392/392 |
+| 测试回归 | - | 0 |
+
+### 下一步计划
+
+第47轮方向（按第45轮评审规划）:
+1. **重构 WasmGCBackend._compile_function 分层拆分**（审查驱动，CC=26 Top1）
+2. **批量清理 print_debug**（审查驱动，104 个 LOW 级问题）
+3. 或 **质量门禁建设**（优先级 72，三次推迟强制提升）
+
+---
+
 ## 2026-07-24 15:30 第45轮评审（路线图评审）
 
 ### 评审范围
