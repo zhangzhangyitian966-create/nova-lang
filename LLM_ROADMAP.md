@@ -107,9 +107,9 @@
 | ✅ | 重构 CraneliftBackend._compile_instr 调度表化 | medium | 65 | 3-5 小时 | - |
 | ⏳ | 建立代码质量门禁（docstring + 命名规范） | medium | 72 | 3-5 小时 | low_quality_issues_cleanup |
 | ✅ | 重构 TypeChecker._check_pattern 调度表化 | medium | 70 | 2-3 小时 | - |
-| ⏳ | 重构 WasmGCBackend._compile_function 分层拆分 | medium | 68 | 3-5 小时 | - |
+| ✅ | 重构 WasmGCBackend._compile_function 分层拆分 | medium | 68 | 3-5 小时 | - |
 | ⏳ | 批量清理 print_debug（104 个 LOW） | easy | 60 | 2-3 小时 | - |
-| ⏳ | 重构 MIRLowering._lower_if_expr 拆分 | medium | 55 | 2-3 小时 | - |
+| ✅ | 重构 MIRLowering._lower_if_expr 拆分 | medium | 55 | 2-3 小时 | - |
 
 ## 🧪 测试完善
 

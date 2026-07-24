@@ -1,6 +1,8 @@
 {
-  "cycles": 46,
+  "cycles": 47,
   "completed_tasks": [
+    "refactor_wasm_compile_function",
+    "refactor_mir_lower_if_expr",
     "refactor_type_checker_check_pattern",
     "licm_correctness_tests",
     "refactor_type_checker_unify",
@@ -105,6 +107,22 @@
   "failed_tasks": [],
   "task_history": [
     {
+      "cycle": 47,
+      "task_id": "refactor_wasm_compile_function",
+      "status": "completed",
+      "source": "审查驱动",
+      "reason": "WasmGCBackend._compile_function 圈复杂度 26（审查日志 Top1），253 行函数过长。分层拆分为 6 个独立方法，将 CC 降至约 5-7。",
+      "details": "将 _compile_function 从 253 行重构为分层结构：1) 新增 _emit_func_signature() 生成函数签名并收集 label→pc 映射；2) 新增 _emit_dispatch_prologue() 声明 PC 局部变量并生成 exit/dispatch/br_table 框架；3) 新增 _compile_function_blocks() 遍历函数体并按指令类型分发；4) 新增 5 个独立 _emit_xxx_block() 方法处理控制流终结指令（LIRLabel/LIRJump/LIRBranch/LIRSwitch/LIRReturn/LIRPanic）；5) 新增 _emit_dispatch_epilogue() 关闭框架。_compile_function 主函数从 253 行压缩至约 10 行。消除了冗余的 current_block_label/current_block_idx/in_first_block 状态变量。"
+    },
+    {
+      "cycle": 47,
+      "task_id": "refactor_mir_lower_if_expr",
+      "status": "completed",
+      "source": "审查驱动",
+      "reason": "MIRLowering._lower_if_expr 圈复杂度 22，106 行。true/false 分支有近 30 行镜像重复代码，提取通用方法后 CC 降至约 8-10。",
+      "details": "将 _lower_if_expr 从 106 行重构为分层结构：1) 新增 _lower_branch_body() 通用分支处理方法，消除 true/false 分支的 30 行镜像重复代码，返回 (result, modified_vars) 元组；2) 新增 _insert_merge_phis() 处理 merge 块 Phi 节点插入（约 35 行独立逻辑）；3) 新增 _insert_result_phi() 处理 if 表达式结果 Phi（约 15 行独立逻辑）；4) _lower_if_expr 主函数从 106 行压缩至约 25 行（CC≈8）。测试 395/395 通过，零回归。"
+    },
+    {
       "cycle": 46,
       "task_id": "refactor_type_checker_check_pattern",
       "status": "completed",
@@ -145,9 +163,9 @@
       "details": "将 _compile_instr 从 75 行 18 分支 if-elif 链重构为调度表模式：1) 新增 _build_instr_dispatch_table() 构建 18 种 LIR 指令类型的 handler 映射表；2) 新增 16 个独立 _compile_xxx 方法按类别组织（标签1个、常量与加载4个、运算2个、函数调用1个、控制流3个、数据结构构建4个、访问2个、杂项1个）；3) _compile_instr 主函数从 75 行压缩至 8 行（CC≈3）。与 wasm_backend 和 lir_c_backend 风格完全统一。"
     }
   ],
-  "current_cycle": 46,
-  "baseline_tests": 392,
-  "current_tests": 392,
+  "current_cycle": 47,
+  "baseline_tests": 395,
+  "current_tests": 395,
   "last_review_cycle": 45,
   "tasks": [
     {
@@ -184,7 +202,7 @@
       "priority": 68,
       "category": "engineering",
       "estimated": "3-5 小时",
-      "status": "pending",
+      "status": "completed",
       "depends_on": [],
       "reason": "审查日志 Top1 最复杂函数（CC=26, 253行）。分层拆分可将 CC 降至约 10-12，是新一代复杂度治理的核心目标。[新增任务 / 审查驱动]"
     },
@@ -283,7 +301,7 @@
       "priority": 55,
       "category": "engineering",
       "estimated": "2-3 小时",
-      "status": "pending",
+      "status": "completed",
       "depends_on": [],
       "reason": "审查日志显示 _lower_if_expr CC=22，同时是 function_too_long（106 行）。IR 层复杂度治理，与 _lower_match_expr（CC=20, 134行）和 _lower_for_expr（CC=138行）同属 MIR 降级。[新增任务 / 审查驱动]"
     },

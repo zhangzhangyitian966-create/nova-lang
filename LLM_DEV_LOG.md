@@ -1,3 +1,78 @@
+## 2026-07-24 12:30 第47轮开发
+
+### 本轮任务
+
+| 任务 | 来源 | 状态 | 说明 |
+|------|------|------|------|
+| 重构 WasmGCBackend._compile_function 分层拆分 | 【审查驱动】 | 成功 | CC 26→5，253行拆分为6个方法 |
+| 重构 MIRLowering._lower_if_expr 拆分 | 【审查驱动】 | 成功 | CC 22→8，消除30行镜像重复代码 |
+
+### 审查日志研读摘要
+
+本轮基于第45轮评审结论，聚焦「新一代复杂度治理」。
+
+**审查发现采纳**:
+- `_compile_function` CC=26，审查日志 Top1，分层拆分为6个独立方法（函数签名、分派框架、函数体编译、5种控制流终结指令、框架关闭），消除253行巨型函数。
+- `_lower_if_expr` CC=22，true/false分支有近30行镜像重复代码，提取通用 `_lower_branch_body()` 方法，消除重复。
+
+**任务调整**:
+- 原计划「批量清理 print_debug（104个LOW）」，但深度分析后发现大部分 print 是正常功能（evaluator/vm 的 print 内置函数实现、cli/compiler_cli 的用户交互输出、scripts 的日志），真正可清理的调试残留极少。果断放弃低价值任务，转向高价值的 `_lower_if_expr` 拆分。
+
+### 任务详情
+
+#### 任务1: refactor_wasm_compile_function [审查驱动]
+
+**为什么选这个**: 审查日志显示 `_compile_function` CC=26、253行，是新一代 Top1 最复杂函数。第45轮评审明确规划为第47轮核心任务。分层拆分可将 CC 降至约 5-7。
+
+**实现**:
+1. 新增 `_emit_func_signature()` — 生成函数签名 `(func $nova_name ...)` 并收集 `label→pc` 映射
+2. 新增 `_emit_dispatch_prologue()` — 声明 `$pc` 局部变量，生成 `(block $exit)` / `(loop $dispatch)` / `br_table` 框架
+3. 新增 `_compile_function_blocks()` — 遍历函数体，按指令类型分发到对应处理方法
+4. 新增 5 个独立 `_emit_xxx_block()` 方法：
+   - `_emit_label_block()` — 基本块开始 `(block $bbN)`
+   - `_emit_jump_block()` — 无条件跳转（设置 PC + br dispatch）
+   - `_emit_branch_block()` — 条件分支（if-else 设置 PC + br dispatch）
+   - `_emit_switch_block()` — Switch 多分支（嵌套 if-else 级联）
+   - `_emit_return_block()` — 返回（压栈 + br exit）
+   - `_emit_panic_block()` — Panic（调用 panic + 关闭 block）
+5. 新增 `_emit_dispatch_epilogue()` — 关闭 loop/exit/func 框架
+6. 消除冗余状态变量：`current_block_label`、`current_block_idx`、`in_first_block` 在旧代码中赋值但未被有效使用
+7. `_compile_function` 主函数从 253 行压缩至约 10 行
+
+**测试**: 395/395 通过，零回归。
+
+#### 任务2: refactor_mir_lower_if_expr [审查驱动]
+
+**为什么选这个**: 审查日志显示 `_lower_if_expr` CC=22、106行。true/false 分支有近 30 行镜像重复代码（环境保存、降级、收集修改、恢复环境），是提取通用方法的经典场景。
+
+**实现**:
+1. 新增 `_lower_branch_body(hir_expr, branch_block, merge_block, pre_env)` — 通用分支处理方法
+   - 在独立环境中降级分支表达式
+   - 若分支未设置终结器，自动添加 `MIRJump(merge_block.label)`
+   - 收集被修改的变量，返回 `(result, modified_vars)`
+   - 恢复 `env` 和 `current_block`
+2. 新增 `_insert_merge_phis(...)` — 为被修改的变量在 merge 块插入 Phi 节点（约35行独立逻辑）
+3. 新增 `_insert_result_phi(...)` — 为 if 表达式结果插入 Phi 节点（约15行独立逻辑）
+4. `_lower_if_expr` 主函数从 106 行压缩至约 25 行（CC≈8）
+
+**测试**: 395/395 通过，零回归。
+
+### 测试对比
+
+| 指标 | 开发前 | 开发后 |
+|------|--------|--------|
+| 测试通过 | 395/395 | 395/395 |
+| 测试回归 | - | 0 |
+
+### 下一步计划
+
+第48轮方向（按第45轮评审规划）:
+1. **建立代码质量门禁**（优先级 72，三次推迟强制提升，medium 难度）
+2. 或 **C 后端闭包 Phase3**（优先级 78，hard 难度）
+3. 或 **LOW 级问题批量治理 v2**（优先级 48，easy 难度，docstring + 魔法数字）
+
+---
+
 ## 2026-07-24 16:30 第46轮开发
 
 ### 本轮任务

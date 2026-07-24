@@ -261,29 +261,15 @@ class WasmGCBackend:
         Wasm 的结构化控制流（block/loop/if）无法直接表达任意 goto CFG。
         采用显式 PC 变量 + br_table 方案，将任意 CFG 转换为一个大循环
         内的分派表，支持前向跳转、后向跳转、循环等所有控制流模式。
-
-        结构：
-          (func $name (param ...) (result ...)
-            (local $pc i32)    ;; 程序计数器（基本块索引）
-            (local ...)         ;; 其他虚拟寄存器
-            (block $exit       ;; 出口块（return 跳出用）
-              (loop $dispatch  ;; 分派循环
-                ;; 根据 $pc 跳转到对应基本块
-                (local.get $pc)
-                (br_table $bb0 $bb1 ... $bbN $exit)
-                (block $bb0    ;; 基本块 0
-                  ... 指令 ...
-                  (local.set $pc <next_pc>)
-                  (br $dispatch)  ;; 回到循环顶部重新分派
-                )
-                (block $bb1
-                  ...
-                )
-                ...
-              ) ;; end loop
-            ) ;; end exit block
-          ) ;; end func
         """
+        label_to_pc = self._emit_func_signature(name, func)
+        pc_counter = len(label_to_pc)
+        self._emit_dispatch_prologue(pc_counter)
+        self._compile_function_blocks(func, label_to_pc)
+        self._emit_dispatch_epilogue()
+
+    def _emit_func_signature(self, name: str, func: LIRFunction) -> Dict[str, int]:
+        """生成函数签名并收集标签到 PC 的映射"""
         params_parts = []
         for loc, ty in func.params:
             wasm_ty = self._nova_type_to_wasm(ty)
@@ -297,217 +283,175 @@ class WasmGCBackend:
         self._emit(f"(func $nova_{name} {params_str} {result_str}")
         self.indent_level += 1
 
-        # 第一步：收集所有标签（基本块）并分配 PC 索引
         label_to_pc: Dict[str, int] = {}
         pc_counter = 0
-
-        # 第一个基本块（函数入口，可能没有显式 Label）
-        # 检查 body 第一条是不是 Label，如果不是，函数开头本身是一个隐式块
-        has_entry_label = False
-        if func.body and isinstance(func.body[0], LIRLabel):
-            has_entry_label = True
-
         for instr in func.body:
             if isinstance(instr, LIRLabel):
                 if instr.name not in label_to_pc:
                     label_to_pc[instr.name] = pc_counter
                     pc_counter += 1
 
-        # 声明 PC 局部变量，初始值为 0（第一个基本块）
+        return label_to_pc
+
+    def _emit_dispatch_prologue(self, pc_counter: int):
+        """声明 PC 局部变量并生成控制流分派框架"""
         self._emit("(local $pc i32)")
-        # 初始 PC = 0（第一个基本块）
         self._emit("(i32.const 0)")
         self._emit("(local.set $pc)")
-
         self._emit("")
         self._emit(";; ---- 控制流：PC + br_table 方案 ----")
         self._emit("")
 
-        # 出口块（return 时跳出到这里）
         self._emit("(block $exit")
         self.indent_level += 1
 
-        # 分派循环
         self._emit("(loop $dispatch")
         self.indent_level += 1
 
-        # br_table：根据 $pc 跳转到对应基本块
-        # 格式: (br_table $bb0 $bb1 ... $default)
-        br_targets = []
-        for i in range(pc_counter):
-            br_targets.append(f"$bb{i}")
-        # 默认目标：退出循环（异常情况）
+        br_targets = [f"$bb{i}" for i in range(pc_counter)]
         br_targets.append("$exit")
         self._emit(f"(local.get $pc)")
         self._emit(f"(br_table {' '.join(br_targets)})")
         self._emit("")
 
-        # 第二步：编译每个基本块
-        # 将线性指令序列按 Label 切分为基本块
-        current_block_idx = 0
-        current_block_label = None
-        in_first_block = not has_entry_label
-
+    def _compile_function_blocks(self, func: LIRFunction, label_to_pc: Dict[str, int]):
+        """编译函数体内的所有基本块"""
         for instr in func.body:
             if isinstance(instr, LIRLabel):
-                # 新基本块开始
-                # 如果之前在一个块里，需要关闭它（但第一个隐式块特殊处理）
-                if current_block_label is not None or in_first_block:
-                    # 上一个块应该已经在 Jump/Branch/Return 处处理了结束
-                    pass
-
-                block_idx = label_to_pc[instr.name]
-                current_block_label = instr.name
-                current_block_idx = block_idx
-                in_first_block = False
-
-                # 开一个 block 对应这个基本块
-                self._emit(f"(block $bb{block_idx}")
-                self.indent_level += 1
-                self._emit(f";; --- 基本块 {block_idx}: {instr.name} ---")
-
+                self._emit_label_block(instr, label_to_pc)
             elif isinstance(instr, LIRJump):
-                # 无条件跳转：设置新 PC，br 回 dispatch 循环
-                target_pc = label_to_pc.get(instr.target, 0)
-                self._emit(f"(i32.const {target_pc})")
-                self._emit("(local.set $pc)")
-                self._emit("(br $dispatch)")
-                # 关闭当前 block
-                self.indent_level -= 1
-                self._emit(")")
-                self._emit("")
-
+                self._emit_jump_block(instr, label_to_pc)
             elif isinstance(instr, LIRBranch):
-                # 条件分支：根据条件设置不同的 PC，然后 br 回 dispatch
-                # 注意：Wasm br_if 是条件为真时跳转，我们需要：
-                # 条件为真 → 跳 true_target，条件为假 → 跳 false_target
-                true_pc = label_to_pc.get(instr.true_target, 0)
-                false_pc = label_to_pc.get(instr.false_target, 0)
+                self._emit_branch_block(instr, label_to_pc)
+            elif isinstance(instr, LIRSwitch):
+                self._emit_switch_block(instr, label_to_pc)
+            elif isinstance(instr, LIRReturn):
+                self._emit_return_block(instr)
+            elif isinstance(instr, LIRPanic):
+                self._emit_panic_block(instr, func)
+            else:
+                self._compile_instr(instr, func)
 
-                if instr.src_locs:
-                    self._emit(f"(local.get ${instr.src_locs[0][0]})")
-                # 条件为真时跳到 true 块，否则继续到 false 块
-                # 使用 if-else 结构设置 PC
+    def _emit_label_block(self, instr: LIRLabel, label_to_pc: Dict[str, int]):
+        """新基本块开始"""
+        block_idx = label_to_pc[instr.name]
+        self._emit(f"(block $bb{block_idx}")
+        self.indent_level += 1
+        self._emit(f";; --- 基本块 {block_idx}: {instr.name} ---")
+
+    def _emit_jump_block(self, instr: LIRJump, label_to_pc: Dict[str, int]):
+        """无条件跳转：设置新 PC，br 回 dispatch 循环"""
+        target_pc = label_to_pc.get(instr.target, 0)
+        self._emit(f"(i32.const {target_pc})")
+        self._emit("(local.set $pc)")
+        self._emit("(br $dispatch)")
+        self.indent_level -= 1
+        self._emit(")")
+        self._emit("")
+
+    def _emit_branch_block(self, instr: LIRBranch, label_to_pc: Dict[str, int]):
+        """条件分支：根据条件设置不同的 PC，然后 br 回 dispatch"""
+        true_pc = label_to_pc.get(instr.true_target, 0)
+        false_pc = label_to_pc.get(instr.false_target, 0)
+
+        if instr.src_locs:
+            self._emit(f"(local.get ${instr.src_locs[0][0]})")
+
+        self._emit("(if")
+        self.indent_level += 1
+        self._emit("(then")
+        self.indent_level += 1
+        self._emit(f"(i32.const {true_pc})")
+        self._emit("(local.set $pc)")
+        self.indent_level -= 1
+        self._emit(")")
+        self._emit("(else")
+        self.indent_level += 1
+        self._emit(f"(i32.const {false_pc})")
+        self._emit("(local.set $pc)")
+        self.indent_level -= 1
+        self._emit(")")
+        self.indent_level -= 1
+        self._emit(")")
+        self._emit("(br $dispatch)")
+        self.indent_level -= 1
+        self._emit(")")
+        self._emit("")
+
+    def _emit_switch_block(self, instr: LIRSwitch, label_to_pc: Dict[str, int]):
+        """Switch 多分支：使用 if-else 级联比较，设置 PC 后 br $dispatch"""
+        default_pc = label_to_pc.get(instr.default_target, 0)
+
+        if instr.src_locs and instr.cases:
+            val_loc = instr.src_locs[0][0]
+            val_type = instr.src_locs[0][1] if len(instr.src_locs[0]) > 1 else INT_TYPE
+            wasm_type = WASM_TYPE_MAP.get(val_type, "i64")
+
+            for case_val, target in reversed(instr.cases):
+                target_pc = label_to_pc.get(target, 0)
+                self._emit(f"(local.get ${val_loc})")
+                if isinstance(case_val, int):
+                    self._emit(f"({wasm_type}.const {case_val})")
+                elif isinstance(case_val, float):
+                    self._emit(f"({wasm_type}.const {case_val})")
+                else:
+                    self._emit(f"({wasm_type}.const 0)")
+                self._emit(f"({wasm_type}.eq)")
                 self._emit("(if")
                 self.indent_level += 1
                 self._emit("(then")
                 self.indent_level += 1
-                self._emit(f"(i32.const {true_pc})")
+                self._emit(f"(i32.const {target_pc})")
                 self._emit("(local.set $pc)")
                 self.indent_level -= 1
                 self._emit(")")
                 self._emit("(else")
                 self.indent_level += 1
-                self._emit(f"(i32.const {false_pc})")
-                self._emit("(local.set $pc)")
+
+            self._emit(f"(i32.const {default_pc})")
+            self._emit("(local.set $pc)")
+
+            for _ in instr.cases:
                 self.indent_level -= 1
                 self._emit(")")
                 self.indent_level -= 1
                 self._emit(")")
-                self._emit("(br $dispatch)")
-                # 关闭当前 block
-                self.indent_level -= 1
-                self._emit(")")
-                self._emit("")
+        else:
+            self._emit(f"(i32.const {default_pc})")
+            self._emit("(local.set $pc)")
 
-            elif isinstance(instr, LIRSwitch):
-                # switch 多分支：使用 if-else 级联比较，设置 PC 后 br $dispatch
-                default_pc = label_to_pc.get(instr.default_target, 0)
-
-                if instr.src_locs and instr.cases:
-                    val_loc = instr.src_locs[0][0]
-                    val_type = instr.src_locs[0][1] if len(instr.src_locs[0]) > 1 else INT_TYPE
-                    wasm_type = WASM_TYPE_MAP.get(val_type, "i64")
-
-                    # 生成嵌套 if-else：每个 case 一个比较
-                    # 从后往前生成，实现 else if 嵌套
-                    for case_val, target in reversed(instr.cases):
-                        target_pc = label_to_pc.get(target, 0)
-                        # 将值压栈
-                        self._emit(f"(local.get ${val_loc})")
-                        # 将 case 值压栈
-                        if isinstance(case_val, int):
-                            self._emit(f"({wasm_type}.const {case_val})")
-                        elif isinstance(case_val, float):
-                            self._emit(f"({wasm_type}.const {case_val})")
-                        else:
-                            # 字符串等复杂类型暂时用 default 处理
-                            self._emit(f"({wasm_type}.const 0)")
-                        # 比较
-                        self._emit(f"({wasm_type}.eq)")
-                        # if 结构
-                        self._emit("(if")
-                        self.indent_level += 1
-                        self._emit("(then")
-                        self.indent_level += 1
-                        self._emit(f"(i32.const {target_pc})")
-                        self._emit("(local.set $pc)")
-                        self.indent_level -= 1
-                        self._emit(")")
-                        self._emit("(else")
-                        self.indent_level += 1
-
-                    # default 分支（最内层 else）
-                    self._emit(f"(i32.const {default_pc})")
-                    self._emit("(local.set $pc)")
-
-                    # 闭合所有 if-else
-                    for _ in instr.cases:
-                        self.indent_level -= 1
-                        self._emit(")")
-                        self.indent_level -= 1
-                        self._emit(")")
-                else:
-                    # 没有值或没有 case，直接跳 default
-                    self._emit(f"(i32.const {default_pc})")
-                    self._emit("(local.set $pc)")
-
-                self._emit("(br $dispatch)")
-                # 关闭当前 block
-                self.indent_level -= 1
-                self._emit(")")
-                self._emit("")
-
-            elif isinstance(instr, LIRReturn):
-                # 返回：先将返回值压入 Wasm 栈，再跳出 exit 块
-                if instr.src_locs:
-                    ret_loc = instr.src_locs[0][0]
-                    self._emit(f"(local.get ${ret_loc})")
-                self._emit("(br $exit)")
-                # 关闭当前 block
-                self.indent_level -= 1
-                self._emit(")")
-                self._emit("")
-
-            elif isinstance(instr, LIRPanic):
-                # Panic：调用 panic 函数，然后 unreachable
-                self._compile_instr(instr, func)
-                # 关闭当前 block（panic 后不会继续执行）
-                self.indent_level -= 1
-                self._emit(")")
-                self._emit("")
-
-            else:
-                # 普通指令
-                self._compile_instr(instr, func)
-
-        # 如果最后一个基本块没有以 Jump/Branch/Return/Panic 结尾
-        # （理论上不应该发生，但防御性处理）
-        # 检查是否有未关闭的 block（通过看 indent_level 判断）
-        # 这里简单地关闭所有打开的基本块 block
-        # 实际上，正常的 LIR 每个块都应该有终结指令
-
-        # 关闭 dispatch loop
-        self.indent_level -= 1
-        self._emit(") ;; end loop $dispatch")
-
-        # 关闭 exit block
-        self.indent_level -= 1
-        self._emit(") ;; end block $exit")
-
+        self._emit("(br $dispatch)")
         self.indent_level -= 1
         self._emit(")")
         self._emit("")
+
+    def _emit_return_block(self, instr: LIRReturn):
+        """返回：先将返回值压入 Wasm 栈，再跳出 exit 块"""
+        if instr.src_locs:
+            ret_loc = instr.src_locs[0][0]
+            self._emit(f"(local.get ${ret_loc})")
+        self._emit("(br $exit)")
+        self.indent_level -= 1
+        self._emit(")")
+        self._emit("")
+
+    def _emit_panic_block(self, instr: LIRPanic, func: LIRFunction):
+        """Panic：调用 panic 函数，然后关闭当前 block"""
+        self._compile_instr(instr, func)
+        self.indent_level -= 1
+        self._emit(")")
+        self._emit("")
+
+    def _emit_dispatch_epilogue(self):
+        """关闭 dispatch loop、exit block 和函数体"""
+        self.indent_level -= 1
+        self._emit(") ;; end loop $dispatch")
+        self.indent_level -= 1
+        self._emit(") ;; end block $exit")
+        self.indent_level -= 1
+        self._emit(")")
+        self._emit("")
+
 
     def _build_instr_dispatch_table(self) -> dict:
         """构建 LIR 指令类型 → 编译方法 的调度表

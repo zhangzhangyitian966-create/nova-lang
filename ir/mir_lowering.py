@@ -469,69 +469,78 @@ class MIRLowering:
             cond_ssa or "", true_block.label, false_block.label
         )
 
-        # 保存进入分支前的 env 状态
         pre_env = dict(self.env)
 
-        # --- true 分支 ---
-        old_block = self.current_block
-        self.current_block = true_block
-        true_result = self._lower_expr(hir_expr.consequence, true_block)
-        if true_block.terminator is None:
-            true_block.terminator = MIRJump(merge_block.label)
-        # 收集 true 分支修改的变量
-        true_modified = {}
-        for name, ssa in self.env.items():
-            if name not in pre_env or pre_env[name] != ssa:
-                true_modified[name] = ssa
-        # 恢复 env 和 current_block
-        self.env = dict(pre_env)
-        self.current_block = old_block
+        true_result, true_modified = self._lower_branch_body(
+            hir_expr.consequence, true_block, merge_block, pre_env
+        )
+        false_result, false_modified = self._lower_branch_body(
+            hir_expr.alternative, false_block, merge_block, pre_env
+        )
 
-        # --- false 分支 ---
-        self.current_block = false_block
-        false_result = None
-        if hir_expr.alternative:
-            false_result = self._lower_expr(hir_expr.alternative, false_block)
-        if false_block.terminator is None:
-            false_block.terminator = MIRJump(merge_block.label)
-        # 收集 false 分支修改的变量
-        false_modified = {}
-        for name, ssa in self.env.items():
-            if name not in pre_env or pre_env[name] != ssa:
-                false_modified[name] = ssa
-        # 恢复 env
-        self.env = dict(pre_env)
-        self.current_block = old_block
-
-        # --- merge 块：为被修改的变量插入 Phi ---
         self.current_block = merge_block
+        self._insert_merge_phis(
+            pre_env, true_modified, false_modified, true_block, false_block, merge_block
+        )
 
-        # 找出所有在任一分支中被修改的变量
+        merge_ssa = self._insert_result_phi(
+            true_result, false_result, hir_expr.ir_type, true_block, false_block, merge_block
+        )
+
+        self.all_blocks.extend([true_block, false_block, merge_block])
+        self.current_block = merge_block
+        return merge_ssa
+
+    def _lower_branch_body(self, hir_expr, branch_block, merge_block, pre_env):
+        """降级单个分支（true 或 false），返回 (result, modified_vars)。
+
+        在独立的环境中降级分支表达式，收集被修改的变量，
+        并在分支未设置终结器时自动添加跳转到 merge 块的 Jump。
+        """
+        old_block = self.current_block
+        self.current_block = branch_block
+
+        result = None
+        if hir_expr:
+            result = self._lower_expr(hir_expr, branch_block)
+
+        if branch_block.terminator is None:
+            branch_block.terminator = MIRJump(merge_block.label)
+
+        modified = {}
+        for name, ssa in self.env.items():
+            if name not in pre_env or pre_env[name] != ssa:
+                modified[name] = ssa
+
+        self.env = dict(pre_env)
+        self.current_block = old_block
+        return result, modified
+
+    def _insert_merge_phis(self, pre_env, true_modified, false_modified,
+                           true_block, false_block, merge_block):
+        """为被修改的变量在 merge 块插入 Phi 节点。"""
         all_modified_names = set(true_modified.keys()) | set(false_modified.keys())
 
         for name in all_modified_names:
             phi_sources = []
 
-            # true 分支：如果修改了就用修改后的值，否则用进入分支前的值
             if name in true_modified:
                 phi_sources.append((true_block.label, true_modified[name]))
             elif name in pre_env:
                 phi_sources.append((true_block.label, pre_env[name]))
 
-            # false 分支：同理
             if name in false_modified:
                 phi_sources.append((false_block.label, false_modified[name]))
             elif name in pre_env:
                 phi_sources.append((false_block.label, pre_env[name]))
 
-            # 只有当至少有两个不同来源时才需要 Phi
             if len(phi_sources) >= 2:
-                # 从第一个 source 的 SSA 类型推断 Phi 类型（SSA 保证所有来源类型一致）
                 phi_type = UNIT_TYPE
                 for _, src_ssa in phi_sources:
                     if src_ssa in self.ssa_types:
                         phi_type = self.ssa_types[src_ssa]
                         break
+
                 instr = MIRPhi(phi_type)
                 instr.sources = phi_sources
                 instr.result_name = self._new_ssa()
@@ -539,24 +548,23 @@ class MIRLowering:
                 self.env[name] = instr.result_name
                 self.ssa_types[instr.result_name] = phi_type
 
-        # --- 表达式结果 Phi（if 表达式本身的值）---
+    def _insert_result_phi(self, true_result, false_result, ir_type,
+                           true_block, false_block, merge_block):
+        """为 if 表达式结果插入 Phi 节点，返回结果 SSA 名或 None。"""
         result_phi_sources = []
         if true_result:
             result_phi_sources.append((true_block.label, true_result))
         if false_result:
             result_phi_sources.append((false_block.label, false_result))
 
-        merge_ssa = None
         if result_phi_sources:
-            instr = MIRPhi(hir_expr.ir_type)
+            instr = MIRPhi(ir_type)
             instr.sources = result_phi_sources
             instr.result_name = self._new_ssa()
             merge_block.instructions.append(instr)
-            merge_ssa = instr.result_name
+            return instr.result_name
+        return None
 
-        self.all_blocks.extend([true_block, false_block, merge_block])
-        self.current_block = merge_block
-        return merge_ssa
 
     def _lower_match_expr(self, hir_expr, block):
         """
