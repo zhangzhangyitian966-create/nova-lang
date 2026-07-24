@@ -1024,11 +1024,16 @@ class TypeChecker:
         - Bool 类型：确保 true 和 false 都被覆盖
         - 通配符 (_) 和变量绑定视为覆盖所有剩余情况
         - 检测冗余分支（通配符/变量绑定之后的分支）
+        - 检测字面量模式冗余（重复的字面量值）
         """
         from .ast_nodes import (
             PatternBool,
+            PatternChar,
             PatternConstructor,
+            PatternFloat,
             PatternIdentifier,
+            PatternInt,
+            PatternString,
             PatternWildcard,
         )
 
@@ -1040,6 +1045,11 @@ class TypeChecker:
         has_wildcard_or_var = False
         has_guarded_wildcard_or_var = False
         redundant_arms = []
+
+        # 字面量模式冗余检测：按类型分组，记录已见值
+        # key: 字面量类型标识 ("int", "float", "string", "char", "bool")
+        # value: set of seen literal values
+        seen_literals = {}
 
         for i, arm in enumerate(arms):
             pat = arm.pattern
@@ -1058,6 +1068,60 @@ class TypeChecker:
                 covered_constructors.add(pat.name)
             elif isinstance(pat, PatternBool):
                 covered_constructors.add(str(pat.value))
+                # 字面量冗余检测：Bool
+                if not arm_has_guard:
+                    key = "bool"
+                    val = str(pat.value)
+                    if key not in seen_literals:
+                        seen_literals[key] = set()
+                    if val in seen_literals[key]:
+                        redundant_arms.append(i)
+                    else:
+                        seen_literals[key].add(val)
+            elif isinstance(pat, PatternInt):
+                # 字面量冗余检测：Int
+                if not arm_has_guard:
+                    key = "int"
+                    val = pat.value
+                    if key not in seen_literals:
+                        seen_literals[key] = set()
+                    if val in seen_literals[key]:
+                        redundant_arms.append(i)
+                    else:
+                        seen_literals[key].add(val)
+            elif isinstance(pat, PatternFloat):
+                # 字面量冗余检测：Float（NaN 不等，其他按值比较）
+                if not arm_has_guard and pat.value == pat.value:  # NaN safe
+                    key = "float"
+                    val = pat.value
+                    if key not in seen_literals:
+                        seen_literals[key] = set()
+                    if val in seen_literals[key]:
+                        redundant_arms.append(i)
+                    else:
+                        seen_literals[key].add(val)
+            elif isinstance(pat, PatternString):
+                # 字面量冗余检测：String
+                if not arm_has_guard:
+                    key = "string"
+                    val = pat.value
+                    if key not in seen_literals:
+                        seen_literals[key] = set()
+                    if val in seen_literals[key]:
+                        redundant_arms.append(i)
+                    else:
+                        seen_literals[key].add(val)
+            elif isinstance(pat, PatternChar):
+                # 字面量冗余检测：Char
+                if not arm_has_guard:
+                    key = "char"
+                    val = pat.value
+                    if key not in seen_literals:
+                        seen_literals[key] = set()
+                    if val in seen_literals[key]:
+                        redundant_arms.append(i)
+                    else:
+                        seen_literals[key].add(val)
 
         # 报告冗余分支
         if redundant_arms:

@@ -1,7 +1,7 @@
 {
-  "cycles": 21,
-  "frontend_completed": 14,
-  "backend_completed": 16,
+  "cycles": 22,
+  "frontend_completed": 15,
+  "backend_completed": 17,
   "last_review_cycle": 21,
   "current_review_cycle": 24,
   "completed_tasks": [
@@ -35,7 +35,9 @@
     "backend_native_runtime_call_refactor",
     "frontend_cleanup_legacy_compatible",
     "backend_wasm_data_build_fill",
-    "review_cycle_21"
+    "review_cycle_21",
+    "frontend_literal_pattern_redundancy",
+    "backend_fix_native_runtime_call_bugs"
   ],
   "failed_tasks": [],
   "deprecated_tasks": [
@@ -44,6 +46,28 @@
     "backend_wasm_gc_types"
   ],
   "task_history": [
+    {
+      "cycle": 22,
+      "task_id": "frontend_literal_pattern_redundancy",
+      "name": "实现字面量模式冗余检测",
+      "track": "frontend",
+      "difficulty": "easy",
+      "priority": 55,
+      "result": "success",
+      "details": "在 type_checker.py 的 _check_match_exhaustiveness 中新增字面量模式冗余检测。维护 seen_literals 字典按类型分组（int/float/string/char/bool），当重复字面量值出现时标记为冗余分支。新增导入 PatternInt/PatternFloat/PatternString/PatternChar。含 guard 的字面量分支不视为冗余（guard 可能拒绝匹配）。Float 类型对 NaN 做安全检查（NaN != NaN）。约新增 60 行检测代码。395 测试全部通过，无回归。",
+      "timestamp": "2026-07-25 06:12"
+    },
+    {
+      "cycle": 22,
+      "task_id": "backend_fix_native_runtime_call_bugs",
+      "name": "修复原生后端 _emit_runtime_call 的 P0 bug",
+      "track": "backend",
+      "difficulty": "easy",
+      "priority": 99,
+      "result": "success",
+      "details": "修复 2 个 P0 bug：(P0-1) 将 INT_ARG_REGS/FLOAT_ARG_REGS/CALLER_GPRS 从 _emit_call 方法的局部变量提升为模块级常量（放在 native_backend.py 文件顶部，import 区域之后），解决 _emit_runtime_call 引用 NameError 问题。_emit_call 中删除重复的局部变量定义，改为引用模块级常量。(P0-2) 重写 _emit_build_tuple 的字段填充逻辑：删除使用 RSP 负偏移做临时中转的不安全代码（e.movsd_mem_reg(RSP, -(i*8+8), XMM0)），改为直接写入 [base + byte_offset]（e.movsd_mem_reg(RAX, byte_offset, XMM0)），消除了栈损坏风险和多余的中转指令。395 测试全部通过，无回归。",
+      "timestamp": "2026-07-25 06:12"
+    },
     {
       "cycle": 21,
       "task_id": "review_cycle_21",
@@ -76,54 +100,9 @@
       "result": "success",
       "details": "删除 type_checker.py 中 _types_compatible 方法（行 1548-1588，共 41 行）。深度分析确认该方法零外部调用点，7 处引用全部为内部递归自引用，是彻底的死代码。该方法对 TypeVar 直接放行（鸭子类型），不产生约束，与当前 _unify_types 的合一驱动语义不兼容。前端线达到 100% 完成（14/14）。395 测试全部通过，无回归。",
       "timestamp": "2026-07-25 00:15"
-    },
-    {
-      "cycle": 19,
-      "task_id": "backend_native_runtime_call_refactor",
-      "name": "原生后端复合指令迁移到 _emit_runtime_call",
-      "track": "backend",
-      "difficulty": "medium",
-      "priority": 90,
-      "result": "success",
-      "details": "全面迁移原生后端复合数据结构指令到 _emit_runtime_call 统一调用器。扩展 _emit_runtime_call 支持立即数参数（格式：(('imm', value), arg_type)），实现栈对齐和 caller-saved 寄存器保护的自动化。迁移范围：_emit_build_list（nova_list_new + nova_list_push 循环）、_emit_list_append（nova_list_push）、_emit_build_map（nova_map_new + nova_map_put 循环）、_emit_build_adt（nova_adt_new + nova_adt_set_field 循环）、_emit_index（nova_list_get）。删除约 120 行手动 push/pop+call 代码，新增约 40 行统一调用代码。395 测试全部通过，无回归。",
-      "timestamp": "2026-07-24 13:10"
-    },
-    {
-      "cycle": 19,
-      "task_id": "frontend_for_loop_type_inference",
-      "name": "修复 for 循环和列表推导的迭代器类型推断",
-      "track": "frontend",
-      "difficulty": "medium",
-      "priority": 72,
-      "result": "success",
-      "details": "修复 type_checker.py 中 _check_for_expr 和 _check_list_comprehension 的迭代器变量类型绑定问题。原代码将循环变量绑定为裸 TypeVar('for_elem')/TypeVar('lc_elem')，不与 iterable 的实际元素类型合一。修复后：range 循环变量绑定为 INT_T；List 遍历提取 ListType.elem_type 作为循环变量类型；其他类型回退到 TypeVar 保持原有推断行为。395 测试全部通过，无回归。",
-      "timestamp": "2026-07-24 13:05"
-    },
-    {
-      "cycle": 18,
-      "task_id": "review_cycle_18",
-      "name": "第 18 轮 - 双线路线图评审",
-      "track": "review",
-      "difficulty": "review",
-      "priority": 0,
-      "result": "success",
-      "details": "第六次三轮回顾评审（第 16-18 轮）。深度代码审计重大发现：(F-1) P0 Bug nova_map_set/nova_map_put 命名不一致；(F-2) P0 缺失——原生后端无链接器；(F-3) P1 风险——复合数据结构指令不使用 _emit_runtime_call；(F-4) 代码卫生——_types_compatible 可安全删除；(F-5) P1 缺失——Wasm BuildList/BuildTuple/BuildADT 不填充内容；(F-6) P2 弱点——for 循环迭代器类型不合一。前端评估：类型合一全面部署（46 处 _unify_types），模式匹配完备性基础版就绪。后端评估：原生后端 75% 完成度，但链接器缺失是最大阻断；LIR C 后端 85% 最成熟；Wasm 后端 60% 名不副实。任务池变更：新增 5 个任务，废弃 0 个，调整 6 个优先级。下阶段重点：后端 P0 bug 修复 + 原生后端运行时调用规范化 + 前端类型精度提升。",
-      "timestamp": "2026-07-24 10:10"
     }
   ],
   "tasks": [
-    {
-      "task_id": "backend_fix_native_runtime_call_bugs",
-      "name": "修复原生后端 _emit_runtime_call 的 P0 bug",
-      "description": "修复 3 个 P0 问题：(1) CALLER_GPRS/INT_ARG_REGS/FLOAT_ARG_REGS 仅在 _emit_call 中定义为局部变量，_emit_runtime_call 中引用会 NameError——将这三个常量提升为模块级常量；(2) _emit_build_tuple 中浮点字段使用负栈偏移 RSP-(i*8+8) 可能覆盖 caller-saved 保存区——改用正偏移临时区域或 call 指令中转；(3) 确认 _emit_runtime_call 所有调用路径的正确性。",
-      "track": "backend",
-      "difficulty": "easy",
-      "priority": 99,
-      "estimated_effort": "2-3小时",
-      "status": "pending",
-      "source": "review_21_audit",
-      "depends_on": []
-    },
     {
       "task_id": "backend_closure_mir_lowering",
       "name": "修复 MIR lambda 降级——编译 lambda 函数体",
@@ -168,18 +147,6 @@
       "difficulty": "medium",
       "priority": 60,
       "estimated_effort": "4-6小时",
-      "status": "pending",
-      "source": "review_21_audit",
-      "depends_on": []
-    },
-    {
-      "task_id": "frontend_literal_pattern_redundancy",
-      "name": "实现字面量模式冗余检测",
-      "description": "为 Int/String/Char 字面量模式添加冗余检测：当多个分支匹配相同的字面量值时报冗余警告。当前冗余检测仅覆盖通配符（通配符后的分支报冗余），不覆盖重复字面量。",
-      "track": "frontend",
-      "difficulty": "easy",
-      "priority": 55,
-      "estimated_effort": "2-3小时",
       "status": "pending",
       "source": "review_21_audit",
       "depends_on": []
@@ -230,6 +197,30 @@
       "estimated_effort": "3-5小时",
       "status": "pending",
       "source": "quality_analysis",
+      "depends_on": []
+    },
+    {
+      "task_id": "backend_fix_native_runtime_call_bugs",
+      "name": "修复原生后端 _emit_runtime_call 的 P0 bug",
+      "description": "修复 3 个 P0 问题：(1) CALLER_GPRS/INT_ARG_REGS/FLOAT_ARG_REGS 仅在 _emit_call 中定义为局部变量，_emit_runtime_call 中引用会 NameError——将这三个常量提升为模块级常量；(2) _emit_build_tuple 中浮点字段使用负栈偏移 RSP-(i*8+8) 可能覆盖 caller-saved 保存区——改用正偏移临时区域或 call 指令中转；(3) 确认 _emit_runtime_call 所有调用路径的正确性。",
+      "track": "backend",
+      "difficulty": "easy",
+      "priority": 99,
+      "estimated_effort": "2-3小时",
+      "status": "completed",
+      "source": "review_21_audit",
+      "depends_on": []
+    },
+    {
+      "task_id": "frontend_literal_pattern_redundancy",
+      "name": "实现字面量模式冗余检测",
+      "description": "为 Int/String/Char 字面量模式添加冗余检测：当多个分支匹配相同的字面量值时报冗余警告。当前冗余检测仅覆盖通配符（通配符后的分支报冗余），不覆盖重复字面量。",
+      "track": "frontend",
+      "difficulty": "easy",
+      "priority": 55,
+      "estimated_effort": "2-3小时",
+      "status": "completed",
+      "source": "review_21_audit",
       "depends_on": []
     },
     {

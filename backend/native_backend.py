@@ -64,6 +64,19 @@ from ..ir.ir_nodes import (
 )
 
 # ============================================================
+# System V AMD64 ABI 调用约定常量
+# ============================================================
+
+# 整数参数寄存器（前 6 个参数通过寄存器传递）
+INT_ARG_REGS = [RDI, RSI, RDX, RCX, R8, R9]
+
+# 浮点参数寄存器（前 8 个参数通过寄存器传递）
+FLOAT_ARG_REGS = [XMM0, XMM1, XMM2, XMM3, XMM4, XMM5, XMM6, XMM7]
+
+# caller-saved GPR（需要在调用前保存/调用后恢复）
+CALLER_GPRS = [RCX, RDX, RSI, RDI, R8, R9, R10, R11]
+
+# ============================================================
 # 指令发射上下文（传递寄存器分配结果和汇编状态）
 # ============================================================
 
@@ -568,9 +581,7 @@ class NativeCodeGen:
         - 调用前 16 字节栈对齐
         """
         e = ctx.e
-        INT_ARG_REGS = [RDI, RSI, RDX, RCX, R8, R9]
-        FLOAT_ARG_REGS = [XMM0, XMM1, XMM2, XMM3, XMM4, XMM5, XMM6, XMM7]
-        CALLER_GPRS = [RCX, RDX, RSI, RDI, R8, R9, R10, R11]
+        # ABI 常量已提升为模块级变量（见文件顶部）
 
         has_return = instr.dst_loc is not None
 
@@ -921,12 +932,10 @@ class NativeCodeGen:
             dst_name, _ = dst_info
             ctx.store_from_reg(dst_name, RAX)
 
-        # 逐字段填充（元素值写入指针+offset）
+        # 逐字段填充（元素值直接写入 [base + offset]，无需中转）
         for i, (elem_loc, elem_type) in enumerate(instr.src_locs):
             byte_offset = i * NOVA_VALUE_SIZE
             is_float = elem_type.kind == IRType.FLOAT
-            # 加载元素到临时寄存器
-            ctx.load_to_reg(elem_loc, RCX, is_float=is_float)
             # 加载基址到 RAX
             if dst_info:
                 base_l = ctx.get_loc(dst_info[0])
@@ -934,17 +943,13 @@ class NativeCodeGen:
                     e.mov_reg_reg64(RAX, base_l[1])
                 else:
                     e.mov_reg_mem(RAX, RSP, base_l[1])
-            # 存储到 [base + offset]
+            # 直接存储元素到 [base + byte_offset]
             if is_float:
-                e.movsd_mem_reg(RSP, -(i * 8 + 8), XMM0)  # 用临时栈做中转
-                e.mov_reg_imm64(RDX, byte_offset)
-                e.add_reg_reg(RAX, RDX)
-                e.movsd_reg_mem(XMM0, RAX, 0)
+                ctx.load_to_reg(elem_loc, XMM0, is_float=True)
+                e.movsd_mem_reg(RAX, byte_offset, XMM0)
             else:
-                e.mov_mem_reg(RSP, -(i * 8 + 8), RCX)
-                e.mov_reg_imm64(RDX, byte_offset)
-                e.add_reg_reg(RAX, RDX)
-                e.mov_reg_mem(RAX, 0, RCX)
+                ctx.load_to_reg(elem_loc, RCX, is_float=False)
+                e.mov_mem_reg(RAX, byte_offset, RCX)
 
     def _emit_build_map(self, instr, ctx: "_EmitContext"):
         """编译 Map 构建：调用 nova_map_new(entry_count)，然后逐对 nova_map_put。"""

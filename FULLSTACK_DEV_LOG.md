@@ -4,6 +4,45 @@
 
 ---
 
+## 第 22 轮 — 2026-07-25 06:12
+
+> 普通开发轮：前端字面量模式冗余检测 + 后端 P0 bug 修复
+
+---
+
+### 前端任务：实现字面量模式冗余检测（frontend_literal_pattern_redundancy）
+
+- **结果**: 成功
+- **难度**: easy | **优先级**: 55
+- **为什么选这个**: 前端线已 100% 完成（14/14）进入维护模式。评审指出字面量冗余检测是完全缺失的薄弱点。easy 难度，约 60 行代码，风险极低。
+- **详情**: 在 `type_checker.py` 的 `_check_match_exhaustiveness` 中新增字面量模式冗余检测。维护 `seen_literals` 字典按类型分组（int/float/string/char/bool），当重复字面量值出现时标记为冗余分支。新增导入 `PatternInt`/`PatternFloat`/`PatternString`/`PatternChar`。含 guard 的字面量分支不视为冗余（guard 可能拒绝匹配）。Float 类型对 NaN 做安全检查（NaN != NaN）。
+- **前端下一步**: 唯一剩余前端任务 `frontend_nested_pattern_check`（medium/60），属于锦上添花型，可在后续轮次处理。前端线继续保持维护模式。
+
+---
+
+### 后端任务：修复原生后端 _emit_runtime_call P0 bug（backend_fix_native_runtime_call_bugs）
+
+- **结果**: 成功
+- **难度**: easy | **优先级**: 99（最高）
+- **为什么选这个**: 第 21 轮评审发现的 P0-1 和 P0-2 bug，影响原生后端所有运行时调用路径（NameError）和元组构建的栈安全。路线图明确标注"第 22 轮"优先执行。
+- **详情**:
+  - **P0-1 修复**: 将 `INT_ARG_REGS`/`FLOAT_ARG_REGS`/`CALLER_GPRS` 从 `_emit_call` 方法的局部变量提升为 `native_backend.py` 模块级常量（文件顶部 import 区之后），解决 `_emit_runtime_call` 引用时的 NameError。`_emit_call` 中删除重复定义，改为引用模块级常量。
+  - **P0-2 修复**: 重写 `_emit_build_tuple` 字段填充逻辑：删除使用 RSP 负偏移做临时中转的不安全代码（`movsd_mem_reg(RSP, -(i*8+8), XMM0)`），改为直接写入 `[base + byte_offset]`（`movsd_mem_reg(RAX, byte_offset, XMM0)`），消除了栈损坏风险和多余的中转指令。同时删除了不再需要的 RDX 寄存器中转和 add_reg_reg。
+- **后端下一步**: 闭包 MIR 降级（`backend_closure_mir_lowering`，hard/85）——这是闭包全链路的前置条件，下轮优先执行。
+
+---
+
+### 测试前后对比
+
+| 阶段 | 通过数 | 总数 | 失败 |
+|------|--------|------|------|
+| 基线（开发前） | 395 | 395 | 0 |
+| 最终验证 | 395 | 395 | 0 |
+
+无回归，测试通过率 100%。
+
+---
+
 ## 第 21 轮评审 — 2026-07-25 08:30
 
 > 三轮回顾评审：第 19-21 轮总结 + 双线路线图调整
