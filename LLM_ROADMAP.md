@@ -1,7 +1,7 @@
 # Nova LLM 智能开发路线图
 
-**更新时间**: 2026-07-24 16:30:00
-**上次评审**: 第 45 轮（路线图评审）
+**更新时间**: 2026-07-25 16:05:00
+**上次评审**: 第 48 轮（路线图评审）
 
 本路线图由 LLM 智能开发系统动态维护。
 
@@ -34,6 +34,7 @@
 | ✅ | 修复列表推导式 latch 块 SSA 替换不完整 | medium | 85 | 2-4 小时 | extract_loop_ssa |
 | ✅ | MIR CFG 工具与循环分析基础设施 | medium | 70 | 4-6 小时 | mir_ssa_verifier, ssa_verifier_tests |
 | ✅ | LIR switch/match 降级补全 | medium | 65 | 3-5 小时 | fix_mir_ssa |
+| ✅ | 重构 MIRLowering._lower_if_expr 拆分 | medium | 55 | 2-3 小时 | - |
 
 ## 🚀 优化 Pass
 
@@ -44,6 +45,7 @@
 | ✅ | 实现公共子表达式消除 Pass (CSE) | medium | 75 | 3-5 小时 | - |
 | ✅ | 实现循环不变量外提 Pass (LICM) | hard | 65 | 1-2 周 | fix_mir_ssa, cse_pass, mir_ssa_verifier, ssa_verifier_tests |
 | ✅ | LIR 层死代码消除 Pass (LIR-DCE) | easy | 70 | 2-3 小时 | mir_ssa_verifier |
+| ✅ | LICM 优化正确性测试 | medium | 60 | 3-5 小时 | implement_licm_pass, ssa_verifier_tests |
 
 ## ⚙️ 后端开发
 
@@ -63,6 +65,7 @@
 | ✅ | 修复 Wasm 后端全局变量声明缺失 | easy | 62 | 1-2 小时 | wasm_control_flow_rewrite |
 | ✅ | 重构 Wasm 后端指令编译调度表化 | medium | 72 | 3-5 小时 | wasm_control_flow_rewrite |
 | ⏳ | 实现原生后端函数调用 ABI | hard | 20 | 3-5 天 | fix_mir_ssa |
+| ✅ | 重构 WasmGCBackend._compile_function 分层拆分 | medium | 68 | 3-5 小时 | - |
 
 ## 🛠️ 工程质量
 
@@ -105,11 +108,12 @@
 | ✅ | 高复杂度函数补全 docstring | easy | 55 | 2-3 小时 | - |
 | ✅ | 重构 cfg_utils 操作数访问调度表化 | medium | 55 | 3-5 小时 | - |
 | ✅ | 重构 CraneliftBackend._compile_instr 调度表化 | medium | 65 | 3-5 小时 | - |
-| ⏳ | 建立代码质量门禁（docstring + 命名规范） | medium | 72 | 3-5 小时 | low_quality_issues_cleanup |
 | ✅ | 重构 TypeChecker._check_pattern 调度表化 | medium | 70 | 2-3 小时 | - |
 | ✅ | 重构 WasmGCBackend._compile_function 分层拆分 | medium | 68 | 3-5 小时 | - |
-| ⏳ | 批量清理 print_debug（104 个 LOW） | easy | 60 | 2-3 小时 | - |
 | ✅ | 重构 MIRLowering._lower_if_expr 拆分 | medium | 55 | 2-3 小时 | - |
+| ⏳ | 建立代码质量门禁（docstring + 命名规范） | medium | 75 | 3-5 小时 | low_quality_issues_cleanup |
+| ⏳ | 精准清理 print_debug（真实调试残留） | easy | 55 | 1-2 小时 | - |
+| ⏳ | 审查数据同步机制 | easy | 50 | 1-2 小时 | - |
 
 ## 🧪 测试完善
 
@@ -124,10 +128,10 @@
 
 ---
 
-**进度**: 84/91 (92%)
-- **已完成**: 84
+**进度**: 88/95 (93%)
+- **已完成**: 88
 - **进行中**: 1
 - **待开发**: 5
 - **已废弃**: 1
 
-> 注：第45轮路线图评审。Top10 复杂度调度表化战略基本完成（里程碑）。新增 5 个任务：TypeChecker._check_pattern 调度表化（CC=24）、WasmGCBackend._compile_function 分层拆分（CC=26）、print_debug 清理（104个）、MIRLowering._lower_if_expr 拆分（CC=22）、C 后端闭包 Phase3。质量门禁优先级从 62 提升至 72（三次推迟强制推进）。下阶段方向：新一代复杂度治理 + LOW 级遏制 + 质量门禁落地。
+> 注：第48轮路线图评审。新一代Top10复杂度调度表化基本完成（里程碑）。质量门禁连续4次推迟被强制关注，优先级提升至75。新增1个任务（sync_review_data审查数据同步）。print_debug任务调整为精准清理（范围缩小，优先级55）。下阶段方向：质量门禁落地 + 功能完整性推进 + LOW级遏制。

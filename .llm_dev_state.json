@@ -1,5 +1,5 @@
 {
-  "cycles": 47,
+  "cycles": 48,
   "completed_tasks": [
     "refactor_wasm_compile_function",
     "refactor_mir_lower_if_expr",
@@ -102,10 +102,19 @@
     "review_cycle_42",
     "refactor_ccodegen_compile_expr",
     "clean_unused_imports_v3",
-    "review_cycle_45"
+    "review_cycle_45",
+    "review_cycle_48"
   ],
   "failed_tasks": [],
   "task_history": [
+    {
+      "cycle": 48,
+      "task_id": "review_cycle_48",
+      "status": "completed",
+      "source": "评审轮",
+      "reason": "第48轮路线图评审，每3轮一次的例行评审。总结第46-47轮开发成果，评估方向/质量/效率/价值/审查对齐五维表现，规划第49-51轮方向。",
+      "details": "完成第48轮路线图评审：五维评估（方向正确、质量持续提升但审查数据严重滞后、效率优秀、价值高、审查对齐卓越75%）；新一代Top10复杂度调度表化基本完成里程碑；质量门禁连续4次推迟问题被强制关注；新增1个任务（sync_review_data审查数据同步）；调整2个任务优先级（establish_quality_gate 72→75, clean_print_debug 60→55）；规划第49-51轮方向为'质量门禁落地+功能完整性推进+LOW级遏制'。"
+    },
     {
       "cycle": 47,
       "task_id": "refactor_wasm_compile_function",
@@ -137,36 +146,12 @@
       "source": "自主规划",
       "reason": "LICM 是已实现的最高级优化 Pass，但缺乏专项测试。原计划清理 unused_import，但工具检测困难，转向高价值测试任务。",
       "details": "为 LoopInvariantCodeMotion Pass 编写 3 个专项测试用例：1) test_licm_hoists_pure_invariant - 验证纯的循环不变量（10+20）被外提到 pre-header；2) test_licm_preserves_structure - 验证 LICM 后 MIR 结构保持完整（基本块、终结指令存在）；3) test_licm_runs_on_mutable_loop - 验证含 mutable 变量的循环上 LICM 正常运行不报错。测试全部通过。"
-    },
-    {
-      "cycle": 45,
-      "task_id": "review_cycle_45",
-      "status": "completed",
-      "source": "评审轮",
-      "reason": "第45轮路线图评审，每3轮一次的例行评审。总结第43-44轮开发成果，评估方向/质量/效率/价值/审查对齐五维表现，规划第46-48轮方向。",
-      "details": "完成第45轮路线图评审：五维评估（方向正确、质量持续提升但LOW反弹、效率优秀、价值非常高、审查对齐卓越100%）；Top10调度表化战略基本完成里程碑；新增5个任务（2个审查驱动复杂度治理+1个print_debug清理+1个闭包Phase3+1个MIR拆分）；调整4个任务优先级；规划第46-48轮方向为'新一代复杂度治理+LOW级遏制+质量门禁落地'。质量门禁强制提升优先级至72（三次推迟已形成模式）。"
-    },
-    {
-      "cycle": 44,
-      "task_id": "refactor_type_checker_unify",
-      "status": "completed",
-      "source": "审查驱动",
-      "reason": "TypeChecker._unify 圈复杂度 26，类型系统核心合一算法。10 个主类型分支构成 if-elif 链，新增类型时必须修改本函数，违反开闭原则。调度表化重构可行性高，与项目调度表化战略一致。第42轮评审规划为第44轮核心任务。",
-      "details": "将 _unify 从 82 行 10 分支 if-elif 链重构为调度表模式：1) 保留 TypeVar 处理（3 种情况）在主函数中，这是合一算法的基础；2) 新增 6 个独立方法（_unify_prim/_unify_list/_unify_map/_unify_tuple/_unify_fn/_unify_adt）处理结构类型合一；3) 模块级 _UNIFY_DISPATCH 字典（6 种 NovaType 子类→方法名映射）；4) _unify 主函数从 82 行压缩至约 25 行（CC≈5）。新增类型只需在调度表加一行并实现对应 handler。"
-    },
-    {
-      "cycle": 44,
-      "task_id": "refactor_cranelift_backend_dispatch",
-      "status": "completed",
-      "source": "审查驱动",
-      "reason": "审查日志（第1500轮）显示 CraneliftBackend._compile_instr 圈复杂度 24，Top 10 中仅剩的未调度表化的高复杂度函数。18 个 elif 分支，与 wasm_backend 和 lir_c_backend 的调度表化实践不一致。",
-      "details": "将 _compile_instr 从 75 行 18 分支 if-elif 链重构为调度表模式：1) 新增 _build_instr_dispatch_table() 构建 18 种 LIR 指令类型的 handler 映射表；2) 新增 16 个独立 _compile_xxx 方法按类别组织（标签1个、常量与加载4个、运算2个、函数调用1个、控制流3个、数据结构构建4个、访问2个、杂项1个）；3) _compile_instr 主函数从 75 行压缩至 8 行（CC≈3）。与 wasm_backend 和 lir_c_backend 风格完全统一。"
     }
   ],
-  "current_cycle": 47,
+  "current_cycle": 48,
   "baseline_tests": 395,
   "current_tests": 395,
-  "last_review_cycle": 45,
+  "last_review_cycle": 48,
   "tasks": [
     {
       "id": "c_backend_closure_phase3",
@@ -183,28 +168,18 @@
       "reason": "闭包是 Nova 函数式核心的重要特性。Phase1+2 已完成 LIR 指令+环境填充，Phase3 是让闭包真正可用的最后一步。需要在 LIRCBackend.compile() 中为 lambda 产生的辅助函数生成 C 函数定义。[新增任务 / 自主规划]"
     },
     {
-      "id": "refactor_type_checker_check_pattern",
-      "name": "重构 TypeChecker._check_pattern 调度表化",
-      "description": "TypeChecker._check_pattern 圈复杂度 24（审查日志 Top4），模式匹配的类型检查函数。按 AST 模式节点类型（PatternWildcard/PatternInt/PatternConstructor/PatternTuple/PatternList 等）建立调度表分发，将 CC 降至约 3-5。",
+      "id": "establish_quality_gate",
+      "name": "建立代码质量门禁（docstring + 命名规范）",
+      "description": "在 auto_review.py 中增加增量质量检查：新增代码必须有 docstring（公共 API）、不得引入新的魔法数字、命名规范检查。设定 LOW 问题增长率上限，防止技术债持续累积。四次评审推迟，强制提升优先级。",
       "difficulty": "medium",
-      "priority": 70,
-      "category": "engineering",
-      "estimated": "2-3 小时",
-      "status": "completed",
-      "depends_on": [],
-      "reason": "审查日志显示 _check_pattern CC=24，是新一代 Top10 中最适合调度表化的函数。模式匹配本质上是按节点类型分发，完全符合调度表模式。与 _unify 调度表化同属 type_checker.py，可沿用模式。[新增任务 / 审查驱动]"
-    },
-    {
-      "id": "refactor_wasm_compile_function",
-      "name": "重构 WasmGCBackend._compile_function 分层拆分",
-      "description": "WasmGCBackend._compile_function 圈复杂度 26（审查日志 Top1），253 行函数过长。不适合简单调度表化（因为按语义角色分发而非指令类型），建议分层拆分：将 5 种控制流终结指令的编译逻辑提取为独立方法，主函数只负责遍历+块切分+调用终结方法。",
-      "difficulty": "medium",
-      "priority": 68,
+      "priority": 75,
       "category": "engineering",
       "estimated": "3-5 小时",
-      "status": "completed",
-      "depends_on": [],
-      "reason": "审查日志 Top1 最复杂函数（CC=26, 253行）。分层拆分可将 CC 降至约 10-12，是新一代复杂度治理的核心目标。[新增任务 / 审查驱动]"
+      "status": "pending",
+      "depends_on": [
+        "low_quality_issues_cleanup"
+      ],
+      "reason": "LOW 级问题持续增长（836→1029，+23%），缺乏质量红线导致持续累积。连续 4 个评审周期（39/42/45/48）规划但未落地，已形成系统性推迟模式。提升优先级至 75 强制推进，打破推迟循环。[优先级调整: 72→75，四次推迟强制提升]"
     },
     {
       "id": "unify_c_backend",
@@ -225,30 +200,28 @@
       "reason": "目前有两套 C 代码生成路径（AST 路径功能完整，LIR 路径仅阶段一），功能重叠增加维护成本。SSA 基础打好后，统一到 LIR→C 路径可以让所有后端共享 IR 优化成果。[优先级维持 70，闭包支持作为独立任务优先级更高]"
     },
     {
-      "id": "establish_quality_gate",
-      "name": "建立代码质量门禁（docstring + 命名规范）",
-      "description": "在 auto_review.py 中增加增量质量检查：新增代码必须有 docstring（公共 API）、不得引入新的魔法数字、命名规范检查。设定 LOW 问题增长率上限，防止技术债持续累积。三次评审推迟，强制提升优先级。",
-      "difficulty": "medium",
-      "priority": 72,
+      "id": "sync_review_data",
+      "name": "审查数据同步机制",
+      "description": "在 auto_review.py 或 LLM 开发流程中增加「已重构函数标注」机制，避免审查日志长期显示过时数据。例如：维护一个手动更新的已重构函数列表，审查报告生成时自动标注「实际已重构」。",
+      "difficulty": "easy",
+      "priority": 50,
       "category": "engineering",
-      "estimated": "3-5 小时",
+      "estimated": "1-2 小时",
       "status": "pending",
-      "depends_on": [
-        "low_quality_issues_cleanup"
-      ],
-      "reason": "LOW 级问题持续增长（836→1029，+23%），缺乏质量红线导致持续累积。连续 3 个评审周期（39/42/45）规划但未落地，已形成推迟模式。提升优先级至 72 强制推进。[优先级调整: 62→72，三次推迟强制提升]"
+      "depends_on": [],
+      "reason": "审查数据严重滞后：第1501轮报告仍显示已重构函数的旧复杂度（_unify=26、_check_pattern=24、_compile_function=26 等），实际已分别降至约 5、3、5。滞后数据导致审查日志可信度下降，影响任务优先级判断。[新增任务 / 自主发现]"
     },
     {
       "id": "clean_print_debug",
-      "name": "批量清理 print_debug（104 个 LOW 级问题）",
-      "description": "审查日志显示 print_debug 共 104 个 LOW 级问题，比上轮增长 27%。清理调试语句残留，将 print 替换为 logging 或直接移除。优先清理非核心模块。",
+      "name": "精准清理 print_debug（真实调试残留）",
+      "description": "经第47轮深度分析，104 个 print_debug 中绝大多数是正常功能输出（evaluator/vm 的 print 内置函数实现、cli/compiler_cli 的用户交互输出、scripts 的日志）。本任务聚焦真正可清理的调试残留：evaluator.py 第221行裸 print(val)、pass_manager.py 验证输出等。",
       "difficulty": "easy",
-      "priority": 60,
+      "priority": 55,
       "category": "engineering",
-      "estimated": "2-3 小时",
+      "estimated": "1-2 小时",
       "status": "pending",
       "depends_on": [],
-      "reason": "print_debug 是 LOW 级问题中增长最快的子类别之一（+27%），清理风险低、收益明确。104 个调试语句残留影响代码整洁度。[新增任务 / 审查驱动]"
+      "reason": "原任务「批量清理104个print_debug」经深度分析后被判定为低价值（大部分print是正常功能）。但代码审计发现 evaluator.py 和 pass_manager.py 等位置确有真实调试残留。调整为精准清理，只处理真正的调试输出。[优先级调整: 60→55，任务范围缩小]"
     },
     {
       "id": "benchmark_enhance_exec_time",
@@ -265,21 +238,6 @@
       "reason": "基准测试框架目前只支持 VM 后端执行时间测量，C/Wasm 后端只能测编译时间。补齐后可全面评估各后端性能。[优先级维持 58][自主规划]"
     },
     {
-      "id": "licm_correctness_tests",
-      "name": "LICM 优化正确性测试",
-      "description": "为 LoopInvariantCodeMotion Pass 编写专项测试用例，覆盖：循环不变量识别、pre-header 创建、外提后 SSA 正确性、嵌套循环处理、带副作用的不变量不外提、Phi 节点处理等。配合 SSAVerifier 确保优化后 SSA 性质保持",
-      "difficulty": "medium",
-      "priority": 60,
-      "category": "test",
-      "estimated": "3-5 小时",
-      "status": "completed",
-      "depends_on": [
-        "implement_licm_pass",
-        "ssa_verifier_tests"
-      ],
-      "reason": "LICM 是已实现的最高级优化 Pass，但缺乏专项测试。[优先级调整: 68→60，优化 Pass 测试优先级暂降]"
-    },
-    {
       "id": "cfg_utils_unit_tests",
       "name": "CFG 基础设施单元测试",
       "description": "为 ir/cfg_utils.py 编写单元测试，覆盖：CFG 遍历（前向/后向）、支配树计算、回边检测、自然循环识别、指令操作数访问、副作用判断、后继块获取等核心功能",
@@ -294,18 +252,6 @@
       "reason": "cfg_utils.py（799行）是循环优化的核心基础设施，但缺乏直接测试。[优先级维持 56][自主发现]"
     },
     {
-      "id": "refactor_mir_lower_if_expr",
-      "name": "重构 MIRLowering._lower_if_expr 拆分",
-      "description": "MIRLowering._lower_if_expr 圈复杂度 22，106 行。将 if 表达式的 MIR 降级逻辑按分支拆分为独立方法（_lower_then_branch/_lower_else_branch/_build_if_merge），主函数只负责创建基本块和分支调度。",
-      "difficulty": "medium",
-      "priority": 55,
-      "category": "engineering",
-      "estimated": "2-3 小时",
-      "status": "completed",
-      "depends_on": [],
-      "reason": "审查日志显示 _lower_if_expr CC=22，同时是 function_too_long（106 行）。IR 层复杂度治理，与 _lower_match_expr（CC=20, 134行）和 _lower_for_expr（CC=138行）同属 MIR 降级。[新增任务 / 审查驱动]"
-    },
-    {
       "id": "low_quality_issues_cleanup",
       "name": "LOW 级问题批量治理（docstring + 魔法数字）",
       "description": "批量清理 LOW 级问题：为 ir/ 和 backend/ 模块的公共 API 添加 docstring，将高频魔法数字（如 8 字节大小、默认迭代次数等）提取为命名常量，清理调试打印语句。v1 已完成核心模块的主要部分。",
@@ -315,7 +261,7 @@
       "estimated": "2-4 小时",
       "status": "pending",
       "depends_on": [],
-      "reason": "v1 已完成核心模块的 docstring 和魔法数字，剩余部分价值递减。[优先级调整: 52→48，v1 已完成主要部分][审查发现]"
+      "reason": "v1 已完成核心模块的 docstring 和魔法数字，剩余部分价值递减。建议与质量门禁配合执行——先建门禁再清理存量。[优先级维持 48][审查发现]"
     },
     {
       "id": "c_backend_closure_support",
