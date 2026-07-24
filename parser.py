@@ -669,11 +669,16 @@ class Parser:
         return MatchExpr(subject=subject, arms=arms, span=self._span(tok))
 
     def _parse_match_arm(self) -> MatchArm:
-        """解析 match 分支"""
+        """解析 match 分支，支持可选 guard 条件：pattern if guard -> body"""
         pattern = self._parse_pattern()
+        guard = None
+        # 检查是否有 guard（pattern 后紧跟 if 关键字，而非 ->）
+        if self._peek_type() == TokenType.IF:
+            self._advance()  # 消费 if
+            guard = self._parse_expression()
         self._expect(TokenType.ARROW)
         body = self._parse_expression()
-        return MatchArm(pattern=pattern, body=body)
+        return MatchArm(pattern=pattern, guard=guard, body=body)
 
     # ----------------------------------------------------------
     # 模式

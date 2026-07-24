@@ -40,14 +40,26 @@ from ..ir.ir_nodes import (
     IRType,
     LIRBinOp,
     LIRBranch,
+    LIRBuildADT,
+    LIRBuildList,
+    LIRBuildMap,
+    LIRBuildTuple,
     LIRCall,
+    LIRCallIndirect,
+    LIRClosureCreate,
+    LIRFieldAccess,
     LIRFunction,
+    LIRIndex,
     LIRJump,
     LIRLabel,
+    LIRListAppend,
     LIRLoadConst,
+    LIRLoadReg,
     LIRModule,
     LIRPanic,
     LIRReturn,
+    LIRStoreReg,
+    LIRSwitch,
     LIRUnaryOp,
 )
 
@@ -125,12 +137,18 @@ class NativeCodeGen:
         self.relocations = []  # [(code_offset, symbol, addend)]
         self.link_calls = []  # [(caller_func_name, code_offset_in_func, target_func_name)]
         self.data_fixups = []  # [(func_name, code_offset_in_func, data_offset, kind)]
+        self.external_calls = []  # [(caller_func_name, code_offset_in_func, external_func_name)]
         # 常量值 -> 数据段偏移的映射（用于快速查找）
         self._float_const_map = {}  # value_str -> data_offset
         self._string_const_map = {}  # value -> data_offset
 
     def compile(self, lir_module: LIRModule) -> bytes:
         """编译 LIR Module 为 ELF 二进制"""
+        # 0. 重置编译状态
+        self.link_calls = []
+        self.data_fixups = []
+        self.external_calls = []
+
         # 1. 收集所有字符串和浮点常量
         self._collect_constants(lir_module)
 
@@ -371,11 +389,23 @@ class NativeCodeGen:
             LIRBinOp: self._emit_binop,
             LIRUnaryOp: self._emit_unary_op,
             LIRCall: self._emit_call,
+            LIRCallIndirect: self._emit_call_indirect,
             LIRReturn: self._emit_return,
             LIRJump: self._emit_jump,
             LIRBranch: self._emit_branch,
             LIRLabel: self._emit_label,
             LIRPanic: self._emit_panic,
+            LIRLoadReg: self._emit_load_reg,
+            LIRStoreReg: self._emit_store_reg,
+            LIRBuildList: self._emit_build_list,
+            LIRListAppend: self._emit_list_append,
+            LIRBuildTuple: self._emit_build_tuple,
+            LIRBuildMap: self._emit_build_map,
+            LIRBuildADT: self._emit_build_adt,
+            LIRFieldAccess: self._emit_field_access,
+            LIRIndex: self._emit_index,
+            LIRClosureCreate: self._emit_closure_create,
+            LIRSwitch: self._emit_switch,
         }
 
     def _emit_load_const(self, instr, ctx: "_EmitContext"):
@@ -666,6 +696,445 @@ class NativeCodeGen:
         e.mov_reg_imm64(RDI, 1)
         e.mov_reg_imm64(RAX, 60)  # syscall: exit
         e.syscall()
+
+    # ============================================================
+    # 阶段 B.2: 寄存器传送指令（Phi 降级、变量拷贝）
+    # ============================================================
+
+    def _emit_load_reg(self, instr, ctx: "_EmitContext"):
+        """编译寄存器间传送指令（Phi 降级后的值拷贝）。
+
+        src_locs[0] -> dst_loc 的 mov 操作。
+        这是 SSA Phi 节点降级为线性指令序列的关键指令。
+        """
+        if not instr.src_locs or not instr.dst_loc:
+            return
+        src_name, src_type = instr.src_locs[0]
+        dst_name, dst_type = instr.dst_loc
+        is_float = src_type.kind == IRType.FLOAT
+
+        src_loc = ctx.get_loc(src_name)
+        dst_loc = ctx.get_loc(dst_name)
+
+        if dst_loc[0] == "reg":
+            if src_loc[0] == "reg":
+                # 寄存器 -> 寄存器
+                if is_float:
+                    ctx.e.movsd_reg_reg(dst_loc[1], src_loc[1])
+                else:
+                    ctx.e.mov_reg_reg64(dst_loc[1], src_loc[1])
+            else:
+                # 栈 -> 寄存器
+                if is_float:
+                    ctx.e.movsd_reg_mem(dst_loc[1], RSP, src_loc[1])
+                else:
+                    ctx.e.mov_reg_mem(dst_loc[1], RSP, src_loc[1])
+        elif dst_loc[0] == "stack":
+            if src_loc[0] == "reg":
+                # 寄存器 -> 栈
+                if is_float:
+                    ctx.e.movsd_mem_reg(RSP, dst_loc[1], src_loc[1])
+                else:
+                    ctx.e.mov_mem_reg(RSP, dst_loc[1], src_loc[1])
+            else:
+                # 栈 -> 栈（通过寄存器中转）
+                if is_float:
+                    ctx.e.movsd_reg_mem(XMM0, RSP, src_loc[1])
+                    ctx.e.movsd_mem_reg(RSP, dst_loc[1], XMM0)
+                else:
+                    ctx.e.mov_reg_mem(RAX, RSP, src_loc[1])
+                    ctx.e.mov_mem_reg(RSP, dst_loc[1], RAX)
+
+    def _emit_store_reg(self, instr, ctx: "_EmitContext"):
+        """编译寄存器存储指令（与 LIRLoadReg 对称，确保 dst_loc 被写入）。"""
+        if not instr.src_locs or not instr.dst_loc:
+            return
+        # 逻辑与 _emit_load_reg 相同：src_locs[0] -> dst_loc
+        self._emit_load_reg(instr, ctx)
+
+    # ============================================================
+    # 阶段 B.3: 复合数据结构指令（调用运行时函数）
+    # ============================================================
+
+    def _emit_runtime_call(
+        self, func_name: str, args: list, dst_loc_info, ctx: "_EmitContext"
+    ):
+        """通用运行时函数调用发射器。
+
+        通过 System V ABI 调用外部运行时函数（nova_list_new 等）。
+        调用链路：保存 caller-saved -> 设置参数 -> call -> 恢复 -> 取返回值。
+        外部函数的 call rel32 在链接阶段暂不回填（保持 0 偏移）。
+        """
+        e = ctx.e
+        has_return = dst_loc_info is not None
+        dst_name, dst_type = dst_loc_info if has_return else (None, None)
+        dst_in_caller_saved = False
+        dst_is_float = False
+        if has_return:
+            dst_loc = ctx.get_loc(dst_name)
+            dst_in_caller_saved = dst_loc[0] == "reg" and dst_loc[1] in CALLER_GPRS
+            dst_is_float = dst_type.kind == IRType.FLOAT
+
+        # 1. 预留返回值栈槽
+        need_retval_slot = has_return and (dst_in_caller_saved or dst_is_float)
+        if need_retval_slot:
+            e.sub_rsp_imm(8)
+
+        # 2. 保存 caller-saved GPR
+        for reg in CALLER_GPRS:
+            e.push_reg(reg)
+
+        # 3. 设置参数
+        int_idx = 0
+        float_idx = 0
+        stack_args = []
+        for arg_vname, arg_type in args:
+            is_float = arg_type.kind == IRType.FLOAT
+            if is_float:
+                if float_idx < len(FLOAT_ARG_REGS):
+                    ctx.load_to_reg(arg_vname, FLOAT_ARG_REGS[float_idx], is_float=True)
+                    float_idx += 1
+                else:
+                    stack_args.append((arg_vname, True))
+            else:
+                if int_idx < len(INT_ARG_REGS):
+                    ctx.load_to_reg(arg_vname, INT_ARG_REGS[int_idx], is_float=False)
+                    int_idx += 1
+                else:
+                    stack_args.append((arg_vname, False))
+
+        # 4. 栈对齐
+        retval_bit = 1 if need_retval_slot else 0
+        needs_align = (retval_bit + len(stack_args)) % 2 == 1
+        if needs_align:
+            e.sub_rsp_imm(8)
+
+        # 5. 栈参数压栈
+        for arg_vname, is_float in reversed(stack_args):
+            ctx.load_to_reg(arg_vname, RAX, is_float=is_float)
+            e.push_reg(RAX)
+
+        # 6. 发射 call（外部函数，暂用 0 偏移）
+        call_offset = e.call_rel32()
+        self.external_calls.append((ctx.func_name, call_offset, func_name))
+
+        # 7. 清理栈参数和对齐
+        if stack_args:
+            e.add_rsp_imm(len(stack_args) * 8)
+        if needs_align:
+            e.add_rsp_imm(8)
+
+        # 8. 保存返回值
+        if has_return:
+            if need_retval_slot:
+                if dst_is_float:
+                    e.movsd_mem_reg(RSP, 64, XMM0)
+                else:
+                    e.mov_mem_reg(RSP, 64, RAX)
+            else:
+                ctx.store_from_reg(dst_name, RAX, is_float=False)
+
+        # 9. 恢复 caller-saved GPR
+        for reg in reversed(CALLER_GPRS):
+            e.pop_reg(reg)
+
+        # 10. 加载预留的返回值
+        if need_retval_slot:
+            if dst_is_float:
+                e.movsd_reg_mem(XMM0, RSP, 0)
+                ctx.store_from_reg(dst_name, XMM0, is_float=True)
+            else:
+                e.mov_reg_mem(RAX, RSP, 0)
+                ctx.store_from_reg(dst_name, RAX, is_float=False)
+            e.add_rsp_imm(8)
+
+    def _emit_build_list(self, instr, ctx: "_EmitContext"):
+        """编译列表构建：调用 nova_list_new(count)，然后 nova_list_push 逐个添加元素。"""
+        e = ctx.e
+        dst_info = instr.dst_loc if instr.dst_loc else None
+
+        # 先调用 nova_list_new(count)
+        # 构造整数参数：count
+        # 用临时方式加载 count 到 RDI
+        e.push_reg(RDI)
+        e.push_reg(RSI)
+        e.mov_reg_imm64(RDI, instr.count)
+        call_offset = e.call_rel32()
+        self.external_calls.append((ctx.func_name, call_offset, "nova_list_new"))
+        e.pop_reg(RSI)
+        e.pop_reg(RDI)
+
+        # 保存列表指针到目标位置
+        if dst_info:
+            dst_name, _ = dst_info
+            ctx.store_from_reg(dst_name, RAX)
+
+        # 循环 nova_list_push(list, elem)
+        for i, (elem_loc, elem_type) in enumerate(instr.src_locs):
+            e.push_reg(RDI)
+            e.push_reg(RSI)
+            # RDI = list pointer
+            if dst_info:
+                src_l = ctx.get_loc(dst_info[0])
+                if src_l[0] == "reg":
+                    e.mov_reg_reg64(RDI, src_l[1])
+                else:
+                    e.mov_reg_mem(RDI, RSP, src_l[1] + 16)  # +16 跳过 push 的 RDI/RSI
+            # RSI = element
+            ctx.load_to_reg(elem_loc, RSI, is_float=elem_type.kind == IRType.FLOAT)
+            call_offset = e.call_rel32()
+            self.external_calls.append((ctx.func_name, call_offset, "nova_list_push"))
+            e.pop_reg(RSI)
+            e.pop_reg(RDI)
+
+    def _emit_list_append(self, instr, ctx: "_EmitContext"):
+        """编译列表追加：调用 nova_list_push(list, elem)。"""
+        if not instr.src_locs or len(instr.src_locs) < 2:
+            return
+        e = ctx.e
+        e.push_reg(RDI)
+        e.push_reg(RSI)
+        # RDI = list
+        ctx.load_to_reg(instr.src_locs[0][0], RDI)
+        # RSI = element
+        ctx.load_to_reg(instr.src_locs[1][0], RSI)
+        call_offset = e.call_rel32()
+        self.external_calls.append((ctx.func_name, call_offset, "nova_list_push"))
+        e.pop_reg(RSI)
+        e.pop_reg(RDI)
+        # dst = list (原地修改，指针不变)
+        if instr.dst_loc:
+            dst_name, _ = instr.dst_loc
+            ctx.store_from_reg(dst_name, RAX)
+
+    def _emit_build_tuple(self, instr, ctx: "_EmitContext"):
+        """编译元组构建：调用 nova_alloc(size)，然后逐字段填充。"""
+        e = ctx.e
+        NOVA_VALUE_SIZE = 8
+        size = instr.count * NOVA_VALUE_SIZE
+        dst_info = instr.dst_loc if instr.dst_loc else None
+
+        # 调用 nova_alloc(size)
+        e.push_reg(RDI)
+        e.mov_reg_imm64(RDI, size)
+        call_offset = e.call_rel32()
+        self.external_calls.append((ctx.func_name, call_offset, "nova_alloc"))
+        e.pop_reg(RDI)
+
+        # 保存指针
+        if dst_info:
+            dst_name, _ = dst_info
+            ctx.store_from_reg(dst_name, RAX)
+
+        # 逐字段填充（元素值写入指针+offset）
+        for i, (elem_loc, elem_type) in enumerate(instr.src_locs):
+            byte_offset = i * NOVA_VALUE_SIZE
+            is_float = elem_type.kind == IRType.FLOAT
+            # 加载元素到临时寄存器
+            ctx.load_to_reg(elem_loc, RCX, is_float=is_float)
+            # 加载基址到 RAX
+            if dst_info:
+                base_l = ctx.get_loc(dst_info[0])
+                if base_l[0] == "reg":
+                    e.mov_reg_reg64(RAX, base_l[1])
+                else:
+                    e.mov_reg_mem(RAX, RSP, base_l[1])
+            # 存储到 [base + offset]
+            if is_float:
+                e.movsd_mem_reg(RSP, -(i * 8 + 8), XMM0)  # 用临时栈做中转
+                e.mov_reg_imm64(RDX, byte_offset)
+                e.add_reg_reg(RAX, RDX)
+                e.movsd_reg_mem(XMM0, RAX, 0)
+            else:
+                e.mov_mem_reg(RSP, -(i * 8 + 8), RCX)
+                e.mov_reg_imm64(RDX, byte_offset)
+                e.add_reg_reg(RAX, RDX)
+                e.mov_reg_mem(RAX, 0, RCX)
+
+    def _emit_build_map(self, instr, ctx: "_EmitContext"):
+        """编译 Map 构建：调用 nova_map_new(entry_count)，然后逐对 nova_map_set。"""
+        e = ctx.e
+        dst_info = instr.dst_loc if instr.dst_loc else None
+
+        # 调用 nova_map_new(entry_count)
+        e.push_reg(RDI)
+        e.push_reg(RSI)
+        e.mov_reg_imm64(RDI, instr.entry_count)
+        call_offset = e.call_rel32()
+        self.external_calls.append((ctx.func_name, call_offset, "nova_map_new"))
+        e.pop_reg(RSI)
+        e.pop_reg(RDI)
+
+        if dst_info:
+            dst_name, _ = dst_info
+            ctx.store_from_reg(dst_name, RAX)
+
+        # 循环 nova_map_set(map, key, value)
+        for i in range(instr.entry_count):
+            key_idx = i * 2
+            val_idx = i * 2 + 1
+            if key_idx < len(instr.src_locs) and val_idx < len(instr.src_locs):
+                e.push_reg(RDI)
+                e.push_reg(RSI)
+                e.push_reg(RDX)
+                # RDI = map
+                if dst_info:
+                    base_l = ctx.get_loc(dst_info[0])
+                    if base_l[0] == "reg":
+                        e.mov_reg_reg64(RDI, base_l[1])
+                    else:
+                        e.mov_reg_mem(RDI, RSP, base_l[1] + 24)  # +24 跳过 push
+                # RSI = key
+                key_loc, key_type = instr.src_locs[key_idx]
+                ctx.load_to_reg(key_loc, RSI)
+                # RDX = value
+                val_loc, val_type = instr.src_locs[val_idx]
+                ctx.load_to_reg(val_loc, RDX)
+                call_offset = e.call_rel32()
+                self.external_calls.append((ctx.func_name, call_offset, "nova_map_set"))
+                e.pop_reg(RDX)
+                e.pop_reg(RSI)
+                e.pop_reg(RDI)
+
+    def _emit_build_adt(self, instr, ctx: "_EmitContext"):
+        """编译 ADT 构建：调用 nova_adt_new(type_id, variant_tag, field_count)，然后填充字段。"""
+        e = ctx.e
+        dst_info = instr.dst_loc if instr.dst_loc else None
+
+        # 调用 nova_adt_new(type_id, variant_tag, field_count)
+        e.push_reg(RDI)
+        e.push_reg(RSI)
+        e.push_reg(RDX)
+        e.mov_reg_imm64(RDI, instr.type_tag)
+        e.mov_reg_imm64(RSI, instr.type_tag)
+        e.mov_reg_imm64(RDX, instr.field_count)
+        call_offset = e.call_rel32()
+        self.external_calls.append((ctx.func_name, call_offset, "nova_adt_new"))
+        e.pop_reg(RDX)
+        e.pop_reg(RSI)
+        e.pop_reg(RDI)
+
+        if dst_info:
+            dst_name, _ = dst_info
+            ctx.store_from_reg(dst_name, RAX)
+
+        # 逐字段填充 nova_adt_set_field(adt, idx, value)
+        for i, (field_loc, field_type) in enumerate(instr.src_locs):
+            e.push_reg(RDI)
+            e.push_reg(RSI)
+            e.push_reg(RDX)
+            # RDI = adt pointer
+            if dst_info:
+                base_l = ctx.get_loc(dst_info[0])
+                if base_l[0] == "reg":
+                    e.mov_reg_reg64(RDI, base_l[1])
+                else:
+                    e.mov_reg_mem(RDI, RSP, base_l[1] + 24)
+            # RSI = field index
+            e.mov_reg_imm64(RSI, i)
+            # RDX = field value
+            ctx.load_to_reg(field_loc, RDX, is_float=field_type.kind == IRType.FLOAT)
+            call_offset = e.call_rel32()
+            self.external_calls.append((ctx.func_name, call_offset, "nova_adt_set_field"))
+            e.pop_reg(RDX)
+            e.pop_reg(RSI)
+            e.pop_reg(RDI)
+
+    def _emit_field_access(self, instr, ctx: "_EmitContext"):
+        """编译字段访问：从基址+offset 加载值。
+
+        offset 是字段索引，每个字段 8 字节（NovaValue 大小）。
+        生成 base + offset 地址计算 + 内存加载。
+        """
+        if not instr.src_locs or not instr.dst_loc:
+            return
+        e = ctx.e
+        src_name, src_type = instr.src_locs[0]
+        dst_name, dst_type = instr.dst_loc
+        NOVA_VALUE_SIZE = 8
+        byte_offset = instr.offset * NOVA_VALUE_SIZE
+        is_float = dst_type.kind == IRType.FLOAT
+
+        # 加载基址到 RAX
+        src_loc = ctx.get_loc(src_name)
+        if src_loc[0] == "reg":
+            e.mov_reg_reg64(RAX, src_loc[1])
+        else:
+            e.mov_reg_mem(RAX, RSP, src_loc[1])
+
+        # 计算目标地址 RAX = base + byte_offset
+        e.mov_reg_imm64(RDX, byte_offset)
+        e.add_reg_reg(RAX, RDX)
+
+        # 从 [RAX] 加载到目标
+        if is_float:
+            e.movsd_reg_mem(XMM0, RAX, 0)
+            ctx.store_from_reg(dst_name, XMM0, is_float=True)
+        else:
+            e.mov_reg_mem(RAX, 0, RAX)  # mov RAX, [RAX]
+            ctx.store_from_reg(dst_name, RAX)
+
+    def _emit_index(self, instr, ctx: "_EmitContext"):
+        """编译索引访问：调用 nova_list_get(list, index)。"""
+        if not instr.src_locs or len(instr.src_locs) < 2 or not instr.dst_loc:
+            return
+        e = ctx.e
+        e.push_reg(RDI)
+        e.push_reg(RSI)
+        # RDI = list
+        ctx.load_to_reg(instr.src_locs[0][0], RDI)
+        # RSI = index
+        ctx.load_to_reg(instr.src_locs[1][0], RSI)
+        call_offset = e.call_rel32()
+        self.external_calls.append((ctx.func_name, call_offset, "nova_list_get"))
+        e.pop_reg(RSI)
+        e.pop_reg(RDI)
+        # 保存返回值
+        dst_name, dst_type = instr.dst_loc
+        ctx.store_from_reg(dst_name, RAX, is_float=dst_type.kind == IRType.FLOAT)
+
+    def _emit_closure_create(self, instr, ctx: "_EmitContext"):
+        """编译闭包创建（占位实现）。
+
+        当前原生后端暂不支持完整的闭包运行时，
+        生成零值占位，与 Wasm 后端行为一致。
+        TODO: 接入 nova_closure_new 运行时函数。
+        """
+        if not instr.dst_loc:
+            return
+        dst_name, _ = instr.dst_loc
+        ctx.store_from_reg(dst_name, RAX)
+
+    def _emit_call_indirect(self, instr, ctx: "_EmitContext"):
+        """编译间接调用（闭包/函数指针调用，占位实现）。
+
+        当前原生后端暂不支持间接调用机制，
+        需要运行时提供闭包 vtable 才能完成。
+        TODO: 实现闭包对象解包 + 函数指针间接调用。
+        """
+        pass
+
+    def _emit_switch(self, instr, ctx: "_EmitContext"):
+        """编译 switch 多分支跳转。
+
+        先加载条件值到 RAX，然后逐一比较并条件跳转。
+        最后 fall through 到 default 分支。
+        """
+        e = ctx.e
+        if instr.src_locs:
+            ctx.load_to_reg(instr.src_locs[0][0], RAX)
+
+        # 逐一比较 case 值并条件跳转
+        for value, target in instr.cases:
+            e.mov_reg_imm64(RDX, value)
+            e.cmp_reg_reg(RAX, RDX)
+            je_offset = e.je_rel32()
+            ctx.jump_fixups.append((je_offset, target, "jcc"))
+
+        # fall through 到 default 分支
+        if instr.default_target:
+            jmp_offset = e.jmp_rel32()
+            ctx.jump_fixups.append((jmp_offset, instr.default_target, "jmp"))
 
     # ============================================================
     # 阶段 B: 跳转偏移回填

@@ -1,7 +1,7 @@
 {
-  "cycles": 16,
-  "frontend_completed": 11,
-  "backend_completed": 12,
+  "cycles": 17,
+  "frontend_completed": 12,
+  "backend_completed": 13,
   "last_review_cycle": 15,
   "current_review_cycle": 18,
   "completed_tasks": [
@@ -26,13 +26,37 @@
     "frontend_type_unify_deepen",
     "backend_native_stack_frame",
     "frontend_pattern_exhaustiveness",
-    "backend_native_call_abi"
+    "backend_native_call_abi",
+    "frontend_match_guard_typecheck",
+    "backend_native_compound_instr"
   ],
   "failed_tasks": [],
   "deprecated_tasks": [
     "frontend_type_var_strict"
   ],
   "task_history": [
+    {
+      "cycle": 17,
+      "task_id": "frontend_match_guard_typecheck",
+      "name": "实现 match 表达式 guard 条件类型检查",
+      "track": "frontend",
+      "difficulty": "medium",
+      "priority": 72,
+      "result": "success",
+      "details": "完善模式匹配 guard 条件支持（前后端联动修改）：(1) parser.py _parse_match_arm 新增 guard 语法解析——pattern 后可跟 'if guard_expr -> body'，用 _peek_type(IF) 判断是否有 guard；(2) type_checker.py check_match_arm 新增 guard 类型检查——在模式绑定后检查 guard 表达式必须为 Bool 类型，非 Bool 报 TypeCheckError；(3) type_checker.py _check_match_exhaustiveness 完善——含 guard 的通配符/变量绑定不再视为完备覆盖（因为 guard 可能拒绝某些值），新增 has_guarded_wildcard_or_var 状态追踪。改动范围小且隔离（3 个方法），392 测试全部通过，无回归。",
+      "timestamp": "2026-07-24 07:10"
+    },
+    {
+      "cycle": 17,
+      "task_id": "backend_native_compound_instr",
+      "name": "为原生后端补全复合数据结构指令代码生成",
+      "track": "backend",
+      "difficulty": "hard",
+      "priority": 90,
+      "result": "success",
+      "details": "为原生后端调度表新增 13 种 LIR 指令的代码生成，从 9 种扩展到 22 种：(1) LIRLoadReg/LIRStoreReg——寄存器间 mov 传送（支持 reg→reg/reg→stack/stack→reg/stack→stack 四种组合，含浮点），是 Phi 降级正确工作的基础；(2) LIRBuildList——调用 nova_list_new + nova_list_push 逐元素填充；(3) LIRListAppend——调用 nova_list_push；(4) LIRBuildTuple——调用 nova_alloc + 逐字段内存填充；(5) LIRBuildMap——调用 nova_map_new + nova_map_set 逐对插入；(6) LIRBuildADT——调用 nova_adt_new + nova_adt_set_field 逐字段填充；(7) LIRFieldAccess——base+offset 地址计算 + 内存加载（纯指令，无需运行时调用）；(8) LIRIndex——调用 nova_list_get；(9) LIRClosureCreate/LIRCallIndirect——占位实现（待运行时完善）；(10) LIRSwitch——逐一比较 + 条件跳转级联。新增 external_calls 列表记录外部运行时函数调用。原生后端从'只能跑纯数值'到'可编译复合数据结构'的关键突破。392 测试全部通过，无回归。",
+      "timestamp": "2026-07-24 07:10"
+    },
     {
       "cycle": 16,
       "task_id": "frontend_pattern_exhaustiveness",
@@ -184,7 +208,7 @@
       "difficulty": "hard",
       "priority": 95,
       "result": "success",
-      "details": "实现完整的类型合一算法基础设施并接入关键路径：(1) union-find 替换表 _subst + 路径压缩的 _find 方法；(2) _unify 合一算法——支持 PrimType/ListType/MapType/TupleType/FnType/ADTType 全部 9 种情况，含 TypeVar 双向绑定；(3) _occur_check 发生检查——防止无限递归类型；(4) _apply_subst 替换应用——递归展开所有类型变量；(5) _instantiate 泛型实例化——let-polymorphism，每次引用泛型函数创建 fresh 副本；(6) _check_fn_call 升级为合一驱动参数匹配，返回类型应用替换后再返回；(7) _check_identifier 增加泛型实例化——包含 TypeVar 的类型每次引用自动实例化。类型系统从\"兼容检查\"升级为\"合一推断\"的第一步，392 测试全部通过。",
+      "details": "实现完整的类型合一算法基础设施并接入关键路径：(1) union-find 替换表 _subst + 路径压缩的 _find 方法；(2) _unify 合一算法——支持 PrimType/ListType/MapType/TupleType/FnType/ADTType 全部 9 种情况，含 TypeVar 双向绑定；(3) _occur_check 发生检查——防止无限递归类型；(4) _apply_subst 替换应用——递归展开所有类型变量；(5) _instantiate 泛型实例化——let-polymorphism，每次引用泛型函数创建 fresh 副本；(6) _check_fn_call 升级为合一驱动参数匹配，返回类型应用替换后再返回；(7) _check_identifier 增加泛型实例化——包含 TypeVar 的类型每次引用自动实例化。类型系统从'兼容检查'升级为'合一推断'的第一步，392 测试全部通过。",
       "timestamp": "2026-07-23 04:15"
     },
     {
@@ -332,6 +356,30 @@
     }
   ],
   "tasks": [
+    {
+      "task_id": "frontend_match_guard_typecheck",
+      "name": "实现 match 表达式 guard 条件类型检查",
+      "description": "为 match 分支的 guard 条件添加类型检查（必须为 Bool）和完备性分析支持（含 guard 的通配符不视为完备覆盖），同时扩展解析器支持 'pattern if guard -> body' 语法。",
+      "track": "frontend",
+      "difficulty": "medium",
+      "priority": 72,
+      "estimated_effort": "2-3小时",
+      "status": "completed",
+      "source": "code_analysis_17",
+      "depends_on": ["frontend_pattern_exhaustiveness"]
+    },
+    {
+      "task_id": "backend_native_compound_instr",
+      "name": "为原生后端补全复合数据结构指令代码生成",
+      "description": "在原生后端调度表新增 LIRLoadReg/StoreReg/BuildList/ListAppend/BuildTuple/BuildMap/BuildADT/FieldAccess/Index/ClosureCreate/CallIndirect/Switch 共 13 种指令，通过运行时函数调用支持复合数据结构。",
+      "track": "backend",
+      "difficulty": "hard",
+      "priority": 90,
+      "estimated_effort": "4-6小时",
+      "status": "completed",
+      "source": "code_analysis_17",
+      "depends_on": ["backend_native_call_abi"]
+    },
     {
       "task_id": "backend_native_call_abi",
       "name": "实现原生后端 System V AMD64 ABI 调用约定",

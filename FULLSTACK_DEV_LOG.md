@@ -4,6 +4,41 @@
 
 ---
 
+## 第 17 轮（2026-07-24 07:10）
+
+### 前端任务：实现 match 表达式 guard 条件类型检查
+- **结果**: 成功
+- **难度**: medium
+- **为什么选这个**: AST 层已预留 guard 字段但类型检查层完全忽略，是功能缺失；改动集中在 type_checker.py 和 parser.py 的少量方法内，低风险高收益
+- **详情**:
+  - parser.py `_parse_match_arm` 新增 guard 语法解析：`pattern if guard_expr -> body`
+  - type_checker.py `check_match_arm` 新增 guard 类型检查：guard 必须为 Bool 类型
+  - type_checker.py `_check_match_exhaustiveness` 完善：含 guard 的通配符/变量绑定不再视为完备覆盖
+
+### 后端任务：为原生后端补全复合数据结构指令代码生成
+- **结果**: 成功
+- **难度**: hard
+- **为什么选这个**: 原生后端调度表仅覆盖 9 种 LIR 指令，任何涉及列表/元组/ADT 的程序都会静默丢失数据结构构建指令。这是从"hello world"到"实际程序"的关键缺口
+- **详情**:
+  - 调度表从 9 种扩展到 22 种 LIR 指令
+  - 新增 LIRLoadReg/StoreReg（Phi 降级基础）、LIRBuildList/ListAppend/BuildTuple/BuildMap/BuildADT（运行时函数调用）、LIRFieldAccess（内存偏移加载）、LIRIndex（nova_list_get）、LIRSwitch（比较+条件跳转级联）
+  - LIRClosureCreate/LIRCallIndirect 为占位实现
+  - 新增 external_calls 列表记录外部运行时函数调用
+
+### 测试对比
+- 基线: 392 passed
+- 本轮: 392 passed（无回归）
+
+### 前端下一步
+- 前端原始任务池中的 6 个任务已全部完成（含废弃），需要新增前端任务或聚焦质量优化
+- 建议：清理 _types_compatible 死代码、增强 for/列表推导的迭代器类型推断
+
+### 后端下一步
+- 原生后端指令选择优化（easy，低风险高收益）
+- Wasm 后端栈平衡验证器（medium，提升 Wasm 后端可靠性）
+
+---
+
 ## 第 15 轮评审 — 2026-07-24 16:00 ~ 16:30
 
 > 三轮回顾评审：第 13-15 轮总结 + 双线路线图调整

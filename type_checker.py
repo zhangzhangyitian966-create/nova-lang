@@ -946,9 +946,21 @@ class TypeChecker:
     def check_match_arm(
         self, arm, subject_type: NovaType, match_expr: MatchExpr
     ) -> NovaType:
-        """检查 match 分支"""
+        """检查 match 分支，包括可选的 guard 条件类型检查"""
         child_env = self.env.child()
         self._check_pattern(arm.pattern, subject_type, child_env, match_expr)
+        # 检查 guard 条件（必须为 Bool 类型）
+        if arm.guard is not None:
+            old_env = self.env
+            self.env = child_env
+            guard_ty = self.check_expr(arm.guard)
+            if not self._unify_types(guard_ty, BOOL_T):
+                raise TypeCheckError(
+                    f"match 分支的 guard 条件必须是 Bool 类型，实际为 {guard_ty}",
+                    line=arm.guard.span.line if arm.guard.span else -1,
+                    column=arm.guard.span.column if arm.guard.span else -1,
+                )
+            self.env = old_env
         old_env = self.env
         self.env = child_env
         body_ty = self.check_expr(arm.body)
@@ -979,15 +991,22 @@ class TypeChecker:
 
         covered_constructors = set()
         has_wildcard_or_var = False
+        has_guarded_wildcard_or_var = False
         redundant_arms = []
 
         for i, arm in enumerate(arms):
             pat = arm.pattern
+            arm_has_guard = arm.guard is not None
             if isinstance(pat, (PatternWildcard, PatternIdentifier)):
                 if has_wildcard_or_var:
                     # 多个通配符/变量绑定，后续全部冗余
                     redundant_arms.append(i)
-                has_wildcard_or_var = True
+                elif arm_has_guard:
+                    # 含 guard 的通配符/变量绑定不视为完备覆盖，
+                    # 因为 guard 可能拒绝某些值
+                    has_guarded_wildcard_or_var = True
+                else:
+                    has_wildcard_or_var = True
             elif isinstance(pat, PatternConstructor):
                 covered_constructors.add(pat.name)
             elif isinstance(pat, PatternBool):
