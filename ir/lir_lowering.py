@@ -59,6 +59,7 @@ from .ir_nodes import (
 
 
 class LIRLoweringError(Exception):
+    """MIR -> LIR 降级过程中的错误"""
     pass
 
 
@@ -97,6 +98,17 @@ class LIRLowering:
         }
 
     def lower(self, mir_module):
+        """将 MIR 模块降级为 LIR 模块。
+
+        遍历 MIR 模块中的全局变量和函数，
+        将 MIR 基本块和指令转换为 LIR 指令。
+
+        参数:
+            mir_module: MIRModule 实例
+
+        返回:
+            LIRModule 实例
+        """
         lir_module = LIRModule(name=mir_module.name)
 
         for name, mir_global in mir_module.globals.items():

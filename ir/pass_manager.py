@@ -415,19 +415,23 @@ class _UsedNamesCollector(HIRVisitor):
         self.used = set()
 
     def visit_HIRIdentifier(self, expr):
+        """收集标识符引用的变量名"""
         self.used.add(expr.name)
 
     def visit_HIRAssignExpr(self, expr):
+        """收集赋值表达式中的变量引用（赋值目标算写使用）"""
         # 赋值的目标也是一个使用（写使用）
         if isinstance(expr.target, HIRIdentifier):
             self.used.add(expr.target.name)
         self.visit(expr.value)
 
     def visit_HIRLambda(self, expr):
+        """遍历 lambda 体，跳过参数名（参数是新绑定）"""
         # Lambda 的参数是新绑定，不加入 used
         self.visit(expr.body)
 
     def visit_HIRForExpr(self, expr):
+        """遍历 for 循环体和可迭代对象，跳过循环变量名（新绑定）"""
         # for 循环变量是新绑定，不加入 used
         self.visit(expr.iterable)
         self.visit(expr.body)
@@ -435,6 +439,7 @@ class _UsedNamesCollector(HIRVisitor):
             self.visit(expr.step)
 
     def visit_HIRLetDecl(self, expr):
+        """遍历 let 绑定的值表达式，跳过绑定名（新绑定）"""
         # let 绑定的 name 是新绑定，不加入 used，只收集 value 中的使用
         self.visit(expr.value)
 
@@ -742,6 +747,7 @@ class LoopInvariantCodeMotion(Pass):
         depths = {}
 
         def compute_depth(header):
+            """递归计算循环嵌套深度（1=外层循环，2=嵌套循环等）"""
             if header in depths:
                 return depths[header]
             loop = loop_info.get_loop(header)
@@ -1362,12 +1368,15 @@ class PassManager:
         self._verification_errors = {}
 
     def add_hir_pass(self, pass_):
+        """注册 HIR 层优化 Pass"""
         self.hir_passes.append(pass_)
 
     def add_mir_pass(self, pass_):
+        """注册 MIR 层优化 Pass"""
         self.mir_passes.append(pass_)
 
     def add_lir_pass(self, pass_):
+        """注册 LIR 层优化 Pass"""
         self.lir_passes.append(pass_)
 
     def add_mir_verification_pass(self, pass_):
@@ -1400,6 +1409,15 @@ class PassManager:
             warnings.warn(msg, stacklevel=3)
 
     def run_hir_passes(self, hir_module, max_iterations=DEFAULT_MAX_PASS_ITERATIONS):
+        """运行 HIR 层优化 Pass（不动点迭代直到无变化）。
+
+        参数:
+            hir_module: HIRModule 实例
+            max_iterations: 最大迭代次数
+
+        返回:
+            bool: 是否有任何 Pass 产生了变化
+        """
         total_changed = False
         for iteration in range(max_iterations):
             changed = False
@@ -1418,6 +1436,15 @@ class PassManager:
         return total_changed
 
     def run_mir_passes(self, mir_module, max_iterations=DEFAULT_MAX_PASS_ITERATIONS):
+        """运行 MIR 层优化 Pass（不动点迭代），优化完成后运行验证 Pass。
+
+        参数:
+            mir_module: MIRModule 实例
+            max_iterations: 最大迭代次数
+
+        返回:
+            bool: 是否有任何 Pass 产生了变化
+        """
         total_changed = False
         for iteration in range(max_iterations):
             changed = False
@@ -1460,6 +1487,15 @@ class PassManager:
         return total_changed
 
     def run_lir_passes(self, lir_module, max_iterations=DEFAULT_MAX_PASS_ITERATIONS):
+        """运行 LIR 层优化 Pass（不动点迭代直到无变化）。
+
+        参数:
+            lir_module: LIRModule 实例
+            max_iterations: 最大迭代次数
+
+        返回:
+            bool: 是否有任何 Pass 产生了变化
+        """
         total_changed = False
         for iteration in range(max_iterations):
             changed = False

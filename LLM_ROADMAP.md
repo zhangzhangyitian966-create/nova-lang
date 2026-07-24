@@ -1,6 +1,6 @@
 # Nova LLM 智能开发路线图
 
-**更新时间**: 2026-07-25 16:05:00
+**更新时间**: 2026-07-25 20:01:00
 **上次评审**: 第 48 轮（路线图评审）
 
 本路线图由 LLM 智能开发系统动态维护。
@@ -111,9 +111,12 @@
 | ✅ | 重构 TypeChecker._check_pattern 调度表化 | medium | 70 | 2-3 小时 | - |
 | ✅ | 重构 WasmGCBackend._compile_function 分层拆分 | medium | 68 | 3-5 小时 | - |
 | ✅ | 重构 MIRLowering._lower_if_expr 拆分 | medium | 55 | 2-3 小时 | - |
-| ⏳ | 建立代码质量门禁（docstring + 命名规范） | medium | 75 | 3-5 小时 | low_quality_issues_cleanup |
+| ⏳ | 建立代码质量门禁（docstring + 命名规范） | medium | 76 | 3-5 小时 | - |
+| ✅ | 审查数据同步机制（REFACTORED_FUNCTIONS 标注） | easy | 50 | 1-2 小时 | - |
+| ✅ | LOW 级问题批量治理 v2（ir/ 模块 docstring） | easy | 48 | 2-4 小时 | - |
 | ⏳ | 精准清理 print_debug（真实调试残留） | easy | 55 | 1-2 小时 | - |
-| ⏳ | 审查数据同步机制 | easy | 50 | 1-2 小时 | - |
+
+---
 
 ## 🧪 测试完善
 
@@ -134,4 +137,4 @@
 - **待开发**: 5
 - **已废弃**: 1
 
-> 注：第48轮路线图评审。新一代Top10复杂度调度表化基本完成（里程碑）。质量门禁连续4次推迟被强制关注，优先级提升至75。新增1个任务（sync_review_data审查数据同步）。print_debug任务调整为精准清理（范围缩小，优先级55）。下阶段方向：质量门禁落地 + 功能完整性推进 + LOW级遏制。
+> 注：第49轮开发完成。审查数据同步机制（sync_review_data）已实现——在 auto_review.py 中新增 REFACTORED_FUNCTIONS 字典和 _lookup_refactored() 函数，审查报告现在能自动标注已重构函数。LOW 级问题批量治理 v2 完成 ir/ 模块 16 处 docstring 补充。质量门禁已连续推迟 5 轮，优先级提升至 76。下阶段方向：质量门禁强制落地 + 闭包功能完整性推进。

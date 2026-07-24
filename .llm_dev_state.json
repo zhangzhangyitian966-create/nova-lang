@@ -1,5 +1,5 @@
 {
-  "cycles": 48,
+  "cycles": 49,
   "completed_tasks": [
     "refactor_wasm_compile_function",
     "refactor_mir_lower_if_expr",
@@ -103,10 +103,28 @@
     "refactor_ccodegen_compile_expr",
     "clean_unused_imports_v3",
     "review_cycle_45",
-    "review_cycle_48"
+    "review_cycle_48",
+    "sync_review_data",
+    "low_quality_issues_cleanup_v2"
   ],
   "failed_tasks": [],
   "task_history": [
+    {
+      "cycle": 49,
+      "task_id": "sync_review_data",
+      "status": "completed",
+      "source": "自主发现",
+      "reason": "审查数据严重滞后（第48轮评审核心发现），第1501轮报告仍显示已重构函数的旧复杂度。在 auto_review.py 中建立 REFACTORED_FUNCTIONS 标注字典和 _lookup_refactored() 查找函数，让审查报告自动标注已重构函数。",
+      "details": "在 auto_review.py 中新增：1) REFACTORED_FUNCTIONS 字典，记录 24 个已被 LLM 重构的函数（文件名::全限定名 → {old_cc, cycle, note}）；2) _lookup_refactored() 查找函数，支持精确匹配和模糊匹配；3) phase6_complexity() 中对 Top10 函数自动检查并标注已重构状态（显示旧CC、重构轮次、说明）。审查报告现在能准确反映哪些函数已重构，避免误导任务优先级判断。"
+    },
+    {
+      "cycle": 49,
+      "task_id": "low_quality_issues_cleanup_v2",
+      "status": "completed",
+      "source": "审查驱动",
+      "reason": "LOW 级问题中 58% 是 no_docstring。为 ir/ 模块的核心公共 API 补充 docstring，解决审查发现的 LOW 级问题积累问题。",
+      "details": "为 ir/ 模块补充 docstring：1) lir_lowering.py: LIRLoweringError 异常类、LIRLowering.lower() 入口方法（2处）；2) mir_lowering.py: MIRLoweringError 异常类、MIRLowering.lower() 入口方法（2处）；3) pass_manager.py: _UsedNamesCollector 的 5 个 visitor 方法、compute_depth 嵌套函数、PassManager 的 3 个 add_xxx_pass() 方法和 3 个 run_xxx_passes() 方法（12处）。共修复 16 处 docstring 缺失。测试 395/395 通过，零回归。"
+    },
     {
       "cycle": 48,
       "task_id": "review_cycle_48",
@@ -130,25 +148,9 @@
       "source": "审查驱动",
       "reason": "MIRLowering._lower_if_expr 圈复杂度 22，106 行。true/false 分支有近 30 行镜像重复代码，提取通用方法后 CC 降至约 8-10。",
       "details": "将 _lower_if_expr 从 106 行重构为分层结构：1) 新增 _lower_branch_body() 通用分支处理方法，消除 true/false 分支的 30 行镜像重复代码，返回 (result, modified_vars) 元组；2) 新增 _insert_merge_phis() 处理 merge 块 Phi 节点插入（约 35 行独立逻辑）；3) 新增 _insert_result_phi() 处理 if 表达式结果 Phi（约 15 行独立逻辑）；4) _lower_if_expr 主函数从 106 行压缩至约 25 行（CC≈8）。测试 395/395 通过，零回归。"
-    },
-    {
-      "cycle": 46,
-      "task_id": "refactor_type_checker_check_pattern",
-      "status": "completed",
-      "source": "审查驱动",
-      "reason": "TypeChecker._check_pattern 圈复杂度 24（审查日志 Top4），模式匹配的类型检查函数。按 AST 模式节点类型建立调度表分发，将 CC 降至约 3-5。",
-      "details": "将 _check_pattern 从 8 分支 if-elif 链重构为调度表模式：1) 新增 _build_pattern_checkers() 构建 9 种 Pattern 节点类型的 handler 映射表；2) 新增 9 个独立 _check_pattern_xxx 方法（通配符/整数/浮点/布尔/字符串/字符/标识符/构造器/元组/列表）；3) _check_pattern 主函数从 60+ 行压缩至约 10 行（CC≈3）。与 _unify 调度表化同属 type_checker.py，风格统一。"
-    },
-    {
-      "cycle": 46,
-      "task_id": "licm_correctness_tests",
-      "status": "completed",
-      "source": "自主规划",
-      "reason": "LICM 是已实现的最高级优化 Pass，但缺乏专项测试。原计划清理 unused_import，但工具检测困难，转向高价值测试任务。",
-      "details": "为 LoopInvariantCodeMotion Pass 编写 3 个专项测试用例：1) test_licm_hoists_pure_invariant - 验证纯的循环不变量（10+20）被外提到 pre-header；2) test_licm_preserves_structure - 验证 LICM 后 MIR 结构保持完整（基本块、终结指令存在）；3) test_licm_runs_on_mutable_loop - 验证含 mutable 变量的循环上 LICM 正常运行不报错。测试全部通过。"
     }
   ],
-  "current_cycle": 48,
+  "current_cycle": 49,
   "baseline_tests": 395,
   "current_tests": 395,
   "last_review_cycle": 48,
@@ -172,14 +174,12 @@
       "name": "建立代码质量门禁（docstring + 命名规范）",
       "description": "在 auto_review.py 中增加增量质量检查：新增代码必须有 docstring（公共 API）、不得引入新的魔法数字、命名规范检查。设定 LOW 问题增长率上限，防止技术债持续累积。四次评审推迟，强制提升优先级。",
       "difficulty": "medium",
-      "priority": 75,
+      "priority": 76,
       "category": "engineering",
       "estimated": "3-5 小时",
       "status": "pending",
-      "depends_on": [
-        "low_quality_issues_cleanup"
-      ],
-      "reason": "LOW 级问题持续增长（836→1029，+23%），缺乏质量红线导致持续累积。连续 4 个评审周期（39/42/45/48）规划但未落地，已形成系统性推迟模式。提升优先级至 75 强制推进，打破推迟循环。[优先级调整: 72→75，四次推迟强制提升]"
+      "depends_on": [],
+      "reason": "LOW 级问题持续增长（836→1029，+23%），缺乏质量红线导致持续累积。连续 5 个评审周期（39/42/45/48+49）规划但未落地，已形成系统性推迟模式。low_quality_issues_cleanup v2 已完成部分 docstring，门禁不再依赖它。优先级再提升至 76。[优先级调整: 75→76，五次推迟，依赖解除]"
     },
     {
       "id": "unify_c_backend",
@@ -200,18 +200,6 @@
       "reason": "目前有两套 C 代码生成路径（AST 路径功能完整，LIR 路径仅阶段一），功能重叠增加维护成本。SSA 基础打好后，统一到 LIR→C 路径可以让所有后端共享 IR 优化成果。[优先级维持 70，闭包支持作为独立任务优先级更高]"
     },
     {
-      "id": "sync_review_data",
-      "name": "审查数据同步机制",
-      "description": "在 auto_review.py 或 LLM 开发流程中增加「已重构函数标注」机制，避免审查日志长期显示过时数据。例如：维护一个手动更新的已重构函数列表，审查报告生成时自动标注「实际已重构」。",
-      "difficulty": "easy",
-      "priority": 50,
-      "category": "engineering",
-      "estimated": "1-2 小时",
-      "status": "pending",
-      "depends_on": [],
-      "reason": "审查数据严重滞后：第1501轮报告仍显示已重构函数的旧复杂度（_unify=26、_check_pattern=24、_compile_function=26 等），实际已分别降至约 5、3、5。滞后数据导致审查日志可信度下降，影响任务优先级判断。[新增任务 / 自主发现]"
-    },
-    {
       "id": "clean_print_debug",
       "name": "精准清理 print_debug（真实调试残留）",
       "description": "经第47轮深度分析，104 个 print_debug 中绝大多数是正常功能输出（evaluator/vm 的 print 内置函数实现、cli/compiler_cli 的用户交互输出、scripts 的日志）。本任务聚焦真正可清理的调试残留：evaluator.py 第221行裸 print(val)、pass_manager.py 验证输出等。",
@@ -221,7 +209,7 @@
       "estimated": "1-2 小时",
       "status": "pending",
       "depends_on": [],
-      "reason": "原任务「批量清理104个print_debug」经深度分析后被判定为低价值（大部分print是正常功能）。但代码审计发现 evaluator.py 和 pass_manager.py 等位置确有真实调试残留。调整为精准清理，只处理真正的调试输出。[优先级调整: 60→55，任务范围缩小]"
+      "reason": "原任务「批量清理104个print_debug」经深度分析后被判定为低价值（大部分print是正常功能）。但代码审计发现 evaluator.py 和 pass_manager.py 等位置确有真实调试残留。调整为精准清理，只处理真正的调试输出。[优先级维持 55]"
     },
     {
       "id": "benchmark_enhance_exec_time",
@@ -254,14 +242,14 @@
     {
       "id": "low_quality_issues_cleanup",
       "name": "LOW 级问题批量治理（docstring + 魔法数字）",
-      "description": "批量清理 LOW 级问题：为 ir/ 和 backend/ 模块的公共 API 添加 docstring，将高频魔法数字（如 8 字节大小、默认迭代次数等）提取为命名常量，清理调试打印语句。v1 已完成核心模块的主要部分。",
+      "description": "批量清理 LOW 级问题：为 ir/ 和 backend/ 模块的公共 API 添加 docstring，将高频魔法数字（如 8 字节大小、默认迭代次数等）提取为命名常量，清理调试打印语句。v1 已完成核心模块的主要部分。v2 已完成 ir/ 模块 docstring 补充。",
       "difficulty": "easy",
-      "priority": 48,
+      "priority": 46,
       "category": "engineering",
       "estimated": "2-4 小时",
       "status": "pending",
       "depends_on": [],
-      "reason": "v1 已完成核心模块的 docstring 和魔法数字，剩余部分价值递减。建议与质量门禁配合执行——先建门禁再清理存量。[优先级维持 48][审查发现]"
+      "reason": "v1 已完成核心模块的 docstring 和魔法数字，v2 已完成 ir/ 模块 16 处 docstring。剩余 backend/ 模块部分价值递减。[优先级调整: 48→46，v2 已消耗大部分价值][审查发现]"
     },
     {
       "id": "c_backend_closure_support",

@@ -67,6 +67,7 @@ from .cfg_utils import replace_instr_operands, replace_terminator_operands
 
 
 class MIRLoweringError(Exception):
+    """HIR -> MIR 降级过程中的错误"""
     pass
 
 
@@ -132,6 +133,17 @@ class MIRLowering:
         }
 
     def lower(self, hir_module):
+        """将 HIR 模块降级为 MIR 模块。
+
+        遍历 HIR 模块中的声明，将顶层 let 绑定转为 MIR 全局变量，
+        将函数定义降级为 MIR 函数（基本块 + SSA 指令）。
+
+        参数:
+            hir_module: HIRModule 实例
+
+        返回:
+            MIRModule 实例
+        """
         mir_module = MIRModule(name=hir_module.name)
         mir_module.type_defs = hir_module.type_defs
         self.type_defs = hir_module.type_defs
