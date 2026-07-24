@@ -172,7 +172,11 @@ class WasmGCBackend:
                 '"nova_json_stringify"',
                 "(func $nova_json_stringify (param i32) (result i32))",
             ),
-            ('"nova_panic"', "(func $nova_panic (param i32))"),
+            ('"nova_panic"', '(func $nova_panic (param i32))'),
+            ('"nova_map_new"', '(func $nova_map_new (param i32) (result i32))'),
+            ('"nova_map_put"', '(func $nova_map_put (param i32) (param i32) (param i64))'),
+            ('"nova_adt_new"', '(func $nova_adt_new (param i32) (param i32) (param i32) (result i32))'),
+            ('"nova_adt_set_field"', '(func $nova_adt_set_field (param i32) (param i32) (param i64))'),
         ]
 
         for name, sig in runtime_imports:
@@ -293,9 +297,14 @@ class WasmGCBackend:
 
         return label_to_pc
 
-    def _emit_dispatch_prologue(self, pc_counter: int):
-        """声明 PC 局部变量并生成控制流分派框架"""
+    def _emit_dispatch_prologue(self, pc_counter: int, func: LIRFunction = None):
+        """声明 PC 局部变量并生成控制流分派框架
+
+        同时声明数据结构构建所需的临时局部变量。
+        """
         self._emit("(local $pc i32)")
+        # 数据结构构建临时变量：用于存储 nova_list_new/nova_alloc/nova_adt_new 等的返回指针
+        self._emit("(local $tmp_ptr i32)")
         self._emit("(i32.const 0)")
         self._emit("(local.set $pc)")
         self._emit("")
@@ -571,25 +580,87 @@ class WasmGCBackend:
         self._emit("(return)")
 
     def _compile_build_list(self, instr: LIRBuildList):
-        """编译列表构建"""
+        """编译列表构建：nova_list_new(count) + 逐元素 nova_list_push。
+
+        使用预声明的 $tmp_ptr 临时局部变量存储列表指针，
+        每次填充时通过 local.get 重新获取指针。参照原生后端实现。
+        """
+        # 1. 调用 nova_list_new(count) 获取列表指针
         self._emit(f"(i32.const {instr.count})")
         self._emit("(call $nova_list_new)")
+        self._emit("(local.set $tmp_ptr)")
+
+        # 2. 逐元素 nova_list_push(list_ptr, elem_value)
+        for elem_loc, elem_type in instr.src_locs:
+            self._emit("(local.get $tmp_ptr)")  # list_ptr (i32)
+            self._emit(f"(local.get ${elem_loc})")  # elem_value (i64)
+            self._emit("(call $nova_list_push)")
 
     def _compile_build_map(self, instr: LIRBuildMap):
-        """编译映射构建"""
+        """编译映射构建：nova_map_new(entry_count) + 逐对 nova_map_put。
+
+        nova_map_put(map_ptr, key_ptr, value) 三个参数。
+        key 在 Nova 中是 String 类型（i32 指针），value 是 i64。
+        """
+        # 1. 调用 nova_map_new(entry_count) 获取映射指针
         self._emit(f"(i32.const {instr.entry_count})")
         self._emit("(call $nova_map_new)")
+        self._emit("(local.set $tmp_ptr)")
+
+        # 2. 逐对 nova_map_put(map_ptr, key_ptr, value)
+        #    src_locs 格式：[key0, val0, key1, val1, ...]
+        for i in range(instr.entry_count):
+            key_idx = i * 2
+            val_idx = i * 2 + 1
+            if key_idx < len(instr.src_locs) and val_idx < len(instr.src_locs):
+                key_loc = instr.src_locs[key_idx][0]
+                val_loc = instr.src_locs[val_idx][0]
+                self._emit("(local.get $tmp_ptr)")  # map_ptr (i32)
+                self._emit(f"(local.get ${key_loc})")  # key_ptr (i32)
+                self._emit(f"(local.get ${val_loc})")  # value (i64)
+                self._emit("(call $nova_map_put)")
 
     def _compile_build_tuple(self, instr: LIRBuildTuple):
-        """编译元组构建"""
-        self._emit(f"(i32.const {instr.count * 8})")
+        """编译元组构建：nova_alloc(size) + 逐字段 i64.store。
+
+        元组是连续内存布局，每个字段 8 字节（NovaValue 大小）。
+        使用 nova_alloc 分配后，通过 Wasm i64.store 指令逐字段写入。
+        """
+        NOVA_VALUE_SIZE = 8
+        size = instr.count * NOVA_VALUE_SIZE
+
+        # 1. 调用 nova_alloc(size) 获取元组指针
+        self._emit(f"(i32.const {size})")
         self._emit("(call $nova_alloc)")
+        self._emit("(local.set $tmp_ptr)")
+
+        # 2. 逐字段 i64.store
+        for i, (elem_loc, elem_type) in enumerate(instr.src_locs):
+            byte_offset = i * NOVA_VALUE_SIZE
+            self._emit("(local.get $tmp_ptr)")
+            self._emit(f"(local.get ${elem_loc})")
+            self._emit(f"(i64.store offset={byte_offset} align=8)")
 
     def _compile_build_adt(self, instr: LIRBuildADT):
-        """编译 ADT 构建"""
-        self._emit(f"(i32.const {instr.type_tag})")
-        self._emit(f"(i32.const {instr.field_count * 8 + 8})")
-        self._emit("(call $nova_alloc)")
+        """编译 ADT 构建：nova_adt_new(type_id, variant_tag, field_count) + 逐字段 nova_adt_set_field。
+
+        修复原实现：原来调用 nova_alloc（仅 1 参数）但传了 2 个参数（type_tag 和 size），
+        且不设置 variant_tag 也不填充字段。改为使用正确的 nova_adt_new + nova_adt_set_field。
+        """
+        # 1. 调用 nova_adt_new(type_id, variant_tag, field_count)
+        #    返回 ADT 指针
+        self._emit(f"(i32.const {instr.type_tag})")  # type_id
+        self._emit(f"(i32.const {instr.type_tag})")  # variant_tag（与 type_tag 相同）
+        self._emit(f"(i32.const {instr.field_count})")  # field_count
+        self._emit("(call $nova_adt_new)")
+        self._emit("(local.set $tmp_ptr)")
+
+        # 2. 逐字段 nova_adt_set_field(adt_ptr, idx, value)
+        for i, (field_loc, field_type) in enumerate(instr.src_locs):
+            self._emit("(local.get $tmp_ptr)")  # adt_ptr (i32)
+            self._emit(f"(i32.const {i})")  # field index
+            self._emit(f"(local.get ${field_loc})")  # field value (i64)
+            self._emit("(call $nova_adt_set_field)")
 
     def _compile_closure_create(self, instr: LIRClosureCreate):
         """编译闭包创建

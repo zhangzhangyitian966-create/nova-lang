@@ -1545,49 +1545,6 @@ class TypeChecker:
         """合一后解析类型：应用替换表，获得最终的完全展开类型。"""
         return self._apply_subst(ty)
 
-    def _types_compatible(self, a: NovaType, b: NovaType) -> bool:
-        """检查两个类型是否兼容（遗留方法，仅在非关键路径使用）。
-
-        注意：此方法对 TypeVar 直接放行（鸭子类型），不产生类型约束。
-        新代码应优先使用 _unify_types 进行合一驱动的类型检查。
-        """
-        if isinstance(a, TypeVar) or isinstance(b, TypeVar):
-            return True
-        if a == b:
-            return True
-        # 递归检查 FnType 参数兼容性
-        if isinstance(a, FnType) and isinstance(b, FnType):
-            if len(a.param_types) != len(b.param_types):
-                return False
-            return all(
-                self._types_compatible(pa, pb)
-                for pa, pb in zip(a.param_types, b.param_types)
-            ) and self._types_compatible(a.return_type, b.return_type)
-        # 递归检查 ListType
-        if isinstance(a, ListType) and isinstance(b, ListType):
-            return self._types_compatible(a.elem_type, b.elem_type)
-        # 递归检查 MapType
-        if isinstance(a, MapType) and isinstance(b, MapType):
-            return self._types_compatible(a.key_type, b.key_type) and self._types_compatible(a.value_type, b.value_type)
-        # 递归检查 TupleType
-        if isinstance(a, TupleType) and isinstance(b, TupleType):
-            if len(a.elements) != len(b.elements):
-                return False
-            return all(
-                self._types_compatible(e1, e2)
-                for e1, e2 in zip(a.elements, b.elements)
-            )
-        # 递归检查 ADTType
-        if isinstance(a, ADTType) and isinstance(b, ADTType):
-            if a.name != b.name or len(a.type_params) != len(b.type_params):
-                return False
-            return all(
-                self._types_compatible(p1, p2)
-                for p1, p2 in zip(a.type_params, b.type_params)
-            )
-        return False
-
-
 # ============================================================
 # 类型合一调度表
 # ============================================================
