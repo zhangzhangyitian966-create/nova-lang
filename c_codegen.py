@@ -167,7 +167,7 @@ C_KEYWORDS: Set[str] = {
     "nova_map_new",
     "nova_map_free",
     "nova_map_get",
-    "nova_map_set",
+    "nova_map_put",
     "nova_closure_new",
     "nova_closure_call",
     "nova_adt_new",
@@ -1050,7 +1050,7 @@ class CCodeGen:
             key_c = self._compile_expr(key_expr)
             val_c = self._compile_expr(val_expr)
             lines.append(
-                f"    nova_map_set({tmp}, (void*)(intptr_t){key_c}, (void*)(intptr_t){val_c});"
+                f"    nova_map_put({tmp}, (void*)(intptr_t){key_c}, (void*)(intptr_t){val_c});"
             )
         lines.append(f"    {tmp}")
         lines.append(f"}}")

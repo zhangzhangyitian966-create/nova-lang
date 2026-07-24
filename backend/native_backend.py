@@ -952,7 +952,7 @@ class NativeCodeGen:
                 e.mov_reg_mem(RAX, 0, RCX)
 
     def _emit_build_map(self, instr, ctx: "_EmitContext"):
-        """编译 Map 构建：调用 nova_map_new(entry_count)，然后逐对 nova_map_set。"""
+        """编译 Map 构建：调用 nova_map_new(entry_count)，然后逐对 nova_map_put。"""
         e = ctx.e
         dst_info = instr.dst_loc if instr.dst_loc else None
 
@@ -969,7 +969,7 @@ class NativeCodeGen:
             dst_name, _ = dst_info
             ctx.store_from_reg(dst_name, RAX)
 
-        # 循环 nova_map_set(map, key, value)
+        # 循环 nova_map_put(map, key, value)
         for i in range(instr.entry_count):
             key_idx = i * 2
             val_idx = i * 2 + 1
@@ -991,7 +991,7 @@ class NativeCodeGen:
                 val_loc, val_type = instr.src_locs[val_idx]
                 ctx.load_to_reg(val_loc, RDX)
                 call_offset = e.call_rel32()
-                self.external_calls.append((ctx.func_name, call_offset, "nova_map_set"))
+                self.external_calls.append((ctx.func_name, call_offset, "nova_map_put"))
                 e.pop_reg(RDX)
                 e.pop_reg(RSI)
                 e.pop_reg(RDI)

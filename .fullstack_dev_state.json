@@ -1,9 +1,9 @@
 {
-  "cycles": 17,
+  "cycles": 18,
   "frontend_completed": 12,
-  "backend_completed": 13,
-  "last_review_cycle": 15,
-  "current_review_cycle": 18,
+  "backend_completed": 14,
+  "last_review_cycle": 18,
+  "current_review_cycle": 21,
   "completed_tasks": [
     "frontend_try_expr_typecheck",
     "backend_native_label_patch",
@@ -28,13 +28,37 @@
     "frontend_pattern_exhaustiveness",
     "backend_native_call_abi",
     "frontend_match_guard_typecheck",
-    "backend_native_compound_instr"
+    "backend_native_compound_instr",
+    "backend_fix_map_set_put",
+    "review_cycle_18"
   ],
   "failed_tasks": [],
   "deprecated_tasks": [
     "frontend_type_var_strict"
   ],
   "task_history": [
+    {
+      "cycle": 18,
+      "task_id": "review_cycle_18",
+      "name": "第 18 轮 - 双线路线图评审",
+      "track": "review",
+      "difficulty": "review",
+      "priority": 0,
+      "result": "success",
+      "details": "第六次三轮回顾评审（第 16-18 轮）。深度代码审计重大发现：(F-1) P0 Bug nova_map_set/nova_map_put 命名不一致——原生后端和 LIR C 后端调用 nova_map_set，但运行时库只有 nova_map_put，链接必失败；(F-2) P0 缺失——原生后端无链接器，external_calls 保持 0 偏移，生成的 ELF 无法调用运行时函数；(F-3) P1 风险——复合数据结构指令不使用 _emit_runtime_call，手动管理栈对齐/caller-saved 有正确性风险；(F-4) 代码卫生——_types_compatible 已无外部调用点，可安全删除；(F-5) P1 缺失——Wasm BuildList/BuildTuple/BuildADT 不填充元素/字段；(F-6) P2 弱点——for 循环/列表推导迭代器变量类型不与 iterable 合一。前端评估：类型合一全面部署（46 处 _unify_types），模式匹配完备性基础版就绪（ADT+Bool+通配符+冗余检测），遗留 _types_compatible 可安全删除。后端评估：原生后端 75% 完成度（指令调度 18/20 完整、ABI 调用约定已实现），但链接器缺失是最大阻断；LIR C 后端 85% 最成熟；Wasm 后端 60% 名不副实。任务池变更：新增 5 个任务（map 命名修复 P0、运行时调用重构 P1、Wasm 数据构建完善 P1、for 循环类型推断 P2、遗留代码清理），废弃 0 个，调整 6 个优先级。下阶段重点：后端 P0 bug 修复 + 原生后端运行时调用规范化 + 前端类型精度提升。",
+      "timestamp": "2026-07-24 10:10"
+    },
+    {
+      "cycle": 18,
+      "task_id": "backend_fix_map_set_put",
+      "name": "修复 nova_map_set/nova_map_put 命名不一致（P0 Bug）",
+      "track": "backend",
+      "difficulty": "easy",
+      "priority": 98,
+      "result": "success",
+      "details": "修复跨后端+运行时的函数命名不一致 bug：原生后端 native_backend.py（_emit_build_map 调用 nova_map_set）和 LIR C 后端 lir_c_backend.py（_emit_build_map 调用 nova_map_set）与运行时库 nova_runtime.h/nova_runtime.c（只定义了 nova_map_put）不匹配，导致链接时找不到 nova_map_set 符号。修复：将两个后端中的 nova_map_set 统一改为 nova_map_put，与运行时库保持一致。修复仅涉及 2 个文件各 1 处函数名替换，测试全部通过。",
+      "timestamp": "2026-07-24 10:08"
+    },
     {
       "cycle": 17,
       "task_id": "frontend_match_guard_typecheck",
@@ -43,7 +67,7 @@
       "difficulty": "medium",
       "priority": 72,
       "result": "success",
-      "details": "完善模式匹配 guard 条件支持（前后端联动修改）：(1) parser.py _parse_match_arm 新增 guard 语法解析——pattern 后可跟 'if guard_expr -> body'，用 _peek_type(IF) 判断是否有 guard；(2) type_checker.py check_match_arm 新增 guard 类型检查——在模式绑定后检查 guard 表达式必须为 Bool 类型，非 Bool 报 TypeCheckError；(3) type_checker.py _check_match_exhaustiveness 完善——含 guard 的通配符/变量绑定不再视为完备覆盖（因为 guard 可能拒绝某些值），新增 has_guarded_wildcard_or_var 状态追踪。改动范围小且隔离（3 个方法），392 测试全部通过，无回归。",
+      "details": "完善模式匹配 guard 条件支持：parser.py _parse_match_arm 新增 guard 语法解析；type_checker.py check_match_arm 新增 guard 类型检查（必须为 Bool）；_check_match_exhaustiveness 完善——含 guard 的通配符不视为完备覆盖。392 测试全部通过。",
       "timestamp": "2026-07-24 07:10"
     },
     {
@@ -54,7 +78,7 @@
       "difficulty": "hard",
       "priority": 90,
       "result": "success",
-      "details": "为原生后端调度表新增 13 种 LIR 指令的代码生成，从 9 种扩展到 22 种：(1) LIRLoadReg/LIRStoreReg——寄存器间 mov 传送（支持 reg→reg/reg→stack/stack→reg/stack→stack 四种组合，含浮点），是 Phi 降级正确工作的基础；(2) LIRBuildList——调用 nova_list_new + nova_list_push 逐元素填充；(3) LIRListAppend——调用 nova_list_push；(4) LIRBuildTuple——调用 nova_alloc + 逐字段内存填充；(5) LIRBuildMap——调用 nova_map_new + nova_map_set 逐对插入；(6) LIRBuildADT——调用 nova_adt_new + nova_adt_set_field 逐字段填充；(7) LIRFieldAccess——base+offset 地址计算 + 内存加载（纯指令，无需运行时调用）；(8) LIRIndex——调用 nova_list_get；(9) LIRClosureCreate/LIRCallIndirect——占位实现（待运行时完善）；(10) LIRSwitch——逐一比较 + 条件跳转级联。新增 external_calls 列表记录外部运行时函数调用。原生后端从'只能跑纯数值'到'可编译复合数据结构'的关键突破。392 测试全部通过，无回归。",
+      "details": "调度表从 9 种扩展到 22 种 LIR 指令。新增 LIRLoadReg/StoreReg/BuildList/ListAppend/BuildTuple/BuildMap/BuildADT/FieldAccess/Index/Switch 等 13 种指令。LIRClosureCreate/LIRCallIndirect 为占位。392 测试全部通过。",
       "timestamp": "2026-07-24 07:10"
     },
     {
@@ -65,7 +89,7 @@
       "difficulty": "hard",
       "priority": 86,
       "result": "success",
-      "details": "在 type_checker.py 中实现模式匹配完备性检查基础版：(1) 新增 _check_match_exhaustiveness 方法，在 _check_match_expr 末尾调用；(2) ADT 类型覆盖检查——收集所有 PatternConstructor 名称，与 TypeEnv.adt_variants 中该 ADT 的全部构造器对比，缺失时报错并列出缺失构造器；(3) Bool 类型覆盖检查——确保 true 和 false 都被覆盖（或通配符）；(4) 通配符 (_) 和变量绑定 (PatternIdentifier) 视为覆盖所有剩余情况；(5) 冗余分支检测——通配符/变量绑定之后的分支报告冗余。范围聚焦构造器级别，暂未实现嵌套模式深度分析和 Guard 不可达检测。392 测试全部通过，无回归。",
+      "details": "新增 _check_match_exhaustiveness 方法。ADT 类型覆盖检查、Bool 类型覆盖检查、通配符/变量绑定覆盖、冗余分支检测。392 测试全部通过。",
       "timestamp": "2026-07-24 04:20"
     },
     {
@@ -76,290 +100,135 @@
       "difficulty": "hard",
       "priority": 99,
       "result": "success",
-      "details": "全面重写 _emit_call，实现 System V AMD64 ABI 调用约定的核心功能：(1) 整数参数传递——前6个按顺序加载到 RDI/RSI/RDX/RCX/R8/R9，多余参数从右到左压栈；(2) 浮点参数传递——前8个按顺序加载到 XMM0-XMM7，多余参数压栈；(3) 浮点返回值捕获——从 XMM0 捕获（之前只有 RAX 整数返回值）；(4) caller-saved GPR 保守保存/恢复——call 前 push RCX/RDX/RSI/RDI/R8/R9/R10/R11（64字节），call 后 pop 恢复；(5) 栈对齐——根据 retval_slot 和栈参数数量动态计算是否需要额外 8 字节对齐垫片，确保 call 前 RSP ≡ 0 (mod 16)；(6) 返回值安全处理——当返回值目标在 caller-saved 寄存器中时，先将返回值保存到栈槽，恢复 caller-saved 后再加载到目标。参数传递从 0% 到核心功能完备，是原生后端可用性的最大突破。392 测试全部通过，无回归。",
+      "details": "全面重写 _emit_call：整数参数 RDI/RSI/RDX/RCX/R8/R9，浮点参数 XMM0-XMM7，栈对齐，caller-saved 保存/恢复，浮点返回值 XMM0。392 测试全部通过。",
       "timestamp": "2026-07-24 04:20"
-    },
-    {
-      "cycle": 15,
-      "task_id": "review_cycle_15",
-      "name": "第 15 轮 - 双线路线图评审",
-      "track": "review",
-      "difficulty": "review",
-      "priority": 0,
-      "result": "success",
-      "details": "第五次三轮回顾评审（第 13-15 轮）。深度代码审计关键发现：前端——_types_compatible 已全面替换为 _unify_types（51 处关键路径），TypeVar 不再放行，合一基础设施完备；但模式匹配完备性检查仍完全缺失，是前端最大短板。后端——原生后端参数传递完全缺失（blocking bug）、caller-saved 寄存器在 call 后无保存/恢复（会导致活跃值被静默破坏）；WasmGC 仍名不副实（所有复合类型映射为 i32 指针）；Phi 降级正确，LIR→MIR 链路完整。调整任务池优先级：frontend_pattern_exhaustiveness 提升至 86，backend 各任务按紧急度微调。下阶段重点：后端攻坚 System V ABI 调用约定 + 前端实现模式匹配完备性检查。",
-      "timestamp": "2026-07-24 16:00"
-    },
-    {
-      "cycle": 14,
-      "task_id": "frontend_type_unify_deepen",
-      "name": "深化类型合一：全面替换 _types_compatible",
-      "track": "frontend",
-      "difficulty": "hard",
-      "priority": 94,
-      "result": "success",
-      "details": "将 type_checker.py 中所有关键路径的 _types_compatible 调用替换为合一驱动的类型检查：(1) 新增 _unify_types 辅助方法——先 _apply_subst 展开类型变量再 _unify，成功时产生类型约束；(2) 新增 _unify_and_resolve 辅助方法——合一后应用替换表获得最终类型；(3) 替换了 30+ 处关键路径：let/mut 绑定类型标注、函数返回类型、列表元素一致性、Map 键值一致性、if 条件和分支类型、match 分支类型、while 条件、赋值兼容、管道表达式、模式匹配（PatternInt/Bool/String）、全部二元运算（算术/取余/字符串拼接/比较/逻辑）、一元运算、列表推导过滤条件；(4) env.define 时用 _unify_and_resolve 确保绑定的类型完全展开；(5) 返回类型时用 _unify_and_resolve 确保返回值不含未解析的 TypeVar。类型系统从'鸭子兼容'升级为'合一推断'，TypeVar 不再被直接放行。392 测试全部通过，无回归。",
-      "timestamp": "2026-07-24 15:30"
-    },
-    {
-      "cycle": 14,
-      "task_id": "backend_native_stack_frame",
-      "name": "实现原生后端完整栈帧管理",
-      "track": "backend",
-      "difficulty": "hard",
-      "priority": 96,
-      "result": "success",
-      "details": "修复原生后端栈帧管理的 16 字节对齐 bug 并规范化栈帧布局：(1) 修正 prologue/epilogue 对齐计算——原来只做 (stack_size + 15) & ~15，未考虑 6 个 callee-saved 压栈后的 8 (mod 16) 偏移；修复为 (stack_size + 8 + 15) & ~15，正确补偿 push 后的 48 字节偏移使 RSP ≡ 0 (mod 16)；(2) 添加完整的栈帧布局文档注释（ASCII 图），明确各区域的作用和对齐要求；(3) 记录 _native_frame_pad 属性供后续调用约定使用；(4) 规范化 _generate_start 入口的栈对齐说明；(5) 改进 _emit_call 注释，明确 caller-saved 寄存器破坏语义和后续参数传递计划。修复仅涉及 _compile_function 的对齐计算逻辑，不改变指令发射路径。392 测试全部通过，无回归。",
-      "timestamp": "2026-07-24 15:30"
-    },
-    {
-      "cycle": 13,
-      "task_id": "frontend_parser_error_recovery",
-      "name": "增强解析器错误恢复能力",
-      "track": "frontend",
-      "difficulty": "medium",
-      "priority": 60,
-      "result": "success",
-      "details": "为 parser.py 实现完整的 panic mode 错误恢复：(1) Parser 新增 _errors 列表收集所有 ParseError；(2) 新增 _synchronize_to_declaration_boundary 方法——顶层声明失败后跳到下一个声明起始关键字（let/mut/fn/type/alias/import/export/for/while/ident）；(3) 新增 _synchronize_to_statement_boundary 方法——块内语句失败后跳到语句边界（关键字/RBRACE/SEMICOLON/IDENT）；(4) parse() 方法改为 try/except 包裹 _parse_top_level，收集错误后同步继续，最终抛出第一个错误保持向后兼容；(5) _parse_block 添加语句级 try/except，单条语句失败不影响后续语句解析。实测验证：含多个错误的代码可以正确报告所有错误（如 4 行代码中 2 个错误均被捕获并报告）。392 测试全部通过，无回归。",
-      "timestamp": "2026-07-24 03:05"
-    },
-    {
-      "cycle": 13,
-      "task_id": "backend_wasm_return_fix",
-      "name": "修复 Wasm 后端 LIRReturn 返回值处理 bug",
-      "track": "backend",
-      "difficulty": "medium",
-      "priority": 88,
-      "result": "success",
-      "details": "修复 wasm_backend.py 中两处 LIRReturn 返回值缺失问题：(1) dispatch loop 路径（_compile_function 中 elif LIRReturn 分支）——在 br $exit 前添加 local.get 压入返回值；(2) _compile_return 方法——在 (return) 前添加 local.get 压入返回值。两处修复逻辑一致：检查 instr.src_locs 是否有值，若有则取第一个 src_loc 用 local.get 压栈。与 native_backend.py 的 _emit_return 实现对齐（原生后端正确处理了 src_locs）。392 测试全部通过，无回归。",
-      "timestamp": "2026-07-24 03:02"
-    },
-    {
-      "cycle": 12,
-      "task_id": "review_cycle_12",
-      "name": "第 12 轮 - 双线路线图评审",
-      "track": "review",
-      "difficulty": "review",
-      "priority": 0,
-      "result": "success",
-      "details": "第四次三轮回顾评审（第 10-12 轮）。深度代码审计重大发现：前端——合一算法接入面仍极窄（仅函数调用）、_types_compatible 中 TypeVar 仍直接放行、模式匹配完备性完全缺失、解析器错误恢复为零；后端——原生后端参数传递完全缺失（blocking bug）、栈帧调用级缺失、Phi 降级正确、Wasm LIRReturn 返回值处理有 bug、WasmGC 仍名不副实、C 后端双轨并存。新增 1 个 Wasm 返回值修复任务，调整多项优先级。下阶段重点：后端攻坚原生调用约定 + 前端合一深化全面替换 _types_compatible。",
-      "timestamp": "2026-07-24 07:15"
-    },
-    {
-      "cycle": 11,
-      "task_id": "frontend_map_literal_parse",
-      "name": "实现 Map 字面量解析与类型检查",
-      "track": "frontend",
-      "difficulty": "medium",
-      "priority": 58,
-      "result": "success",
-      "details": "填补 Map 类型断层：parser.py 新增 _parse_map_expr 方法解析 {key: value, ...} 语法，在 _parse_primary_expr 中通过 lookahead 区分 Map 字面量与代码块（空{}是代码块，非空且首表达式后为 COLON 则为 Map）；type_checker.py 新增 _check_map_expr 方法检查键类型一致性和值类型一致性，返回 MapType(key_type, value_type)。AST 和 HIR 降级路径已就绪，无需修改。392 测试全部通过，无回归。",
-      "timestamp": "2026-07-23 13:10"
-    },
-    {
-      "cycle": 11,
-      "task_id": "backend_phi_matchjump_successors",
-      "name": "修复 Phi 降级 MIRMatchJump 后继块计算不全",
-      "track": "backend",
-      "difficulty": "medium",
-      "priority": 93,
-      "result": "success",
-      "details": "修复 lir_lowering.py 中 _get_successor_blocks 对 MIRMatchJump 只返回 [default_target] 而忽略 variant_tests 中各个 case 目标块的 bug。修复方案与 cfg_utils.py 中正确的 get_successors 实现保持一致：targets = [test[2] for test in terminator.variant_tests]，再视情况追加 default_target。修复仅 3 行，解决 match 分支 Phi 节点边缘块判断错误的问题，确保 SSA 语义在 match + Phi 组合场景下保持正确。392 测试全部通过，无回归。",
-      "timestamp": "2026-07-23 13:08"
-    },
-    {
-      "cycle": 10,
-      "task_id": "frontend_mut_type_annotation",
-      "name": "修复 Mut 绑定忽略类型注解 bug",
-      "track": "frontend",
-      "difficulty": "easy",
-      "priority": 80,
-      "result": "success",
-      "details": "修复 _check_mut_binding（第697-700行）完全忽略 type_annotation 字段的 bug。添加与 _check_let_binding 一致的类型注解检查逻辑：若有注解则用 _from_ast_type 转换并用 _types_compatible 验证推断类型与注解类型兼容，不兼容时抛出 TypeCheckError。修复仅 7 行，模式与 let 绑定完全一致，392 测试全部通过。",
-      "timestamp": "2026-07-23 10:15"
-    },
-    {
-      "cycle": 10,
-      "task_id": "backend_native_elf_phnum",
-      "name": "修复原生后端 ELF phnum 不匹配 bug",
-      "track": "backend",
-      "difficulty": "easy",
-      "priority": 95,
-      "result": "success",
-      "details": "修复 _generate_elf 中 phnum=3（声明 LOAD(code) + LOAD(data) + LOAD(rodata) 三个 program header）但实际只创建并写入 code_ph 和 data_ph 两个的 P0 正确性 bug。ELF 头期望 3x56=168 字节 program headers 但只提供 2x56=112 字节，差 56 字节导致后续代码段数据被 ELF 加载器误解为第三个 program header。修复：将 phnum 从 3 改为 2，与实际写入数量一致。修复仅 1 行，392 测试全部通过。",
-      "timestamp": "2026-07-23 10:18"
-    },
-    {
-      "cycle": 9,
-      "task_id": "review_cycle_9",
-      "name": "第 9 轮 - 双线路线图评审",
-      "track": "review",
-      "difficulty": "review",
-      "priority": 0,
-      "result": "success",
-      "details": "第三次三轮回顾评审（第 7-9 轮）。深度代码审计有重大发现：前端——合一算法接入面极窄（仅函数调用）、_types_compatible 中 TypeVar 直接放行（duck typing）、缺少 let 泛化和递归函数类型更新、Mut 绑定忽略类型注解、无模式匹配完备性检查、Map 字面量解析缺失；后端——原生后端调用约定几乎未实现（参数传递完全缺失）、ELF phnum 不匹配（声明3个实际2个）、寄存器分配不考虑 CFG 和调用约定、栈帧对齐计算错误、Phi 降级 MIRMatchJump 后继块不全、WasmGC 名不副实（完全没用到 GC 类型）、Wasm 多参数闭包调用未实现、C 后端双轨并存。任务池新增 7 个任务，优先级大幅调整。下阶段重点：后端攻坚（调用约定 + ELF bug 修复 + Phi MatchJump 修复）+ 前端合一深化（全面替换 _types_compatible）。",
-      "timestamp": "2026-07-23 07:05"
-    },
-    {
-      "cycle": 8,
-      "task_id": "frontend_type_unification",
-      "name": "实现真正的类型合一（unification）算法",
-      "track": "frontend",
-      "difficulty": "hard",
-      "priority": 95,
-      "result": "success",
-      "details": "实现完整的类型合一算法基础设施并接入关键路径：(1) union-find 替换表 _subst + 路径压缩的 _find 方法；(2) _unify 合一算法——支持 PrimType/ListType/MapType/TupleType/FnType/ADTType 全部 9 种情况，含 TypeVar 双向绑定；(3) _occur_check 发生检查——防止无限递归类型；(4) _apply_subst 替换应用——递归展开所有类型变量；(5) _instantiate 泛型实例化——let-polymorphism，每次引用泛型函数创建 fresh 副本；(6) _check_fn_call 升级为合一驱动参数匹配，返回类型应用替换后再返回；(7) _check_identifier 增加泛型实例化——包含 TypeVar 的类型每次引用自动实例化。类型系统从'兼容检查'升级为'合一推断'的第一步，392 测试全部通过。",
-      "timestamp": "2026-07-23 04:15"
-    },
-    {
-      "cycle": 8,
-      "task_id": "backend_phi_edge_block_fix",
-      "name": "修复 Phi 节点降级的边缘块问题",
-      "track": "backend",
-      "difficulty": "medium",
-      "priority": 86,
-      "result": "success",
-      "details": "修复 lir_lowering.py 中 Phi 节点降级的 critical edge bug：原代码将所有后继块的 Phi 拷贝都放在前驱块末尾（终结指令前），对于条件分支（两后继）场景，两条互斥路径的 Phi 拷贝都会被执行，导致值被错误覆盖。修复方案：实现 critical edge splitting——当有多后继的前驱块跳转到含 Phi 的后继时，为每条边插入边缘块（edge block），Phi 拷贝放在对应边缘块中，边缘块末尾再跳转到真正的目标。支持 MIRBranch（两分支）和 MIRSwitch/MIRMatchJump（多分支）两种场景。新增 _insert_phi_copies 和 _lower_terminator_with_targets 两个辅助方法。392 测试全部通过，无回归。",
-      "timestamp": "2026-07-23 04:18"
-    },
-    {
-      "cycle": 7,
-      "task_id": "frontend_tuple_compat_bug",
-      "name": "修复 TupleType 兼容检查属性名 bug",
-      "track": "frontend",
-      "difficulty": "easy",
-      "priority": 85,
-      "result": "success",
-      "details": "修复 _types_compatible 中 TupleType 分支使用 a.element_types / b.element_types 的属性名错误——TupleType 的实际属性名是 elements（而非 element_types）。此 bug 会导致元组类型递归兼容检查抛出 AttributeError。修复仅需 2 行改动，测试全部通过。",
-      "timestamp": "2026-07-23 02:05"
-    },
-    {
-      "cycle": 7,
-      "task_id": "backend_native_regalloc_fix",
-      "name": "修复原生后端寄存器分配设计缺陷",
-      "track": "backend",
-      "difficulty": "hard",
-      "priority": 98,
-      "result": "success",
-      "details": "修复寄存器分配器的三个设计级严重 bug：(1) LIRLoadConst vname 命名错误——改用 dst_loc[0] 而非 const_* 常量值命名，使分配结果与使用位置匹配；(2) 浮点栈加载/存储未实现——在 x86_64.py 新增 movsd_reg_mem 和 movsd_mem_reg 方法，load_to_reg/store_from_reg 的浮点栈分支用真正的 movsd [rsp+offset] 指令；(3) get_loc 静默 fallback 到 RAX——改为抛出 ValueError 异常，防止难以调试的静默数据损坏。同时修复 float 常量栈存储时只加载不存栈的遗漏 bug。",
-      "timestamp": "2026-07-23 02:12"
-    },
-    {
-      "cycle": 6,
-      "task_id": "review_cycle_6",
-      "name": "第 6 轮 - 双线路线图评审",
-      "track": "review",
-      "difficulty": "review",
-      "priority": 0,
-      "result": "success",
-      "details": "第二次三轮回顾评审（第 4-6 轮）。深度代码审计发现多个关键问题：前端 TupleType 属性名 bug、类型合一仍缺失；后端原生寄存器分配有设计级缺陷（vname 命名错误、浮点栈占位）、ELF phnum 不匹配、Phi 降级 critical edge bug、WasmGC 名不副实。任务池新增 3 个 bug 修复任务，原生后端优先级重新排序。下阶段重点：修复原生后端寄存器分配（最优先）+ 前端类型合一攻坚。",
-      "timestamp": "2026-07-22 22:10"
-    },
-    {
-      "cycle": 5,
-      "task_id": "frontend_eq_op_typecheck",
-      "name": "修复 ==/!= 比较运算符类型检查",
-      "track": "frontend",
-      "difficulty": "easy",
-      "priority": 75,
-      "result": "success",
-      "details": "修复 _check_binary_op 中 == 和 != 直接返回 BOOL_T 完全不检查操作数类型的 bug。新增所有比较操作的左右操作数类型兼容检查（_types_compatible），有序比较（< > <= >=）额外要求数值类型。同时修复有序比较只检查数值类型但未检查两操作数一致的问题。",
-      "timestamp": "2026-07-22 19:04"
-    },
-    {
-      "cycle": 5,
-      "task_id": "backend_native_reg_alloc",
-      "name": "实现原生后端线性扫描寄存器分配器",
-      "track": "backend",
-      "difficulty": "hard",
-      "priority": 94,
-      "result": "success",
-      "details": "完整重写 _compile_body，实现线性扫描寄存器分配器：(1) 收集所有虚拟寄存器的活跃区间 [first_use, last_use]；(2) 按开始点排序，线性扫描分配物理寄存器（13 GPR + 8 XMM），寄存器不足时溢出到栈槽（选择最远活跃区间作为牺牲者）；(3) 打通指令发射链路——所有指令真正从 src_locs 读操作数、向 dst_loc 写结果，支持寄存器/栈两种位置，load_to_reg/store_from_reg 辅助函数处理搬移。支持整数/浮点两套寄存器池，LIRBinOp/LIRUnaryOp/LIRReturn/LIRBranch 等指令均已适配。",
-      "timestamp": "2026-07-22 19:12"
-    },
-    {
-      "cycle": 4,
-      "task_id": "frontend_adt_type_param_eq",
-      "name": "修复 ADT 类型参数相等性比较",
-      "track": "frontend",
-      "difficulty": "easy",
-      "priority": 80,
-      "result": "success",
-      "details": "修复 ADTType.__eq__ 只比较 name 不比较 type_params 的严重 bug：增加 type_params 长度检查和逐元素递归比较；同步修复 __hash__ 包含 type_params。同时补充 _types_compatible 中缺失的 MapType、TupleType、ADTType 递归兼容检查，与 ListType/FnType 保持一致。",
-      "timestamp": "2026-07-22 16:07"
-    },
-    {
-      "cycle": 4,
-      "task_id": "backend_native_elf_entry_fix",
-      "name": "修复原生后端 ELF 入口地址并接入编译管道",
-      "track": "backend",
-      "difficulty": "medium",
-      "priority": 96,
-      "result": "success",
-      "details": "完成三项 P0 修复：(1) 修复 ELF e_entry 从文件偏移 0 改为虚拟地址 0x400000 + start_offset；(2) 实现 link_calls 回填机制——修改 link_calls 数据结构增加调用者函数名，在 _generate_elf 中参照 data_fixups 模式回填所有 call rel32 偏移；(3) 将 BACKEND_NATIVE 从 CraneliftBackend 切换为 NativeCodeGen，原生后端正式接入编译管道。",
-      "timestamp": "2026-07-22 16:10"
-    },
-    {
-      "cycle": 3,
-      "task_id": "review_cycle_3",
-      "name": "第 3 轮 - 双线路线图评审",
-      "track": "review",
-      "difficulty": "review",
-      "priority": 0,
-      "result": "success",
-      "details": "首次三轮回顾评审。发现原生后端未接入编译管道（P0 bug）、ADT 类型参数相等 bug、==/!= 类型检查缺失等问题。任务池从 15 个扩充到 18 个，后端优先级大幅调整。下阶段重点：后端攻坚（让原生后端真正工作）+ 前端类型安全修复。",
-      "timestamp": "2026-07-22 13:00"
-    },
-    {
-      "cycle": 2,
-      "task_id": "frontend_field_access_error",
-      "name": "修复字段访问异常静默吞噬",
-      "track": "frontend",
-      "difficulty": "easy",
-      "priority": 65,
-      "result": "success",
-      "details": "重写 _check_field_access：消除 ValueError 静默 pass，区分三种错误并给出精确提示——无效索引格式（非数字）、索引越界（含元组长度信息）、ADT 类型需用模式匹配、其他类型不支持字段访问。每条错误均附修复提示。",
-      "timestamp": "2026-07-22 10:06"
-    },
-    {
-      "cycle": 2,
-      "task_id": "backend_native_float_const",
-      "name": "实现原生后端浮点/字符串常量加载",
-      "track": "backend",
-      "difficulty": "medium",
-      "priority": 75,
-      "result": "success",
-      "details": "实现 LIRLoadConst 的 float 和 string 分支：浮点用 movsd [rip+offset] 加载到 XMM 寄存器，字符串用 lea reg, [rip+offset] 加载地址。新增 data_fixups 列表记录数据引用，在 _generate_elf 阶段计算数据段虚拟地址并回填所有 RIP-relative 偏移。常量收集增加去重逻辑（相同值只存一份）。",
-      "timestamp": "2026-07-22 10:12"
-    },
-    {
-      "cycle": 1,
-      "task_id": "frontend_try_expr_typecheck",
-      "name": "完善 ? 操作符类型检查",
-      "track": "frontend",
-      "difficulty": "medium",
-      "priority": 78,
-      "result": "success",
-      "details": "修复 _check_try_expr 从占位实现升级为真正的类型检查：验证表达式为 Option/Result ADT 类型，提取内部值类型返回；非 Option/Result 类型使用 ? 报类型错误。TypeVar 暂时放行以保持兼容。",
-      "timestamp": "2026-07-22 08:15"
-    },
-    {
-      "cycle": 1,
-      "task_id": "backend_native_label_patch",
-      "name": "实现原生后端两阶段汇编与标签回填",
-      "track": "backend",
-      "difficulty": "medium",
-      "priority": 92,
-      "result": "success",
-      "details": "在 _compile_body 中实现两阶段汇编：第一阶段发射指令并记录 label_offsets 和 jump_fixups；第二阶段遍历 jump_fixups 调用 emitter.patch_rel32 回填所有 jmp/jcc 的 rel32 偏移量。",
-      "timestamp": "2026-07-22 08:16"
     }
   ],
   "tasks": [
     {
+      "task_id": "backend_native_runtime_call_refactor",
+      "name": "原生后端复合指令迁移到 _emit_runtime_call",
+      "description": "将 _emit_build_list/_emit_build_tuple/_emit_build_map/_emit_build_adt/_emit_index/_emit_list_append 等方法从手动 push/pop+call 模式迁移到使用 _emit_runtime_call 辅助方法，确保栈对齐和 caller-saved 寄存器保护的正确性。当前手动方式存在两个风险：(1) 不检查栈对齐就直接 call；(2) 不保存/恢复 caller-saved 寄存器，可能在 call 后丢失活跃值。",
+      "track": "backend",
+      "difficulty": "medium",
+      "priority": 90,
+      "estimated_effort": "4-6小时",
+      "status": "pending",
+      "source": "review_18_audit",
+      "depends_on": ["backend_native_call_abi"]
+    },
+    {
+      "task_id": "backend_native_instr_selection",
+      "name": "实现原生后端指令选择优化",
+      "description": "添加指令选择优化：xor eax, eax 替代 mov rax, 0（节省 5 字节且更快）、test reg, reg 替代 cmp reg, 0、使用 LEA 做加法+移位组合。低难度高收益的代码质量优化。",
+      "track": "backend",
+      "difficulty": "easy",
+      "priority": 68,
+      "estimated_effort": "2-4小时",
+      "status": "pending",
+      "source": "review_3",
+      "depends_on": ["backend_native_regalloc_fix"]
+    },
+    {
+      "task_id": "backend_wasm_data_build_fill",
+      "name": "Wasm 后端数据结构构建指令完善（元素/字段填充）",
+      "description": "修复 wasm_backend.py 中 _compile_build_list（只调用 nova_list_new 不填充元素）、_compile_build_tuple（只调用 nova_alloc 不填充字段）、_compile_build_adt（只调用 nova_alloc 不填充字段）的问题。需要逐元素/逐字段调用运行时函数填充数据。",
+      "track": "backend",
+      "difficulty": "medium",
+      "priority": 65,
+      "estimated_effort": "4-6小时",
+      "status": "pending",
+      "source": "review_18_audit",
+      "depends_on": []
+    },
+    {
+      "task_id": "frontend_for_loop_type_inference",
+      "name": "修复 for 循环和列表推导的迭代器类型推断",
+      "description": "修复 _check_for_expr 和 _check_list_comprehension 中迭代器变量绑定为 TypeVar('for_elem')/TypeVar('lc_elem') 但不与 iterable 的元素类型合一的问题。应提取 iterable 的元素类型（List→elem_type, range→Int）并与循环变量合一。",
+      "track": "frontend",
+      "difficulty": "medium",
+      "priority": 72,
+      "estimated_effort": "2-3小时",
+      "status": "pending",
+      "source": "review_18_audit",
+      "depends_on": []
+    },
+    {
+      "task_id": "frontend_cleanup_legacy_compatible",
+      "name": "清理 _types_compatible 遗留方法",
+      "description": "_types_compatible 方法已无外部调用点（0 个），仅剩 6 处内部递归自引用。将其内部的递归调用改为 _unify_types 或直接内联，然后删除整个方法。同时清理相关注释和文档标注。",
+      "track": "frontend",
+      "difficulty": "easy",
+      "priority": 52,
+      "estimated_effort": "1-2小时",
+      "status": "pending",
+      "source": "review_18_audit",
+      "depends_on": []
+    },
+    {
+      "task_id": "backend_wasm_stack_balance",
+      "name": "实现 Wasm 后端栈平衡验证器",
+      "description": "为 WasmGC 后端添加栈深度跟踪与验证。深度审计发现由于所有值通过 local.get/local.set 中转，实际栈平衡风险低于预期，但仍需验证 block 边界处的栈一致性。",
+      "track": "backend",
+      "difficulty": "medium",
+      "priority": 52,
+      "estimated_effort": "1-2天",
+      "status": "pending",
+      "source": "review_3",
+      "depends_on": []
+    },
+    {
+      "task_id": "backend_wasm_indirect_multiarg",
+      "name": "实现 Wasm 多参数闭包调用",
+      "description": "修复 wasm_backend 中 LIRCallIndirect 多参数直接 pass 的问题，实现多参数间接调用：table.get 获取函数引用 + 多参数调用。",
+      "track": "backend",
+      "difficulty": "medium",
+      "priority": 54,
+      "estimated_effort": "4-6小时",
+      "status": "pending",
+      "source": "quality_analysis",
+      "depends_on": []
+    },
+    {
+      "task_id": "backend_unify_c_codegen",
+      "name": "统一 C 后端（旧路径迁移到 LIR 路径）",
+      "description": "将旧的 c_codegen.py（AST级C代码生成）功能迁移到 lir_c_backend.py（LIR级C代码生成），淘汰旧路径。LIR C 后端已功能完整（22 种 LIR 指令全覆盖），主要差距在闭包支持。",
+      "track": "backend",
+      "difficulty": "hard",
+      "priority": 48,
+      "estimated_effort": "2-3天",
+      "status": "pending",
+      "source": "quality_analysis",
+      "depends_on": []
+    },
+    {
+      "task_id": "backend_wasm_gc_types",
+      "name": "完善 WasmGC 原生类型定义",
+      "description": "扩展 WasmGC 类型系统：增加 List/Map/ADT 的原生 struct/array 类型定义，真正利用 GC 托管堆。当前 WasmGC 名不副实，复合类型全部映射为 i32 指针。",
+      "track": "backend",
+      "difficulty": "hard",
+      "priority": 50,
+      "estimated_effort": "3-5天",
+      "status": "pending",
+      "source": "quality_analysis",
+      "depends_on": []
+    },
+    {
+      "task_id": "backend_lir_phi_lowering_verify",
+      "name": "验证 Phi 节点 LIR 降级正确性",
+      "description": "系统验证 MIR Phi 节点降级到 LIR 线性指令序列的正确性。Phi 降级已修复 critical edge 和 MIRMatchJump 后继块两个 bug，实际运行良好，但缺少系统性测试验证。",
+      "track": "backend",
+      "difficulty": "medium",
+      "priority": 46,
+      "estimated_effort": "3-5小时",
+      "status": "pending",
+      "source": "quality_analysis",
+      "depends_on": []
+    },
+    {
       "task_id": "frontend_match_guard_typecheck",
       "name": "实现 match 表达式 guard 条件类型检查",
-      "description": "为 match 分支的 guard 条件添加类型检查（必须为 Bool）和完备性分析支持（含 guard 的通配符不视为完备覆盖），同时扩展解析器支持 'pattern if guard -> body' 语法。",
+      "description": "为 match 分支的 guard 条件添加类型检查（必须为 Bool）和完备性分析支持。",
       "track": "frontend",
       "difficulty": "medium",
       "priority": 72,
@@ -371,7 +240,7 @@
     {
       "task_id": "backend_native_compound_instr",
       "name": "为原生后端补全复合数据结构指令代码生成",
-      "description": "在原生后端调度表新增 LIRLoadReg/StoreReg/BuildList/ListAppend/BuildTuple/BuildMap/BuildADT/FieldAccess/Index/ClosureCreate/CallIndirect/Switch 共 13 种指令，通过运行时函数调用支持复合数据结构。",
+      "description": "在原生后端调度表新增 13 种 LIR 指令的代码生成，从 9 种扩展到 22 种。",
       "track": "backend",
       "difficulty": "hard",
       "priority": 90,
@@ -383,7 +252,7 @@
     {
       "task_id": "backend_native_call_abi",
       "name": "实现原生后端 System V AMD64 ABI 调用约定",
-      "description": "实现 System V AMD64 调用约定的参数传递：前6个整型参数用 RDI/RSI/RDX/RCX/R8/R9，前8个浮点参数用 XMM0-XMM7，其余栈传；返回值 RAX/XMM0；调用前保存 caller-saved 寄存器，函数序言保存 callee-saved 寄存器。原生后端当前参数传递完全缺失，是可用性的最大瓶颈。",
+      "description": "实现 System V AMD64 调用约定的参数传递、返回值捕获、caller-saved 保存/恢复、栈对齐。",
       "track": "backend",
       "difficulty": "hard",
       "priority": 99,
@@ -395,7 +264,7 @@
     {
       "task_id": "frontend_pattern_exhaustiveness",
       "name": "实现模式匹配完备性检查",
-      "description": "为 match 表达式添加完备性检查，确保所有构造器都被覆盖，检测冗余分支和不可达分支，给出精确的错误提示（缺失哪些变体）。当前完全没有完备性检查，不完备的 match 只会在运行时 panic。",
+      "description": "为 match 表达式添加完备性检查：ADT 覆盖、Bool 覆盖、通配符、冗余检测。",
       "track": "frontend",
       "difficulty": "hard",
       "priority": 86,
@@ -405,75 +274,15 @@
       "depends_on": []
     },
     {
-      "task_id": "backend_wasm_stack_balance",
-      "name": "实现 Wasm 后端栈平衡验证器",
-      "description": "为 WasmGC 后端添加栈深度跟踪与验证：编译每条指令时维护操作数栈深度计数器，确保生成的 Wasm 代码栈平衡。当前栈机映射是\"凭感觉\"的，复杂程序大概率栈不平衡导致验证失败。",
-      "track": "backend",
-      "difficulty": "medium",
-      "priority": 72,
-      "estimated_effort": "1-2天",
-      "status": "pending",
-      "source": "review_3",
-      "depends_on": []
-    },
-    {
-      "task_id": "backend_wasm_indirect_multiarg",
-      "name": "实现 Wasm 多参数闭包调用",
-      "description": "修复 wasm_backend 中 LIRCallIndirect 多参数直接 pass 的问题，实现多参数间接调用：table.get 获取函数引用 + 多参数调用。当前多参数闭包调用是空实现。",
-      "track": "backend",
-      "difficulty": "medium",
-      "priority": 70,
-      "estimated_effort": "4-6小时",
-      "status": "pending",
-      "source": "quality_analysis",
-      "depends_on": []
-    },
-    {
-      "task_id": "backend_unify_c_codegen",
-      "name": "统一 C 后端（旧路径迁移到 LIR 路径）",
-      "description": "将旧的 c_codegen.py（AST级C代码生成）功能迁移到 lir_c_backend.py（LIR级C代码生成），淘汰旧路径，消除双轨维护成本。",
-      "track": "backend",
-      "difficulty": "hard",
-      "priority": 66,
-      "estimated_effort": "2-3天",
-      "status": "pending",
-      "source": "quality_analysis",
-      "depends_on": []
-    },
-    {
-      "task_id": "backend_native_instr_selection",
-      "name": "实现原生后端指令选择优化",
-      "description": "添加指令选择优化：xor eax, eax 替代 mov rax, 0（节省 5 字节且更快）、test reg, reg 替代 cmp reg, 0、使用 LEA 做加法+移位组合。低难度高收益的代码质量优化。",
+      "task_id": "backend_fix_map_set_put",
+      "name": "修复 nova_map_set/nova_map_put 命名不一致",
+      "description": "将原生后端和 LIR C 后端中的 nova_map_set 调用统一改为 nova_map_put，与运行时库一致。P0 链接 bug。",
       "track": "backend",
       "difficulty": "easy",
-      "priority": 62,
-      "estimated_effort": "2-4小时",
-      "status": "pending",
-      "source": "review_3",
-      "depends_on": ["backend_native_regalloc_fix"]
-    },
-    {
-      "task_id": "backend_wasm_gc_types",
-      "name": "完善 WasmGC 原生类型定义",
-      "description": "扩展 WasmGC 类型系统：增加 List/Map/ADT 的原生 struct/array 类型定义，真正利用 GC 托管堆，替代运行时函数调用。当前 WasmGC 名不副实，复合类型全部映射为 i32 指针。",
-      "track": "backend",
-      "difficulty": "hard",
-      "priority": 60,
-      "estimated_effort": "3-5天",
-      "status": "pending",
-      "source": "quality_analysis",
-      "depends_on": []
-    },
-    {
-      "task_id": "backend_lir_phi_lowering_verify",
-      "name": "验证 Phi 节点 LIR 降级正确性",
-      "description": "系统验证 MIR Phi 节点降级到 LIR 线性指令序列的正确性，编写针对性测试用例，确保 SSA 语义在降级后保持。",
-      "track": "backend",
-      "difficulty": "medium",
-      "priority": 58,
-      "estimated_effort": "3-5小时",
-      "status": "pending",
-      "source": "quality_analysis",
+      "priority": 98,
+      "estimated_effort": "30分钟",
+      "status": "completed",
+      "source": "review_18_audit",
       "depends_on": []
     }
   ]

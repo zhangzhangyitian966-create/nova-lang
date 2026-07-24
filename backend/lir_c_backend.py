@@ -446,7 +446,7 @@ class LIRCBackend:
                 if key_idx < len(instr.src_locs) and val_idx < len(instr.src_locs):
                     key_var = self._loc_var_name(instr.src_locs[key_idx][0])
                     val_var = self._loc_var_name(instr.src_locs[val_idx][0])
-                    self._emit(f"nova_map_set({dst}, {key_var}, {val_var});")
+                    self._emit(f"nova_map_put({dst}, {key_var}, {val_var});")
 
     def _compile_build_adt(self, instr: LIRBuildADT):
         """编译 ADT 构建
