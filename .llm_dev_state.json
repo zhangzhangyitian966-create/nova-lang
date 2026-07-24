@@ -1,5 +1,5 @@
 {
-  "cycles": 42,
+  "cycles": 43,
   "completed_tasks": [
     "refactor_eval_expr_complexity",
     "refactor_evaluator_match_pattern",
@@ -93,10 +93,28 @@
     "c_backend_closure_phase2_env",
     "refactor_ccodegen_infer_type",
     "refactor_ccodegen_fn_call",
-    "review_cycle_42"
+    "review_cycle_42",
+    "refactor_ccodegen_compile_expr",
+    "clean_unused_imports_v3"
   ],
   "failed_tasks": [],
   "task_history": [
+    {
+      "cycle": 43,
+      "task_id": "refactor_ccodegen_compile_expr",
+      "status": "completed",
+      "source": "审查驱动",
+      "reason": "审查日志（第1499轮）显示 CCodeGen._compile_expr 圈复杂度 33，全项目 Top 3。32 个 if-isinstance 分支全部是类型判断，与已完成的 _infer_c_type_from_expr 和 _compile_fn_call 同文件，可沿用调度表模式重构。第42轮评审明确规划为第43轮核心任务。",
+      "details": "将 _compile_expr 从约 105 行 32 分支 if-elif 链重构为调度表模式：1) 新增4个独立方法（_compile_string_literal/_compile_char_literal/_compile_assignment_expr/_compile_try_expr）处理原分支中内联的逻辑；2) 模块级 _EXPR_COMPILE_DISPATCH 字典（32 个 AST 节点类型→handler 映射，16 个用 lambda、16 个委托给独立方法）；3) _compile_expr 主函数从 105 行压缩至 5 行（CC≈3）。与 _EXPR_TYPE_DISPATCH 和 _BUILTIN_RET_TYPES 并列置于文件末尾，风格统一。"
+    },
+    {
+      "cycle": 43,
+      "task_id": "clean_unused_imports_v3",
+      "status": "completed",
+      "source": "审查驱动",
+      "reason": "审查日志显示 unused_import 共 26 个 MEDIUM 级别问题，是 MEDIUM 级最大单一类别。清理风险低、收益明确。第42轮评审明确规划为第43轮配套任务。",
+      "details": "清理了 2 个文件的 3 个未使用导入：1) type_checker.py 移除 import copy（全文件无使用）；2) tree-sitter-nova/bindings/python/tree_sitter_nova/__init__.py 移除 import sys 和 import tree_sitter（sys 无使用，tree_sitter 在 try 块内冗余，from tree_sitter import Language, Parser 已足够触发 ImportError）。nova/__init__.py 和 tests/benchmarks/__init__.py 的导入属于公共 API re-export，予以保留。"
+    },
     {
       "cycle": 42,
       "task_id": "review_cycle_42",
@@ -271,9 +289,9 @@
       "priority": 55,
       "category": "engineering",
       "estimated": "3-5 小时",
-      "status": "pending",
+      "status": "completed",
       "depends_on": [],
-      "reason": "审查日志（第1499轮）显示 _compile_expr 圈复杂度 33，Top 3。与 _infer_c_type_from_expr 和 _compile_fn_call 同属 c_codegen.py，连续重构可最大化减少维护成本。旧 C 后端最终将被废弃，但当前仍是功能最完整路径。[新增任务 / 审查驱动]"
+      "reason": "审查日志（第1499轮）显示 _compile_expr 圈复杂度 33，Top 3。与 _infer_c_type_from_expr 和 _compile_fn_call 同属 c_codegen.py，连续重构可最大化减少维护成本。旧 C 后端最终将被废弃，但当前仍是功能最完整路径。[已完成 / 审查驱动]"
     },
     {
       "id": "clean_unused_imports_v3",
@@ -283,9 +301,9 @@
       "priority": 58,
       "category": "engineering",
       "estimated": "1-2 小时",
-      "status": "pending",
+      "status": "completed",
       "depends_on": [],
-      "reason": "unused_import 是 MEDIUM 级别中数量最多的单一类别（26 个），且清理风险低、收益明确。v2 已清理 4 个，v3 继续推进。[新增任务 / 审查驱动]"
+      "reason": "unused_import 是 MEDIUM 级别中数量最多的单一类别（26 个），且清理风险低、收益明确。v2 已清理 4 个，v3 继续推进。[已完成 / 审查驱动]"
     },
     {
       "id": "unify_c_backend",

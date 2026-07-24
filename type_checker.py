@@ -12,7 +12,6 @@ Nova 编程语言 - 类型检查器
 """
 
 from typing import Dict, List, Optional
-import copy
 
 from .ast_nodes import (
     AliasDef,

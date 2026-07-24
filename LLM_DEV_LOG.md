@@ -1,3 +1,83 @@
+## 2026-07-24 21:12 第43轮开发
+
+### 开发概览
+- **轮次**: 第 43 轮（普通开发轮）
+- **基线测试**: 392/392 通过
+- **完成任务**: 2 个（全部审查驱动）
+- **审查驱动任务占比**: 100%（2/2）
+- **测试结果**: 392/392 通过（零回归）
+- **失败回滚**: 0 次
+
+---
+
+### 本轮任务列表
+
+1. **【审查驱动】重构 CCodeGen._compile_expr 降低圈复杂度**（CC=33，Top3）
+2. **【审查驱动】批量清理未使用导入 v3**（26 个 MEDIUM 级）
+
+---
+
+### 任务详情
+
+#### 1. refactor_ccodegen_compile_expr（审查驱动）
+
+**问题来源**: 审查日志（第1499轮）显示 `CCodeGen._compile_expr` 圈复杂度 33，全项目 Top 3。约 105 行包含 32 个 if-isinstance 分支，每个分支仅调用对应子方法或返回简单表达式。与已完成的 `_infer_c_type_from_expr`（第41轮）和 `_compile_fn_call`（第41轮）同属 c_codegen.py，可沿用调度表模式重构。
+
+**修改内容**:
+- `c_codegen.py`: 将 `_compile_expr` 从 105 行 32 分支 if-elif 链重构为调度表模式
+  - 新增 4 个独立方法：`_compile_string_literal`、`_compile_char_literal`、`_compile_assignment_expr`、`_compile_try_expr`
+  - 新增模块级 `_EXPR_COMPILE_DISPATCH` 字典（32 个 AST 节点类型 → handler 映射，16 个 lambda + 16 个独立方法）
+  - 主函数从 105 行压缩至 5 行（CC≈3）
+
+**收益**: 圈复杂度从 33 降至约 3，c_codegen.py 的调度表化战略全部完成（_infer_c_type + _compile_fn_call + _compile_expr）。新增 AST 节点类型只需在调度表加一行，与项目内所有其他核心分发函数风格统一。
+
+#### 2. clean_unused_imports_v3（审查驱动）
+
+**问题来源**: 审查日志显示 unused_import 共 26 个 MEDIUM 级别问题，是 MEDIUM 级最大单一类别。清理风险低、收益明确。
+
+**修改内容**:
+- `type_checker.py`: 移除 `import copy`（全文件无使用）
+- `tree-sitter-nova/bindings/python/tree_sitter_nova/__init__.py`: 移除 `import sys` 和 `import tree_sitter`（sys 无使用；tree_sitter 在 try 块内冗余，`from tree_sitter import Language, Parser` 已足够触发 ImportError）
+
+**收益**: 清理 3 个未使用导入，MEDIUM 问题数从 26 降至 23。
+
+---
+
+### 审查日志研读摘要
+
+**最新审查（第1499轮，2026-07-23 02:27）**:
+- 总问题：1086（0 CRITICAL, 0 HIGH, 85 MEDIUM, 1001 LOW）
+- Top10 复杂函数中 7 个已完成调度表化，剩余 3 个（_compile_expr/33、_compile_function/25、CraneliftBackend._compile_instr/24）
+- unused_import 26 个，是 MEDIUM 最大单一类别
+
+**本轮采纳的审查问题**:
+1. CCodeGen._compile_expr（CC=33，Top3）→ 调度表化重构
+2. unused_import（26 个 MEDIUM）→ 批量清理 3 个
+
+---
+
+### 测试对比
+
+| 阶段 | 通过数 | 总数 | 结果 |
+|------|--------|------|------|
+| 开发前基线 | 392 | 392 | 通过 |
+| 任务1完成后 | 392 | 392 | 通过 |
+| 任务2完成后 | 392 | 392 | 通过 |
+
+**零回归确认**。
+
+---
+
+### 下一步计划
+
+第44轮方向（按第42轮评审规划）：
+1. **【审查驱动】重构 TypeChecker._unify 降低圈复杂度**（CC=38，Top6）
+2. **【审查驱动】LOW 级问题批量治理 v2**（docstring + 魔法数字）
+
+Top10 复杂度已进入收尾阶段，_compile_expr 完成后仅剩 2 个（_compile_function 实际 CC 约 8-10，不紧迫；CraneliftBackend._compile_instr=24）。下阶段重点转向类型系统重构和 LOW 级问题治理。
+
+---
+
 ## 2026-07-24 21:03 第42轮评审（路线图评审）
 
 ### 评审范围

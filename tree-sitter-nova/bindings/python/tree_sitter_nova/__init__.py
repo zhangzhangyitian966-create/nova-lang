@@ -5,10 +5,8 @@ Requires the compiled shared library (tree_sitter_nova.so) to be available.
 """
 
 import os
-import sys
 
 try:
-    import tree_sitter
     from tree_sitter import Language, Parser
 except ImportError:
     raise ImportError(

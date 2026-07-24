@@ -543,110 +543,30 @@ class CCodeGen:
 
     def _compile_expr(self, expr) -> str:
         """编译表达式，返回 C 表达式字符串"""
+        handler = _EXPR_COMPILE_DISPATCH.get(type(expr))
+        if handler is not None:
+            return handler(self, expr)
+        return f"/* unhandled: {type(expr).__name__} */"
 
-        if isinstance(expr, IntLiteral):
-            return f"((int64_t){expr.value})"
+    def _compile_string_literal(self, expr: StringLiteral) -> str:
+        """编译字符串字面量为 nova_string_new 调用"""
+        escaped = self._escape_c_string(expr.value)
+        return f'nova_string_new("{escaped}")'
 
-        elif isinstance(expr, FloatLiteral):
-            return f"((double){repr(expr.value)})"
+    def _compile_char_literal(self, expr: CharLiteral) -> str:
+        """编译字符字面量"""
+        escaped = self._escape_c_char(expr.value)
+        return f"'{escaped}'"
 
-        elif isinstance(expr, StringLiteral):
-            escaped = self._escape_c_string(expr.value)
-            return f'nova_string_new("{escaped}")'
+    def _compile_assignment_expr(self, expr: Assignment) -> str:
+        """编译赋值表达式"""
+        c_name = self._mangle_name(expr.name)
+        value_c = self._compile_expr(expr.value)
+        return f"({c_name} = {value_c})"
 
-        elif isinstance(expr, CharLiteral):
-            escaped = self._escape_c_char(expr.value)
-            return f"'{escaped}'"
-
-        elif isinstance(expr, BoolLiteral):
-            return "true" if expr.value else "false"
-
-        elif isinstance(expr, UnitLiteral):
-            return "((void)0)"
-
-        elif isinstance(expr, Identifier):
-            return self._mangle_name(expr.name)
-
-        elif isinstance(expr, BinaryOp):
-            return self._compile_binary_op(expr)
-
-        elif isinstance(expr, UnaryOp):
-            return self._compile_unary_op(expr)
-
-        elif isinstance(expr, IfExpr):
-            return self._compile_if_expr(expr)
-
-        elif isinstance(expr, MatchExpr):
-            return self._compile_match_expr(expr)
-
-        elif isinstance(expr, FnCall):
-            return self._compile_fn_call(expr)
-
-        elif isinstance(expr, Lambda):
-            return self._compile_lambda(expr)
-
-        elif isinstance(expr, PipeExpr):
-            return self._compile_pipe_expr(expr)
-
-        elif isinstance(expr, LetBinding):
-            return self._compile_let_binding_expr(expr)
-
-        elif isinstance(expr, MutBinding):
-            return self._compile_mut_binding_expr(expr)
-
-        elif isinstance(expr, Assignment):
-            c_name = self._mangle_name(expr.name)
-            value_c = self._compile_expr(expr.value)
-            return f"({c_name} = {value_c})"
-
-        elif isinstance(expr, Block):
-            return self._compile_block(expr)
-
-        elif isinstance(expr, ListExpr):
-            return self._compile_list_expr(expr)
-
-        elif isinstance(expr, ListComprehension):
-            return self._compile_list_comprehension(expr)
-
-        elif isinstance(expr, TupleExpr):
-            return self._compile_tuple_expr(expr)
-
-        elif isinstance(expr, MapExpr):
-            return self._compile_map_expr(expr)
-
-        elif isinstance(expr, FieldAccess):
-            return self._compile_field_access(expr)
-
-        elif isinstance(expr, ForExpr):
-            return self._compile_for_expr(expr)
-
-        elif isinstance(expr, WhileExpr):
-            return self._compile_while_expr(expr)
-
-        elif isinstance(expr, BreakExpr):
-            return "break"
-
-        elif isinstance(expr, ContinueExpr):
-            return "continue"
-
-        elif isinstance(expr, TryExpr):
-            return self._compile_expr(expr.expr)
-
-        elif isinstance(expr, (ImportDecl, ExportDecl)):
-            return ""
-
-        elif isinstance(expr, TypeDef):
-            return ""
-
-        elif isinstance(expr, AliasDef):
-            return ""
-
-        elif isinstance(expr, FnDef):
-            # 嵌套函数定义——生成闭包
-            return self._compile_nested_fn_def(expr)
-
-        else:
-            return f"/* unhandled: {type(expr).__name__} */"
+    def _compile_try_expr(self, expr: TryExpr) -> str:
+        """编译 try 表达式（当前直接透传内部表达式）"""
+        return self._compile_expr(expr.expr)
 
     # ----------------------------------------------------------
     # 字面量和基本表达式
@@ -1422,6 +1342,56 @@ class CCodeGen:
         """检查名称是否是 C 关键字"""
         return name in C_KEYWORDS
 
+
+# ============================================================
+# _compile_expr 调度表
+# ============================================================
+
+# 表达式编译调度表：AST 节点类型 → handler 方法
+_EXPR_COMPILE_DISPATCH = {
+    # 字面量（简单 lambda）
+    IntLiteral: lambda self, e: f"((int64_t){e.value})",
+    FloatLiteral: lambda self, e: f"((double){repr(e.value)})",
+    BoolLiteral: lambda self, e: "true" if e.value else "false",
+    UnitLiteral: lambda self, e: "((void)0)",
+    # 字面量（需转义）
+    StringLiteral: CCodeGen._compile_string_literal,
+    CharLiteral: CCodeGen._compile_char_literal,
+    # 标识符
+    Identifier: lambda self, e: self._mangle_name(e.name),
+    # 运算
+    BinaryOp: CCodeGen._compile_binary_op,
+    UnaryOp: CCodeGen._compile_unary_op,
+    # 控制流与表达式
+    IfExpr: CCodeGen._compile_if_expr,
+    MatchExpr: CCodeGen._compile_match_expr,
+    FnCall: CCodeGen._compile_fn_call,
+    Lambda: CCodeGen._compile_lambda,
+    PipeExpr: CCodeGen._compile_pipe_expr,
+    # 绑定
+    LetBinding: CCodeGen._compile_let_binding_expr,
+    MutBinding: CCodeGen._compile_mut_binding_expr,
+    Assignment: CCodeGen._compile_assignment_expr,
+    # 块与数据结构
+    Block: CCodeGen._compile_block,
+    ListExpr: CCodeGen._compile_list_expr,
+    ListComprehension: CCodeGen._compile_list_comprehension,
+    TupleExpr: CCodeGen._compile_tuple_expr,
+    MapExpr: CCodeGen._compile_map_expr,
+    FieldAccess: CCodeGen._compile_field_access,
+    # 循环
+    ForExpr: CCodeGen._compile_for_expr,
+    WhileExpr: CCodeGen._compile_while_expr,
+    BreakExpr: lambda self, e: "break",
+    ContinueExpr: lambda self, e: "continue",
+    # 其他
+    TryExpr: CCodeGen._compile_try_expr,
+    ImportDecl: lambda self, e: "",
+    ExportDecl: lambda self, e: "",
+    TypeDef: lambda self, e: "",
+    AliasDef: lambda self, e: "",
+    FnDef: CCodeGen._compile_nested_fn_def,
+}
 
 # ============================================================
 # _infer_c_type_from_expr 调度表

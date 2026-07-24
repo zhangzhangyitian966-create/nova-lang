@@ -96,8 +96,8 @@
 | ✅ | 重构 BytecodeCompiler._compile_expr 降低圈复杂度 | medium | 60 | 3-5 小时 | - |
 | ✅ | 重构 SSAVerifier._verify_function 降低圈复杂度 | medium | 65 | 3-5 小时 | - |
 | ⏳ | 重构 TypeChecker._unify 降低圈复杂度 | medium | 65 | 3-5 小时 | - |
-| ⏳ | 重构 CCodeGen._compile_expr 降低圈复杂度 | medium | 55 | 3-5 小时 | - |
-| ⏳ | 批量清理未使用导入 v3 | easy | 58 | 1-2 小时 | - |
+| ✅ | 重构 CCodeGen._compile_expr 降低圈复杂度 | medium | 55 | 3-5 小时 | - |
+| ✅ | 批量清理未使用导入 v3 | easy | 58 | 1-2 小时 | - |
 | ✅ | 重构 CCodeGen._infer_c_type_from_expr 降低圈复杂度 | medium | 48 | 3-5 小时 | - |
 | ✅ | 重构 NativeCodeGen._compile_body 降低圈复杂度 | medium | 40 | 4-6 小时 | - |
 | ⏳ | LOW 级问题批量治理（docstring + 魔法数字） | easy | 52 | 2-4 小时 | - |
