@@ -1,7 +1,7 @@
 # Nova LLM 智能开发路线图
 
-**更新时间**: 2026-07-24 21:03:00
-**上次评审**: 第 42 轮（路线图评审）
+**更新时间**: 2026-07-24 15:30:00
+**上次评审**: 第 45 轮（路线图评审）
 
 本路线图由 LLM 智能开发系统动态维护。
 
@@ -59,6 +59,7 @@
 | ✅ | C 后端 LIR 路径列表推导式支持 | medium | 72 | 3-5 小时 | c_backend_adt_match, unify_c_backend |
 | ✅ | C 后端数据结构构建正确性验证 | medium | 80 | 3-5 小时 | c_backend_listcomp_verify, c_backend_adt_match |
 | 🔄 | C 后端闭包功能对齐（Phase1+2 完成，环境填充已落地） | hard | 78 | 1-2 天 | c_backend_data_verify |
+| ⏳ | C 后端闭包 Phase3（lambda 函数体编译） | hard | 78 | 3-5 天 | c_backend_closure_support |
 | ✅ | 修复 Wasm 后端全局变量声明缺失 | easy | 62 | 1-2 小时 | wasm_control_flow_rewrite |
 | ✅ | 重构 Wasm 后端指令编译调度表化 | medium | 72 | 3-5 小时 | wasm_control_flow_rewrite |
 | ⏳ | 实现原生后端函数调用 ABI | hard | 20 | 3-5 天 | fix_mir_ssa |
@@ -100,11 +101,15 @@
 | ✅ | 批量清理未使用导入 v3 | easy | 58 | 1-2 小时 | - |
 | ✅ | 重构 CCodeGen._infer_c_type_from_expr 降低圈复杂度 | medium | 48 | 3-5 小时 | - |
 | ✅ | 重构 NativeCodeGen._compile_body 降低圈复杂度 | medium | 40 | 4-6 小时 | - |
-| ⏳ | LOW 级问题批量治理（docstring + 魔法数字） | easy | 52 | 2-4 小时 | - |
+| ⏳ | LOW 级问题批量治理（docstring + 魔法数字） | easy | 48 | 2-4 小时 | - |
 | ✅ | 高复杂度函数补全 docstring | easy | 55 | 2-3 小时 | - |
 | ✅ | 重构 cfg_utils 操作数访问调度表化 | medium | 55 | 3-5 小时 | - |
 | ✅ | 重构 CraneliftBackend._compile_instr 调度表化 | medium | 65 | 3-5 小时 | - |
-| ⏳ | 建立代码质量门禁（docstring + 命名规范） | medium | 62 | 3-5 小时 | low_quality_issues_cleanup |
+| ⏳ | 建立代码质量门禁（docstring + 命名规范） | medium | 72 | 3-5 小时 | low_quality_issues_cleanup |
+| ⏳ | 重构 TypeChecker._check_pattern 调度表化 | medium | 70 | 2-3 小时 | - |
+| ⏳ | 重构 WasmGCBackend._compile_function 分层拆分 | medium | 68 | 3-5 小时 | - |
+| ⏳ | 批量清理 print_debug（104 个 LOW） | easy | 60 | 2-3 小时 | - |
+| ⏳ | 重构 MIRLowering._lower_if_expr 拆分 | medium | 55 | 2-3 小时 | - |
 
 ## 🧪 测试完善
 
@@ -114,15 +119,15 @@
 | ✅ | 为 SSA 验证器编写完整测试 | easy | 78 | 2-3 小时 | mir_ssa_verifier, extract_loop_ssa |
 | ✅ | 建立后端性能基准测试框架 | medium | 60 | 3-5 小时 | unify_c_backend |
 | ⏳ | 基准测试框架增强（C/Wasm执行时间+优化对比） | medium | 58 | 3-5 小时 | backend_benchmark_framework |
-| ⏳ | LICM 优化正确性测试 | medium | 68 | 3-5 小时 | implement_licm_pass, ssa_verifier_tests |
+| ⏳ | LICM 优化正确性测试 | medium | 60 | 3-5 小时 | implement_licm_pass, ssa_verifier_tests |
 | ⏳ | CFG 基础设施单元测试 | medium | 56 | 3-5 小时 | mir_cfg_loop_analysis |
 
 ---
 
-**进度**: 80/85 (94%)
-- **已完成**: 80
+**进度**: 82/90 (91%)
+- **已完成**: 82
 - **进行中**: 1
-- **待开发**: 3
+- **待开发**: 6
 - **已废弃**: 1
 
-> 注：第44轮完成 TypeChecker._unify（CC 26→5）和 CraneliftBackend._compile_instr（CC 24→3）调度表化重构。Top10 复杂函数中所有审查发现的条目已全部完成调度表化重构（7 个早期完成 + _compile_expr/33 + _unify/38 实际为 26 + Cranelift/24）。剩余 WasmGC._compile_function/25 因涉及全局 emitter 状态抽象，重构复杂度中等，列入下阶段计划。
+> 注：第45轮路线图评审。Top10 复杂度调度表化战略基本完成（里程碑）。新增 5 个任务：TypeChecker._check_pattern 调度表化（CC=24）、WasmGCBackend._compile_function 分层拆分（CC=26）、print_debug 清理（104个）、MIRLowering._lower_if_expr 拆分（CC=22）、C 后端闭包 Phase3。质量门禁优先级从 62 提升至 72（三次推迟强制推进）。下阶段方向：新一代复杂度治理 + LOW 级遏制 + 质量门禁落地。
