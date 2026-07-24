@@ -1,6 +1,8 @@
 {
-  "cycles": 43,
+  "cycles": 44,
   "completed_tasks": [
+    "refactor_type_checker_unify",
+    "refactor_cranelift_backend_dispatch",
     "refactor_eval_expr_complexity",
     "refactor_evaluator_match_pattern",
     "clean_unused_imports_v2",
@@ -99,6 +101,22 @@
   ],
   "failed_tasks": [],
   "task_history": [
+    {
+      "cycle": 44,
+      "task_id": "refactor_type_checker_unify",
+      "status": "completed",
+      "source": "审查驱动",
+      "reason": "TypeChecker._unify 圈复杂度 26，类型系统核心合一算法。10 个主类型分支构成 if-elif 链，新增类型时必须修改本函数，违反开闭原则。调度表化重构可行性高，与项目调度表化战略一致。第42轮评审规划为第44轮核心任务。",
+      "details": "将 _unify 从 82 行 10 分支 if-elif 链重构为调度表模式：1) 保留 TypeVar 处理（3 种情况）在主函数中，这是合一算法的基础；2) 新增 6 个独立方法（_unify_prim/_unify_list/_unify_map/_unify_tuple/_unify_fn/_unify_adt）处理结构类型合一；3) 模块级 _UNIFY_DISPATCH 字典（6 种 NovaType 子类→方法名映射）；4) _unify 主函数从 82 行压缩至约 25 行（CC≈5）。新增类型只需在调度表加一行并实现对应 handler。"
+    },
+    {
+      "cycle": 44,
+      "task_id": "refactor_cranelift_backend_dispatch",
+      "status": "completed",
+      "source": "审查驱动",
+      "reason": "审查日志（第1500轮）显示 CraneliftBackend._compile_instr 圈复杂度 24，Top 10 中仅剩的未调度表化的高复杂度函数。18 个 elif 分支，与 wasm_backend 和 lir_c_backend 的调度表化实践不一致。",
+      "details": "将 _compile_instr 从 75 行 18 分支 if-elif 链重构为调度表模式：1) 新增 _build_instr_dispatch_table() 构建 18 种 LIR 指令类型的 handler 映射表；2) 新增 16 个独立 _compile_xxx 方法按类别组织（标签1个、常量与加载4个、运算2个、函数调用1个、控制流3个、数据结构构建4个、访问2个、杂项1个）；3) _compile_instr 主函数从 75 行压缩至 8 行（CC≈3）。与 wasm_backend 和 lir_c_backend 风格完全统一。"
+    },
     {
       "cycle": 43,
       "task_id": "refactor_ccodegen_compile_expr",
@@ -376,14 +394,14 @@
     {
       "id": "refactor_type_checker_unify",
       "name": "重构 TypeChecker._unify 降低圈复杂度",
-      "description": "TypeChecker._unify 圈复杂度 38（全项目 Top 6），类型系统的核心合一算法。按类型类别拆分为独立方法（基础类型、复合类型、ADT、函数类型等），引入调度表模式降低复杂度",
+      "description": "TypeChecker._unify 圈复杂度 26，类型系统的核心合一算法。已重构为调度表模式：保留 TypeVar 处理在主函数，结构类型合一通过 _UNIFY_DISPATCH 调度表分发到 6 个独立 handler 方法。主函数从 82 行压缩至约 25 行（CC≈5）。",
       "difficulty": "medium",
       "priority": 65,
       "category": "engineering",
       "estimated": "3-5 小时",
-      "status": "pending",
+      "status": "completed",
       "depends_on": [],
-      "reason": "最新审查显示 _unify 圈复杂度 38，排名 Top 6。类型系统是 Nova 的核心竞争力，合一算法的可维护性直接影响类型系统的正确性和可扩展性。调度表化后类型扩展更方便。[新增任务 / 审查驱动]"
+      "reason": "TypeChecker._unify 圈复杂度 26，类型系统核心合一算法。调度表化重构后新增类型只需在调度表加一行并实现 handler，与项目调度表化战略一致。[已完成 / 审查驱动]"
     },
     {
       "id": "refactor_wasm_backend_dispatch",

@@ -95,7 +95,7 @@
 | ✅ | 重构 Evaluator._match_pattern 降低圈复杂度 | medium | 72 | 3-5 小时 | refactor_eval_expr_complexity |
 | ✅ | 重构 BytecodeCompiler._compile_expr 降低圈复杂度 | medium | 60 | 3-5 小时 | - |
 | ✅ | 重构 SSAVerifier._verify_function 降低圈复杂度 | medium | 65 | 3-5 小时 | - |
-| ⏳ | 重构 TypeChecker._unify 降低圈复杂度 | medium | 65 | 3-5 小时 | - |
+| ✅ | 重构 TypeChecker._unify 降低圈复杂度 | medium | 65 | 3-5 小时 | - |
 | ✅ | 重构 CCodeGen._compile_expr 降低圈复杂度 | medium | 55 | 3-5 小时 | - |
 | ✅ | 批量清理未使用导入 v3 | easy | 58 | 1-2 小时 | - |
 | ✅ | 重构 CCodeGen._infer_c_type_from_expr 降低圈复杂度 | medium | 48 | 3-5 小时 | - |
@@ -103,6 +103,7 @@
 | ⏳ | LOW 级问题批量治理（docstring + 魔法数字） | easy | 52 | 2-4 小时 | - |
 | ✅ | 高复杂度函数补全 docstring | easy | 55 | 2-3 小时 | - |
 | ✅ | 重构 cfg_utils 操作数访问调度表化 | medium | 55 | 3-5 小时 | - |
+| ✅ | 重构 CraneliftBackend._compile_instr 调度表化 | medium | 65 | 3-5 小时 | - |
 | ⏳ | 建立代码质量门禁（docstring + 命名规范） | medium | 62 | 3-5 小时 | low_quality_issues_cleanup |
 
 ## 🧪 测试完善
@@ -118,10 +119,10 @@
 
 ---
 
-**进度**: 78/84 (93%)
-- **已完成**: 78
+**进度**: 80/85 (94%)
+- **已完成**: 80
 - **进行中**: 1
-- **待开发**: 4
+- **待开发**: 3
 - **已废弃**: 1
 
-> 注：第42轮评审新增 2 个审查驱动任务（CCodeGen._compile_expr 重构 + unused_import v3 清理），TypeChecker._unify 优先级上调至 65。Top10 复杂函数中已有 7 个完成调度表化重构，剩余 3 个（_compile_expr/33、_unify/38、WasmGC._compile_function/25）。
+> 注：第44轮完成 TypeChecker._unify（CC 26→5）和 CraneliftBackend._compile_instr（CC 24→3）调度表化重构。Top10 复杂函数中所有审查发现的条目已全部完成调度表化重构（7 个早期完成 + _compile_expr/33 + _unify/38 实际为 26 + Cranelift/24）。剩余 WasmGC._compile_function/25 因涉及全局 emitter 状态抽象，重构复杂度中等，列入下阶段计划。

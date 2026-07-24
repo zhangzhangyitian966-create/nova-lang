@@ -1,3 +1,88 @@
+## 2026-07-24 04:12 第44轮开发
+
+### 开发概览
+- **轮次**: 第 44 轮（普通开发轮）
+- **基线测试**: 392/392 通过
+- **完成任务**: 2 个（全部审查驱动）
+- **审查驱动任务占比**: 100%（2/2）
+- **测试结果**: 392/392 通过（零回归）
+- **失败回滚**: 0 次
+
+---
+
+### 本轮任务列表
+
+1. **【审查驱动】重构 TypeChecker._unify 降低圈复杂度**（CC=26，类型系统核心）
+2. **【审查驱动】重构 CraneliftBackend._compile_instr 调度表化**（CC=24，Top10 剩余）
+
+---
+
+### 任务详情
+
+#### 1. refactor_type_checker_unify（审查驱动）
+
+**问题来源**: TypeChecker._unify 是 Hindley-Milner 类型推断的核心合一算法，82 行包含 10 个主类型分支（TypeVar×3、PrimType、ListType、MapType、TupleType、FnType、ADTType）。代码分析实测圈复杂度 26，是类型检查器中最高复杂度的方法。
+
+**修改内容**:
+- `type_checker.py`: 将 `_unify` 从 82 行 10 分支 if-elif 链重构为调度表模式
+  - 保留 TypeVar 处理（3 种情况）在主函数中，这是合一算法的核心逻辑
+  - 新增 6 个独立 handler 方法：`_unify_prim`、`_unify_list`、`_unify_map`、`_unify_tuple`、`_unify_fn`、`_unify_adt`
+  - 模块级 `_UNIFY_DISPATCH` 字典（6 种 NovaType 子类→方法名映射）
+  - 主函数从 82 行压缩至约 25 行（CC≈5）
+
+**收益**: 圈复杂度从 26 降至约 5。新增类型只需在调度表加一行并实现 handler，与 `_build_expr_checkers` 风格统一。类型系统核心算法的可维护性显著提升。
+
+#### 2. refactor_cranelift_backend_dispatch（审查驱动）
+
+**问题来源**: 审查日志（第1500轮）显示 CraneliftBackend._compile_instr 圈复杂度 24，是 Top10 中仅剩的未调度表化的高复杂度函数。18 个 elif 分支与 wasm_backend 和 lir_c_backend 的调度表化实践不一致。
+
+**修改内容**:
+- `backend/cranelift_backend.py`: 将 `_compile_instr` 从 75 行 18 分支 if-elif 链重构为调度表模式
+  - 新增 `_build_instr_dispatch_table()` 构建 18 种 LIR 指令类型的 handler 映射表
+  - 新增 16 个独立 `_compile_xxx` 方法按类别组织（标签1个、常量与加载4个、运算2个、函数调用1个、控制流3个、数据结构构建4个、访问2个、杂项1个）
+  - `_compile_instr` 主函数从 75 行压缩至 8 行（CC≈3）
+  - `__init__` 中初始化 `self._instr_dispatch`
+
+**收益**: 圈复杂度从 24 降至约 3。与 wasm_backend 和 lir_c_backend 风格完全统一，所有后端（C/Wasm/Cranelift/Native）的指令编译主函数均采用调度表模式。
+
+---
+
+### 审查日志研读摘要
+
+**最新审查（第1500轮，2026-07-24 01:20）**:
+- 总问题：1107（0 CRITICAL, 0 HIGH, 78 MEDIUM, 1029 LOW）
+- MEDIUM 持续下降（94→78），LOW 反弹（1001→1029）
+- cyclomatic_complexity: 19（继续下降）
+- unused_import: 24（继续下降）
+
+**本轮采纳的审查问题**:
+1. TypeChecker._unify（CC=26）→ 调度表化重构
+2. CraneliftBackend._compile_instr（CC=24，Top10 剩余）→ 调度表化重构
+
+---
+
+### 测试对比
+
+| 阶段 | 通过数 | 总数 | 结果 |
+|------|--------|------|------|
+| 开发前基线 | 392 | 392 | 通过 |
+| 任务1完成后 | 392 | 392 | 通过 |
+| 任务2完成后 | 392 | 392 | 通过 |
+
+**零回归确认**。
+
+---
+
+### 下一步计划
+
+第45轮方向（按第42轮评审规划延续）：
+1. **【审查驱动/自主发现】重构 WasmGCBackend._compile_function 降低复杂度**（CC=25，253行函数过长）
+2. **【审查驱动】LOW 级问题批量治理 v2**（docstring + 魔法数字，LOW 反弹至1029）
+
+Top10 复杂度调度表化战略已进入收尾阶段。所有四大后端（C/Wasm/Cranelift/Native）的指令编译主函数均已调度表化，类型检查器核心算法也已调度表化。下阶段重点：1）收尾最后一个 Top10 复杂函数；2）LOW 级问题治理遏制反弹。
+
+---
+
 ## 2026-07-24 21:12 第43轮开发
 
 ### 开发概览

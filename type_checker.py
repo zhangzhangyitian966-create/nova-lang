@@ -1299,7 +1299,7 @@ class TypeChecker:
         算法：
         1. 首先通过 _find 找到两个类型的根
         2. 如果任一根是 TypeVar，则将其绑定到另一个类型
-        3. 否则按结构递归合一
+        3. 否则按结构递归合一（通过 _UNIFY_DISPATCH 调度表分发）
         4. 发生检查：防止创建无限递归类型
         """
         a_root = self._find(a) if isinstance(a, TypeVar) else a
@@ -1327,51 +1327,60 @@ class TypeChecker:
             self._subst[id(b_root)] = a_root
             return True
 
-        # 情况 4：基本类型
-        if isinstance(a_root, PrimType) and isinstance(b_root, PrimType):
-            return a_root.name == b_root.name
-
-        # 情况 5：ListType
-        if isinstance(a_root, ListType) and isinstance(b_root, ListType):
-            return self._unify(a_root.elem_type, b_root.elem_type)
-
-        # 情况 6：MapType
-        if isinstance(a_root, MapType) and isinstance(b_root, MapType):
-            return self._unify(a_root.key_type, b_root.key_type) and self._unify(
-                a_root.value_type, b_root.value_type
-            )
-
-        # 情况 7：TupleType
-        if isinstance(a_root, TupleType) and isinstance(b_root, TupleType):
-            if len(a_root.elements) != len(b_root.elements):
-                return False
-            return all(
-                self._unify(e1, e2)
-                for e1, e2 in zip(a_root.elements, b_root.elements)
-            )
-
-        # 情况 8：FnType
-        if isinstance(a_root, FnType) and isinstance(b_root, FnType):
-            if len(a_root.param_types) != len(b_root.param_types):
-                return False
-            return all(
-                self._unify(p1, p2)
-                for p1, p2 in zip(a_root.param_types, b_root.param_types)
-            ) and self._unify(a_root.return_type, b_root.return_type)
-
-        # 情况 9：ADTType
-        if isinstance(a_root, ADTType) and isinstance(b_root, ADTType):
-            if a_root.name != b_root.name:
-                return False
-            if len(a_root.type_params) != len(b_root.type_params):
-                return False
-            return all(
-                self._unify(p1, p2)
-                for p1, p2 in zip(a_root.type_params, b_root.type_params)
-            )
+        # 情况 4-9：结构类型合一，通过调度表分发
+        if type(a_root) is type(b_root):
+            handler_name = _UNIFY_DISPATCH.get(type(a_root))
+            if handler_name is not None:
+                return getattr(self, handler_name)(a_root, b_root)
 
         # 情况 10：不兼容的类型构造器
         return False
+
+    # ------------------------------------------------------------------
+    # 结构类型合一 handler（被 _UNIFY_DISPATCH 调度表调用）
+    # ------------------------------------------------------------------
+
+    def _unify_prim(self, a: PrimType, b: PrimType) -> bool:
+        """合一两个基本类型"""
+        return a.name == b.name
+
+    def _unify_list(self, a: ListType, b: ListType) -> bool:
+        """合一两个列表类型"""
+        return self._unify(a.elem_type, b.elem_type)
+
+    def _unify_map(self, a: MapType, b: MapType) -> bool:
+        """合一两个 Map 类型"""
+        return self._unify(a.key_type, b.key_type) and self._unify(
+            a.value_type, b.value_type
+        )
+
+    def _unify_tuple(self, a: TupleType, b: TupleType) -> bool:
+        """合一两个元组类型"""
+        if len(a.elements) != len(b.elements):
+            return False
+        return all(
+            self._unify(e1, e2) for e1, e2 in zip(a.elements, b.elements)
+        )
+
+    def _unify_fn(self, a: FnType, b: FnType) -> bool:
+        """合一两个函数类型"""
+        if len(a.param_types) != len(b.param_types):
+            return False
+        return all(
+            self._unify(p1, p2)
+            for p1, p2 in zip(a.param_types, b.param_types)
+        ) and self._unify(a.return_type, b.return_type)
+
+    def _unify_adt(self, a: ADTType, b: ADTType) -> bool:
+        """合一两个代数数据类型"""
+        if a.name != b.name:
+            return False
+        if len(a.type_params) != len(b.type_params):
+            return False
+        return all(
+            self._unify(p1, p2)
+            for p1, p2 in zip(a.type_params, b.type_params)
+        )
 
     def _apply_subst(self, ty: "NovaType") -> "NovaType":
         """将替换表应用到类型上，返回所有类型变量都被替换后的类型。
@@ -1494,3 +1503,17 @@ class TypeChecker:
                 for p1, p2 in zip(a.type_params, b.type_params)
             )
         return False
+
+
+# ============================================================
+# 类型合一调度表
+# ============================================================
+
+_UNIFY_DISPATCH = {
+    PrimType: "_unify_prim",
+    ListType: "_unify_list",
+    MapType: "_unify_map",
+    TupleType: "_unify_tuple",
+    FnType: "_unify_fn",
+    ADTType: "_unify_adt",
+}
