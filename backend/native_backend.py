@@ -528,18 +528,107 @@ class NativeCodeGen:
             ctx.store_from_reg(dst_name, RAX)
 
     def _emit_call(self, instr, ctx: "_EmitContext"):
-        """编译函数调用指令。
+        """编译函数调用指令，实现 System V AMD64 ABI 调用约定。
 
-        当前实现：直接 call（参数传递将在 backend_native_call_abi 中实现）。
-        调用后从 RAX/XMM0 捕获返回值。
-        注意：caller-saved 寄存器（RCX, RDX, RSI, RDI, R8-R11）的值
-        在 call 后可能被破坏，寄存器分配器已在活跃区间计算中考虑了这一点。
+        包含：
+        - 整数参数传递：RDI, RSI, RDX, RCX, R8, R9（前6个），其余栈传
+        - 浮点参数传递：XMM0-XMM7（前8个），其余栈传
+        - 返回值捕获：RAX（整数）/ XMM0（浮点）
+        - caller-saved GPR 保存/恢复（保守方案）
+        - 调用前 16 字节栈对齐
         """
         e = ctx.e
+        INT_ARG_REGS = [RDI, RSI, RDX, RCX, R8, R9]
+        FLOAT_ARG_REGS = [XMM0, XMM1, XMM2, XMM3, XMM4, XMM5, XMM6, XMM7]
+        CALLER_GPRS = [RCX, RDX, RSI, RDI, R8, R9, R10, R11]
+
+        has_return = instr.dst_loc is not None
+
+        # 判断返回值目标是否在 caller-saved 中或是否为浮点
+        dst_in_caller_saved = False
+        dst_is_float = False
+        if has_return:
+            dst_name, dst_type = instr.dst_loc
+            dst_loc = ctx.get_loc(dst_name)
+            dst_in_caller_saved = dst_loc[0] == "reg" and dst_loc[1] in CALLER_GPRS
+            dst_is_float = dst_type.kind == IRType.FLOAT
+
+        # 1. 为返回值预留栈槽（如果目标在 caller-saved 中或浮点）
+        need_retval_slot = has_return and (dst_in_caller_saved or dst_is_float)
+        if need_retval_slot:
+            e.sub_rsp_imm(8)
+
+        # 2. 保存 caller-saved GPR（保守方案，确保 call 后活跃值不被破坏）
+        for reg in CALLER_GPRS:
+            e.push_reg(reg)
+
+        # 3. 搬移参数到 ABI 寄存器/栈
+        int_idx = 0
+        float_idx = 0
+        stack_args = []  # [(vreg_name, is_float), ...]
+
+        for arg_vname, arg_type in instr.arg_locs:
+            is_float = arg_type.kind == IRType.FLOAT
+            if is_float:
+                if float_idx < len(FLOAT_ARG_REGS):
+                    ctx.load_to_reg(arg_vname, FLOAT_ARG_REGS[float_idx], is_float=True)
+                    float_idx += 1
+                else:
+                    stack_args.append((arg_vname, True))
+            else:
+                if int_idx < len(INT_ARG_REGS):
+                    ctx.load_to_reg(arg_vname, INT_ARG_REGS[int_idx], is_float=False)
+                    int_idx += 1
+                else:
+                    stack_args.append((arg_vname, False))
+
+        # 4. 栈对齐：System V ABI 要求 call 前 RSP ≡ 0 (mod 16)
+        # 当前已调整：retval_slot(8) + caller_saved(64) + stack_args(8*n)
+        # 需要总调整量 ≡ 0 (mod 16)，即 retval? + n ≡ 0 (mod 2)
+        retval_bit = 1 if need_retval_slot else 0
+        needs_align = (retval_bit + len(stack_args)) % 2 == 1
+        if needs_align:
+            e.sub_rsp_imm(8)
+
+        # 5. 栈参数从右到左压栈
+        for arg_vname, is_float in reversed(stack_args):
+            ctx.load_to_reg(arg_vname, RAX, is_float=is_float)
+            e.push_reg(RAX)
+
+        # 6. 发射 call
         call_offset = e.call_rel32()
         self.link_calls.append((ctx.func_name, call_offset, instr.func_name))
-        if instr.dst_loc:
-            ctx.store_from_reg(instr.dst_loc[0], RAX)
+
+        # 7. 清理栈参数
+        if stack_args:
+            e.add_rsp_imm(len(stack_args) * 8)
+        if needs_align:
+            e.add_rsp_imm(8)
+
+        # 8. 保存返回值到预留槽（如果需要）
+        if has_return:
+            if need_retval_slot:
+                if dst_is_float:
+                    e.movsd_mem_reg(RSP, 64, XMM0)
+                else:
+                    e.mov_mem_reg(RSP, 64, RAX)
+            else:
+                # 目标在栈或 callee-saved 中，直接存储
+                ctx.store_from_reg(dst_name, RAX, is_float=False)
+
+        # 9. 恢复 caller-saved GPR
+        for reg in reversed(CALLER_GPRS):
+            e.pop_reg(reg)
+
+        # 10. 从预留槽加载返回值并清理
+        if need_retval_slot:
+            if dst_is_float:
+                e.movsd_reg_mem(XMM0, RSP, 0)
+                ctx.store_from_reg(dst_name, XMM0, is_float=True)
+            else:
+                e.mov_reg_mem(RAX, RSP, 0)
+                ctx.store_from_reg(dst_name, RAX, is_float=False)
+            e.add_rsp_imm(8)
 
     def _emit_return(self, instr, ctx: "_EmitContext"):
         """编译返回指令（加载返回值到 RAX/XMM0，ret 在函数尾声处理）。"""

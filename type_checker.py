@@ -655,6 +655,8 @@ class TypeChecker:
                 raise TypeCheckError(
                     f"match 分支 {i} 类型 {arm_ty} 与第一个分支 {result_type} 不一致"
                 )
+        # 检查模式匹配完备性
+        self._check_match_exhaustiveness(subject_ty, expr.arms, expr)
         return self._unify_and_resolve(result_type) if result_type else UNIT_T
 
     def _check_block(self, expr) -> NovaType:
@@ -952,6 +954,95 @@ class TypeChecker:
         body_ty = self.check_expr(arm.body)
         self.env = old_env
         return body_ty
+
+    def _check_match_exhaustiveness(
+        self, subject_type: NovaType, arms: List, match_expr: MatchExpr
+    ):
+        """检查 match 表达式的模式覆盖是否完备。
+
+        当前支持：
+        - ADT 类型：确保所有构造器都被覆盖
+        - Bool 类型：确保 true 和 false 都被覆盖
+        - 通配符 (_) 和变量绑定视为覆盖所有剩余情况
+        - 检测冗余分支（通配符/变量绑定之后的分支）
+        """
+        from .ast_nodes import (
+            PatternBool,
+            PatternConstructor,
+            PatternIdentifier,
+            PatternWildcard,
+        )
+
+        # 提取行号列号用于报错
+        line = match_expr.span.line if match_expr.span else -1
+        column = match_expr.span.column if match_expr.span else -1
+
+        covered_constructors = set()
+        has_wildcard_or_var = False
+        redundant_arms = []
+
+        for i, arm in enumerate(arms):
+            pat = arm.pattern
+            if isinstance(pat, (PatternWildcard, PatternIdentifier)):
+                if has_wildcard_or_var:
+                    # 多个通配符/变量绑定，后续全部冗余
+                    redundant_arms.append(i)
+                has_wildcard_or_var = True
+            elif isinstance(pat, PatternConstructor):
+                covered_constructors.add(pat.name)
+            elif isinstance(pat, PatternBool):
+                covered_constructors.add(str(pat.value))
+
+        # 报告冗余分支
+        if redundant_arms:
+            # 只报告第一个冗余分支，避免信息过载
+            first = redundant_arms[0]
+            raise TypeCheckError(
+                f"match 分支 {first} 是冗余的：之前的分支已经覆盖了所有情况",
+                line=line,
+                column=column,
+            )
+
+        # 如果存在通配符或变量绑定，视为完备
+        if has_wildcard_or_var:
+            return
+
+        # 对 ADT 类型检查构造器覆盖
+        if isinstance(subject_type, ADTType):
+            all_variants = self.env.get_all_adt_variants()
+            variants = all_variants.get(subject_type.name)
+            if variants:
+                expected = {vname for vname, _ in variants}
+                missing = expected - covered_constructors
+                if missing:
+                    missing_list = ", ".join(sorted(missing))
+                    raise TypeCheckError(
+                        f"match 表达式不完备：缺失构造器 {missing_list}",
+                        line=line,
+                        column=column,
+                    )
+
+        # 对 Bool 类型检查 true/false 覆盖
+        if isinstance(subject_type, PrimType) and subject_type.name == "Bool":
+            if "True" not in covered_constructors or "False" not in covered_constructors:
+                missing = []
+                if "True" not in covered_constructors:
+                    missing.append("true")
+                if "False" not in covered_constructors:
+                    missing.append("false")
+                raise TypeCheckError(
+                    f"match 表达式不完备：缺失布尔值 {', '.join(missing)}",
+                    line=line,
+                    column=column,
+                )
+
+        # 没有分支时视为不完备（除非类型为空，但 Nova 暂不支持空类型）
+        if not arms:
+            raise TypeCheckError(
+                "match 表达式必须至少有一个分支",
+                line=line,
+                column=column,
+            )
 
     def _check_pattern(self, pattern, subject_type: NovaType, env: TypeEnv, match_expr):
         """检查模式与类型的匹配"""

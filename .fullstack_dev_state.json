@@ -1,7 +1,7 @@
 {
-  "cycles": 15,
-  "frontend_completed": 10,
-  "backend_completed": 11,
+  "cycles": 16,
+  "frontend_completed": 11,
+  "backend_completed": 12,
   "last_review_cycle": 15,
   "current_review_cycle": 18,
   "completed_tasks": [
@@ -24,13 +24,37 @@
     "frontend_parser_error_recovery",
     "backend_wasm_return_fix",
     "frontend_type_unify_deepen",
-    "backend_native_stack_frame"
+    "backend_native_stack_frame",
+    "frontend_pattern_exhaustiveness",
+    "backend_native_call_abi"
   ],
   "failed_tasks": [],
   "deprecated_tasks": [
     "frontend_type_var_strict"
   ],
   "task_history": [
+    {
+      "cycle": 16,
+      "task_id": "frontend_pattern_exhaustiveness",
+      "name": "实现模式匹配完备性检查（基础版）",
+      "track": "frontend",
+      "difficulty": "hard",
+      "priority": 86,
+      "result": "success",
+      "details": "在 type_checker.py 中实现模式匹配完备性检查基础版：(1) 新增 _check_match_exhaustiveness 方法，在 _check_match_expr 末尾调用；(2) ADT 类型覆盖检查——收集所有 PatternConstructor 名称，与 TypeEnv.adt_variants 中该 ADT 的全部构造器对比，缺失时报错并列出缺失构造器；(3) Bool 类型覆盖检查——确保 true 和 false 都被覆盖（或通配符）；(4) 通配符 (_) 和变量绑定 (PatternIdentifier) 视为覆盖所有剩余情况；(5) 冗余分支检测——通配符/变量绑定之后的分支报告冗余。范围聚焦构造器级别，暂未实现嵌套模式深度分析和 Guard 不可达检测。392 测试全部通过，无回归。",
+      "timestamp": "2026-07-24 04:20"
+    },
+    {
+      "cycle": 16,
+      "task_id": "backend_native_call_abi",
+      "name": "实现原生后端 System V AMD64 ABI 调用约定（核心版）",
+      "track": "backend",
+      "difficulty": "hard",
+      "priority": 99,
+      "result": "success",
+      "details": "全面重写 _emit_call，实现 System V AMD64 ABI 调用约定的核心功能：(1) 整数参数传递——前6个按顺序加载到 RDI/RSI/RDX/RCX/R8/R9，多余参数从右到左压栈；(2) 浮点参数传递——前8个按顺序加载到 XMM0-XMM7，多余参数压栈；(3) 浮点返回值捕获——从 XMM0 捕获（之前只有 RAX 整数返回值）；(4) caller-saved GPR 保守保存/恢复——call 前 push RCX/RDX/RSI/RDI/R8/R9/R10/R11（64字节），call 后 pop 恢复；(5) 栈对齐——根据 retval_slot 和栈参数数量动态计算是否需要额外 8 字节对齐垫片，确保 call 前 RSP ≡ 0 (mod 16)；(6) 返回值安全处理——当返回值目标在 caller-saved 寄存器中时，先将返回值保存到栈槽，恢复 caller-saved 后再加载到目标。参数传递从 0% 到核心功能完备，是原生后端可用性的最大突破。392 测试全部通过，无回归。",
+      "timestamp": "2026-07-24 04:20"
+    },
     {
       "cycle": 15,
       "task_id": "review_cycle_15",
@@ -316,7 +340,7 @@
       "difficulty": "hard",
       "priority": 99,
       "estimated_effort": "2-3天",
-      "status": "pending",
+      "status": "completed",
       "source": "review_9",
       "depends_on": ["backend_native_stack_frame"]
     },
@@ -328,7 +352,7 @@
       "difficulty": "hard",
       "priority": 86,
       "estimated_effort": "2-3天",
-      "status": "pending",
+      "status": "completed",
       "source": "quality_analysis",
       "depends_on": []
     },
