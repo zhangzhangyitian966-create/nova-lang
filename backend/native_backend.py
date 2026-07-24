@@ -764,6 +764,10 @@ class NativeCodeGen:
         通过 System V ABI 调用外部运行时函数（nova_list_new 等）。
         调用链路：保存 caller-saved -> 设置参数 -> call -> 恢复 -> 取返回值。
         外部函数的 call rel32 在链接阶段暂不回填（保持 0 偏移）。
+
+        参数格式：
+          - 变量参数: (vreg_name, arg_type)
+          - 立即数参数: (("imm", value), arg_type)
         """
         e = ctx.e
         has_return = dst_loc_info is not None
@@ -784,33 +788,50 @@ class NativeCodeGen:
         for reg in CALLER_GPRS:
             e.push_reg(reg)
 
-        # 3. 设置参数
+        # 3. 设置参数（支持变量和立即数混合）
         int_idx = 0
         float_idx = 0
-        stack_args = []
-        for arg_vname, arg_type in args:
+        stack_var_args = []  # 变量溢出参数（从右到左压栈）
+        stack_arg_count = 0  # 总溢出参数数（含立即数）
+        for arg_spec, arg_type in args:
             is_float = arg_type.kind == IRType.FLOAT
-            if is_float:
-                if float_idx < len(FLOAT_ARG_REGS):
-                    ctx.load_to_reg(arg_vname, FLOAT_ARG_REGS[float_idx], is_float=True)
-                    float_idx += 1
-                else:
-                    stack_args.append((arg_vname, True))
-            else:
+            if isinstance(arg_spec, tuple) and arg_spec[0] == "imm":
+                imm_val = arg_spec[1]
+                if is_float:
+                    # 浮点立即数暂不支持（需要加载到临时内存再 movsd）
+                    raise NotImplementedError("浮点立即数参数暂不支持")
                 if int_idx < len(INT_ARG_REGS):
-                    ctx.load_to_reg(arg_vname, INT_ARG_REGS[int_idx], is_float=False)
+                    e.mov_reg_imm64(INT_ARG_REGS[int_idx], imm_val)
                     int_idx += 1
                 else:
-                    stack_args.append((arg_vname, False))
+                    e.mov_reg_imm64(RAX, imm_val)
+                    e.push_reg(RAX)
+                    stack_arg_count += 1
+            else:
+                arg_vname = arg_spec
+                if is_float:
+                    if float_idx < len(FLOAT_ARG_REGS):
+                        ctx.load_to_reg(arg_vname, FLOAT_ARG_REGS[float_idx], is_float=True)
+                        float_idx += 1
+                    else:
+                        stack_var_args.append((arg_vname, True))
+                        stack_arg_count += 1
+                else:
+                    if int_idx < len(INT_ARG_REGS):
+                        ctx.load_to_reg(arg_vname, INT_ARG_REGS[int_idx], is_float=False)
+                        int_idx += 1
+                    else:
+                        stack_var_args.append((arg_vname, False))
+                        stack_arg_count += 1
 
         # 4. 栈对齐
         retval_bit = 1 if need_retval_slot else 0
-        needs_align = (retval_bit + len(stack_args)) % 2 == 1
+        needs_align = (retval_bit + stack_arg_count) % 2 == 1
         if needs_align:
             e.sub_rsp_imm(8)
 
-        # 5. 栈参数压栈
-        for arg_vname, is_float in reversed(stack_args):
+        # 5. 变量栈参数压栈（从右到左）
+        for arg_vname, is_float in reversed(stack_var_args):
             ctx.load_to_reg(arg_vname, RAX, is_float=is_float)
             e.push_reg(RAX)
 
@@ -819,8 +840,8 @@ class NativeCodeGen:
         self.external_calls.append((ctx.func_name, call_offset, func_name))
 
         # 7. 清理栈参数和对齐
-        if stack_args:
-            e.add_rsp_imm(len(stack_args) * 8)
+        if stack_arg_count > 0:
+            e.add_rsp_imm(stack_arg_count * 8)
         if needs_align:
             e.add_rsp_imm(8)
 
@@ -850,62 +871,36 @@ class NativeCodeGen:
 
     def _emit_build_list(self, instr, ctx: "_EmitContext"):
         """编译列表构建：调用 nova_list_new(count)，然后 nova_list_push 逐个添加元素。"""
-        e = ctx.e
         dst_info = instr.dst_loc if instr.dst_loc else None
 
         # 先调用 nova_list_new(count)
-        # 构造整数参数：count
-        # 用临时方式加载 count 到 RDI
-        e.push_reg(RDI)
-        e.push_reg(RSI)
-        e.mov_reg_imm64(RDI, instr.count)
-        call_offset = e.call_rel32()
-        self.external_calls.append((ctx.func_name, call_offset, "nova_list_new"))
-        e.pop_reg(RSI)
-        e.pop_reg(RDI)
-
-        # 保存列表指针到目标位置
-        if dst_info:
-            dst_name, _ = dst_info
-            ctx.store_from_reg(dst_name, RAX)
+        self._emit_runtime_call(
+            "nova_list_new",
+            [(("imm", instr.count), IRType.int_type())],
+            dst_info,
+            ctx,
+        )
 
         # 循环 nova_list_push(list, elem)
         for i, (elem_loc, elem_type) in enumerate(instr.src_locs):
-            e.push_reg(RDI)
-            e.push_reg(RSI)
-            # RDI = list pointer
             if dst_info:
-                src_l = ctx.get_loc(dst_info[0])
-                if src_l[0] == "reg":
-                    e.mov_reg_reg64(RDI, src_l[1])
-                else:
-                    e.mov_reg_mem(RDI, RSP, src_l[1] + 16)  # +16 跳过 push 的 RDI/RSI
-            # RSI = element
-            ctx.load_to_reg(elem_loc, RSI, is_float=elem_type.kind == IRType.FLOAT)
-            call_offset = e.call_rel32()
-            self.external_calls.append((ctx.func_name, call_offset, "nova_list_push"))
-            e.pop_reg(RSI)
-            e.pop_reg(RDI)
+                self._emit_runtime_call(
+                    "nova_list_push",
+                    [dst_info, (elem_loc, elem_type)],
+                    None,
+                    ctx,
+                )
 
     def _emit_list_append(self, instr, ctx: "_EmitContext"):
         """编译列表追加：调用 nova_list_push(list, elem)。"""
         if not instr.src_locs or len(instr.src_locs) < 2:
             return
-        e = ctx.e
-        e.push_reg(RDI)
-        e.push_reg(RSI)
-        # RDI = list
-        ctx.load_to_reg(instr.src_locs[0][0], RDI)
-        # RSI = element
-        ctx.load_to_reg(instr.src_locs[1][0], RSI)
-        call_offset = e.call_rel32()
-        self.external_calls.append((ctx.func_name, call_offset, "nova_list_push"))
-        e.pop_reg(RSI)
-        e.pop_reg(RDI)
-        # dst = list (原地修改，指针不变)
-        if instr.dst_loc:
-            dst_name, _ = instr.dst_loc
-            ctx.store_from_reg(dst_name, RAX)
+        self._emit_runtime_call(
+            "nova_list_push",
+            [instr.src_locs[0], instr.src_locs[1]],
+            instr.dst_loc,
+            ctx,
+        )
 
     def _emit_build_tuple(self, instr, ctx: "_EmitContext"):
         """编译元组构建：调用 nova_alloc(size)，然后逐字段填充。"""
@@ -953,92 +948,63 @@ class NativeCodeGen:
 
     def _emit_build_map(self, instr, ctx: "_EmitContext"):
         """编译 Map 构建：调用 nova_map_new(entry_count)，然后逐对 nova_map_put。"""
-        e = ctx.e
         dst_info = instr.dst_loc if instr.dst_loc else None
 
         # 调用 nova_map_new(entry_count)
-        e.push_reg(RDI)
-        e.push_reg(RSI)
-        e.mov_reg_imm64(RDI, instr.entry_count)
-        call_offset = e.call_rel32()
-        self.external_calls.append((ctx.func_name, call_offset, "nova_map_new"))
-        e.pop_reg(RSI)
-        e.pop_reg(RDI)
-
-        if dst_info:
-            dst_name, _ = dst_info
-            ctx.store_from_reg(dst_name, RAX)
+        self._emit_runtime_call(
+            "nova_map_new",
+            [(("imm", instr.entry_count), IRType.int_type())],
+            dst_info,
+            ctx,
+        )
 
         # 循环 nova_map_put(map, key, value)
         for i in range(instr.entry_count):
             key_idx = i * 2
             val_idx = i * 2 + 1
             if key_idx < len(instr.src_locs) and val_idx < len(instr.src_locs):
-                e.push_reg(RDI)
-                e.push_reg(RSI)
-                e.push_reg(RDX)
-                # RDI = map
                 if dst_info:
-                    base_l = ctx.get_loc(dst_info[0])
-                    if base_l[0] == "reg":
-                        e.mov_reg_reg64(RDI, base_l[1])
-                    else:
-                        e.mov_reg_mem(RDI, RSP, base_l[1] + 24)  # +24 跳过 push
-                # RSI = key
-                key_loc, key_type = instr.src_locs[key_idx]
-                ctx.load_to_reg(key_loc, RSI)
-                # RDX = value
-                val_loc, val_type = instr.src_locs[val_idx]
-                ctx.load_to_reg(val_loc, RDX)
-                call_offset = e.call_rel32()
-                self.external_calls.append((ctx.func_name, call_offset, "nova_map_put"))
-                e.pop_reg(RDX)
-                e.pop_reg(RSI)
-                e.pop_reg(RDI)
+                    self._emit_runtime_call(
+                        "nova_map_put",
+                        [
+                            dst_info,
+                            instr.src_locs[key_idx],
+                            instr.src_locs[val_idx],
+                        ],
+                        None,
+                        ctx,
+                    )
 
     def _emit_build_adt(self, instr, ctx: "_EmitContext"):
         """编译 ADT 构建：调用 nova_adt_new(type_id, variant_tag, field_count)，然后填充字段。"""
-        e = ctx.e
         dst_info = instr.dst_loc if instr.dst_loc else None
+        int_ty = IRType.int_type()
 
         # 调用 nova_adt_new(type_id, variant_tag, field_count)
-        e.push_reg(RDI)
-        e.push_reg(RSI)
-        e.push_reg(RDX)
-        e.mov_reg_imm64(RDI, instr.type_tag)
-        e.mov_reg_imm64(RSI, instr.type_tag)
-        e.mov_reg_imm64(RDX, instr.field_count)
-        call_offset = e.call_rel32()
-        self.external_calls.append((ctx.func_name, call_offset, "nova_adt_new"))
-        e.pop_reg(RDX)
-        e.pop_reg(RSI)
-        e.pop_reg(RDI)
-
-        if dst_info:
-            dst_name, _ = dst_info
-            ctx.store_from_reg(dst_name, RAX)
+        self._emit_runtime_call(
+            "nova_adt_new",
+            [
+                (("imm", instr.type_tag), int_ty),
+                (("imm", instr.type_tag), int_ty),
+                (("imm", instr.field_count), int_ty),
+            ],
+            dst_info,
+            ctx,
+        )
 
         # 逐字段填充 nova_adt_set_field(adt, idx, value)
         for i, (field_loc, field_type) in enumerate(instr.src_locs):
-            e.push_reg(RDI)
-            e.push_reg(RSI)
-            e.push_reg(RDX)
-            # RDI = adt pointer
             if dst_info:
-                base_l = ctx.get_loc(dst_info[0])
-                if base_l[0] == "reg":
-                    e.mov_reg_reg64(RDI, base_l[1])
-                else:
-                    e.mov_reg_mem(RDI, RSP, base_l[1] + 24)
-            # RSI = field index
-            e.mov_reg_imm64(RSI, i)
-            # RDX = field value
-            ctx.load_to_reg(field_loc, RDX, is_float=field_type.kind == IRType.FLOAT)
-            call_offset = e.call_rel32()
-            self.external_calls.append((ctx.func_name, call_offset, "nova_adt_set_field"))
-            e.pop_reg(RDX)
-            e.pop_reg(RSI)
-            e.pop_reg(RDI)
+                self._emit_runtime_call(
+                    "nova_adt_set_field",
+                    [
+                        dst_info,
+                        (("imm", i), int_ty),
+                        (field_loc, field_type),
+                    ],
+                    None,
+                    ctx,
+                )
 
     def _emit_field_access(self, instr, ctx: "_EmitContext"):
         """编译字段访问：从基址+offset 加载值。
@@ -1078,20 +1044,12 @@ class NativeCodeGen:
         """编译索引访问：调用 nova_list_get(list, index)。"""
         if not instr.src_locs or len(instr.src_locs) < 2 or not instr.dst_loc:
             return
-        e = ctx.e
-        e.push_reg(RDI)
-        e.push_reg(RSI)
-        # RDI = list
-        ctx.load_to_reg(instr.src_locs[0][0], RDI)
-        # RSI = index
-        ctx.load_to_reg(instr.src_locs[1][0], RSI)
-        call_offset = e.call_rel32()
-        self.external_calls.append((ctx.func_name, call_offset, "nova_list_get"))
-        e.pop_reg(RSI)
-        e.pop_reg(RDI)
-        # 保存返回值
-        dst_name, dst_type = instr.dst_loc
-        ctx.store_from_reg(dst_name, RAX, is_float=dst_type.kind == IRType.FLOAT)
+        self._emit_runtime_call(
+            "nova_list_get",
+            [instr.src_locs[0], instr.src_locs[1]],
+            instr.dst_loc,
+            ctx,
+        )
 
     def _emit_closure_create(self, instr, ctx: "_EmitContext"):
         """编译闭包创建（占位实现）。

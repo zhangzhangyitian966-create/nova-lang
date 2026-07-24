@@ -703,21 +703,28 @@ class TypeChecker:
         """检查 for 表达式（range 和列表遍历），返回 List[body_type]。
 
         range 循环验证起止步类型；列表遍历验证迭代器类型。
+        循环变量类型与 iterable 的元素类型合一。
         """
-        # for 循环：返回 List[元素类型]
+        # 推断循环变量的元素类型
         if isinstance(expr.iterable, tuple) and expr.iterable[0] == "range":
             # 范围循环：iterable 是 ("range", start, end, step)
             start_ty = self.check_expr(expr.iterable[1])
             end_ty = self.check_expr(expr.iterable[2])
             if expr.iterable[3]:
                 self.check_expr(expr.iterable[3])  # step
+            # range 产生整数序列，循环变量为 Int
+            elem_ty = INT_T
         else:
-            # 列表遍历
+            # 列表遍历：提取 iterable 的元素类型
             iter_ty = self.check_expr(expr.iterable)
+            if isinstance(iter_ty, ListType):
+                elem_ty = iter_ty.elem_type
+            else:
+                elem_ty = TypeVar("for_elem")
 
         # 检查循环体类型
         child_env = self.env.child()
-        child_env.define(expr.var_name, TypeVar("for_elem"))
+        child_env.define(expr.var_name, elem_ty)
         old_env = self.env
         self.env = child_env
         body_ty = self.check_expr(expr.body)
@@ -952,16 +959,23 @@ class TypeChecker:
         """检查列表推导式，验证迭代器和过滤条件类型，返回 List[expr_type]。
 
         过滤条件必须为 Bool 类型。
+        循环变量类型与 iterable 的元素类型合一。
         """
-        # 列表推导式：返回 List[expr 类型]
+        # 推断循环变量的元素类型
         if isinstance(expr.iterable, tuple) and expr.iterable[0] == "range":
             self.check_expr(expr.iterable[1])
             self.check_expr(expr.iterable[2])
+            # range 产生整数序列，循环变量为 Int
+            elem_ty = INT_T
         else:
-            self.check_expr(expr.iterable)
+            iter_ty = self.check_expr(expr.iterable)
+            if isinstance(iter_ty, ListType):
+                elem_ty = iter_ty.elem_type
+            else:
+                elem_ty = TypeVar("lc_elem")
 
         child_env = self.env.child()
-        child_env.define(expr.var_name, TypeVar("lc_elem"))
+        child_env.define(expr.var_name, elem_ty)
         if expr.filter_cond:
             old_env = self.env
             self.env = child_env

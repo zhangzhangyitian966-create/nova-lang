@@ -4,6 +4,50 @@
 
 ---
 
+## 第 19 轮（2026-07-24 13:00-13:15）
+
+### 前端任务：修复 for 循环和列表推导的迭代器类型推断
+
+- **任务 ID**: frontend_for_loop_type_inference
+- **难度**: medium
+- **优先级**: 72
+- **结果**: 成功
+- **为什么选这个**: 第 18 轮评审明确指出的 P2 弱点。循环变量绑定为裸 TypeVar 导致类型精度不足，是前端类型系统的实质性短板。
+- **修改内容**:
+  - `type_checker.py` `_check_for_expr`: range 循环变量绑定为 `INT_T`；List 遍历提取 `ListType.elem_type`；其他类型回退到 `TypeVar`
+  - `type_checker.py` `_check_list_comprehension`: 同样的修复逻辑
+- **测试验证**: 395 passed, 20 subtests passed，无回归
+
+### 后端任务：原生后端复合指令迁移到 _emit_runtime_call
+
+- **任务 ID**: backend_native_runtime_call_refactor
+- **难度**: medium
+- **优先级**: 90
+- **结果**: 成功
+- **为什么选这个**: 第 18 轮评审指出的 P1 风险，且是最高优先级后端任务（P90）。手动 push/pop+call 模式不检查栈对齐、不保存 caller-saved，存在正确性风险。
+- **修改内容**:
+  - 扩展 `_emit_runtime_call` 支持立即数参数（格式 `(('imm', value), arg_type)`），自动处理寄存器分配、栈对齐和 caller-saved 保存/恢复
+  - 迁移 `_emit_build_list`（nova_list_new + nova_list_push 循环）
+  - 迁移 `_emit_list_append`（nova_list_push）
+  - 迁移 `_emit_build_map`（nova_map_new + nova_map_put 循环）
+  - 迁移 `_emit_build_adt`（nova_adt_new + nova_adt_set_field 循环）
+  - 迁移 `_emit_index`（nova_list_get）
+  - 删除约 120 行手动 push/pop+call 代码
+- **测试验证**: 395 passed, 20 subtests passed，无回归
+
+### 测试前后对比
+
+| 指标 | 开发前 | 开发后 |
+|------|--------|--------|
+| 通过测试数 | 395 | 395 |
+| 子测试数 | 20 | 20 |
+| 回归 | - | 无 |
+
+### 下轮计划
+
+- **前端**: 清理 _types_compatible 遗留方法（easy，最后一个前端待做任务）
+- **后端**: 原生后端指令选择优化（easy，P68）或 Wasm 后端数据结构构建指令完善（medium，P65）
+
 ## 第 18 轮评审 — 2026-07-24 10:10
 
 > 三轮回顾评审：第 16-18 轮总结 + 双线路线图调整

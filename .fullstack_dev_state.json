@@ -1,7 +1,7 @@
 {
-  "cycles": 18,
-  "frontend_completed": 12,
-  "backend_completed": 14,
+  "cycles": 19,
+  "frontend_completed": 13,
+  "backend_completed": 15,
   "last_review_cycle": 18,
   "current_review_cycle": 21,
   "completed_tasks": [
@@ -30,13 +30,37 @@
     "frontend_match_guard_typecheck",
     "backend_native_compound_instr",
     "backend_fix_map_set_put",
-    "review_cycle_18"
+    "review_cycle_18",
+    "frontend_for_loop_type_inference",
+    "backend_native_runtime_call_refactor"
   ],
   "failed_tasks": [],
   "deprecated_tasks": [
     "frontend_type_var_strict"
   ],
   "task_history": [
+    {
+      "cycle": 19,
+      "task_id": "backend_native_runtime_call_refactor",
+      "name": "原生后端复合指令迁移到 _emit_runtime_call",
+      "track": "backend",
+      "difficulty": "medium",
+      "priority": 90,
+      "result": "success",
+      "details": "全面迁移原生后端复合数据结构指令到 _emit_runtime_call 统一调用器。扩展 _emit_runtime_call 支持立即数参数（格式：(('imm', value), arg_type)），实现栈对齐和 caller-saved 寄存器保护的自动化。迁移范围：_emit_build_list（nova_list_new + nova_list_push 循环）、_emit_list_append（nova_list_push）、_emit_build_map（nova_map_new + nova_map_put 循环）、_emit_build_adt（nova_adt_new + nova_adt_set_field 循环）、_emit_index（nova_list_get）。删除约 120 行手动 push/pop+call 代码，新增约 40 行统一调用代码。395 测试全部通过，无回归。",
+      "timestamp": "2026-07-24 13:10"
+    },
+    {
+      "cycle": 19,
+      "task_id": "frontend_for_loop_type_inference",
+      "name": "修复 for 循环和列表推导的迭代器类型推断",
+      "track": "frontend",
+      "difficulty": "medium",
+      "priority": 72,
+      "result": "success",
+      "details": "修复 type_checker.py 中 _check_for_expr 和 _check_list_comprehension 的迭代器变量类型绑定问题。原代码将循环变量绑定为裸 TypeVar('for_elem')/TypeVar('lc_elem')，不与 iterable 的实际元素类型合一。修复后：range 循环变量绑定为 INT_T；List 遍历提取 ListType.elem_type 作为循环变量类型；其他类型回退到 TypeVar 保持原有推断行为。395 测试全部通过，无回归。",
+      "timestamp": "2026-07-24 13:05"
+    },
     {
       "cycle": 18,
       "task_id": "review_cycle_18",
@@ -113,7 +137,7 @@
       "difficulty": "medium",
       "priority": 90,
       "estimated_effort": "4-6小时",
-      "status": "pending",
+      "status": "completed",
       "source": "review_18_audit",
       "depends_on": ["backend_native_call_abi"]
     },
@@ -149,7 +173,7 @@
       "difficulty": "medium",
       "priority": 72,
       "estimated_effort": "2-3小时",
-      "status": "pending",
+      "status": "completed",
       "source": "review_18_audit",
       "depends_on": []
     },
