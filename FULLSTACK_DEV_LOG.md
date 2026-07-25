@@ -4,6 +4,83 @@
 
 ---
 
+## 第 29 轮开发 — 2026-07-26 03:48
+
+> 普通开发轮：前端 parser 块内错误恢复粒度增强 + 后端 MIR lambda 降级鲁棒性修复
+
+---
+
+### 前端任务：增强 parser 块内错误恢复粒度
+
+**任务 ID**: `frontend_parser_block_recovery` | **难度**: easy | **优先级**: 35 | **结果**: 成功
+
+**为什么选择这个任务：**
+- 前端任务池已空，第 27 轮评审 P2-4 明确指出 parser 块内错误恢复粒度偏粗
+- 维护模式下的轻量增量改进，低难度高确定性
+- 与第 28 轮 parser 多错误聚合抛出形成连贯的 DX 改进链
+
+**实现详情：**
+- `parser.py` 的 `_parse_block` 中增加块内最大错误数限制和强制跳过保护
+  - 新增类常量 `_BLOCK_MAX_ERRORS = 3`，当单块内连续错误达到上限时，放弃剩余内容直接跳到 `RBRACE`
+  - 错误恢复逻辑中增加 `block_errors` 计数器，每次 `ParseError` 时递增
+  - 超过阈值时通过 `while` 循环强制前进到 `RBRACE` 或 `EOF` 后 `break`
+  - 避免在严重损坏的块内无限循环同步，提升编译器对恶意/损坏输入的鲁棒性
+
+**测试验证：** 395 测试全部通过，无回归。
+
+**前端线状态：** 20/21 完成（含 1 废弃），维护模式。
+
+---
+
+### 后端任务：修复 MIR lambda 降级的边界崩溃风险
+
+**任务 ID**: `backend_mir_lambda_robust` | **难度**: easy | **优先级**: 82 | **结果**: 成功
+
+**为什么选择这个任务：**
+- 任务池中最高优先级的 easy 任务（P82），防御式修复
+- 第 27 轮评审 P1-1：mir_lowering `_lower_lambda` return_type is None 时直接访问 `.kind` 导致 AttributeError
+- 为后续 hard 任务（native_fn_ptr / wasm_fn_ptr）扫清障碍，确保 MIR 层稳定
+
+**实现详情：**
+- `ir/mir_lowering.py` 的 `_lower_lambda` 中增加防御式类型检查
+  - 原代码第 467 行 `if return_type.kind == IRType.TYPE_VAR:` 假设 return_type 一定存在
+  - 修复：条件改为 `if return_type is None or return_type.kind == IRType.TYPE_VAR:`，当 return_type 为 None 时回退到 ir_type 推断路径
+  - 同时增加 `fn_type and fn_type.params` 的防御检查，避免 fn_type 为 None 时访问 `.params` 崩溃
+- 清零评审报告 P1-1 项
+
+**代码量：** 约 3 行修改（含注释）。
+
+**测试验证：** 395 测试全部通过，无回归。
+
+**后端线状态：** 23/29 完成（含 3 废弃）。P1-1 已清零，剩余 P0：native_fn_ptr(P95)、wasm_fn_ptr(P90)。
+
+---
+
+### 测试与基线对比
+
+| 指标 | 开发前 | 开发后 | 变化 |
+|------|--------|--------|------|
+| 通过测试数 | 395 | 395 | 0 |
+| 失败测试数 | 0 | 0 | 0 |
+| 测试通过率 | 100% | 100% | 0% |
+
+**已知问题：** `test_vm_higher_order` 偶发 flaky 失败（第 27 轮已记录，测试间全局状态污染）。
+
+---
+
+### 下轮计划
+
+**前端下一步：**
+- 前端线维护模式，任务池已空。下轮（第 30 轮）为评审轮，不安排新功能开发
+- 第 31 轮起如需继续保持前端活跃，可从 P2 问题中提取轻量任务
+
+**后端下一步：**
+- `backend_native_fn_ptr`（hard，P95）：原生后端闭包 fn_ptr 回填，清零 P0-1
+- `backend_closure_e2e_test`（medium，P85）：闭包后端执行测试，建立质量保障
+- 投入比建议：前端 0% / 后端 100%
+
+---
+
 ## 第 28 轮开发 — 2026-07-25 21:10
 
 > 普通开发轮：前端 parser 多错误聚合抛出 + 后端 LIR SSA callee 降级

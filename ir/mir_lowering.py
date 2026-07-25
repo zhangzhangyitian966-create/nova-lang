@@ -464,9 +464,10 @@ class MIRLowering:
         # 4. 构造 HIRFunction（捕获变量作为前缀隐式参数 + lambda 自身参数）
         # 优先使用 lambda 上显式标注的返回类型，否则从 ir_type 推断
         return_type = hir_expr.return_type
-        if return_type.kind == IRType.TYPE_VAR:
+        # 防御式检查：return_type 可能为 None（前端未正确填充时）
+        if return_type is None or return_type.kind == IRType.TYPE_VAR:
             fn_type = hir_expr.ir_type
-            if fn_type.params:
+            if fn_type and fn_type.params:
                 return_type = fn_type.params[-1]
             else:
                 return_type = UNIT_TYPE

@@ -1,8 +1,8 @@
 # Nova 前后端专项开发路线图
 
-**更新时间**: 2026-07-25
+**更新时间**: 2026-07-26
 **上次评审**: 第 27 轮
-**当前轮次**: 第 28 轮
+**当前轮次**: 第 29 轮
 **下次评审**: 第 30 轮
 
 本路线图由前后端专项开发系统维护，专注于前端类型系统和后端代码生成的核心功能开发。
@@ -11,18 +11,19 @@
 
 | 轨道 | 总数 | 已完成 | 待做 | 废弃 | 完成率 |
 |------|------|--------|------|------|--------|
-| 前端 | 20 | 19 | 0 | 1 | 95.0% |
-| 后端 | 29 | 22 | 7 | 3 | 75.9% |
-| **总计** | **49** | **41** | **7** | **4** | **83.7%** |
+| 前端 | 21 | 20 | 0 | 1 | 95.2% |
+| 后端 | 29 | 23 | 6 | 3 | 79.3% |
+| **总计** | **50** | **43** | **6** | **4** | **86.0%** |
 
 ## 前端开发线
 
-**状态：维护模式（19/20 完成）**
+**状态：维护模式（20/21 完成）**
 
 前端核心功能已完成，进入维护模式。
 
 | 状态 | 任务 | 难度 | 优先级 | 预计 | 依赖 |
 |------|------|------|--------|------|------|
+| ~~完成~~ | ~~增强 parser 块内错误恢复粒度~~ | easy | 35 | - | 第 29 轮完成 |
 | ~~完成~~ | ~~修复 parser 错误列表只抛出第一个的问题~~ | easy | 45 | - | 第 28 轮完成 |
 | ~~完成~~ | ~~增强 parser 错误恢复对 lambda 起始符的支持~~ | easy | 55 | - | 第 26 轮完成 |
 | ~~完成~~ | ~~实现列表模式完备性检查~~ | medium | 65 | - | 第 25 轮完成 |
@@ -30,10 +31,16 @@
 | ~~完成~~ | ~~实现字面量模式冗余检测~~ | easy | 55 | - | 第 22 轮完成 |
 | ~~废弃~~ | ~~收紧 TypeVar 兼容性判断~~ | medium | 72 | - | 已并入类型合一任务 |
 
-### 历史已完成（16/16）
+### 历史已完成（17/17）
 
 | 状态 | 任务 | 难度 | 优先级 |
 |------|------|------|--------|
+| 完成 | 增强 parser 块内错误恢复粒度 | easy | 35 |
+| 完成 | 修复 parser 错误列表只抛出第一个的问题 | easy | 45 |
+| 完成 | 增强 parser 错误恢复对 lambda 起始符的支持 | easy | 55 |
+| 完成 | 实现列表模式完备性检查 | medium | 65 |
+| 完成 | 实现嵌套模式完备性检查 | medium | 60 |
+| 完成 | 实现字面量模式冗余检测 | easy | 55 |
 | 完成 | 清理 _types_compatible 遗留方法 | easy | 52 |
 | 完成 | 修复 for 循环和列表推导的迭代器类型推断 | medium | 72 |
 | 完成 | 实现 match guard 条件类型检查 | medium | 72 |
@@ -55,11 +62,10 @@
 
 | 状态 | 任务 | 难度 | 优先级 | 预计 | 依赖 | 轮次计划 |
 |------|------|------|--------|------|------|----------|
-| ~~完成~~ | ~~实现 LIR 降级 MIRCall SSA callee 为 LIRCallIndirect~~ | medium | **99** | 2-3小时 | closure_mir_lowering | **第 28 轮** |
-| 待做 | 实现原生后端闭包 fn_ptr 回填 | hard | **95** | 4-6小时 | native_closure_impl | **第 29 轮** |
-| 待做 | 实现 Wasm 后端闭包 fn_ptr 回填 | hard | **90** | 4-6小时 | wasm_closure_impl | **第 30 轮** |
-| 待做 | 实现闭包后端执行测试 | medium | **85** | 3-4小时 | - | **第 29 轮** |
-| 待做 | 修复 MIR lambda 降级的边界崩溃风险 | easy | **82** | 1-2小时 | closure_mir_lowering | **第 29 轮** |
+| ~~完成~~ | ~~修复 MIR lambda 降级的边界崩溃风险~~ | easy | **82** | 1-2小时 | closure_mir_lowering | **第 29 轮** |
+| 待做 | 实现原生后端闭包 fn_ptr 回填 | hard | **95** | 4-6小时 | native_closure_impl | **第 31 轮** |
+| 待做 | 实现闭包后端执行测试 | medium | **85** | 3-4小时 | - | **第 31 轮** |
+| 待做 | 实现 Wasm 后端闭包 fn_ptr 回填 | hard | **90** | 4-6小时 | wasm_closure_impl | **第 32 轮** |
 
 ### 其他待做任务
 
@@ -72,10 +78,11 @@
 | ~~废弃~~ | ~~实现 Wasm 多参数闭包调用~~ | medium | 54 | - | 并入 wasm_closure_impl |
 | ~~废弃~~ | ~~完善 WasmGC 原生类型定义~~ | hard | 50 | - | 推迟到闭包后评估 |
 
-### 历史已完成（22/29）
+### 历史已完成（23/29）
 
 | 状态 | 任务 | 难度 | 优先级 |
 |------|------|------|--------|
+| 完成 | 修复 MIR lambda 降级的边界崩溃风险 | easy | 82 |
 | 完成 | 实现 LIR 降级 MIRCall SSA callee 为 LIRCallIndirect | medium | 99 |
 | 完成 | 实现 C 后端闭包函数指针非 NULL | medium | 68 |
 | 完成 | 实现 Wasm 后端完整闭包支持 | hard | 90 |
@@ -125,7 +132,7 @@
 
 | 编号 | 问题 | 影响 | 状态 |
 |------|------|------|------|
-| P1-1 | mir_lowering _lower_lambda return_type is None 崩溃 | 无返回类型注解的 lambda 编译器崩溃 | 待修复（backend_mir_lambda_robust） |
+| P1-1 | mir_lowering _lower_lambda return_type is None 崩溃 | 无返回类型注解的 lambda 编译器崩溃 | **已修复**（第 29 轮 backend_mir_lambda_robust） |
 | P1-2 | native_backend _emit_call_indirect 未保护 caller-saved 返回值目标 | 闭包返回值可能写入被破坏的寄存器 | 待修复 |
 | P1-3 | type_checker.py 1756 行大文件病 | 维护成本高，建议拆分 pattern_checker.py | 待改进 |
 | P1-4 | 无后端执行测试 | lambda 经后端编译后无端到端验证 | 待补充（backend_closure_e2e_test） |
@@ -136,23 +143,24 @@
 |------|------|------|------|
 | P2-1 | wasm _compile_call_indirect 边界检查不完整 | 参数数组可能越界写入 | 待改进 |
 | P2-2 | 列表模式完备性过于保守（恒为 False） | 精确列表模式误报不完备 | 待改进 |
-| P2-3 | parser 错误列表只抛出第一个 | DX 不佳，无法获取完整诊断 | 待改进 |
-| P2-4 | parser 块内错误恢复粒度偏粗 | 同步失败可能丢弃剩余整个块 | 待改进 |
+| P2-3 | parser 错误列表只抛出第一个 | DX 不佳，无法获取完整诊断 | **已修复**（第 28 轮 frontend_parser_multi_errors） |
+| P2-4 | parser 块内错误恢复粒度偏粗 | 同步失败可能丢弃剩余整个块 | **已修复**（第 29 轮 frontend_parser_block_recovery） |
 
 ## 说明
 
-- 前端线：**19/20 完成（含 1 废弃），任务池已空**，进入纯维护模式
+- 前端线：**20/21 完成（含 1 废弃），任务池已空**，进入纯维护模式
 - 后端线：下 2 轮聚焦闭包闭环（fn_ptr 回填 → 执行测试）
-- 闭包进度：MIR 降级已完成，LIR 降级 SSA callee 已修复（第 28 轮），三后端中 C 后端最完整（trampoline+fn_ptr），Native/Wasm fn_ptr 待回填
-- P0 修复进度：3 个 P0 中 P0-3 已清零，剩余 P0-1（native_fn_ptr）、P0-2（wasm_fn_ptr）计划第 29-30 轮清零
-- 每轮开发：1 个前端任务 + 1 个后端任务（前端维护模式时可为纯后端）
+- 闭包进度：MIR 降级已完成（含鲁棒性修复），LIR 降级 SSA callee 已修复（第 28 轮），三后端中 C 后端最完整（trampoline+fn_ptr），Native/Wasm fn_ptr 待回填
+- P0 修复进度：3 个 P0 中 P0-3 已清零，剩余 P0-1（native_fn_ptr）、P0-2（wasm_fn_ptr）计划第 31-32 轮清零
+- P1 修复进度：P1-1 已清零（第 29 轮 backend_mir_lambda_robust），剩余 P1-2/P1-3/P1-4
+- 每轮开发：1 个前端任务 + 1 个后端任务（前端维护模式时可为轻量增量）
 - 每 3 轮一次评审，调整优先级和任务池
 - ~~删除线~~表示已废弃/合并的任务
 
 ## 评审记录
 
 - **第 30 轮评审**（待执行）：第十次三轮回顾（第 28-30 轮）。
-- **第 27 轮评审**（2026-07-25）：第九次三轮回顾（第 25-27 轮）。深度代码审计发现 3 个 P0（native/wasm fn_ptr NULL、lir_lowering SSA callee 未降级）、4 个 P1（mir_lowering return_type None 崩溃、native caller-saved 保护缺失、type_checker 1756 行大文件病、parser 错误恢复粒度粗）、4 个 P2（wasm 边界检查不完整、列表模式过于保守、无后端执行测试、parser 只抛第一个错误）。前端评估：质量 85/100，18/19 完成（94.7%），调度表模式成熟，大文件病是最大工程债。后端评估：C 75%/Native 62%/Wasm 58%，闭包框架完成但 fn_ptr 未回填，LIR SSA callee 降级缺失（P0 架构问题），测试覆盖严重缺失。综合：前后端严重失衡，投入比建议前端 0% / 后端 100%。任务池变更：backend_c_closure_fnptr 标记完成（审计确认已实现 trampoline+fn_ptr）、backend_lir_callee_ssa 升级 P99、backend_mir_lambda_robust 升 P82、新增 backend_native_fn_ptr(P95)/backend_wasm_fn_ptr(P90)/backend_closure_e2e_test(P85)，降低 4 个非关键任务优先级。
+- **第 27 轮评审**（2026-07-25）：第九次三轮回顾（第 25-27 轮）。深度代码审计发现 3 个 P0（native/wasm fn_ptr NULL、lir_lowering SSA callee 未降级）、4 个 P1（mir_lowering return_type None 崩溃、native caller-saved 保护缺失、type_checker 1756 行大文件病、parser 块内错误恢复粒度粗）、4 个 P2（wasm 边界检查不完整、列表模式过于保守、无后端执行测试、parser 只抛第一个错误）。前端评估：质量 85/100，18/19 完成（94.7%），调度表模式成熟，大文件病是最大工程债。后端评估：C 75%/Native 62%/Wasm 58%，闭包框架完成但 fn_ptr 未回填（Native/Wasm P0），LIR SSA callee 降级缺失（P0 架构问题），测试覆盖严重缺失。综合：前后端严重失衡，投入比建议前端 0% / 后端 100%。任务池变更：backend_c_closure_fnptr 标记完成（审计确认已实现 trampoline+fn_ptr）、backend_lir_callee_ssa 升级 P99、backend_mir_lambda_robust 升 P82、新增 backend_native_fn_ptr(P95)/backend_wasm_fn_ptr(P90)/backend_closure_e2e_test(P85)，降低 4 个非关键任务优先级。
 - **第 24 轮评审**（2026-07-25）：第八次三轮回顾（第 22-24 轮）。深度代码审计发现 3 个 P0、4 个 P1、3 个 P2。前端评估：功能完成 82%，type_checker 超过 64KB 出现大文件病。后端评估：Native 55%/Wasm 60%/C 70%，闭包 runtime 集成是三后端共同瓶颈。任务池新增 4 个，调整 2 个优先级，降低 1 个。下阶段重点：P0 清零 → C 后端闭包闭环 → 跨后端 lambda 一致性测试。投入比：前端 5% / 后端 95%。
 - **第 21 轮评审**（2026-07-25）：第七次三轮回顾（第 19-21 轮）。前端线达到 100% 完成，进入维护模式。深度代码审计重大发现 3 个 P0 和 3 个 P1。任务池新增 6 个，废弃 2 个。下阶段重点：P0 bug 修复 → 闭包全链路（MIR+LIR+Backend）→ 后端完善。前端投入比降至 10%，90% 投入后端。
 - **第 18 轮评审**（2026-07-24）：第六次三轮回顾（第 16-18 轮）。发现 P0 Bug nova_map_set/nova_map_put 命名不一致（已修复）、原生后端无链接器（P0 缺失）、复合指令不使用 _emit_runtime_call（P1 风险）、Wasm 数据构建不填充（P1 缺失）、for 循环迭代器类型不合一（P2 弱点）、_types_compatible 可安全删除。任务池新增 5 个。下阶段重点：后端 P0 bug 修复 + 原生后端运行时调用规范化 + 前端类型精度提升。

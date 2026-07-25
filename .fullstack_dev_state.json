@@ -1,7 +1,7 @@
 {
-  "cycles": 28,
-  "frontend_completed": 19,
-  "backend_completed": 22,
+  "cycles": 29,
+  "frontend_completed": 20,
+  "backend_completed": 23,
   "last_review_cycle": 27,
   "current_review_cycle": 27,
   "completed_tasks": [
@@ -48,7 +48,9 @@
     "review_cycle_27",
     "backend_c_closure_fnptr",
     "frontend_parser_multi_errors",
-    "backend_lir_callee_ssa"
+    "backend_lir_callee_ssa",
+    "frontend_parser_block_recovery",
+    "backend_mir_lambda_robust"
   ],
   "failed_tasks": [],
   "deprecated_tasks": [
@@ -57,6 +59,28 @@
     "backend_wasm_gc_types"
   ],
   "task_history": [
+    {
+      "cycle": 29,
+      "task_id": "frontend_parser_block_recovery",
+      "name": "增强 parser 块内错误恢复粒度",
+      "track": "frontend",
+      "difficulty": "easy",
+      "priority": 35,
+      "result": "success",
+      "details": "在 parser.py 的 _parse_block 中增加块内最大错误数限制和强制跳过保护，修复评审报告 P2-4 项。(1) 新增类常量 _BLOCK_MAX_ERRORS = 3，当单块内连续错误达到上限时，放弃剩余内容直接跳到 RBRACE，避免在严重损坏的块内无限循环同步。(2) 错误恢复逻辑中增加 block_errors 计数器，每次 ParseError 时递增。(3) 超过阈值时通过 while 循环强制前进到 RBRACE 或 EOF 后 break。新增约 10 行代码。395 测试全部通过，无回归。前端线 20/21 完成（含 1 废弃）。",
+      "timestamp": "2026-07-26 03:48"
+    },
+    {
+      "cycle": 29,
+      "task_id": "backend_mir_lambda_robust",
+      "name": "修复 MIR lambda 降级的边界崩溃风险",
+      "track": "backend",
+      "difficulty": "easy",
+      "priority": 82,
+      "result": "success",
+      "details": "在 ir/mir_lowering.py 的 _lower_lambda 中增加防御式类型检查。原代码第467行 `if return_type.kind == IRType.TYPE_VAR:` 假设 return_type 一定存在，但 HIRLambda.return_type 是 Optional，可能为 None，直接访问 .kind 会导致 AttributeError。修复：(1) 条件改为 `if return_type is None or return_type.kind == IRType.TYPE_VAR:`，当 return_type 为 None 时回退到 ir_type 推断路径。(2) 同时增加 `fn_type and fn_type.params` 的防御检查，避免 fn_type 为 None 时访问 .params 崩溃。清零评审报告 P1-1 项：mir_lowering _lower_lambda return_type is None 崩溃风险。新增约 3 行代码。395 测试全部通过，无回归。后端线达到 23/29 完成（含 3 废弃）。",
+      "timestamp": "2026-07-26 03:48"
+    },
     {
       "cycle": 28,
       "task_id": "frontend_parser_multi_errors",
@@ -280,7 +304,7 @@
       "difficulty": "easy",
       "priority": 82,
       "estimated_effort": "1-2小时",
-      "status": "pending",
+      "status": "completed",
       "source": "review_24_audit",
       "depends_on": ["backend_closure_mir_lowering"]
     },

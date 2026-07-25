@@ -494,11 +494,15 @@ class Parser:
             return self._parse_block()
         return self._parse_expression()
 
+    # 块内语句解析允许的最大连续错误数，超过则放弃该块剩余内容
+    _BLOCK_MAX_ERRORS = 3
+
     def _parse_block(self) -> Block:
         """解析代码块（带语句级错误恢复）"""
         tok = self._expect(TokenType.LBRACE)
         stmts = []
         tail = None
+        block_errors = 0  # 块内连续错误计数
 
         while self._peek_type() != TokenType.RBRACE:
             try:
@@ -534,6 +538,12 @@ class Parser:
             except ParseError as e:
                 # 块内语句解析失败：记录错误，同步到下一条语句边界
                 self._errors.append(e)
+                block_errors += 1
+                # 若块内错误过多，放弃剩余内容，直接跳到块末尾
+                if block_errors >= self._BLOCK_MAX_ERRORS:
+                    while self._peek_type() not in (TokenType.RBRACE, TokenType.EOF):
+                        self._advance()
+                    break
                 self._synchronize_to_statement_boundary()
                 # 跳过分号（如果有）
                 self._match(TokenType.SEMICOLON)
