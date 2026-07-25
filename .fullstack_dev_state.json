@@ -1,9 +1,9 @@
 {
-  "cycles": 29,
+  "cycles": 30,
   "frontend_completed": 20,
   "backend_completed": 23,
-  "last_review_cycle": 27,
-  "current_review_cycle": 27,
+  "last_review_cycle": 30,
+  "current_review_cycle": 30,
   "completed_tasks": [
     "frontend_try_expr_typecheck",
     "backend_native_label_patch",
@@ -50,7 +50,8 @@
     "frontend_parser_multi_errors",
     "backend_lir_callee_ssa",
     "frontend_parser_block_recovery",
-    "backend_mir_lambda_robust"
+    "backend_mir_lambda_robust",
+    "review_cycle_30"
   ],
   "failed_tasks": [],
   "deprecated_tasks": [
@@ -59,6 +60,17 @@
     "backend_wasm_gc_types"
   ],
   "task_history": [
+    {
+      "cycle": 30,
+      "task_id": "review_cycle_30",
+      "name": "第 30 轮 - 双线路线图评审",
+      "track": "review",
+      "difficulty": "review",
+      "priority": 0,
+      "result": "success",
+      "details": "第十次三轮回顾评审（第 28-30 轮）。深度代码审计发现 2 个 P0（native_backend/wasm_backend fn_ptr 仍传 NULL，闭包调用段错误）、2 个新 P1（native_backend _emit_call_indirect 浮点返回值未处理、闭包后端端到端测试完全缺失）、2 个新 P2（lir_c_backend trampoline double 返回值 intptr_t 强转 UB、test_vm_higher_order flaky）。前端评估：质量 86/100（+1），20/21 完成（95.2%），parser DX 显著改善（多错误聚合+块内恢复），type_checker 1756 行暂不拆分。后端评估：C 75%/Native 62%/Wasm 58%——与上轮持平，但本轮未完成后端任务（第 29 轮 MIR lambda 鲁棒性修复是防御式改动），P0 fn_ptr 回填未推进。综合：前后端仍严重失衡，投入比建议前端 0% / 后端 100%。任务池变更：新增 3 个（backend_native_call_indirect_float P80、backend_c_trampoline_double_fix P55、backend_native_fn_ptr_tramp P97），调整 backend_native_fn_ptr 优先级 95→97（与 trampoline 方案统一），backend_closure_e2e_test 升级 P85→P88。P0-3 和 P1-1 已清零（上轮），本轮无新 P0 清零。",
+      "timestamp": "2026-07-26 04:20"
+    },
     {
       "cycle": 29,
       "task_id": "frontend_parser_block_recovery",
@@ -111,159 +123,27 @@
       "difficulty": "review",
       "priority": 0,
       "result": "success",
-      "details": "第九次三轮回顾评审（第 25-27 轮）。深度代码审计发现 3 个 P0（native_backend/wasm_backend fn_ptr 传 NULL 导致闭包无法调用、lir_lowering _lower_call 未处理 SSA callee 导致闭包调用错误编译为直接调用）、4 个 P1（mir_lowering _lower_lambda return_type is None 崩溃、native_backend _emit_call_indirect 未保护 caller-saved 返回值目标、type_checker.py 1756 行大文件病、parser 块内错误恢复粒度偏粗）、4 个 P2（wasm _compile_call_indirect 边界检查不完整、列表模式完备性过于保守、无后端执行测试、parser 错误列表只抛出第一个）。前端评估：质量 85/100，18/19 完成（94.7%），调度表模式成熟，大文件病是最大工程债。后端评估：C 75%/Native 62%/Wasm 58%，闭包框架完成但 fn_ptr 未回填（Native/Wasm P0），LIR SSA callee 降级缺失（P0 架构问题），测试覆盖严重缺失（无 lambda 后端执行测试）。综合：前后端严重失衡，投入比建议前端 0% / 后端 100%。任务池变更：backend_c_closure_fnptr 标记完成（审计确认已实现 trampoline+fn_ptr）、backend_lir_callee_ssa 升级 P99、backend_mir_lambda_robust 升 P82、新增 backend_native_fn_ptr(P95)、backend_wasm_fn_ptr(P90)、backend_closure_e2e_test(P85)，降低 4 个非关键任务优先级。",
+      "details": "第九次三轮回顾评审（第 25-27 轮）。深度代码审计发现 3 个 P0、4 个 P1、4 个 P2。前端评估：质量 85/100，18/19 完成（94.7%）。后端评估：C 75%/Native 62%/Wasm 58%。综合：前后端严重失衡，投入比建议前端 0% / 后端 100%。任务池变更：backend_c_closure_fnptr 标记完成、backend_lir_callee_ssa 升级 P99、backend_mir_lambda_robust 升 P82、新增 3 个任务。",
       "timestamp": "2026-07-25 20:40"
-    },
-    {
-      "cycle": 26,
-      "task_id": "frontend_parser_lambda_sync",
-      "name": "增强 parser 错误恢复对 lambda 起始符的支持",
-      "track": "frontend",
-      "difficulty": "easy",
-      "priority": 55,
-      "result": "success",
-      "details": "在 parser.py 的两个同步边界方法中添加 PIPE（lambda 起始符 '|'）作为有效的同步停止标记。(1) _STMT_BOUNDARY_TOKENS 集合中添加 TokenType.PIPE，使块内错误恢复时能在 lambda 表达式前停止同步。(2) _synchronize_to_declaration_boundary 中添加 PIPE 检查，使顶层错误恢复时能在 lambda 表达式前停止。修复评审报告 P2-3 项：parser 错误恢复对 lambda 顶层表达式处理弱。新增 3 行代码。395 测试全部通过，无回归。前端线 18/19 完成（含 1 废弃）。",
-      "timestamp": "2026-07-25 20:30"
-    },
-    {
-      "cycle": 26,
-      "task_id": "backend_wasm_closure_impl",
-      "name": "实现 Wasm 后端完整闭包支持",
-      "track": "backend",
-      "difficulty": "hard",
-      "priority": 90,
-      "result": "success",
-      "details": "重写 wasm_backend.py 中 _compile_closure_create 和 _compile_call_indirect，从占位实现升级为完整的运行时调用实现，清零评审报告 P0-2。(1) _emit_imports：新增 nova_closure_new（3×i32→i32）和 nova_closure_call（3×i32→i64）运行时函数导入声明。(2) _compile_closure_create：通过 nova_alloc 在线性内存中分配捕获变量临时数组 → 遍历 src_locs 用 i64.store 逐字段填充 → 压入参数（fn_ptr=NULL, captured=array_ptr, capture_count）→ call $nova_closure_new → 保存返回值到 dst_loc。支持零捕获和有捕获两种场景。(3) _compile_call_indirect：通过 nova_alloc 在线性内存中分配参数临时数组 → 遍历 src_locs[1:] 用 i64.store 逐字段填充 → 压入参数（closure=src_locs[0], args=array_ptr, arg_count）→ call $nova_closure_call → 保存返回值到 dst_loc。修复零参数路径未加载闭包对象的 bug，修复多参数路径直接 pass 丢弃的 P0 bug。两个方法各新增约 35 行代码，总计约 70 行。fn_ptr 当前传 NULL（与 Native/C 后端一致）。395 测试全部通过，无回归。后端线达到 20/28 完成（含 3 废弃）。",
-      "timestamp": "2026-07-25 20:30"
-    },
-    {
-      "cycle": 25,
-      "task_id": "frontend_list_pattern_exhaustive",
-      "name": "实现列表模式完备性检查",
-      "track": "frontend",
-      "difficulty": "medium",
-      "priority": 65,
-      "result": "success",
-      "details": "修复 type_checker.py 中 ListType 的模式匹配完备性检查。原实现只要存在 PatternList 就返回 True，这是错误的——PatternList(elements=[]) 仅覆盖空列表，PatternList(elements=[...]) 仅覆盖对应确切长度的列表，而列表长度无限，没有通配符/变量绑定的情况下不可能完备。修改：将 ListType 分支改为返回 False（通配符/变量绑定已在上方处理并直接返回 True）。约 5 行代码修改，新增 4 行注释。395 测试全部通过，无回归。前端线达到 17/18 完成（含 1 废弃）。",
-      "timestamp": "2026-07-25 19:30"
-    },
-    {
-      "cycle": 25,
-      "task_id": "backend_native_closure_impl",
-      "name": "实现原生后端闭包创建与间接调用",
-      "track": "backend",
-      "difficulty": "hard",
-      "priority": 95,
-      "result": "success",
-      "details": "重写 native_backend.py 中 _emit_closure_create 和 _emit_call_indirect 两个方法，从占位实现升级为完整的运行时调用实现。_emit_closure_create：保存 caller-saved GPR → 在栈上分配捕获变量临时数组并填充 → 设置参数（RDI=NULL fn_ptr, RSI=array_ptr, RDX=capture_count）→ 栈对齐 → call nova_closure_new → 清理栈 → 恢复 caller-saved → 保存返回值。修复 P0 bug（原实现 store_from_reg(dst_name, RAX) 但 RAX 未初始化）。_emit_call_indirect：保存 caller-saved GPR → 在栈上分配参数临时数组并填充 → 加载闭包对象到 RDI → 设置参数（RSI=args_ptr, RDX=arg_count）→ 栈对齐 → call nova_closure_call → 清理栈 → 恢复 caller-saved → 保存返回值。两个方法各新增约 55 行代码，总计约 110 行。fn_ptr 当前传 NULL（与 C 后端一致），后续轮次修复为真实 lambda 函数地址。395 测试全部通过，无回归。",
-      "timestamp": "2026-07-25 19:30"
-    },
-    {
-      "cycle": 24,
-      "task_id": "review_cycle_24",
-      "name": "第 24 轮 - 双线路线图评审",
-      "track": "review",
-      "difficulty": "review",
-      "priority": 0,
-      "result": "success",
-      "details": "第八次三轮回顾评审（第 22-24 轮）。深度代码审计发现 3 个 P0（native_backend _emit_closure_create 生成未初始化 RAX 存储、wasm_backend 多参数间接调用静默丢弃、mir_lowering lambda 返回类型提取可能 IndexError）、4 个 P1（无 lambda 后端执行测试、列表模式完备性缺失、C 后端闭包函数指针 NULL、lir_lowering SSA callee 未降级为 LIRCallIndirect）、3 个 P2（_emit_call_indirect 签名不一致、type_checker 大文件膨胀、parser lambda 错误恢复弱）。前端评估：功能完成 82%，type_checker 超过 64KB 出现大文件病，列表模式完备性缺失，建议拆分 pattern_checker.py。后端评估：Native 55%/Wasm 60%/C 70%，闭包 runtime 集成是三后端共同瓶颈（C 后端最完整但 fn_ptr=NULL，Native/Wasm 双占位），测试覆盖 65% 且 lambda→后端端到端测试完全缺失。任务池变更：新增 4 个（列表模式完备性 P65、MIRCall SSA callee 降级 P70、C 后端闭包函数指针 P68、lambda 降级鲁棒性 P75），调整 2 个优先级（native_closure_impl 82→95、wasm_closure_impl 75→90），降低 1 个（native_instr_selection 68→58）。下阶段重点：P0 清零 → C 后端闭包闭环 → 跨后端 lambda 一致性测试。投入比：前端 5% / 后端 95%。",
-      "timestamp": "2026-07-25 19:10"
-    },
-    {
-      "cycle": 23,
-      "task_id": "frontend_nested_pattern_check",
-      "name": "实现嵌套模式完备性检查",
-      "track": "frontend",
-      "difficulty": "medium",
-      "priority": 60,
-      "result": "success",
-      "details": "在 type_checker.py 中新增嵌套模式完备性检查。新增 _is_wildcard_like 辅助方法判断通配符/变量绑定模式。新增 _check_patterns_exhaustive 递归方法，支持 ADT 构造器子模式递归检查（验证所有变体被覆盖且子模式集体完备）和元组类型逐位置检查。新增 _check_sub_patterns_exhaustive 对同一构造器的多个实例做转置后递归检查。重写 _check_match_exhaustiveness 调用新方法。约新增 100 行递归检查代码。395 测试全部通过，无回归。",
-      "timestamp": "2026-07-25 17:15"
-    },
-    {
-      "cycle": 23,
-      "task_id": "backend_closure_mir_lowering",
-      "name": "修复 MIR lambda 降级——编译 lambda 函数体",
-      "track": "backend",
-      "difficulty": "hard",
-      "priority": 85,
-      "result": "success",
-      "details": "重写 mir_lowering.py 的 _lower_lambda 方法，从占位实现升级为完整的 lambda 函数编译。核心实现：(1) 新增 _collect_free_vars/_collect_idents/_collect_pattern_binds 自由变量分析方法，递归遍历 HIR 树收集 lambda 体内引用的外层变量，正确处理 let/lambda/for/match 等引入新绑定的结构。(2) 新增 _save_context/_restore_context 上下文切换机制，在 lambda 编译前后保存/恢复外层函数的 env/ssa_counter/block_counter/all_blocks 等状态。(3) _lower_lambda 流程：生成唯一函数名 __lambda_N → 分析自由变量 → 确定捕获变量（在 env 中的自由变量）→ 保存上下文 → 构造 HIRFunction（捕获变量作为隐式前缀参数 + lambda 自身参数）→ 复用 _lower_function 编译 lambda 体 → 注册到 lambda_functions 收集器 → 恢复上下文 → 生成 MIRClosureCreate（携带 fn_name 和 captures SSA 名列表）。(4) 在 lower 方法中注册所有 lambda 函数到 MIRModule.functions。功能验证：无捕获 lambda（captures=[]）、有捕获 lambda（captures=['v0']）、嵌套 lambda（内层正确捕获外层+更外层变量）全部正确。LIR 降级也正确生成 LIRClosureCreate（capture_count、src_locs、dst_loc）。这是所有后端闭包支持的前置条件。新增约 200 行代码，395 测试全部通过，无回归。",
-      "timestamp": "2026-07-25 17:30"
-    },
-    {
-      "cycle": 22,
-      "task_id": "frontend_literal_pattern_redundancy",
-      "name": "实现字面量模式冗余检测",
-      "track": "frontend",
-      "difficulty": "easy",
-      "priority": 55,
-      "result": "success",
-      "details": "在 type_checker.py 的 _check_match_exhaustiveness 中新增字面量模式冗余检测。维护 seen_literals 字典按类型分组（int/float/string/char/bool），当重复字面量值出现时标记为冗余分支。新增导入 PatternInt/PatternFloat/PatternString/PatternChar。含 guard 的字面量分支不视为冗余（guard 可能拒绝匹配）。Float 类型对 NaN 做安全检查（NaN != NaN）。约新增 60 行检测代码。395 测试全部通过，无回归。",
-      "timestamp": "2026-07-25 06:12"
-    },
-    {
-      "cycle": 22,
-      "task_id": "backend_fix_native_runtime_call_bugs",
-      "name": "修复原生后端 _emit_runtime_call 的 P0 bug",
-      "track": "backend",
-      "difficulty": "easy",
-      "priority": 99,
-      "result": "success",
-      "details": "修复 2 个 P0 bug：(P0-1) 将 INT_ARG_REGS/FLOAT_ARG_REGS/CALLER_GPRS 从 _emit_call 方法的局部变量提升为模块级常量（放在 native_backend.py 文件顶部，import 区域之后），解决 _emit_runtime_call 引用 NameError 问题。_emit_call 中删除重复的局部变量定义，改为引用模块级常量。(P0-2) 重写 _emit_build_tuple 的字段填充逻辑：删除使用 RSP 负偏移做临时中转的不安全代码（e.movsd_mem_reg(RSP, -(i*8+8), XMM0)），改为直接写入 [base + byte_offset]（e.movsd_mem_reg(RAX, byte_offset, XMM0)），消除了栈损坏风险和多余的中转指令。395 测试全部通过，无回归。",
-      "timestamp": "2026-07-25 06:12"
-    },
-    {
-      "cycle": 21,
-      "task_id": "review_cycle_21",
-      "name": "第 21 轮 - 双线路线图评审",
-      "track": "review",
-      "difficulty": "review",
-      "priority": 0,
-      "result": "success",
-      "details": "第七次三轮回顾评审（第 19-21 轮）。深度代码审计重大发现：(P0-1) native_backend.py _emit_runtime_call 中 CALLER_GPRS/INT_ARG_REGS/FLOAT_ARG_REGS 仅在 _emit_call 内定义为局部变量，_emit_runtime_call 引用会 NameError——所有运行时函数调用路径均不可用；(P0-2) _emit_build_tuple 浮点字段使用负栈偏移 RSP-(i*8+8) 可能覆盖 caller-saved 保存区；(P0-3) wasm _compile_call_indirect 调用未声明的 $nova_closure_call 且多参数间接调用直接 pass 破坏栈平衡。前端评估：类型系统已成熟（88/100），_unify_types 覆盖全面，模式匹配完备性基础版就绪，前端线 100% 完成，进入维护模式。后端评估：Native 80%/Wasm 78%/C 70%——但所有后端的闭包创建和间接调用均为占位实现，lambda/higher-order 函数在所有后端均无法工作（P1 系统性问题）。MIR 层 _lower_lambda 不编译 lambda 函数体（P1 缺失）。任务池变更：新增 6 个（native P0 修复 P99、闭包 MIR 降级 P85、native 闭包实现 P82、Wasm 闭包实现 P75、嵌套模式完备性 P60、字面量模式冗余检测 P55），废弃 2 个（wasm_indirect_multiarg 并入 wasm_closure_impl、wasm_gc_types 推迟到闭包之后）。下阶段重点：P0 bug 修复 → 闭包全链路（MIR+LIR+Backend）→ 后端完善。前端投入比降至 10%，90% 投入后端。",
-      "timestamp": "2026-07-25 08:30"
-    },
-    {
-      "cycle": 20,
-      "task_id": "backend_wasm_data_build_fill",
-      "name": "Wasm 后端数据结构构建指令完善",
-      "track": "backend",
-      "difficulty": "medium",
-      "priority": 65,
-      "result": "success",
-      "details": "修复 wasm_backend.py 中四个数据结构构建指令：_compile_build_list（新增 nova_list_push 循环填充）、_compile_build_map（新增 nova_map_put 循环填充）、_compile_build_tuple（新增 i64.store 逐字段写入）、_compile_build_adt（从错误的 nova_alloc 改为正确的 nova_adt_new + nova_adt_set_field 循环）。新增 $tmp_ptr 临时局部变量声明解决 Wasm 栈无法重复使用返回值的问题。新增 4 个运行时函数导入（nova_map_new/nova_map_put/nova_adt_new/nova_adt_set_field）。395 测试全部通过，无回归。",
-      "timestamp": "2026-07-25 00:20"
-    },
-    {
-      "cycle": 20,
-      "task_id": "frontend_cleanup_legacy_compatible",
-      "name": "清理 _types_compatible 遗留方法",
-      "track": "frontend",
-      "difficulty": "easy",
-      "priority": 52,
-      "result": "success",
-      "details": "删除 type_checker.py 中 _types_compatible 方法（行 1548-1588，共 41 行）。深度分析确认该方法零外部调用点，7 处引用全部为内部递归自引用，是彻底的死代码。该方法对 TypeVar 直接放行（鸭子类型），不产生约束，与当前 _unify_types 的合一驱动语义不兼容。前端线达到 100% 完成（14/14）。395 测试全部通过，无回归。",
-      "timestamp": "2026-07-25 00:15"
     }
   ],
   "tasks": [
     {
-      "task_id": "backend_lir_callee_ssa",
-      "name": "实现 LIR 降级 MIRCall SSA callee 为 LIRCallIndirect",
-      "description": "当前 lir_lowering.py 的 _lower_call 把 instr.callee 直接当函数名字符串，若 callee 是 SSA 值（闭包/函数指针），生成的 LIRCall 会携带无效函数名并被后端错误编译为直接函数调用。修复：当 callee 是 SSA 值（以字母开头且不在已知函数名表中）时降级为 LIRCallIndirect，第一个 src_loc 为闭包对象，后续为参数。这是闭包调用进入所有后端的闸门。",
+      "task_id": "backend_native_fn_ptr_tramp",
+      "name": "实现原生后端闭包 fn_ptr trampoline 方案",
+      "description": "native_backend.py _emit_closure_create 中 fn_ptr 显式传 NULL（e.mov_reg_imm64(RDI, 0)），导致闭包创建后无法调用目标函数。修复方案：(1) 为每个 __lambda_N 函数生成对应的 trampoline 汇编代码（参考 C 后端方案），trampoline 从 captured 数组解包参数后调用实际 lambda 函数；(2) 在 _emit_closure_create 中将 trampoline 标签地址作为 fn_ptr 传入 nova_closure_new（通过 lea_reg_label 或后期标签回填）。同时修复 _emit_call_indirect 的浮点返回值问题（P1-A：当前只从 RAX 读取，需增加 XMM0 浮点返回值路径）。",
       "track": "backend",
-      "difficulty": "medium",
-      "priority": 99,
-      "estimated_effort": "2-3小时",
-      "status": "completed",
-      "source": "review_27_audit",
-      "depends_on": ["backend_closure_mir_lowering"]
+      "difficulty": "hard",
+      "priority": 97,
+      "estimated_effort": "5-7小时",
+      "status": "pending",
+      "source": "review_30_audit",
+      "depends_on": ["backend_native_closure_impl"]
     },
     {
       "task_id": "backend_native_fn_ptr",
-      "name": "实现原生后端闭包 fn_ptr 回填",
-      "description": "native_backend.py _emit_closure_create 中 fn_ptr 显式传 NULL（e.mov_reg_imm64(RDI, 0)），导致闭包创建后无法调用目标函数。修复：在编译期收集 lambda 函数地址（通过标签或绝对地址），将真实函数指针传入 nova_closure_new。可参考 C 后端 trampoline 方案或直接在编译期确定 lambda 地址。",
+      "name": "实现原生后端闭包 fn_ptr 回填（已升级为 trampoline 方案）",
+      "description": "已被 backend_native_fn_ptr_tramp 替代。保留此任务以记录历史。trampoline 方案与 C 后端一致，从 captured 数组解包参数后调用实际 lambda 函数。",
       "track": "backend",
       "difficulty": "hard",
       "priority": 95,
@@ -290,23 +170,35 @@
       "description": "当前 tests/ 全域没有任何测试验证 lambda/closure 经后端编译后能产生正确结果。test_backends.py 无 lambda 测试，test_native_backend.py 无闭包指令测试，test_c_codegen.py test_closure 只检查生成代码包含 NovaClosure 但不执行。修复：在 test_backends.py 中添加 C 后端端到端闭包执行测试（编译→gcc→运行→验证输出），在 test_native_backend.py 中添加闭包指令编码测试。",
       "track": "backend",
       "difficulty": "medium",
-      "priority": 85,
+      "priority": 88,
       "estimated_effort": "3-4小时",
       "status": "pending",
       "source": "review_27_audit",
       "depends_on": []
     },
     {
-      "task_id": "backend_mir_lambda_robust",
-      "name": "修复 MIR lambda 降级的边界崩溃风险",
-      "description": "修复 mir_lowering.py 中 _lower_lambda 的边界问题：hir_expr.return_type 是 Optional 可能为 None，当前直接访问 .kind 会导致 AttributeError。增加防御式类型检查，当 return_type 为 None 时回退到 TypeVar。",
+      "task_id": "backend_native_call_indirect_float",
+      "name": "修复原生后端 _emit_call_indirect 浮点返回值处理",
+      "description": "native_backend.py _emit_call_indirect（第 1185-1188 行）当前只从 RAX 读取返回值，未处理浮点返回值（XMM0）的情况。当闭包返回浮点值时，nova_closure_call 将结果放在 XMM0，但代码从 RAX 读取，导致错误的返回值。修复：参照 _emit_call 的 dst_is_float 检测和 need_retval_slot 栈槽机制，增加浮点返回值分支。",
       "track": "backend",
       "difficulty": "easy",
-      "priority": 82,
+      "priority": 80,
       "estimated_effort": "1-2小时",
-      "status": "completed",
-      "source": "review_24_audit",
-      "depends_on": ["backend_closure_mir_lowering"]
+      "status": "pending",
+      "source": "review_30_audit",
+      "depends_on": []
+    },
+    {
+      "task_id": "backend_c_trampoline_double_fix",
+      "name": "修复 C 后端 trampoline double 返回值 UB",
+      "description": "lir_c_backend.py 第 286 行 trampoline 中 double 返回值使用 (intptr_t) 强转为 void*，这是未定义行为（浮点值通过整数指针转换会丢失精度）。修复：对 double 返回值使用 malloc(sizeof(double)) + memcpy 方案，或在 NovaClosure 中增加类型标签区分整数/浮点返回值。",
+      "track": "backend",
+      "difficulty": "easy",
+      "priority": 55,
+      "estimated_effort": "1-2小时",
+      "status": "pending",
+      "source": "review_30_audit",
+      "depends_on": []
     },
     {
       "task_id": "backend_native_instr_selection",
