@@ -15405,3 +15405,189 @@
 ---
 
 *本报告由 Nova Auto Review v2.0 自动生成*
+
+---
+
+# 第 1502 轮 Nova 深度审查报告 (v2.0)
+
+> 生成时间: 2026-07-25 01:13:15
+> 审查版本: v0.3.0
+
+## 1. 审查概览
+
+| 指标 | 数值 |
+|------|------|
+| 扫描文件数 | 40 |
+| 代码行数 | 24,708 |
+| 函数总数 | 1478 |
+| 类总数 | 287 |
+| 发现问题数 | **1108** |
+| CRITICAL | 0 |
+| HIGH | 0 |
+| MEDIUM | 75 |
+| LOW | 1033 |
+
+### 严重程度分布
+
+- 🔴 **CRITICAL**: 0 个
+- 🟠 **HIGH**: 0 个
+- 🟡 **MEDIUM**: 75 个
+- 🟢 **LOW**: 1033 个
+
+## 2. 代码质量审查
+
+### 2.1 问题类型分布
+
+| 问题类型 | 数量 | 严重级别 |
+|----------|------|----------|
+| no_docstring | 585 | LOW |
+| magic_number | 330 | LOW |
+| print_debug | 104 | LOW |
+| unused_import | 24 | MEDIUM |
+| class_too_large | 18 | MEDIUM |
+| cyclomatic_complexity | 15 | MEDIUM |
+| inconsistent_naming | 14 | LOW |
+| function_too_long | 11 | MEDIUM |
+| too_broad_exception | 7 | MEDIUM |
+
+### 2.2 高优先级问题 (CRITICAL + HIGH)
+
+✅ 无高优先级问题
+
+### 2.3 各模块问题统计 (Top 10)
+
+| 模块 | 问题数 |
+|------|--------|
+| tests | 431 |
+| (root) | 369 |
+| backend | 187 |
+| ir | 120 |
+| tree-sitter-nova | 1 |
+
+## 3. 架构审查
+
+### 3.1 模块概览
+
+- 模块总数: **40**
+- 平均依赖数: **1.52**
+- 循环依赖: **0** 个
+- sys.path hack: **0** 处
+
+### 3.2 循环依赖
+
+✅ 未发现循环依赖
+
+### 3.3 耦合度分析
+
+#### 高被依赖模块 (入度 Top 10)
+
+| 模块 | 入度 (被依赖数) |
+|------|----------------|
+| ir.ir_nodes | 9 |
+| errors | 8 |
+| ast_nodes | 7 |
+| lexer | 5 |
+| parser | 4 |
+| type_checker | 4 |
+| environment | 3 |
+| compiler | 3 |
+| evaluator | 2 |
+| c_codegen | 2 |
+
+#### 高依赖模块 (出度 Top 10)
+
+| 模块 | 出度 (依赖数) |
+|------|--------------|
+|  | 10 |
+| backend.compiler_pipeline | 10 |
+| cli | 8 |
+| compiler_cli | 6 |
+| parser | 3 |
+| evaluator | 3 |
+| ir.mir_lowering | 2 |
+| ir.pass_manager | 2 |
+| backend.lir_c_backend | 2 |
+| type_checker | 2 |
+
+### 3.5 代码量分布
+
+| 目录 | 文件数 | 行数 | 占比 |
+|------|--------|------|------|
+| (root) | 14 | 9,421 | 38.1% |
+| ir | 7 | 6,280 | 25.4% |
+| tests | 10 | 4,808 | 19.5% |
+| backend | 8 | 4,120 | 16.7% |
+| tree-sitter-nova | 1 | 79 | 0.3% |
+
+## 4. 测试分析
+
+- 测试总数: **395**
+- 通过数: ✅ 391
+- 失败数: ❌ 0
+- 错误数: ⚠️  0
+- 跳过数: ⏭️  0
+- 通过率: **99.0%**
+- 耗时: 0s
+
+## 5. 复杂度分析
+
+- 函数总数: **1472**
+- 平均圈复杂度: **2.46**
+- 最高复杂度: **39**
+
+### 5.1 复杂度分布
+
+| 复杂度区间 | 函数数 |
+|------------|--------|
+| 1-5 (简单) | 1329 |
+| 6-10 (中等) | 100 |
+| 11-15 (复杂) | 28 |
+| 16-25 (高复杂) | 14 |
+| 25+ (极复杂) | 1 |
+
+### 5.2 Top 10 最复杂函数
+
+| 排名 | 函数 | 文件 | 圈复杂度 |
+|------|------|------|----------|
+| 1 | TypeChecker._check_match_exhaustiveness | `type_checker.py` | 39 |
+| 2 | NativeCodeGen._emit_runtime_call | `backend/native_backend.py` | 25 |
+| 3 | HIRRewriter.generic_rewrite | `ir/ir_nodes.py` | 23 |
+| 4 | NativeCodeGen._emit_call | `backend/native_backend.py` | 21 |
+| 5 | Evaluator._eval_binary_op | `evaluator.py` | 20 |
+| 6 | LIRLowering._lower_function | `ir/lir_lowering.py` | 20 |
+| 7 | MIRLowering._lower_match_expr | `ir/mir_lowering.py` | 20 |
+| 8 | Parser._parse_pattern | `parser.py` | 20 |
+| 9 | TypeChecker._check_binary_op | `type_checker.py` | 20 |
+| 10 | TypeChecker.check_decl | `type_checker.py` | 19 |
+
+## 7. 增量质量门禁
+
+✅ **门禁通过** — 新增代码未引入质量问题
+
+- 检查文件数（有变更）: 1
+- 门禁问题数: 0
+
+---
+
+## 8. 改进建议
+
+### P0 - 立即修复
+
+✅ 无 P0 级问题
+
+### P1 - 高优先级
+
+✅ 无 P1 级问题
+
+### P2 - 中优先级
+
+- 处理 75 个 MEDIUM 级别问题（函数过长、圈复杂度、未使用导入等）
+
+### P3 - 低优先级 / 优化
+
+- 清理 1033 个 LOW 级别问题（TODO、命名规范、魔法数字等）
+- 重构 Top 10 复杂函数中 10 个 CC>15 的函数
+
+---
+
+*本报告由 Nova Auto Review v2.0 自动生成*
