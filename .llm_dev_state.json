@@ -1,5 +1,5 @@
 {
-  "cycles": 50,
+  "cycles": 51,
   "completed_tasks": [
     "establish_quality_gate",
     "refactor_nova_type_to_c",
@@ -108,10 +108,20 @@
     "review_cycle_45",
     "review_cycle_48",
     "sync_review_data",
-    "low_quality_issues_cleanup_v2"
+    "low_quality_issues_cleanup_v2",
+    "review_cycle_51",
+    "c_backend_closure_support"
   ],
   "failed_tasks": [],
   "task_history": [
+    {
+      "cycle": 51,
+      "task_id": "review_cycle_51",
+      "status": "completed",
+      "source": "评审轮",
+      "reason": "第51轮路线图评审，每3轮一次的例行评审。总结第49-50轮开发成果，评估方向/质量/效率/价值/审查对齐五维表现，规划第52-54轮方向。",
+      "details": "完成第51轮路线图评审：五维评估（方向正确、质量持续提升、效率稳定、价值高、审查对齐优秀60%）；质量门禁成功落地里程碑；审查数据可信度恢复；c_backend_closure_phase3 被强制提升为最高优先级（连续多轮推迟）。新增3个审查驱动任务（剩余Top3复杂度函数重构）。"
+    },
     {
       "cycle": 50,
       "task_id": "establish_quality_gate",
@@ -177,43 +187,31 @@
       "details": "将 _lower_if_expr 从 106 行重构为分层结构：1) 新增 _lower_branch_body() 通用分支处理方法，消除 true/false 分支的 30 行镜像重复代码，返回 (result, modified_vars) 元组；2) 新增 _insert_merge_phis() 处理 merge 块 Phi 节点插入（约 35 行独立逻辑）；3) 新增 _insert_result_phi() 处理 if 表达式结果 Phi（约 15 行独立逻辑）；4) _lower_if_expr 主函数从 106 行压缩至约 25 行（CC≈8）。测试 395/395 通过，零回归。"
     }
   ],
-  "current_cycle": 50,
+  "current_cycle": 51,
   "baseline_tests": 395,
   "current_tests": 395,
-  "last_review_cycle": 48,
+  "last_review_cycle": 51,
   "tasks": [
     {
       "id": "c_backend_closure_phase3",
       "name": "C 后端闭包 Phase3（lambda 函数体编译）",
       "description": "C 后端闭包支持 Phase3：lambda 函数体独立编译为 C 函数（闭包约定签名：NovaValue* lambda_N(NovaValue* env, NovaValue* arg0, ...)），将函数指针从 NULL 替换为实际函数地址。Phase1 已完成 LIR 指令 + 降级 + nova_closure_new 调用，Phase2 已完成捕获变量环境填充。",
       "difficulty": "hard",
-      "priority": 78,
+      "priority": 80,
       "category": "backend",
       "estimated": "3-5 天",
       "status": "pending",
       "depends_on": [
         "c_backend_closure_support"
       ],
-      "reason": "闭包是 Nova 函数式核心的重要特性。Phase1+2 已完成 LIR 指令+环境填充，Phase3 是让闭包真正可用的最后一步。需要在 LIRCBackend.compile() 中为 lambda 产生的辅助函数生成 C 函数定义。[新增任务 / 自主规划]"
-    },
-    {
-      "id": "establish_quality_gate",
-      "name": "建立代码质量门禁（docstring + 命名规范）",
-      "description": "在 auto_review.py 中增加增量质量检查：新增代码必须有 docstring（公共 API）、不得引入新的魔法数字、命名规范检查。设定 LOW 问题增长率上限，防止技术债持续累积。第50轮已落地实现 phase3b_incremental_gate()。",
-      "difficulty": "medium",
-      "priority": 76,
-      "category": "engineering",
-      "estimated": "3-5 小时",
-      "status": "completed",
-      "depends_on": [],
-      "reason": "第50轮已实现 phase3b_incremental_gate()，包含 git diff 行检测、新增函数 docstring 检查、魔法数字检查、命名规范检查，集成到主流程和报告生成。[已完成]"
+      "reason": "闭包是 Nova 函数式核心的重要特性。Phase1+2 已完成 LIR 指令+环境填充，Phase3 是让闭包真正可用的最后一步。需要在 LIRCBackend.compile() 中为 lambda 产生的辅助函数生成 C 函数定义。本轮评审强制提升优先级至 80（原 78），因其已连续多轮被推迟。[审查发现/自主规划]"
     },
     {
       "id": "unify_c_backend",
       "name": "统一 C 后端（LIR 路径功能对齐）",
       "description": "将 c_codegen.py 中已实现但 lir_c_backend.py 缺失的功能迁移过来：ADT 代码生成、match 编译、闭包实现、列表推导式，待功能对齐后废弃旧的 AST→C 路径",
       "difficulty": "hard",
-      "priority": 70,
+      "priority": 72,
       "category": "architecture",
       "estimated": "2-3 天",
       "status": "pending",
@@ -224,73 +222,95 @@
         "lir_switch_match_lowering",
         "c_backend_closure_support"
       ],
-      "reason": "目前有两套 C 代码生成路径（AST 路径功能完整，LIR 路径仅阶段一），功能重叠增加维护成本。SSA 基础打好后，统一到 LIR→C 路径可以让所有后端共享 IR 优化成果。[优先级维持 70，闭包支持作为独立任务优先级更高]"
+      "reason": "目前有两套 C 代码生成路径（AST 路径功能完整，LIR 路径仅阶段一），功能重叠增加维护成本。SSA 基础打好后，统一到 LIR→C 路径可以让所有后端共享 IR 优化成果。优先级提升 70→72，应在闭包 Phase3 之后执行。[自主规划]"
     },
     {
       "id": "clean_print_debug",
       "name": "精准清理 print_debug（真实调试残留）",
       "description": "经第47轮深度分析，104 个 print_debug 中绝大多数是正常功能输出（evaluator/vm 的 print 内置函数实现、cli/compiler_cli 的用户交互输出、scripts 的日志）。本任务聚焦真正可清理的调试残留：evaluator.py 第221行裸 print(val)、pass_manager.py 验证输出等。",
       "difficulty": "easy",
-      "priority": 55,
+      "priority": 50,
       "category": "engineering",
       "estimated": "1-2 小时",
       "status": "pending",
       "depends_on": [],
-      "reason": "原任务「批量清理104个print_debug」经深度分析后被判定为低价值（大部分print是正常功能）。但代码审计发现 evaluator.py 和 pass_manager.py 等位置确有真实调试残留。调整为精准清理，只处理真正的调试输出。[优先级维持 55]"
+      "reason": "原任务「批量清理104个print_debug」经深度分析后被判定为低价值（大部分print是正常功能）。但代码审计发现 evaluator.py 和 pass_manager.py 等位置确有真实调试残留。调整为精准清理，只处理真正的调试输出。优先级下调 55→50。[审查发现]"
     },
     {
       "id": "benchmark_enhance_exec_time",
       "name": "基准测试框架增强（C/Wasm执行时间+优化对比）",
       "description": "为基准测试框架添加 C 后端和 Wasm 后端的执行时间测量，支持优化前后对比功能（同一用例在不同优化级别下的性能对比），扩充基准用例覆盖 ADT、模式匹配、闭包等场景",
       "difficulty": "medium",
-      "priority": 58,
+      "priority": 56,
       "category": "test",
       "estimated": "3-5 小时",
       "status": "pending",
       "depends_on": [
         "backend_benchmark_framework"
       ],
-      "reason": "基准测试框架目前只支持 VM 后端执行时间测量，C/Wasm 后端只能测编译时间。补齐后可全面评估各后端性能。[优先级维持 58][自主规划]"
+      "reason": "基准测试框架目前只支持 VM 后端执行时间测量，C/Wasm 后端只能测编译时间。补齐后可全面评估各后端性能。优先级下调 58→56。[自主规划]"
     },
     {
       "id": "cfg_utils_unit_tests",
       "name": "CFG 基础设施单元测试",
       "description": "为 ir/cfg_utils.py 编写单元测试，覆盖：CFG 遍历（前向/后向）、支配树计算、回边检测、自然循环识别、指令操作数访问、副作用判断、后继块获取等核心功能",
       "difficulty": "medium",
-      "priority": 56,
+      "priority": 54,
       "category": "test",
       "estimated": "3-5 小时",
       "status": "pending",
       "depends_on": [
         "mir_cfg_loop_analysis"
       ],
-      "reason": "cfg_utils.py（799行）是循环优化的核心基础设施，但缺乏直接测试。[优先级维持 56][自主发现]"
+      "reason": "cfg_utils.py（799行）是循环优化的核心基础设施，但缺乏直接测试。优先级下调 56→54。[自主发现]"
     },
     {
       "id": "low_quality_issues_cleanup",
       "name": "LOW 级问题批量治理（docstring + 魔法数字）",
       "description": "批量清理 LOW 级问题：为 ir/ 和 backend/ 模块的公共 API 添加 docstring，将高频魔法数字（如 8 字节大小、默认迭代次数等）提取为命名常量，清理调试打印语句。v1 已完成核心模块的主要部分。v2 已完成 ir/ 模块 docstring 补充。",
       "difficulty": "easy",
-      "priority": 46,
+      "priority": 45,
       "category": "engineering",
       "estimated": "2-4 小时",
       "status": "pending",
       "depends_on": [],
-      "reason": "v1 已完成核心模块的 docstring 和魔法数字，v2 已完成 ir/ 模块 16 处 docstring。剩余 backend/ 模块部分价值递减。[优先级调整: 48→46，v2 已消耗大部分价值][审查发现]"
+      "reason": "v1 已完成核心模块的 docstring 和魔法数字，v2 已完成 ir/ 模块 16 处 docstring。剩余 backend/ 模块部分价值递减。增量质量门禁已落地，新增代码不再引入新的 LOW 问题，存量 LOW 问题可逐步消化。优先级下调 46→45。[审查发现]"
     },
     {
-      "id": "c_backend_closure_support",
-      "name": "C 后端闭包功能对齐",
-      "description": "将旧 C 后端的闭包实现迁移到 LIR→C 路径：闭包环境捕获、函数指针包装、upvar 访问、闭包生命周期管理。Phase 1 已完成：新增 LIRClosureCreate 指令 + 正确降级 + C 后端 nova_closure_new 调用。Phase 2 已完成：捕获变量环境填充（通过 src_locs 传递捕获值，生成 void** 环境数组）。剩余：lambda 函数体独立编译（函数指针非 NULL）、闭包调用协议统一。Phase3 已拆为独立任务。",
-      "difficulty": "hard",
-      "priority": 78,
-      "category": "backend",
-      "estimated": "1-2 天",
-      "status": "in_progress",
-      "depends_on": [
-        "c_backend_data_verify"
-      ],
-      "reason": "闭包是 Nova 函数式核心的重要特性。Phase1+2 已完成（LIR 指令 + 降级 + 环境填充），Phase3 拆为独立任务 c_backend_closure_phase3。[优先级维持 78][自主规划]"
+      "id": "refactor_eval_binary_op",
+      "name": "重构 Evaluator._eval_binary_op 降低圈复杂度",
+      "description": "Evaluator._eval_binary_op 圈复杂度 20，包含 15+ 操作符的长 if-elif 链。重构为调度表模式（操作符→lambda 或操作符→处理函数映射），将 CC 从 20 降至约 6-8。",
+      "difficulty": "medium",
+      "priority": 60,
+      "category": "engineering",
+      "estimated": "2-3 小时",
+      "status": "pending",
+      "depends_on": [],
+      "reason": "审查日志第1502轮 Top10 复杂函数中 _eval_binary_op CC=20（排名#5）。该函数被错误标注为 cycle 38 已重构，第50轮已移除虚假标注。函数是典型的长 if-elif 链，调度表化重构难度低、风险小。[审查驱动]"
+    },
+    {
+      "id": "refactor_lower_match_expr",
+      "name": "重构 MIRLowering._lower_match_expr 降低圈复杂度",
+      "description": "MIRLowering._lower_match_expr 圈复杂度 20，134 行。处理模式匹配分支生成逻辑（字面量/通配符/绑定/构造器）。提取分支生成逻辑为独立方法，降低主函数复杂度。",
+      "difficulty": "medium",
+      "priority": 58,
+      "category": "engineering",
+      "estimated": "3-5 小时",
+      "status": "pending",
+      "depends_on": [],
+      "reason": "审查日志第1502轮 Top10 复杂函数中 _lower_match_expr CC=20（排名#7）。该函数被错误标注为 cycle 40 已重构，第50轮已移除虚假标注。模式匹配分支生成逻辑复杂，可提取独立方法。[审查驱动]"
+    },
+    {
+      "id": "refactor_lower_function",
+      "name": "重构 LIRLowering._lower_function 降低圈复杂度",
+      "description": "LIRLowering._lower_function 圈复杂度 20，153 行。处理 Phi 节点分配 + critical edge splitting + 指令降级调度。可拆分为 Phi 分配、critical edge 处理、指令遍历三个独立阶段。",
+      "difficulty": "medium",
+      "priority": 57,
+      "category": "engineering",
+      "estimated": "3-5 小时",
+      "status": "pending",
+      "depends_on": [],
+      "reason": "审查日志第1502轮 Top10 复杂函数中 _lower_function CC=20（排名#9）。该函数被错误标注为 cycle 42 已重构，第50轮已移除虚假标注。函数逻辑可分为 Phi 分配、critical edge splitting、指令降级三阶段，可分层拆分。[审查驱动]"
     },
     {
       "id": "native_call_abi",

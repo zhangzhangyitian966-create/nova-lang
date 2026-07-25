@@ -1,7 +1,7 @@
 # Nova LLM 智能开发路线图
 
-**更新时间**: 2026-07-25 20:23:00
-**上次评审**: 第 48 轮（路线图评审）
+**更新时间**: 2026-07-25 04:02:00
+**上次评审**: 第 51 轮（路线图评审）
 
 本路线图由 LLM 智能开发系统动态维护。
 
@@ -11,7 +11,7 @@
 |------|------|------|--------|------|------|
 | ✅ | C 后端接入统一 IR 管线 | hard | 95 | 2-3 天 | - |
 | ✅ | C 后端 LIR 代码生成基础框架 | medium | 92 | 1 天 | - |
-| ⏳ | 统一 C 后端（LIR 路径功能对齐） | hard | 70 | 2-3 天 | fix_match_lowering, fix_mir_ssa, refactor_visitor_pattern, lir_switch_match_lowering, c_backend_closure_support |
+| ⏳ | 统一 C 后端（LIR 路径功能对齐） | hard | 72 | 2-3 天 | fix_match_lowering, fix_mir_ssa, refactor_visitor_pattern, lir_switch_match_lowering, c_backend_closure_support |
 
 ## 🔧 IR 降级 / 正确性
 
@@ -60,8 +60,8 @@
 | ✅ | C 后端 LIR 路径 ADT/match 支持 | hard | 72 | 1-2 天 | lir_switch_match_lowering, unify_c_backend |
 | ✅ | C 后端 LIR 路径列表推导式支持 | medium | 72 | 3-5 小时 | c_backend_adt_match, unify_c_backend |
 | ✅ | C 后端数据结构构建正确性验证 | medium | 80 | 3-5 小时 | c_backend_listcomp_verify, c_backend_adt_match |
-| 🔄 | C 后端闭包功能对齐（Phase1+2 完成，环境填充已落地） | hard | 78 | 1-2 天 | c_backend_data_verify |
-| ⏳ | C 后端闭包 Phase3（lambda 函数体编译） | hard | 78 | 3-5 天 | c_backend_closure_support |
+| ✅ | C 后端闭包功能对齐（Phase1+2 完成，环境填充已落地） | hard | 78 | 1-2 天 | c_backend_data_verify |
+| ⏳ | C 后端闭包 Phase3（lambda 函数体编译） | hard | 80 | 3-5 天 | c_backend_closure_support |
 | ✅ | 修复 Wasm 后端全局变量声明缺失 | easy | 62 | 1-2 小时 | wasm_control_flow_rewrite |
 | ✅ | 重构 Wasm 后端指令编译调度表化 | medium | 72 | 3-5 小时 | wasm_control_flow_rewrite |
 | ⏳ | 实现原生后端函数调用 ABI | hard | 20 | 3-5 天 | fix_mir_ssa |
@@ -104,7 +104,7 @@
 | ✅ | 批量清理未使用导入 v3 | easy | 58 | 1-2 小时 | - |
 | ✅ | 重构 CCodeGen._infer_c_type_from_expr 降低圈复杂度 | medium | 48 | 3-5 小时 | - |
 | ✅ | 重构 NativeCodeGen._compile_body 降低圈复杂度 | medium | 40 | 4-6 小时 | - |
-| ⏳ | LOW 级问题批量治理（docstring + 魔法数字） | easy | 48 | 2-4 小时 | - |
+| ⏳ | LOW 级问题批量治理（docstring + 魔法数字） | easy | 45 | 2-4 小时 | - |
 | ✅ | 高复杂度函数补全 docstring | easy | 55 | 2-3 小时 | - |
 | ✅ | 重构 cfg_utils 操作数访问调度表化 | medium | 55 | 3-5 小时 | - |
 | ✅ | 重构 CraneliftBackend._compile_instr 调度表化 | medium | 65 | 3-5 小时 | - |
@@ -116,7 +116,10 @@
 | ✅ | 修复 REFACTORED_FUNCTIONS 虚假标注 | easy | 50 | 1 小时 | - |
 | ✅ | 审查数据同步机制（REFACTORED_FUNCTIONS 标注） | easy | 50 | 1-2 小时 | - |
 | ✅ | LOW 级问题批量治理 v2（ir/ 模块 docstring） | easy | 48 | 2-4 小时 | - |
-| ⏳ | 精准清理 print_debug（真实调试残留） | easy | 55 | 1-2 小时 | - |
+| ⏳ | 精准清理 print_debug（真实调试残留） | easy | 50 | 1-2 小时 | - |
+| ⏳ | 重构 Evaluator._eval_binary_op 降低圈复杂度 | medium | 60 | 2-3 小时 | - |
+| ⏳ | 重构 MIRLowering._lower_match_expr 降低圈复杂度 | medium | 58 | 3-5 小时 | - |
+| ⏳ | 重构 LIRLowering._lower_function 降低圈复杂度 | medium | 57 | 3-5 小时 | - |
 
 ---
 
@@ -128,15 +131,15 @@
 | ✅ | 为 SSA 验证器编写完整测试 | easy | 78 | 2-3 小时 | mir_ssa_verifier, extract_loop_ssa |
 | ✅ | 建立后端性能基准测试框架 | medium | 60 | 3-5 小时 | unify_c_backend |
 | ✅ | LICM 优化正确性测试 | medium | 60 | 3-5 小时 | implement_licm_pass, ssa_verifier_tests |
-| ⏳ | 基准测试框架增强（C/Wasm执行时间+优化对比） | medium | 58 | 3-5 小时 | backend_benchmark_framework |
-| ⏳ | CFG 基础设施单元测试 | medium | 56 | 3-5 小时 | mir_cfg_loop_analysis |
+| ⏳ | 基准测试框架增强（C/Wasm执行时间+优化对比） | medium | 56 | 3-5 小时 | backend_benchmark_framework |
+| ⏳ | CFG 基础设施单元测试 | medium | 54 | 3-5 小时 | mir_cfg_loop_analysis |
 
 ---
 
-**进度**: 91/97 (94%)
-- **已完成**: 91
-- **进行中**: 1
-- **待开发**: 4
+**进度**: 93/100 (93%)
+- **已完成**: 93
+- **进行中**: 0
+- **待开发**: 6
 - **已废弃**: 1
 
-> 注：第50轮开发完成。三大成果：① 建立增量质量门禁（phase3b_incremental_gate）—— 连续5次推迟后终于落地，新增代码必须通过 docstring/魔法数字/命名规范检查；② 重构 LIRCBackend._nova_type_to_c 调度表化（CC 20→6）；③ 修复 REFACTORED_FUNCTIONS 中 4 个虚假"已重构"标注，恢复审查数据可信度。下阶段方向：C 后端闭包 Phase3 + 剩余高复杂度函数重构（_eval_binary_op/_lower_match_expr/_lower_function 均仍 CC 20）。
+> 注：第51轮路线图评审完成。五维评估结果：方向正确、质量持续提升、效率稳定、价值高、审查对齐优秀60%。核心决策：① c_backend_closure_phase3 优先级强制提升至 80（连续多轮推迟）；② 新增 3 个审查驱动重构任务（_eval_binary_op/_lower_match_expr/_lower_function CC=20）；③ 质量门禁成功落地，审查数据可信度恢复。下阶段方向：第52轮强制单任务攻坚 c_backend_closure_phase3，解锁 C 后端完整闭包支持。
