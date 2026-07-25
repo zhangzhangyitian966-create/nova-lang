@@ -4,6 +4,95 @@
 
 ---
 
+## 第 28 轮开发 — 2026-07-25 21:10
+
+> 普通开发轮：前端 parser 多错误聚合抛出 + 后端 LIR SSA callee 降级
+
+---
+
+### 前端任务：修复 parser 错误列表只抛出第一个的问题
+
+**任务 ID**: `frontend_parser_multi_errors` | **难度**: easy | **优先级**: 45 | **结果**: 成功
+
+**为什么选择这个任务：**
+- 前端任务池已空，第 27 轮评审 P2-3 明确指出 parser 错误列表只抛出第一个
+- 维护模式下的轻量增量改进，低难度高 DX 价值
+- 保持前端线活跃，避免完全停滞
+
+**实现详情：**
+- `errors.py`：新增 `ParseErrorGroup` 类，继承 `NovaError`，封装多个 `ParseError`
+  - `__init__` 接收 `errors` 列表，生成 "发现 N 个语法错误" 的摘要消息
+  - `__str__` 格式化输出所有错误，带 `[1]`, `[2]` 序号前缀
+- `parser.py`：修改 `parse()` 方法的错误抛出逻辑
+  - 单个错误：`raise self._errors[0]`（完全向后兼容）
+  - 多个错误：`raise ParseErrorGroup(self._errors)`
+- `__init__.py`：导出 `ParseErrorGroup`
+
+**测试验证：** 395 测试全部通过，无回归。
+
+**前端线状态：** 19/20 完成（含 1 废弃），维护模式。
+
+---
+
+### 后端任务：实现 LIR 降级 MIRCall SSA callee 为 LIRCallIndirect
+
+**任务 ID**: `backend_lir_callee_ssa` | **难度**: medium | **优先级**: 99 | **结果**: 成功
+
+**为什么选择这个任务：**
+- 第 27 轮评审 P0-3：lir_lowering `_lower_call` 未处理 SSA callee，闭包调用在所有后端被错误编译为直接函数调用
+- 优先级 99，是当前 pending 任务中最高优先级
+- **架构级 P0 问题**：这是闭包调用进入所有后端的闸门，阻塞整个闭包全链路
+- 三个后端的 LIRCallIndirect 代码生成均已实现，只需修改 LIR 降级层即可贯通
+
+**实现详情：**
+- `ir/lir_lowering.py`：重写 `_lower_call` 方法，从无条件降级为 `LIRCall` 改为智能分流
+  1. **SSA callee 判断**：`instr.callee in self.ssa_to_loc`（SSA 值在映射中存在）
+  2. **间接调用路径**：创建 `LIRCallIndirect`
+     - `src_locs[0]` = 闭包对象位置和类型（callee 的 SSA 映射）
+     - `src_locs[1:]` = 实际参数位置和类型（与 LIRCall 的 arg_locs 相同）
+     - `arg_count` = `len(instr.args)`（仅实际参数数，不含闭包对象）
+     - `dst_loc` = 返回值位置（与 LIRCall 相同）
+  3. **直接调用路径**：保持原有 `LIRCall` 降级逻辑不变
+- 新增导入 `LIRCallIndirect`
+
+**技术要点：**
+- `ssa_to_loc` 映射是判断 callee 类型的可靠依据：函数字符串（如 `"nova_fn_add"`）不会在 SSA 映射中，而 SSA 值（如 `"v12"`）一定在
+- 三个后端（Native/Wasm/C）的 `_emit_call_indirect` / `_compile_call_indirect` 均一致使用 `src_locs[0]` 作为闭包、`src_locs[1:]` 作为参数，无需后端修改
+- 清零第 27 轮评审 P0-3 架构问题
+
+**代码量：** 约 35 行修改（含注释）。
+
+**测试验证：** 395 测试全部通过，无回归。（`test_vm_higher_order` 偶发 flaky 失败，单独运行通过，与本轮修改无关）
+
+**后端线状态：** 22/29 完成（含 3 废弃）。P0-3 已清零，剩余 P0：native_fn_ptr(P95)、wasm_fn_ptr(P90)。
+
+---
+
+### 测试与基线对比
+
+| 指标 | 开发前 | 开发后 | 变化 |
+|------|--------|--------|------|
+| 通过测试数 | 395 | 395 | 0 |
+| 失败测试数 | 0 | 0 | 0 |
+| 测试通过率 | 100% | 100% | 0% |
+
+**已知问题：** `test_vm_higher_order` 偶发 flaky 失败（第 27 轮已记录，测试间全局状态污染）。
+
+---
+
+### 下轮计划
+
+**前端下一步：**
+- 前端线维护模式，任务池已空。下轮可能继续处理 P2 问题（如列表模式完备性过于保守、parser 块内错误恢复粒度偏粗）或完全暂停前端，100% 投入后端
+
+**后端下一步：**
+- `backend_mir_lambda_robust`（easy，P82）：修复 MIR lambda 降级 return_type 为 None 时的崩溃风险
+- `backend_native_fn_ptr`（hard，P95）：原生后端闭包 fn_ptr 回填，清零 P0-1
+- `backend_closure_e2e_test`（medium，P85）：闭包后端执行测试，建立质量保障
+- 投入比建议：前端 0% / 后端 100%
+
+---
+
 ## 第 27 轮评审 — 2026-07-25 20:40
 
 > 三轮回顾评审：第 25-27 轮总结 + 双线路线图调整

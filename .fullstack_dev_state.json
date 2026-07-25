@@ -1,7 +1,7 @@
 {
-  "cycles": 27,
-  "frontend_completed": 18,
-  "backend_completed": 21,
+  "cycles": 28,
+  "frontend_completed": 19,
+  "backend_completed": 22,
   "last_review_cycle": 27,
   "current_review_cycle": 27,
   "completed_tasks": [
@@ -46,7 +46,9 @@
     "frontend_parser_lambda_sync",
     "backend_wasm_closure_impl",
     "review_cycle_27",
-    "backend_c_closure_fnptr"
+    "backend_c_closure_fnptr",
+    "frontend_parser_multi_errors",
+    "backend_lir_callee_ssa"
   ],
   "failed_tasks": [],
   "deprecated_tasks": [
@@ -55,6 +57,28 @@
     "backend_wasm_gc_types"
   ],
   "task_history": [
+    {
+      "cycle": 28,
+      "task_id": "frontend_parser_multi_errors",
+      "name": "修复 parser 错误列表只抛出第一个的问题",
+      "track": "frontend",
+      "difficulty": "easy",
+      "priority": 45,
+      "result": "success",
+      "details": "在 errors.py 中新增 ParseErrorGroup 类，继承 NovaError，封装多个 ParseError，提供格式化输出（显示所有错误及其序号）。修改 parser.py 的 parse() 方法：当收集到多个错误时（len > 1），抛出 ParseErrorGroup 而非仅第一个错误；单个错误时保持向后兼容直接抛 ParseError。在 __init__.py 中导出 ParseErrorGroup。修复评审报告 P2-3 项：parser 错误列表只抛出第一个，调用方难以获取完整诊断信息。新增约 25 行代码。395 测试全部通过，无回归。前端线 19/20 完成（含 1 废弃）。",
+      "timestamp": "2026-07-25 21:10"
+    },
+    {
+      "cycle": 28,
+      "task_id": "backend_lir_callee_ssa",
+      "name": "实现 LIR 降级 MIRCall SSA callee 为 LIRCallIndirect",
+      "track": "backend",
+      "difficulty": "medium",
+      "priority": 99,
+      "result": "success",
+      "details": "修改 ir/lir_lowering.py 的 _lower_call 方法，从无条件降级为 LIRCall 改为根据 callee 类型智能分流。(1) 新增导入 LIRCallIndirect。(2) 当 instr.callee 在 self.ssa_to_loc 中有映射时（SSA 值，如闭包对象 v12），降级为 LIRCallIndirect：src_locs[0] 为闭包对象位置和类型，src_locs[1:] 为实际参数位置和类型，arg_count 为实际参数数。(3) 当 callee 不在 ssa_to_loc 中时（函数字符串，如 nova_fn_add），保持原有 LIRCall 降级逻辑。三个后端（Native/Wasm/C）的 LIRCallIndirect 代码生成路径均已实现完毕，此次修改使闭包调用贯通整个后端管道。清零评审报告 P0-3：lir_lowering _lower_call 未处理 SSA callee 导致闭包调用错误编译为直接调用。新增约 35 行代码。395 测试全部通过，无回归。后端线达到 22/29 完成（含 3 废弃）。",
+      "timestamp": "2026-07-25 21:10"
+    },
     {
       "cycle": 27,
       "task_id": "review_cycle_27",
@@ -208,7 +232,7 @@
       "difficulty": "medium",
       "priority": 99,
       "estimated_effort": "2-3小时",
-      "status": "pending",
+      "status": "completed",
       "source": "review_27_audit",
       "depends_on": ["backend_closure_mir_lowering"]
     },

@@ -69,7 +69,7 @@ from .ast_nodes import (
     VariantDef,
     WhileExpr,
 )
-from .errors import ParseError
+from .errors import ParseError, ParseErrorGroup
 from .lexer import Token, TokenType
 
 
@@ -195,10 +195,13 @@ class Parser:
                 self._errors.append(e)
                 self._synchronize_to_declaration_boundary()
 
-        # 如果收集了错误，抛出第一个以保持向后兼容
-        # （调用方可以检查 parser._errors 获取完整错误列表）
+        # 如果收集了错误，统一抛出
+        # 单个错误保持向后兼容直接抛 ParseError；
+        # 多个错误用 ParseErrorGroup 包装，方便调用方获取完整诊断
         if self._errors:
-            raise self._errors[0]
+            if len(self._errors) == 1:
+                raise self._errors[0]
+            raise ParseErrorGroup(self._errors)
         return Program(declarations=decls)
 
     def _parse_top_level(self):

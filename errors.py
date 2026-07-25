@@ -122,6 +122,26 @@ class RuntimeError_(NovaError):
             self.source_code = source
 
 
+class ParseErrorGroup(NovaError):
+    """多个语法错误的聚合包装
+
+    当解析器在错误恢复模式下收集到多个 ParseError 时，
+    用此类一次性抛出所有错误，方便调用方获取完整诊断信息。
+    保持向后兼容：单个错误时仍直接抛出 ParseError。
+    """
+
+    def __init__(self, errors, line: int = -1, column: int = -1):
+        self.errors = errors
+        count = len(errors) if errors else 0
+        super().__init__(f"发现 {count} 个语法错误", line, column)
+
+    def __str__(self) -> str:
+        parts = [f"发现 {len(self.errors)} 个语法错误:"]
+        for i, err in enumerate(self.errors, 1):
+            parts.append(f"  [{i}] {err}")
+        return "\n".join(parts)
+
+
 class BreakSignal(Exception):
     """break 信号：用于跳出循环"""
 

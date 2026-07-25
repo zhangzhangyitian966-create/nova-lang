@@ -17,6 +17,7 @@ from .ir_nodes import (
     LIRBuildTuple,
     LIRClosureCreate,
     LIRCall,
+    LIRCallIndirect,
     LIRData,
     LIRFieldAccess,
     LIRFunction,
@@ -500,21 +501,53 @@ class LIRLowering:
     # ---- 函数调用 ----
 
     def _lower_call(self, instr, result):
-        """降级函数调用"""
-        lir = LIRCall()
-        lir.callee = instr.callee  # 使用统一命名
-        # 传递参数位置信息（从 ssa_to_loc 映射）
-        lir.arg_locs = [
-            (self.ssa_to_loc.get(arg_ssa, ""), self.ssa_types.get(arg_ssa, UNIT_TYPE))
-            for arg_ssa in instr.args
-        ]
-        lir.arg_count = len(instr.args)
-        if instr.result_name:
-            lir.dst_loc = (
-                self.ssa_to_loc.get(instr.result_name, ""),
-                instr.result_type,
-            )
-        result.append(lir)
+        """降级函数调用
+
+        区分两种情况：
+        1. callee 是函数字符串（如 "nova_fn_add"）-> 降级为 LIRCall（直接调用）
+        2. callee 是 SSA 值（如 "v12"，代表闭包对象）-> 降级为 LIRCallIndirect
+           此时 src_locs[0] 为闭包对象，src_locs[1:] 为实际参数
+        """
+        # 判断 callee 是否为 SSA 值：SSA 值会在 ssa_to_loc 中有映射
+        if instr.callee in self.ssa_to_loc:
+            # SSA callee（闭包/函数指针）-> 间接调用
+            lir = LIRCallIndirect()
+            lir.arg_count = len(instr.args)
+            # src_locs[0] = 被调用的闭包对象；[1:] = 实际参数
+            lir.src_locs = [
+                (
+                    self.ssa_to_loc.get(instr.callee, ""),
+                    self.ssa_types.get(instr.callee, UNIT_TYPE),
+                )
+            ]
+            for arg_ssa in instr.args:
+                lir.src_locs.append(
+                    (
+                        self.ssa_to_loc.get(arg_ssa, ""),
+                        self.ssa_types.get(arg_ssa, UNIT_TYPE),
+                    )
+                )
+            if instr.result_name:
+                lir.dst_loc = (
+                    self.ssa_to_loc.get(instr.result_name, ""),
+                    instr.result_type,
+                )
+            result.append(lir)
+        else:
+            # 函数字符串 callee -> 直接调用
+            lir = LIRCall()
+            lir.callee = instr.callee
+            lir.arg_locs = [
+                (self.ssa_to_loc.get(arg_ssa, ""), self.ssa_types.get(arg_ssa, UNIT_TYPE))
+                for arg_ssa in instr.args
+            ]
+            lir.arg_count = len(instr.args)
+            if instr.result_name:
+                lir.dst_loc = (
+                    self.ssa_to_loc.get(instr.result_name, ""),
+                    instr.result_type,
+                )
+            result.append(lir)
 
     def _lower_closure_create(self, instr, result):
         """降级闭包创建
