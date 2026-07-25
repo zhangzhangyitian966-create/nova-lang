@@ -1,7 +1,7 @@
 # Nova LLM 智能开发路线图
 
-**更新时间**: 2026-07-25 04:02:00
-**上次评审**: 第 51 轮（路线图评审）
+**更新时间**: 2026-07-26 16:04:00
+**上次评审**: 第 54 轮（路线图评审）
 
 本路线图由 LLM 智能开发系统动态维护。
 
@@ -118,8 +118,12 @@
 | ✅ | LOW 级问题批量治理 v2（ir/ 模块 docstring） | easy | 48 | 2-4 小时 | - |
 | ⏳ | 精准清理 print_debug（真实调试残留） | easy | 50 | 1-2 小时 | - |
 | ✅ | 重构 Evaluator._eval_binary_op 降低圈复杂度 | medium | 60 | 2-3 小时 | - |
-| ⏳ | 重构 MIRLowering._lower_match_expr 降低圈复杂度 | medium | 58 | 3-5 小时 | - |
+| ⏳ | 重构 MIRLowering._lower_match_expr 降低圈复杂度 | medium | 65 | 3-5 小时 | - |
 | ✅ | 重构 LIRLowering._lower_function 降低圈复杂度 | medium | 57 | 3-5 小时 | - |
+| ⏳ | 重构 TypeChecker._check_match_exhaustiveness 降低圈复杂度 | hard | 85 | 1-2 天 | - |
+| ⏳ | Native/Wasm 后端闭包 fn_ptr 回填 | hard | 82 | 4-6 小时 | c_backend_closure_phase3 |
+| ⏳ | 闭包后端端到端测试 | medium | 78 | 3-4 小时 | c_backend_closure_phase3 |
+| ⏳ | 重构 NativeCodeGen._emit_runtime_call + _emit_call 降低圈复杂度 | medium | 60 | 4-6 小时 | - |
 
 ---
 
@@ -131,15 +135,15 @@
 | ✅ | 为 SSA 验证器编写完整测试 | easy | 78 | 2-3 小时 | mir_ssa_verifier, extract_loop_ssa |
 | ✅ | 建立后端性能基准测试框架 | medium | 60 | 3-5 小时 | unify_c_backend |
 | ✅ | LICM 优化正确性测试 | medium | 60 | 3-5 小时 | implement_licm_pass, ssa_verifier_tests |
-| ⏳ | 基准测试框架增强（C/Wasm执行时间+优化对比） | medium | 56 | 3-5 小时 | backend_benchmark_framework |
-| ⏳ | CFG 基础设施单元测试 | medium | 54 | 3-5 小时 | mir_cfg_loop_analysis |
+| ⏳ | 基准测试框架增强（C/Wasm执行时间+优化对比） | medium | 48 | 3-5 小时 | backend_benchmark_framework |
+| ⏳ | CFG 基础设施单元测试 | medium | 50 | 3-5 小时 | mir_cfg_loop_analysis |
 
 ---
 
-**进度**: 95/100 (95%)
-- **已完成**: 95 (+2)
+**进度**: 97/104 (93.3%)
+- **已完成**: 97 (+2：refactor_eval_binary_op, refactor_lower_function)
 - **进行中**: 0
-- **待开发**: 4
+- **待开发**: 6（+4 新增）
 - **已废弃**: 1
 
-> 注：第53轮普通开发轮完成。审查驱动完成 Top10 复杂度函数重构 2/3（_eval_binary_op CC 20→6、_lower_function CC 20→分层后各子方法约5-8）。剩余 _lower_match_expr（CC=20）为本质复杂度，建议下轮评审时重新评估优先级。测试 395/395 通过，零回归。下阶段方向：第54轮为评审轮（54%3==0），全面回顾第52-53轮开发成果并规划第55-57轮。
+> 注：第54轮路线图评审完成。第52-53轮审查对齐率创历史最高 100%。闭包 Phase3 硬任务推迟死循环成功打破。新增 4 个高价值任务：极端复杂度函数重构（P85）、后端闭链路回填（P82）、闭包端到端测试（P78）、Native 后端复杂度优化（P60）。下阶段方向：极端复杂度突破 + 后端完整性推进。
