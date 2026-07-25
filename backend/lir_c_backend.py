@@ -56,6 +56,20 @@ class LIRCBackend:
     控制流使用 C 的 goto + label 实现。
     """
 
+    # Nova 类型 → C 类型映射表（关键词 → C 类型）
+    # 按优先级排列：先匹配先返回
+    _NOVA_TYPE_C_MAP = [
+        ("Int", "int64_t"),
+        ("Float", "double"),
+        ("Bool", "bool"),
+        ("String", "NovaString*"),
+        ("Unit", "void"),
+        ("List", "NovaList*"),
+        ("Map", "NovaMap*"),
+        ("Fn", "NovaClosure*"),
+        ("Closure", "NovaClosure*"),
+    ]
+
     def __init__(self):
         """初始化 LIR → C 代码生成器
 
@@ -703,28 +717,33 @@ class LIRCBackend:
         return ""
 
     def _nova_type_to_c(self, ty) -> str:
-        """Nova 类型 → C 类型字符串"""
+        """Nova 类型 → C 类型字符串。
+
+        通过类型名称关键词匹配，将 Nova 类型映射为对应的 C 类型。
+        支持基本类型（Int/Float/Bool/String/Unit）、容器类型（List/Map）、
+        函数类型（Fn/Closure/箭头类型）。
+
+        参数:
+            ty: Nova 类型对象（需有 name 属性或可 str() 化）
+
+        返回:
+            对应的 C 类型字符串
+        """
         if ty is None:
             return "int64_t"
 
-        type_name = getattr(ty, "name", None) or str(ty)
+        type_str = str(ty)
+        type_name = getattr(ty, "name", None) or type_str
 
-        if type_name == "Int" or "Int" in str(ty):
-            return "int64_t"
-        if type_name == "Float" or "Float" in str(ty):
-            return "double"
-        if type_name == "Bool" or "Bool" in str(ty):
-            return "bool"
-        if type_name == "String" or "String" in str(ty):
-            return "NovaString*"
-        if type_name == "Unit" or "Unit" in str(ty):
-            return "void"
-        if "List" in str(ty) or "List" in type_name:
-            return "NovaList*"
-        if "Map" in str(ty) or "Map" in type_name:
-            return "NovaMap*"
-        if "->" in str(ty) or "Fn" in str(ty) or "Closure" in str(ty):
+        # 按关键词优先级匹配基本类型和容器类型
+        for keyword, c_type in self._NOVA_TYPE_C_MAP:
+            if keyword in type_name or keyword in type_str:
+                return c_type
+
+        # 箭头类型（如 "Int -> Int"）
+        if "->" in type_str:
             return "NovaClosure*"
+
         # 默认：使用不透明指针
         return "NovaValue*"
 

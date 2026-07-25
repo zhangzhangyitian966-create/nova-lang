@@ -1,6 +1,6 @@
 # Nova LLM 智能开发路线图
 
-**更新时间**: 2026-07-25 20:01:00
+**更新时间**: 2026-07-25 20:23:00
 **上次评审**: 第 48 轮（路线图评审）
 
 本路线图由 LLM 智能开发系统动态维护。
@@ -111,7 +111,9 @@
 | ✅ | 重构 TypeChecker._check_pattern 调度表化 | medium | 70 | 2-3 小时 | - |
 | ✅ | 重构 WasmGCBackend._compile_function 分层拆分 | medium | 68 | 3-5 小时 | - |
 | ✅ | 重构 MIRLowering._lower_if_expr 拆分 | medium | 55 | 2-3 小时 | - |
-| ⏳ | 建立代码质量门禁（docstring + 命名规范） | medium | 76 | 3-5 小时 | - |
+| ✅ | 建立代码质量门禁（docstring + 命名规范） | medium | 76 | 3-5 小时 | - |
+| ✅ | 重构 LIRCBackend._nova_type_to_c 调度表化 | easy | 50 | 1-2 小时 | - |
+| ✅ | 修复 REFACTORED_FUNCTIONS 虚假标注 | easy | 50 | 1 小时 | - |
 | ✅ | 审查数据同步机制（REFACTORED_FUNCTIONS 标注） | easy | 50 | 1-2 小时 | - |
 | ✅ | LOW 级问题批量治理 v2（ir/ 模块 docstring） | easy | 48 | 2-4 小时 | - |
 | ⏳ | 精准清理 print_debug（真实调试残留） | easy | 55 | 1-2 小时 | - |
@@ -131,10 +133,10 @@
 
 ---
 
-**进度**: 88/95 (93%)
-- **已完成**: 88
+**进度**: 91/97 (94%)
+- **已完成**: 91
 - **进行中**: 1
-- **待开发**: 5
+- **待开发**: 4
 - **已废弃**: 1
 
-> 注：第49轮开发完成。审查数据同步机制（sync_review_data）已实现——在 auto_review.py 中新增 REFACTORED_FUNCTIONS 字典和 _lookup_refactored() 函数，审查报告现在能自动标注已重构函数。LOW 级问题批量治理 v2 完成 ir/ 模块 16 处 docstring 补充。质量门禁已连续推迟 5 轮，优先级提升至 76。下阶段方向：质量门禁强制落地 + 闭包功能完整性推进。
+> 注：第50轮开发完成。三大成果：① 建立增量质量门禁（phase3b_incremental_gate）—— 连续5次推迟后终于落地，新增代码必须通过 docstring/魔法数字/命名规范检查；② 重构 LIRCBackend._nova_type_to_c 调度表化（CC 20→6）；③ 修复 REFACTORED_FUNCTIONS 中 4 个虚假"已重构"标注，恢复审查数据可信度。下阶段方向：C 后端闭包 Phase3 + 剩余高复杂度函数重构（_eval_binary_op/_lower_match_expr/_lower_function 均仍 CC 20）。

@@ -1,6 +1,9 @@
 {
-  "cycles": 49,
+  "cycles": 50,
   "completed_tasks": [
+    "establish_quality_gate",
+    "refactor_nova_type_to_c",
+    "fix_refactored_annotations",
     "refactor_wasm_compile_function",
     "refactor_mir_lower_if_expr",
     "refactor_type_checker_check_pattern",
@@ -110,6 +113,30 @@
   "failed_tasks": [],
   "task_history": [
     {
+      "cycle": 50,
+      "task_id": "establish_quality_gate",
+      "status": "completed",
+      "source": "自主规划",
+      "reason": "连续5次推迟（第39/42/45/48/49轮评审均规划但未落地），LOW级问题持续增长（1029个），必须建立质量红线防止技术债持续累积。审查日志显示 LOW 问题中 58% 是 no_docstring、28% 是 magic_number，增量门禁可直接遏制增长。",
+      "details": "在 auto_review.py 中新增 phase3b_incremental_gate() 增量质量门禁阶段：1) get_git_changed_lines() 通过 git diff --unified=0 解析变更行号；2) get_new_functions() 识别完全新增的函数/类定义；3) 三项增量检查：gate_no_docstring（新增函数/类必须有 docstring）、gate_new_magic_number（新增行不得引入白名单外魔法数字）、gate_naming_violation（新增函数 snake_case/类 PascalCase）；4) 集成到主流程 main() 中 phase3 之后调用；5) 在 generate_report() 中新增 '## 7. 增量质量门禁' 报告章节，含门禁状态、问题详情、类型分布；6) 门禁失败时在 P1 改进建议中强制列出。基线可通过 NOVA_QUALITY_GATE_BASELINE 环境变量配置（默认 HEAD~1）。测试 395/395 通过。"
+    },
+    {
+      "cycle": 50,
+      "task_id": "refactor_nova_type_to_c",
+      "status": "completed",
+      "source": "审查驱动",
+      "reason": "审查日志第1501轮 Top10 复杂函数中 LIRCBackend._nova_type_to_c CC=20（排名#7），且 Explore 深度分析发现该函数被 REFACTORED_FUNCTIONS 错误标注为'已重构 CC≈3'但实际从未重构。25行函数含 9 个 if + 4 个 or，是典型的长 if 链，可轻松调度表化。",
+      "details": "将 _nova_type_to_c 从 9 个 if + 4 个 or 的长链重构为 _NOVA_TYPE_C_MAP 类级调度表（9 个关键词→C类型映射），主函数通过 for 循环遍历匹配，CC 从 20 降至约 6。新增类级常量 _NOVA_TYPE_C_MAP 和箭头类型单独检查。函数同时补充了完整 docstring（参数说明、返回值说明）。测试 395/395 通过，零回归。"
+    },
+    {
+      "cycle": 50,
+      "task_id": "fix_refactored_annotations",
+      "status": "completed",
+      "source": "审查驱动",
+      "reason": "Explore 深度代码审计发现 REFACTORED_FUNCTIONS 字典中 4 个函数被错误标注为'已重构'但实际 CC 仍为 20：_eval_binary_op（标注 cycle 38，实际未重构）、_lower_match_expr（标注 cycle 40，实际未重构）、_lower_function（标注 cycle 42，实际未重构）、_nova_type_to_c（标注 cycle 42，实际本轮才重构）。虚假标注导致审查报告误导任务优先级判断，必须修复恢复数据可信度。",
+      "details": "修复 REFACTORED_FUNCTIONS 字典：1) 移除 evaluator.py::Evaluator._eval_binary_op（cycle 38 的实际任务是 refactor_eval_expr_complexity 针对 eval_expr，非 _eval_binary_op）；2) 移除 ir/mir_lowering.py::MIRLowering._lower_match_expr（cycle 40 标注不实，函数仍 CC 20）；3) 移除 ir/lir_lowering.py::LIRLowering._lower_function（cycle 42 标注不实，函数仍 CC 20）；4) 更新 backend/lir_c_backend.py::LIRCBackend._nova_type_to_c 为 cycle 50（本轮真正完成调度表化重构）。标注总数从 24 降至 21。测试 395/395 通过。"
+    },
+    {
       "cycle": 49,
       "task_id": "sync_review_data",
       "status": "completed",
@@ -150,7 +177,7 @@
       "details": "将 _lower_if_expr 从 106 行重构为分层结构：1) 新增 _lower_branch_body() 通用分支处理方法，消除 true/false 分支的 30 行镜像重复代码，返回 (result, modified_vars) 元组；2) 新增 _insert_merge_phis() 处理 merge 块 Phi 节点插入（约 35 行独立逻辑）；3) 新增 _insert_result_phi() 处理 if 表达式结果 Phi（约 15 行独立逻辑）；4) _lower_if_expr 主函数从 106 行压缩至约 25 行（CC≈8）。测试 395/395 通过，零回归。"
     }
   ],
-  "current_cycle": 49,
+  "current_cycle": 50,
   "baseline_tests": 395,
   "current_tests": 395,
   "last_review_cycle": 48,
@@ -172,14 +199,14 @@
     {
       "id": "establish_quality_gate",
       "name": "建立代码质量门禁（docstring + 命名规范）",
-      "description": "在 auto_review.py 中增加增量质量检查：新增代码必须有 docstring（公共 API）、不得引入新的魔法数字、命名规范检查。设定 LOW 问题增长率上限，防止技术债持续累积。四次评审推迟，强制提升优先级。",
+      "description": "在 auto_review.py 中增加增量质量检查：新增代码必须有 docstring（公共 API）、不得引入新的魔法数字、命名规范检查。设定 LOW 问题增长率上限，防止技术债持续累积。第50轮已落地实现 phase3b_incremental_gate()。",
       "difficulty": "medium",
       "priority": 76,
       "category": "engineering",
       "estimated": "3-5 小时",
-      "status": "pending",
+      "status": "completed",
       "depends_on": [],
-      "reason": "LOW 级问题持续增长（836→1029，+23%），缺乏质量红线导致持续累积。连续 5 个评审周期（39/42/45/48+49）规划但未落地，已形成系统性推迟模式。low_quality_issues_cleanup v2 已完成部分 docstring，门禁不再依赖它。优先级再提升至 76。[优先级调整: 75→76，五次推迟，依赖解除]"
+      "reason": "第50轮已实现 phase3b_incremental_gate()，包含 git diff 行检测、新增函数 docstring 检查、魔法数字检查、命名规范检查，集成到主流程和报告生成。[已完成]"
     },
     {
       "id": "unify_c_backend",

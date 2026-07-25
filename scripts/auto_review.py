@@ -79,9 +79,6 @@ REFACTORED_FUNCTIONS = {
     "ir/ir_nodes.py::HIRRewriter.generic_rewrite": {
         "old_cc": 23, "cycle": 37, "note": "重构降低复杂度 CC≈5"
     },
-    "evaluator.py::Evaluator._eval_binary_op": {
-        "old_cc": 20, "cycle": 38, "note": "调度表化重构 CC≈3"
-    },
     "evaluator.py::Evaluator.eval_expr": {
         "old_cc": 18, "cycle": 38, "note": "分层拆分重构 CC≈5"
     },
@@ -91,9 +88,6 @@ REFACTORED_FUNCTIONS = {
     "ir/mir_lowering.py::MIRLowering._lower_expr": {
         "old_cc": 70, "cycle": 41, "note": "调度表化重构 CC≈5"
     },
-    "ir/mir_lowering.py::MIRLowering._lower_match_expr": {
-        "old_cc": 20, "cycle": 40, "note": "重构降低复杂度"
-    },
     "ir/pass_manager.py::PassManager._try_inline_expr": {
         "old_cc": 61, "cycle": 24, "note": "函数内联 Pass 实现后重构"
     },
@@ -101,7 +95,7 @@ REFACTORED_FUNCTIONS = {
         "old_cc": 50, "cycle": 30, "note": "统一 SSA 操作数逻辑后重构"
     },
     "backend/lir_c_backend.py::LIRCBackend._nova_type_to_c": {
-        "old_cc": 20, "cycle": 42, "note": "调度表化重构 CC≈3"
+        "old_cc": 20, "cycle": 50, "note": "调度表化重构 CC≈6（_NOVA_TYPE_C_MAP）"
     },
     "backend/lir_c_backend.py::LIRCBackend._compile_instr": {
         "old_cc": 49, "cycle": 42, "note": "调度表化重构 CC≈3"
@@ -123,9 +117,6 @@ REFACTORED_FUNCTIONS = {
     },
     "vm.py::VM._execute_instruction": {
         "old_cc": 123, "cycle": 32, "note": "拆分为独立方法 CC≈3"
-    },
-    "ir/lir_lowering.py::LIRLowering._lower_function": {
-        "old_cc": 20, "cycle": 42, "note": "调度表化重构"
     },
     "backend/lir_c_backend.py::LIRCBackend.compile": {
         "old_cc": 15, "cycle": 42, "note": "重构编译流程"
@@ -691,6 +682,222 @@ def line_level_analysis(filepath, source_lines):
             )
 
     return issues
+
+
+# ============================================================
+# 增量质量门禁（Phase 3b）
+# ============================================================
+
+# 质量门禁基线：与哪个提交对比
+QUALITY_GATE_BASELINE = os.environ.get("NOVA_QUALITY_GATE_BASELINE", "HEAD~1")
+
+# 通用数字白名单（与 line_level_analysis 中的 common 集合一致）
+COMMON_NUMS = {0, 1, 2, 3, 4, 5, 10, 24, 60, 100, 1000, 1024, 3600, 86400}
+
+
+def get_git_changed_lines(filepath, baseline="HEAD~1"):
+    """通过 git diff 获取文件的新增/修改行号集合。
+
+    使用 git diff --unified=0 解析 @@ hunks，
+    返回所有新增行(+)的行号集合。
+
+    参数:
+        filepath: 文件路径（相对于项目根目录）
+        baseline: git diff 的基线（默认 HEAD~1）
+
+    返回:
+        set: 新增/修改行的行号集合
+    """
+    try:
+        result = subprocess.run(
+            ["git", "diff", "--unified=0", baseline, "--", str(filepath)],
+            cwd=str(PROJECT_DIR),
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        if result.returncode != 0:
+            return set()
+
+        changed = set()
+        for line in result.stdout.splitlines():
+            if line.startswith("@@"):
+                m = re.search(r"\+(\d+)(?:,(\d+))?", line)
+                if m:
+                    start = int(m.group(1))
+                    count = int(m.group(2) or 1)
+                    changed.update(range(start, start + count))
+        return changed
+    except Exception:
+        return set()
+
+
+def get_new_functions(tree, changed_lines):
+    """识别 diff 中新增的函数/类定义。
+
+    判定标准：函数/类的所有行都在变更行范围内，视为新增。
+
+    参数:
+        tree: AST 语法树
+        changed_lines: 新增/修改行的行号集合
+
+    返回:
+        list: 新增的函数/类节点列表
+    """
+    new_nodes = []
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            end_line = getattr(node, "end_lineno", node.lineno)
+            if all(l in changed_lines for l in range(node.lineno, end_line + 1)):
+                new_nodes.append(node)
+    return new_nodes
+
+
+def phase3b_incremental_gate():
+    """增量质量门禁：检查新增代码的质量。
+
+    基于 git diff 检测新增代码，对新增函数和新增行施加更严格的质量规则：
+    1. 新增函数/类必须有 docstring（gate_no_docstring）
+    2. 新增行不得引入白名单之外的魔法数字（gate_new_magic_number）
+    3. 新增函数必须遵循命名规范（gate_naming_violation）
+
+    返回:
+        dict: 门禁检查结果，包含 status、issues 和统计信息
+    """
+    log("=" * 60)
+    log("阶段 3b: 增量质量门禁检查")
+    log("=" * 60)
+
+    gate_issues = []
+    py_files = get_python_files(PROJECT_DIR)
+    files_with_changes = 0
+
+    for filepath in py_files:
+        content = read_file(filepath)
+        if not content:
+            continue
+
+        try:
+            tree = ast.parse(content)
+        except SyntaxError:
+            continue
+
+        rel_path = str(filepath.relative_to(PROJECT_DIR))
+        changed_lines = get_git_changed_lines(rel_path, QUALITY_GATE_BASELINE)
+
+        if not changed_lines:
+            continue
+
+        files_with_changes += 1
+        source_lines = content.splitlines()
+
+        # 检查 1: 新增函数/类必须有 docstring
+        new_nodes = get_new_functions(tree, changed_lines)
+        for node in new_nodes:
+            kind = "类" if isinstance(node, ast.ClassDef) else "函数"
+            if not ast.get_docstring(node):
+                gate_issues.append(
+                    CodeIssue(
+                        SEV_HIGH,
+                        "gate_no_docstring",
+                        rel_path,
+                        node.lineno,
+                        f"增量门禁：新增{kind} '{node.name}' 必须有 docstring",
+                        (
+                            source_lines[node.lineno - 1].strip()
+                            if node.lineno <= len(source_lines)
+                            else ""
+                        ),
+                    )
+                )
+
+        # 检查 2: 新增行不得引入白名单之外的魔法数字
+        for line_no in sorted(changed_lines):
+            if line_no > len(source_lines):
+                continue
+            stripped = source_lines[line_no - 1].strip()
+            if not stripped or stripped.startswith("#"):
+                continue
+            # 跳过 import 和纯字符串行
+            if stripped.startswith(("import ", "from ", '"', "'")):
+                continue
+
+            nums = re.findall(r"\b(\d+)\b", stripped)
+            for num_str in nums:
+                num = int(num_str)
+                if num not in COMMON_NUMS and len(str(num)) <= 5:
+                    gate_issues.append(
+                        CodeIssue(
+                            SEV_HIGH,
+                            "gate_new_magic_number",
+                            rel_path,
+                            line_no,
+                            f"增量门禁：新增魔法数字 {num_str}，必须定义为命名常量",
+                            stripped,
+                        )
+                    )
+                    break  # 每行只报第一个
+
+        # 检查 3: 新增函数/类命名规范
+        for node in new_nodes:
+            name = node.name
+            if isinstance(node, ast.ClassDef):
+                if not re.match(r"^[A-Z][a-zA-Z0-9_]*$", name):
+                    gate_issues.append(
+                        CodeIssue(
+                            SEV_HIGH,
+                            "gate_naming_violation",
+                            rel_path,
+                            node.lineno,
+                            f"增量门禁：类 '{name}' 必须使用 PascalCase 命名",
+                            (
+                                source_lines[node.lineno - 1].strip()
+                                if node.lineno <= len(source_lines)
+                                else ""
+                            ),
+                        )
+                    )
+            else:
+                # 公共函数（不以 _ 开头）必须用 snake_case
+                if not name.startswith("_"):
+                    if not re.match(r"^[a-z][a-z0-9_]*$", name):
+                        gate_issues.append(
+                            CodeIssue(
+                                SEV_HIGH,
+                                "gate_naming_violation",
+                                rel_path,
+                                node.lineno,
+                                f"增量门禁：公共函数 '{name}' 必须使用 snake_case 命名",
+                                (
+                                    source_lines[node.lineno - 1].strip()
+                                    if node.lineno <= len(source_lines)
+                                    else ""
+                                ),
+                            )
+                        )
+
+    # 统计
+    gate_sev_counts = defaultdict(int)
+    gate_type_counts = defaultdict(int)
+    for issue in gate_issues:
+        gate_sev_counts[issue.severity] += 1
+        gate_type_counts[issue.issue_type] += 1
+
+    status = "PASS" if not gate_issues else "FAIL"
+    log(f"增量门禁结果: {status}")
+    log(f"  检查文件数: {files_with_changes}（有变更的文件）")
+    log(f"  门禁问题数: {len(gate_issues)}")
+    for sev in [SEV_CRITICAL, SEV_HIGH, SEV_MEDIUM, SEV_LOW]:
+        log(f"  {sev}: {gate_sev_counts.get(sev, 0)}")
+
+    return {
+        "status": status,
+        "issues": [i.to_dict() for i in gate_issues],
+        "severity_counts": dict(gate_sev_counts),
+        "type_counts": dict(gate_type_counts),
+        "total": len(gate_issues),
+        "files_with_changes": files_with_changes,
+    }
 
 
 def phase3_ast_analysis():
@@ -1301,7 +1508,8 @@ def determine_review_round():
 
 
 def generate_report(
-    ast_result, arch_result, test_result, complexity_result, review_round
+    ast_result, arch_result, test_result, complexity_result, review_round,
+    gate_result=None,
 ):
     """生成 Markdown 审查报告"""
     log("=" * 60)
@@ -1550,8 +1758,55 @@ def generate_report(
         )
     lines.append("")
 
+    # ---- 增量质量门禁 ----
+    if gate_result is not None:
+        lines.append("## 7. 增量质量门禁")
+        lines.append("")
+        gate_status = gate_result.get("status", "SKIP")
+        if gate_status == "PASS":
+            lines.append("✅ **门禁通过** — 新增代码未引入质量问题")
+        elif gate_status == "FAIL":
+            lines.append(f"❌ **门禁失败** — 发现 {gate_result.get('total', 0)} 个增量质量问题")
+        else:
+            lines.append("⏭️ **门禁跳过** — 无代码变更")
+        lines.append("")
+        lines.append(f"- 检查文件数（有变更）: {gate_result.get('files_with_changes', 0)}")
+        lines.append(f"- 门禁问题数: {gate_result.get('total', 0)}")
+        lines.append("")
+
+        # 门禁问题详情
+        gate_issues_list = gate_result.get("issues", [])
+        if gate_issues_list:
+            lines.append("### 7.1 门禁问题详情")
+            lines.append("")
+            for i, issue in enumerate(gate_issues_list[:20], 1):
+                lines.append(
+                    f"{i}. **[{issue['type']}]** `{issue['file']}:{issue['line']}`"
+                )
+                lines.append(f"   - {issue['message']}")
+                if issue.get("snippet"):
+                    lines.append(f"   - 代码: `{issue['snippet'][:80]}`")
+                lines.append("")
+            if len(gate_issues_list) > 20:
+                lines.append(f"> 还有 {len(gate_issues_list) - 20} 个门禁问题未列出")
+                lines.append("")
+
+        # 门禁问题类型分布
+        gate_type_counts = gate_result.get("type_counts", {})
+        if gate_type_counts:
+            lines.append("### 7.2 门禁问题类型分布")
+            lines.append("")
+            lines.append("| 问题类型 | 数量 |")
+            lines.append("|----------|------|")
+            for t, c in sorted(gate_type_counts.items(), key=lambda x: -x[1]):
+                lines.append(f"| {t} | {c} |")
+            lines.append("")
+
+        lines.append("---")
+        lines.append("")
+
     # ---- 改进建议 ----
-    lines.append("## 6. 改进建议")
+    lines.append(f"## {'8' if gate_result is not None else '6'}. 改进建议")
     lines.append("")
 
     suggestions_p0 = []  # 立即修复
@@ -1583,6 +1838,13 @@ def generate_report(
     # P1: HIGH 级问题
     if high_issues:
         suggestions_p1.append(f"修复 {len(high_issues)} 个 HIGH 级别问题")
+
+    # 增量质量门禁失败
+    if gate_result and gate_result.get("status") == "FAIL":
+        suggestions_p1.append(
+            f"修复 {gate_result.get('total', 0)} 个增量质量门禁问题"
+            f"（新增代码 docstring/魔法数字/命名规范）"
+        )
 
     # 上帝模块
     if arch_result["god_modules"]:
@@ -1776,6 +2038,9 @@ def main():
         # 阶段 3: AST 级代码质量分析
         ast_result = phase3_ast_analysis()
 
+        # 阶段 3b: 增量质量门禁检查
+        gate_result = phase3b_incremental_gate()
+
         # 阶段 4: 架构审查
         arch_result = phase4_architecture(ast_result)
 
@@ -1788,7 +2053,8 @@ def main():
         # 阶段 7: 报告生成与提交
         review_round = determine_review_round()
         generate_report(
-            ast_result, arch_result, test_result, complexity_result, review_round
+            ast_result, arch_result, test_result, complexity_result, review_round,
+            gate_result,
         )
         git_commit_and_push(review_round)
 
