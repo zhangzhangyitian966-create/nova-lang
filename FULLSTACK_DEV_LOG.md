@@ -4,6 +4,102 @@
 
 ---
 
+## 第 26 轮开发 — 2026-07-25 20:30
+
+> 普通开发轮：前端 parser lambda 同步边界修复 + 后端 Wasm 闭包支持实现
+
+---
+
+### 前端任务：增强 parser 错误恢复对 lambda 起始符的支持
+
+**任务 ID**: `frontend_parser_lambda_sync` | **难度**: easy | **优先级**: 55 | **结果**: ✅ 成功
+
+**为什么选择这个任务：**
+- 前端任务池已空，需从评审报告的薄弱点中新增任务
+- 评审第 24 轮 P2-3 明确指出：parser 错误恢复对 lambda 顶层表达式处理弱
+- 低难度（约 3 行代码），高确定性，适合作为前端维护模式下的轻量任务
+
+**实现详情：**
+- `parser.py` 的 `_STMT_BOUNDARY_TOKENS` 集合中添加 `TokenType.PIPE`
+- `_synchronize_to_declaration_boundary` 方法中添加 `PIPE` 检查作为同步停止标记
+- 使 panic mode 错误恢复时能在 lambda 表达式 `|x| ...` 前停止同步，而非跳过整个 lambda
+
+**测试验证：** 395 测试全部通过，无回归。
+
+**前端线状态：** 18/19 完成（含 1 废弃），进入维护模式。
+
+---
+
+### 后端任务：实现 Wasm 后端完整闭包支持
+
+**任务 ID**: `backend_wasm_closure_impl` | **难度**: hard | **优先级**: 90 | **结果**: ✅ 成功
+
+**为什么选择这个任务：**
+- 优先级 90，是当前 pending 任务中最高优先级的后端任务
+- 评审第 24 轮 P0-2：wasm_backend 多参数间接调用静默丢弃（直接 `pass`），必须修复
+- 第 25 轮已完成 Native 后端闭包支持，本轮完成 Wasm 后端，保持跨后端一致性
+- 清零 P0 bug 是下阶段首要目标
+
+**实现详情：**
+1. **导入声明补全**（`wasm_backend.py:_emit_imports`）：
+   - 新增 `nova_closure_new`（3×i32 → i32）运行时导入
+   - 新增 `nova_closure_call`（3×i32 → i64）运行时导入
+   - 修复原实现引用未声明 `$nova_closure_call` 的 bug
+
+2. **闭包创建**（`_compile_closure_create`）：
+   - 通过 `nova_alloc(capture_count * 8)` 在线性内存中分配捕获变量临时数组
+   - 遍历 `instr.src_locs` 用 `i64.store` 逐字段填充数组
+   - 压入参数（`fn_ptr=NULL`, `captured=array_ptr`, `capture_count`）
+   - 调用 `$nova_closure_new`，保存返回值到 `dst_loc`
+   - 支持零捕获和有捕获两种场景
+
+3. **闭包调用**（`_compile_call_indirect`）：
+   - 通过 `nova_alloc(arg_count * 8)` 在线性内存中分配参数临时数组
+   - 遍历 `instr.src_locs[1:]` 用 `i64.store` 逐字段填充数组（`src_locs[0]` 是闭包对象）
+   - 压入参数（`closure=src_locs[0]`, `args=array_ptr`, `arg_count`）
+   - 调用 `$nova_closure_call`，保存返回值到 `dst_loc`
+   - 修复零参数路径未加载闭包对象的 bug
+   - 修复多参数路径直接 `pass` 丢弃的 P0 bug
+
+**技术要点：**
+- 与 Native 后端的核心逻辑一致（分配数组→填充→调用运行时），差异仅在 "x64 栈操作" vs "Wasm 线性内存 + 值栈操作"
+- `fn_ptr` 当前传 NULL（占位），与 Native/C 后端保持一致，后续轮次统一修复为真实 lambda 函数地址
+- 返回值通过 `local.set` 保存到 `dst_loc`，确保闭包对象/调用结果可被后续指令使用
+
+**代码量：** 两个方法各新增约 35 行代码，导入声明新增 2 行，总计约 72 行。
+
+**测试验证：** 395 测试全部通过，无回归。
+
+**后端线状态：** 20/28 完成（含 3 废弃）。Native 闭包 ✅ / Wasm 闭包 ✅ / C 闭包 fn_ptr 待修复。
+
+---
+
+### 测试与基线对比
+
+| 指标 | 开发前 | 开发后 | 变化 |
+|------|--------|--------|------|
+| 通过测试数 | 395 | 395 | 0 |
+| 失败测试数 | 0 | 0 | 0 |
+| 测试通过率 | 100% | 100% | 0% |
+
+**已知问题：** `test_vm_higher_order` 偶发 flaky 失败（单独运行通过，完整套件偶发失败），疑为测试间全局状态污染，已记录待后续调查。
+
+---
+
+### 下轮计划
+
+**前端下一步：**
+- 前端线进入维护模式，任务池已空。下轮可能新增轻量级任务（如 type_checker 拆分 pattern_checker.py、或 parser lambda 错误恢复进一步增强）
+- 或配合后端任务新增跨后端 lambda 一致性测试（评审 P1-1）
+
+**后端下一步：**
+- `backend_mir_lambda_robust`（P0-3，easy，P75）：修复 MIR lambda 降级的边界崩溃风险
+- `backend_lir_callee_ssa`（P1-4，medium，P70）：LIR 降级 SSA callee 为 LIRCallIndirect
+- `backend_c_closure_fnptr`（P1-3，medium，P68）：C 后端闭包函数指针非 NULL
+- 投入比建议：前端 5% / 后端 95%
+
+---
+
 ## 第 24 轮评审 — 2026-07-25 19:10
 
 > 三轮回顾评审：第 22-24 轮总结 + 双线路线图调整

@@ -1,7 +1,7 @@
 {
-  "cycles": 25,
-  "frontend_completed": 17,
-  "backend_completed": 19,
+  "cycles": 26,
+  "frontend_completed": 18,
+  "backend_completed": 20,
   "last_review_cycle": 24,
   "current_review_cycle": 27,
   "completed_tasks": [
@@ -42,7 +42,9 @@
     "backend_closure_mir_lowering",
     "review_cycle_24",
     "frontend_list_pattern_exhaustive",
-    "backend_native_closure_impl"
+    "backend_native_closure_impl",
+    "frontend_parser_lambda_sync",
+    "backend_wasm_closure_impl"
   ],
   "failed_tasks": [],
   "deprecated_tasks": [
@@ -51,6 +53,28 @@
     "backend_wasm_gc_types"
   ],
   "task_history": [
+    {
+      "cycle": 26,
+      "task_id": "frontend_parser_lambda_sync",
+      "name": "增强 parser 错误恢复对 lambda 起始符的支持",
+      "track": "frontend",
+      "difficulty": "easy",
+      "priority": 55,
+      "result": "success",
+      "details": "在 parser.py 的两个同步边界方法中添加 PIPE（lambda 起始符 '|'）作为有效的同步停止标记。(1) _STMT_BOUNDARY_TOKENS 集合中添加 TokenType.PIPE，使块内错误恢复时能在 lambda 表达式前停止同步。(2) _synchronize_to_declaration_boundary 中添加 PIPE 检查，使顶层错误恢复时能在 lambda 表达式前停止。修复评审报告 P2-3 项：parser 错误恢复对 lambda 顶层表达式处理弱。新增 3 行代码。395 测试全部通过，无回归。前端线 18/19 完成（含 1 废弃）。",
+      "timestamp": "2026-07-25 20:30"
+    },
+    {
+      "cycle": 26,
+      "task_id": "backend_wasm_closure_impl",
+      "name": "实现 Wasm 后端完整闭包支持",
+      "track": "backend",
+      "difficulty": "hard",
+      "priority": 90,
+      "result": "success",
+      "details": "重写 wasm_backend.py 中 _compile_closure_create 和 _compile_call_indirect，从占位实现升级为完整的运行时调用实现，清零评审报告 P0-2。(1) _emit_imports：新增 nova_closure_new（3×i32→i32）和 nova_closure_call（3×i32→i64）运行时函数导入声明。(2) _compile_closure_create：通过 nova_alloc 在线性内存中分配捕获变量临时数组 → 遍历 src_locs 用 i64.store 逐字段填充 → 压入参数（fn_ptr=NULL, captured=array_ptr, capture_count）→ call $nova_closure_new → 保存返回值到 dst_loc。支持零捕获和有捕获两种场景。(3) _compile_call_indirect：通过 nova_alloc 在线性内存中分配参数临时数组 → 遍历 src_locs[1:] 用 i64.store 逐字段填充 → 压入参数（closure=src_locs[0], args=array_ptr, arg_count）→ call $nova_closure_call → 保存返回值到 dst_loc。修复零参数路径未加载闭包对象的 bug，修复多参数路径直接 pass 丢弃的 P0 bug。两个方法各新增约 35 行代码，总计约 70 行。fn_ptr 当前传 NULL（与 Native/C 后端一致）。395 测试全部通过，无回归。后端线达到 20/28 完成（含 3 废弃）。",
+      "timestamp": "2026-07-25 20:30"
+    },
     {
       "cycle": 25,
       "task_id": "frontend_list_pattern_exhaustive",
@@ -164,6 +188,18 @@
   ],
   "tasks": [
     {
+      "task_id": "frontend_parser_lambda_sync",
+      "name": "增强 parser 错误恢复对 lambda 起始符的支持",
+      "description": "在 parser.py 的 _STMT_BOUNDARY_TOKENS 和 _synchronize_to_declaration_boundary 中添加 PIPE（lambda 起始符 '|'）作为有效的同步停止标记。修复评审报告 P2-3 项：parser 错误恢复对 lambda 顶层表达式处理弱。",
+      "track": "frontend",
+      "difficulty": "easy",
+      "priority": 55,
+      "estimated_effort": "30分钟",
+      "status": "completed",
+      "source": "review_24_audit",
+      "depends_on": []
+    },
+    {
       "task_id": "backend_native_closure_impl",
       "name": "实现原生后端闭包创建与间接调用",
       "description": "实现 LIRClosureCreate：调用 nova_closure_new(fn_ptr, captured, capture_count) 创建闭包对象。实现 LIRCallIndirect：调用 nova_closure_call(closure, args, arg_count) 实现闭包调用。System V ABI 兼容。P0 修复：原 _emit_closure_create 执行 store_from_reg(dst_name, RAX) 但 RAX 未经初始化，已修复为正确生成闭包对象代码。fn_ptr 当前传 NULL（占位），后续轮次修复为真实函数地址。",
@@ -183,7 +219,7 @@
       "difficulty": "hard",
       "priority": 90,
       "estimated_effort": "4-6小时",
-      "status": "pending",
+      "status": "completed",
       "source": "review_21_audit",
       "depends_on": ["backend_closure_mir_lowering"]
     },

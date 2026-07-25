@@ -177,6 +177,9 @@ class WasmGCBackend:
             ('"nova_map_put"', '(func $nova_map_put (param i32) (param i32) (param i64))'),
             ('"nova_adt_new"', '(func $nova_adt_new (param i32) (param i32) (param i32) (result i32))'),
             ('"nova_adt_set_field"', '(func $nova_adt_set_field (param i32) (param i32) (param i64))'),
+            # 闭包运行时函数
+            ('"nova_closure_new"', '(func $nova_closure_new (param i32) (param i32) (param i32) (result i32))'),
+            ('"nova_closure_call"', '(func $nova_closure_call (param i32) (param i32) (param i32) (result i64))'),
         ]
 
         for name, sig in runtime_imports:
@@ -561,16 +564,50 @@ class WasmGCBackend:
         """编译间接调用（闭包调用）
 
         调用 nova_closure_call(closure, args_array, arg_count)。
-        简化实现：零参数闭包直接调用，多参数暂不支持。
+        参数通过 nova_alloc 分配临时数组在线性内存中打包。
+        src_locs[0] 是闭包对象，src_locs[1:] 是实际参数。
         """
-        if instr.arg_count > 0:
-            # 对于多参数闭包调用，需要打包参数数组
-            # 简化处理：暂不支持多参数间接调用，使用占位
-            pass
-        # 零参数闭包：直接调用
-        self._emit("(i32.const 0)")  # 空参数数组指针
-        self._emit("(i32.const 0)")  # 参数数量 0
+        arg_count = instr.arg_count
+
+        # 1. 如果有参数，分配参数数组并填充
+        if arg_count > 0 and len(instr.src_locs) > 1:
+            args_size = arg_count * 8  # 每个参数 8 字节（NovaValue 大小）
+            self._emit(f"(i32.const {args_size})")
+            self._emit("(call $nova_alloc)")
+            self._emit("(local.set $tmp_ptr)")
+
+            # 填充参数数组（src_locs[0] 是闭包对象，src_locs[1:] 是参数）
+            for i in range(arg_count):
+                arg_idx = i + 1
+                if arg_idx < len(instr.src_locs):
+                    arg_loc = instr.src_locs[arg_idx][0]
+                    self._emit("(local.get $tmp_ptr)")
+                    self._emit(f"(local.get ${arg_loc})")
+                    self._emit(f"(i64.store offset={i * 8} align=8)")
+
+        # 2. 压入 nova_closure_call 的参数（按声明顺序：closure, args, arg_count）
+        # closure 对象
+        if instr.src_locs:
+            closure_loc = instr.src_locs[0][0]
+            self._emit(f"(local.get ${closure_loc})")
+        else:
+            self._emit("(i32.const 0)")
+
+        # 参数数组指针
+        if arg_count > 0:
+            self._emit("(local.get $tmp_ptr)")
+        else:
+            self._emit("(i32.const 0)")
+
+        # 参数数量
+        self._emit(f"(i32.const {arg_count})")
+
+        # 3. 调用运行时函数
         self._emit("(call $nova_closure_call)")
+
+        # 4. 保存返回值到 dst_loc
+        if instr.dst_loc:
+            self._emit(f"(local.set ${instr.dst_loc[0]})")
 
     def _compile_return(self, instr: LIRReturn):
         """编译返回指令（将返回值压入 Wasm 栈后 return）"""
@@ -665,11 +702,46 @@ class WasmGCBackend:
     def _compile_closure_create(self, instr: LIRClosureCreate):
         """编译闭包创建
 
-        当前阶段：占位实现，返回空指针（i32.const 0）。
-        lambda 函数体的 Wasm 编译待后续实现。
+        调用 nova_closure_new(fn_ptr, captured, capture_count)。
+        捕获变量通过 nova_alloc 分配临时数组在线性内存中打包。
+        fn_ptr 当前传 NULL（占位），与 Native/C 后端保持一致，
+        后续轮次通过函数地址回填机制修复为真实 lambda 函数地址。
         """
-        # 占位：返回空闭包指针
+        capture_count = instr.capture_count
+
+        # 1. 如果有捕获变量，分配捕获数组并填充
+        if capture_count > 0 and instr.src_locs:
+            array_size = capture_count * 8  # 每个捕获变量 8 字节（NovaValue 大小）
+            self._emit(f"(i32.const {array_size})")
+            self._emit("(call $nova_alloc)")
+            self._emit("(local.set $tmp_ptr)")
+
+            for i in range(capture_count):
+                if i < len(instr.src_locs):
+                    cap_loc = instr.src_locs[i][0]
+                    self._emit("(local.get $tmp_ptr)")
+                    self._emit(f"(local.get ${cap_loc})")
+                    self._emit(f"(i64.store offset={i * 8} align=8)")
+
+        # 2. 压入 nova_closure_new 的参数（按声明顺序：fn_ptr, captured, capture_count）
+        # fn_ptr（NULL 占位）
         self._emit("(i32.const 0)")
+
+        # 捕获数组指针
+        if capture_count > 0:
+            self._emit("(local.get $tmp_ptr)")
+        else:
+            self._emit("(i32.const 0)")
+
+        # capture_count
+        self._emit(f"(i32.const {capture_count})")
+
+        # 3. 调用运行时函数
+        self._emit("(call $nova_closure_new)")
+
+        # 4. 保存返回值（闭包指针）到 dst_loc
+        if instr.dst_loc:
+            self._emit(f"(local.set ${instr.dst_loc[0]})")
 
     def _compile_field_access(self, instr: LIRFieldAccess):
         """编译字段访问

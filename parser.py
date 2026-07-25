@@ -86,6 +86,7 @@ class Parser:
     _STMT_BOUNDARY_TOKENS = frozenset({
         TokenType.LET, TokenType.MUT, TokenType.FOR, TokenType.WHILE,
         TokenType.IF, TokenType.MATCH, TokenType.RBRACE, TokenType.EOF,
+        TokenType.PIPE,  # lambda 表达式起始符
     })
 
     def __init__(self, tokens: List[Token], source: str = ""):
@@ -151,6 +152,9 @@ class Parser:
                 break
             # 也检查 IDENT（可能是表达式语句的开头）
             if self._peek_type() == TokenType.IDENT:
+                break
+            # PIPE 是 lambda 表达式的起始符，也应作为同步边界
+            if self._peek_type() == TokenType.PIPE:
                 break
             self._advance()
 
