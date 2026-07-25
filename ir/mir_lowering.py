@@ -7,7 +7,10 @@ HIR -> MIR 降级器
 
 from .ir_nodes import (
     BOOL_TYPE,
+    CLOSURE_TYPE,
     INT_TYPE,
+    IRType,
+    NovaType,
     STRING_TYPE,
     UNIT_TYPE,
     HIRADTConstructor,
@@ -228,6 +231,12 @@ class MIRLowering:
         if entry.terminator is None:
             entry.terminator = MIRReturn(result_ssa)
 
+        # 如果函数返回类型未指定（TYPE_VAR），从函数体结果推断
+        if mir_fn.return_type.kind == IRType.TYPE_VAR and result_ssa:
+            inferred = self.ssa_types.get(result_ssa)
+            if inferred and inferred.kind != IRType.TYPE_VAR:
+                mir_fn.return_type = inferred
+
         mir_fn.basic_blocks = [entry] + self.all_blocks
         mir_fn.entry_block = "bb0"
 
@@ -293,10 +302,28 @@ class MIRLowering:
 
     # === 运算类 ===
 
+    def _infer_binop_type(self, left_ssa: str, right_ssa: str, op: str) -> NovaType:
+        """根据操作数 SSA 类型推断二元运算结果类型
+
+        如果操作数类型已知且一致，返回对应类型；
+        否则返回 TYPE_VAR 占位。
+        """
+        left_ty = self.ssa_types.get(left_ssa)
+        right_ty = self.ssa_types.get(right_ssa)
+        if left_ty and right_ty and left_ty.kind == right_ty.kind:
+            # 算术/比较运算保持操作数类型
+            if op in ("+", "-", "*", "/", "%", "==", "!=", "<", ">", "<=", ">=", "&&", "||"):
+                return left_ty
+        return NovaType(IRType.TYPE_VAR)
+
     def _lower_binary_op(self, hir_expr, block):
         left_ssa = self._lower_expr(hir_expr.left, block)
         right_ssa = self._lower_expr(hir_expr.right, block)
-        instr = MIRBinOp(hir_expr.ir_type)
+        # 优先从操作数类型推断结果类型，HIR 中的 ir_type 可能仍是 TYPE_VAR
+        result_ty = self._infer_binop_type(left_ssa, right_ssa, hir_expr.op)
+        if result_ty.kind == IRType.TYPE_VAR:
+            result_ty = hir_expr.ir_type
+        instr = MIRBinOp(result_ty)
         instr.op = hir_expr.op
         instr.left = left_ssa or ""
         instr.right = right_ssa or ""
@@ -435,10 +462,14 @@ class MIRLowering:
         saved = self._save_context()
 
         # 4. 构造 HIRFunction（捕获变量作为前缀隐式参数 + lambda 自身参数）
-        fn_type = hir_expr.ir_type
-        return_type = (
-            fn_type.params[-1] if fn_type.params else UNIT_TYPE
-        )
+        # 优先使用 lambda 上显式标注的返回类型，否则从 ir_type 推断
+        return_type = hir_expr.return_type
+        if return_type.kind == IRType.TYPE_VAR:
+            fn_type = hir_expr.ir_type
+            if fn_type.params:
+                return_type = fn_type.params[-1]
+            else:
+                return_type = UNIT_TYPE
         all_params = [(name, ty) for name, _, ty in captures] + list(hir_expr.params)
         hir_fn = HIRFunction(
             name=lambda_name,
@@ -457,7 +488,7 @@ class MIRLowering:
         self._restore_context(saved)
 
         # 8. 生成 MIRClosureCreate 指令
-        instr = MIRClosureCreate(hir_expr.ir_type)
+        instr = MIRClosureCreate(CLOSURE_TYPE)
         instr.fn_name = lambda_name
         instr.captures = [enc_ssa for _, enc_ssa, _ in captures]
         return self._emit(instr)

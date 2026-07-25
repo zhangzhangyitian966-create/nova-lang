@@ -1,3 +1,74 @@
+## 2026-07-25 08:15 第52轮开发（普通开发轮）
+
+### 开发范围
+- **轮次**: 第 52 轮（普通开发轮）
+- **上轮评审**: 第 51 轮
+- **测试基线**: 395/395 通过
+- **测试后**: 395/395 通过
+- **任务来源**: 审查驱动/自主规划
+
+---
+
+### 一、本轮任务
+
+| 任务 | 来源 | 状态 | 说明 |
+|------|------|------|------|
+| c_backend_closure_phase3 | 审查驱动/自主规划 | ✅ 成功 | C后端闭包Phase3：lambda函数体编译 |
+
+**核心问题**: 实际开发中发现 Phase3 的真正障碍不是"生成 lambda C 函数"本身（trampoline 已在前期实现），而是 **lambda 参数类型在 HIR→MIR→LIR 管道中完全丢失**，导致 C 后端将 `Int` 参数错误生成为 `NovaValue*`，进而产生 `NovaValue* + NovaValue*` 等无效 C 代码。
+
+---
+
+### 二、修改详情
+
+#### 1. HIR lowering (`ir/hir_lowering.py`)
+- `_lower_fn`: 使用 `_resolve_param_type(p)` 替代硬编码 `TYPE_VAR`，使函数参数类型从 AST 注解正确传播到 HIR
+- `_lower_lambda`: 解析 lambda 的 `return_type` 注解并设置到 `HIRLambda.return_type`
+- 新增 `_resolve_type_annotation(ta)`: 通用类型注解解析，支持 `TypeInt/Float/Bool/String/Unit/Identifier/Fn`
+- 新增 `TypeFn → CLOSURE_TYPE` 映射支持
+
+#### 2. MIR lowering (`ir/mir_lowering.py`)
+- `_lower_lambda`: 使用 `hir_expr.return_type` 作为 lambda 返回类型（替代从 `ir_type` 推断的不可靠逻辑）
+- `_lower_function`: 新增返回类型推断——若 `return_type` 为 `TYPE_VAR`，从 `result_ssa` 的实际类型推断
+- `_infer_binop_type`: 新增辅助方法，从操作数 SSA 类型推断二元运算结果类型（解决 `x + n` 中 `+` 结果类型丢失问题）
+- `_lower_binary_op`: 使用 `_infer_binop_type` 替代直接使用 `hir_expr.ir_type`
+- `MIRClosureCreate.result_type`: 改为 `CLOSURE_TYPE`（替代默认 `UNIT_TYPE`）
+
+#### 3. IR nodes (`ir/ir_nodes.py`)
+- `HIRLambda`: 新增 `return_type` 字段
+- 新增 `CLOSURE_TYPE = NovaType(IRType.FUNCTION, name="Closure")` 常量
+
+#### 4. LIR C backend (`backend/lir_c_backend.py`)
+- `_nova_type_to_c`: 改为大小写不敏感匹配（修复 `"INT"` vs `"Int"` 不匹配导致所有基本类型被映射为 `NovaValue*` 的 bug）
+- `_emit_lambda_trampoline`: 为返回值添加 boxing 转换（`int64_t/double/bool → (void*)(intptr_t)`）
+- `_compile_closure_create`: cast 改为 `(NovaClosure*)`（替代 `(NovaValue*)`）
+
+---
+
+### 三、验证结果
+
+**测试**: 395/395 通过，零回归。
+
+**C 编译器语法检查**: 使用 `gcc -fsyntax-only` 对生成的闭包 C 代码进行检查：
+```c
+int64_t nova_fn___lambda_1(int64_t r0, int64_t r1) {
+    int64_t r2;
+    r2 = r1 + r0;
+    return r2;
+}
+```
+结果：**零错误、零警告**。
+
+---
+
+### 四、下一步计划
+
+1. **闭包调用（Phase4）**: 当前 `main()` 中通过 `nova_fn_add5(r2)` 调用闭包是错误的，应通过 `nova_closure_call()` 进行间接调用。需要实现 `LIRCallIndirect` 的 C 后端代码生成。
+2. **统一 C 后端**: `unify_c_backend` 任务优先级 72，在闭包 Phase4 完成后推进，将 AST→C 路径的功能迁移到 LIR→C 路径。
+3. **Top3 复杂度重构**: 审查驱动的 `_eval_binary_op`、`_lower_match_expr`、`_lower_function` 重构任务（优先级 60/58/57）。
+
+---
+
 ## 2026-07-25 04:02 第51轮评审（路线图评审）
 
 ### 评审范围

@@ -1,5 +1,5 @@
 {
-  "cycles": 51,
+  "cycles": 52,
   "completed_tasks": [
     "establish_quality_gate",
     "refactor_nova_type_to_c",
@@ -110,10 +110,19 @@
     "sync_review_data",
     "low_quality_issues_cleanup_v2",
     "review_cycle_51",
-    "c_backend_closure_support"
+    "c_backend_closure_support",
+    "c_backend_closure_phase3"
   ],
   "failed_tasks": [],
   "task_history": [
+    {
+      "cycle": 52,
+      "task_id": "c_backend_closure_phase3",
+      "status": "completed",
+      "source": "审查驱动/自主规划",
+      "reason": "第51轮评审强制提升为最高优先级（连续多轮推迟）。Phase1+2已完成LIR指令+环境填充，Phase3是让闭包真正可用的最后一步。实际开发中发现核心障碍是lambda参数类型在HIR->MIR->LIR管道中丢失，导致C后端生成错误代码（NovaValue*与int64_t混用）。",
+      "details": "完成C后端闭包Phase3核心开发：1) HIR lowering: _lower_fn使用_resolve_param_type解析参数类型（替代硬编码TYPE_VAR），_lower_lambda解析return_type并设置到HIRLambda.return_type，新增_resolve_type_annotation通用方法支持TypeFn→CLOSURE_TYPE；2) MIR lowering: _lower_lambda使用hir_expr.return_type作为lambda返回类型（替代从ir_type推断），_infer_binop_type从操作数SSA类型推断结果类型（解决lambda体中x+n的类型丢失），_lower_function在return_type为TYPE_VAR时从result_ssa推断；3) IR nodes: HIRLambda新增return_type字段，新增CLOSURE_TYPE常量；4) LIR C backend: _nova_type_to_c改为大小写不敏感匹配（解决INT vs Int不匹配），_emit_lambda_trampoline添加返回值boxing转换（int64_t/double/bool→void*），_compile_closure_create cast改为NovaClosure*。生成C代码通过gcc -fsyntax-only语法检查（零错误零警告）。测试395/395通过，零回归。"
+    },
     {
       "cycle": 51,
       "task_id": "review_cycle_51",
@@ -187,7 +196,7 @@
       "details": "将 _lower_if_expr 从 106 行重构为分层结构：1) 新增 _lower_branch_body() 通用分支处理方法，消除 true/false 分支的 30 行镜像重复代码，返回 (result, modified_vars) 元组；2) 新增 _insert_merge_phis() 处理 merge 块 Phi 节点插入（约 35 行独立逻辑）；3) 新增 _insert_result_phi() 处理 if 表达式结果 Phi（约 15 行独立逻辑）；4) _lower_if_expr 主函数从 106 行压缩至约 25 行（CC≈8）。测试 395/395 通过，零回归。"
     }
   ],
-  "current_cycle": 51,
+  "current_cycle": 52,
   "baseline_tests": 395,
   "current_tests": 395,
   "last_review_cycle": 51,
@@ -200,7 +209,7 @@
       "priority": 80,
       "category": "backend",
       "estimated": "3-5 天",
-      "status": "pending",
+      "status": "completed",
       "depends_on": [
         "c_backend_closure_support"
       ],

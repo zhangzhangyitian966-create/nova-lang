@@ -90,6 +90,7 @@ class LIRCBackend:
         self._string_literals = []
         self._string_counter = 0
         self._tmp_counter_value = 0
+        self._lambda_capture_counts = {}
 
         # 1. 输出头文件
         self._emit_header()
@@ -97,20 +98,28 @@ class LIRCBackend:
         # 2. 收集字符串常量（先扫描所有函数）
         self._collect_string_literals(lir_module)
 
-        # 3. 输出字符串常量声明
+        # 3. 扫描 lambda 闭包创建指令，建立 capture_count 映射
+        self._lambda_capture_counts = self._collect_lambda_capture_counts(lir_module)
+
+        # 4. 输出字符串常量声明
         self._emit_string_literals()
 
-        # 4. 输出全局变量声明
+        # 5. 输出全局变量声明
         self._emit_globals(lir_module)
 
-        # 5. 输出函数前向声明
+        # 6. 输出函数前向声明
         self._emit_fn_declarations(lir_module)
 
-        # 6. 输出函数定义
+        # 7. 输出函数定义
         for name, fn in lir_module.functions.items():
             self._compile_function(fn)
 
-        # 7. 输出 main 函数
+        # 8. 输出 lambda trampoline 函数（闭包调用约定包装器）
+        for name, fn in lir_module.functions.items():
+            if self._is_lambda_name(name) and name in self._lambda_capture_counts:
+                self._emit_lambda_trampoline(fn, self._lambda_capture_counts[name])
+
+        # 9. 输出 main 函数
         self._emit_main(lir_module)
 
         return "\n".join(self._output)
@@ -173,6 +182,12 @@ class LIRCBackend:
             params = self._gen_params_str(fn)
             c_name = self._mangle_fn_name(name)
             self._emit(f"{ret_type} {c_name}({params});")
+            # 为 lambda 输出 trampoline 前向声明
+            if self._is_lambda_name(name) and name in getattr(self, '_lambda_capture_counts', {}):
+                tramp_name = self._mangle_trampoline_name(name)
+                self._emit(
+                    f"void* {tramp_name}(void** captured, void** args, int32_t arg_count);"
+                )
         self._emit("")
 
     def _emit_main(self, lir_module: LIRModule):
@@ -192,6 +207,88 @@ class LIRCBackend:
 
         self._emit("nova_cleanup();")
         self._emit("return 0;")
+        self._indent_level -= 1
+        self._emit("}")
+        self._emit("")
+
+    # ------------------------------------------------------------------
+    # Lambda 闭包 trampoline 生成
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _is_lambda_name(name: str) -> bool:
+        """判断函数名是否为 lambda 辅助函数"""
+        return name.startswith("__lambda_")
+
+    def _mangle_trampoline_name(self, name: str) -> str:
+        """生成 lambda 包装函数（trampoline）的名字"""
+        return f"nova_trampoline_{name}"
+
+    def _collect_lambda_capture_counts(self, lir_module: LIRModule) -> dict:
+        """扫描所有函数体中的 LIRClosureCreate 指令，建立 lambda_name -> capture_count 映射"""
+        counts = {}
+        for fn in lir_module.functions.values():
+            for instr in fn.body:
+                if isinstance(instr, LIRClosureCreate):
+                    counts[instr.fn_name] = instr.capture_count
+        return counts
+
+    def _emit_lambda_trampoline(self, fn: LIRFunction, capture_count: int):
+        """为 lambda 函数生成闭包调用约定的包装函数（trampoline）
+
+        闭包调用约定：void* fn(void** captured, void** args, int32_t arg_count)
+        Lambda 实际函数：void* nova_fn___lambda_N(cap0_type cap0, ..., arg0_type arg0, ...)
+        Trampoline 负责从 captured/args 数组解包参数并调用实际函数。
+        """
+        if not self._is_lambda_name(fn.name):
+            return
+
+        c_name = self._mangle_fn_name(fn.name)
+        tramp_name = self._mangle_trampoline_name(fn.name)
+        ret_type = self._nova_type_to_c(fn.return_type)
+
+        self._emit(
+            f"void* {tramp_name}(void** captured, void** args, int32_t arg_count) {{"
+        )
+        self._indent_level += 1
+
+        # 解包捕获变量（从 captured 数组）
+        for i in range(capture_count):
+            if i >= len(fn.params):
+                break
+            param_name, param_type = fn.params[i]
+            c_type = self._nova_type_to_c(param_type)
+            var_name = self._loc_var_name(param_name)
+            self._emit(f"{c_type} {var_name} = ({c_type})(uintptr_t)captured[{i}];")
+
+        # 解包用户参数（从 args 数组）
+        user_param_start = capture_count
+        user_param_count = len(fn.params) - capture_count
+        for i in range(user_param_count):
+            idx = user_param_start + i
+            if idx >= len(fn.params):
+                break
+            param_name, param_type = fn.params[idx]
+            c_type = self._nova_type_to_c(param_type)
+            var_name = self._loc_var_name(param_name)
+            self._emit(f"{c_type} {var_name} = ({c_type})(uintptr_t)args[{i}];")
+
+        # 调用实际的 lambda 函数
+        arg_names = [self._loc_var_name(p[0]) for p in fn.params]
+        args_str = ", ".join(arg_names) if arg_names else ""
+        if ret_type == "void":
+            self._emit(f"{c_name}({args_str});")
+        else:
+            # 将返回值装箱为 void*（闭包调用约定）
+            if ret_type == "int64_t":
+                self._emit(f"return (void*)(intptr_t){c_name}({args_str});")
+            elif ret_type == "double":
+                self._emit(f"return (void*)(intptr_t){c_name}({args_str});")
+            elif ret_type == "bool":
+                self._emit(f"return (void*)(intptr_t){c_name}({args_str});")
+            else:
+                self._emit(f"return (void*){c_name}({args_str});")
+
         self._indent_level -= 1
         self._emit("}")
         self._emit("")
@@ -483,9 +580,9 @@ class LIRCBackend:
     def _compile_closure_create(self, instr: LIRClosureCreate):
         """编译闭包创建
 
-        调用 nova_closure_new(capture_count, fn_ptr, env) 创建闭包对象。
-        当前阶段：函数指针暂为 NULL（lambda 函数体的 LIR 编译待实现），
-        但捕获变量环境已通过 src_locs 传递，可正确填充。
+        调用 nova_closure_new(fn_ptr, captured, capture_count) 创建闭包对象。
+        函数指针指向 lambda 的 trampoline 包装函数，使闭包可通过
+        nova_closure_call 以统一约定调用。
         """
         dst = self._dst_var_name(instr) if instr.dst_loc else None
         if not dst:
@@ -505,8 +602,9 @@ class LIRCBackend:
                 self._emit(f"{env_var}[{i}] = (void*){cap_var};")
 
         env_arg = env_var if env_var else "NULL"
+        fn_ptr = self._mangle_trampoline_name(instr.fn_name)
         self._emit(
-            f"{dst} = nova_closure_new({capture_count}, NULL, {env_arg});"
+            f"{dst} = (NovaClosure*)nova_closure_new((void*){fn_ptr}, {env_arg}, {capture_count});"
             f" /* closure: {instr.fn_name} */"
         )
 
@@ -735,9 +833,12 @@ class LIRCBackend:
         type_str = str(ty)
         type_name = getattr(ty, "name", None) or type_str
 
-        # 按关键词优先级匹配基本类型和容器类型
+        # 按关键词优先级匹配基本类型和容器类型（大小写不敏感）
+        type_name_lower = type_name.lower()
+        type_str_lower = type_str.lower()
         for keyword, c_type in self._NOVA_TYPE_C_MAP:
-            if keyword in type_name or keyword in type_str:
+            kw_lower = keyword.lower()
+            if kw_lower in type_name_lower or kw_lower in type_str_lower:
                 return c_type
 
         # 箭头类型（如 "Int -> Int"）

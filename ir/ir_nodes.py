@@ -87,6 +87,7 @@ BOOL_TYPE = NovaType(IRType.BOOL)
 CHAR_TYPE = NovaType(IRType.CHAR)
 UNIT_TYPE = NovaType(IRType.UNIT)
 NEVER_TYPE = NovaType(IRType.NEVER)
+CLOSURE_TYPE = NovaType(IRType.FUNCTION, name="Closure")
 
 
 def ListType(elem: NovaType) -> NovaType:
@@ -434,6 +435,7 @@ class HIRLambda(HIRExpr):
     params: List[Tuple[str, NovaType]]  # [(name, type), ...]
     body: HIRExpr
     ir_type: NovaType = field(default_factory=lambda: NovaType(IRType.TYPE_VAR))
+    return_type: NovaType = field(default_factory=lambda: NovaType(IRType.TYPE_VAR))
 
 
 @dataclass

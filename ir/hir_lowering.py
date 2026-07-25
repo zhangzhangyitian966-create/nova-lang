@@ -46,12 +46,22 @@ from ..ast_nodes import (
     StringLiteral,
     TryExpr,
     TupleExpr,
+    TypeBool,
     TypeDef,
+    TypeFloat,
+    TypeFn,
+    TypeIdentifier,
+    TypeInt,
+    TypeString,
+    TypeUnit,
     UnaryOp,
     UnitLiteral,
     WhileExpr,
 )
 from .ir_nodes import (
+    BOOL_TYPE,
+    CLOSURE_TYPE,
+    FLOAT_TYPE,
     HIRAliasDecl,
     HIRAssignExpr,
     HIRBinaryOp,
@@ -102,8 +112,11 @@ from .ir_nodes import (
     HIRVariant,
     HIRWhileExpr,
     HIRWildcardPattern,
+    INT_TYPE,
     IRType,
     NovaType,
+    STRING_TYPE,
+    UNIT_TYPE,
 )
 
 
@@ -229,12 +242,12 @@ class HIRLowering:
 
     def _lower_fn(self, fn_def: FnDef) -> HIRFunction:
         """降级函数定义"""
-        params = [(p.name, NovaType(IRType.TYPE_VAR)) for p in fn_def.params]
+        params = [(p.name, self._resolve_param_type(p)) for p in fn_def.params]
         body = self._lower_expr(fn_def.body)
         return HIRFunction(
             name=fn_def.name,
             params=params,
-            return_type=NovaType(IRType.TYPE_VAR),
+            return_type=self._resolve_type_annotation(fn_def.return_type),
             body=body,
         )
 
@@ -342,9 +355,52 @@ class HIRLowering:
 
     def _lower_lambda(self, expr) -> HIRExpr:
         """降级 Lambda 表达式"""
-        params = [(p.name, NovaType(IRType.TYPE_VAR)) for p in expr.params]
+        params = [(p.name, self._resolve_param_type(p)) for p in expr.params]
         body = self._lower_expr(expr.body)
-        return HIRLambda(params, body)
+        return HIRLambda(
+            params=params,
+            body=body,
+            return_type=self._resolve_type_annotation(expr.return_type),
+        )
+
+    def _resolve_type_annotation(self, ta) -> NovaType:
+        """将 AST 类型注解解析为 NovaType
+
+        支持基本类型（Int/Float/Bool/String/Unit）、类型标识符和函数类型。
+        无法识别时返回 TYPE_VAR 占位。
+        """
+        if ta is None:
+            return NovaType(IRType.TYPE_VAR)
+        if isinstance(ta, TypeInt):
+            return INT_TYPE
+        if isinstance(ta, TypeFloat):
+            return FLOAT_TYPE
+        if isinstance(ta, TypeBool):
+            return BOOL_TYPE
+        if isinstance(ta, TypeString):
+            return STRING_TYPE
+        if isinstance(ta, TypeUnit):
+            return UNIT_TYPE
+        if isinstance(ta, TypeIdentifier):
+            name_map = {
+                "Int": INT_TYPE,
+                "Float": FLOAT_TYPE,
+                "Bool": BOOL_TYPE,
+                "String": STRING_TYPE,
+                "Unit": UNIT_TYPE,
+            }
+            return name_map.get(ta.name, NovaType(IRType.TYPE_VAR))
+        if isinstance(ta, TypeFn):
+            return CLOSURE_TYPE
+        return NovaType(IRType.TYPE_VAR)
+
+    def _resolve_param_type(self, param) -> NovaType:
+        """将 AST 参数的类型注解解析为 NovaType
+
+        如果参数有显式类型注解（如 |x: Int|），则转换为对应的 NovaType；
+        否则返回 TYPE_VAR 占位，由后续类型传播 Pass 填充。
+        """
+        return self._resolve_type_annotation(param.type_annotation)
 
     # ---- 控制流 ----
 
