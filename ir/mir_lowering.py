@@ -23,6 +23,7 @@ from .ir_nodes import (
     HIRFloatLiteral,
     HIRFnDecl,
     HIRForExpr,
+    HIRFunction,
     HIRIdentifier,
     HIRIfExpr,
     HIRIndexExpr,
@@ -62,6 +63,7 @@ from .ir_nodes import (
     MIRStore,
     MIRTupleBuild,
     MIRUnaryOp,
+    _iter_hir_children,
 )
 from .cfg_utils import replace_instr_operands, replace_terminator_operands
 
@@ -92,6 +94,7 @@ class MIRLowering:
         self.loop_stack = []  # 循环栈: [(header_label, exit_label), ...]
         self.ssa_types = {}  # SSA 名 -> 类型映射，用于 Phi 节点类型推断
         self.type_defs = {}  # ADT 类型定义
+        self.lambda_functions = {}  # 收集 lambda 生成的独立 MIRFunction
         # 表达式降级调度表：HIR 节点类型 -> 降级方法
         self._expr_lowerers = self._build_expr_lowerers()
 
@@ -147,6 +150,7 @@ class MIRLowering:
         mir_module = MIRModule(name=hir_module.name)
         mir_module.type_defs = hir_module.type_defs
         self.type_defs = hir_module.type_defs
+        self.lambda_functions = {}  # 重置 lambda 函数收集器
 
         for decl in hir_module.declarations:
             if isinstance(decl, HIRLetDecl):
@@ -157,6 +161,10 @@ class MIRLowering:
                 mir_module.functions[decl.fn_def.name] = self._lower_function(
                     decl.fn_def
                 )
+
+        # 注册所有 lambda 函数到模块（编译过程中收集的）
+        for name, fn in self.lambda_functions.items():
+            mir_module.functions[name] = fn
 
         return mir_module
 
@@ -395,9 +403,210 @@ class MIRLowering:
     # === Lambda ===
 
     def _lower_lambda(self, hir_expr, block):
+        """降级 lambda 表达式：编译 lambda 函数体为独立 MIRFunction。
+
+        步骤：
+        1. 生成唯一的 lambda 函数名
+        2. 分析 lambda 体中的自由变量（需从外层捕获的变量）
+        3. 保存外层编译上下文
+        4. 为 lambda 创建独立 MIRFunction（捕获变量作为隐式前缀参数）
+        5. 编译 lambda 函数体
+        6. 注册 lambda 函数到收集器
+        7. 恢复外层上下文
+        8. 生成 MIRClosureCreate 指令（携带函数名和捕获变量 SSA 名）
+        """
+        # 1. 生成唯一的 lambda 函数名
+        lambda_name = "__lambda_%d" % self.ssa_counter
+
+        # 2. 收集 lambda 参数名，分析自由变量
+        param_names = {name for name, _ in hir_expr.params}
+        free_vars = self._collect_free_vars(hir_expr.body, param_names)
+
+        # 确定捕获变量：自由变量中存在于当前 env 的
+        # 按 sorted 顺序保证确定性
+        captures = []  # [(var_name, enclosing_ssa, var_type)]
+        for var_name in sorted(free_vars):
+            if var_name in self.env:
+                enc_ssa = self.env[var_name]
+                var_type = self.ssa_types.get(enc_ssa, UNIT_TYPE)
+                captures.append((var_name, enc_ssa, var_type))
+
+        # 3. 保存外层编译上下文
+        saved = self._save_context()
+
+        # 4. 构造 HIRFunction（捕获变量作为前缀隐式参数 + lambda 自身参数）
+        fn_type = hir_expr.ir_type
+        return_type = (
+            fn_type.params[-1] if fn_type.params else UNIT_TYPE
+        )
+        all_params = [(name, ty) for name, _, ty in captures] + list(hir_expr.params)
+        hir_fn = HIRFunction(
+            name=lambda_name,
+            params=all_params,
+            return_type=return_type,
+            body=hir_expr.body,
+        )
+
+        # 5. 编译 lambda 函数体（复用 _lower_function 逻辑）
+        mir_fn = self._lower_function(hir_fn)
+
+        # 6. 注册 lambda 函数
+        self.lambda_functions[lambda_name] = mir_fn
+
+        # 7. 恢复外层上下文
+        self._restore_context(saved)
+
+        # 8. 生成 MIRClosureCreate 指令
         instr = MIRClosureCreate(hir_expr.ir_type)
-        instr.fn_name = "<lambda_%d>" % self.ssa_counter
+        instr.fn_name = lambda_name
+        instr.captures = [enc_ssa for _, enc_ssa, _ in captures]
         return self._emit(instr)
+
+    def _save_context(self):
+        """保存当前编译上下文（用于 lambda 编译时的上下文切换）。"""
+        return {
+            "env": dict(self.env),
+            "ssa_counter": self.ssa_counter,
+            "block_counter": self.block_counter,
+            "all_blocks": self.all_blocks,
+            "current_block": self.current_block,
+            "current_function": self.current_function,
+            "ssa_types": dict(self.ssa_types),
+            "loop_stack": list(self.loop_stack),
+        }
+
+    def _restore_context(self, state):
+        """恢复之前保存的编译上下文。"""
+        self.env = state["env"]
+        self.ssa_counter = state["ssa_counter"]
+        self.block_counter = state["block_counter"]
+        self.all_blocks = state["all_blocks"]
+        self.current_block = state["current_block"]
+        self.current_function = state["current_function"]
+        self.ssa_types = state["ssa_types"]
+        self.loop_stack = state["loop_stack"]
+
+    # === 自由变量分析（用于 lambda 捕获变量收集）===
+
+    def _collect_free_vars(self, hir_expr, bound_names):
+        """递归收集 HIR 表达式中的自由变量名称。
+
+        自由变量 = 在表达式中引用但不在 bound_names 中的标识符。
+        用于确定 lambda 需要从外层作用域捕获的变量。
+
+        参数:
+            hir_expr: HIR 表达式
+            bound_names: 当前作用域已绑定的变量名集合
+
+        返回:
+            set: 自由变量名集合
+        """
+        free_vars = set()
+        self._collect_idents(hir_expr, bound_names, free_vars)
+        return free_vars
+
+    def _collect_idents(self, expr, bound_names, free_vars):
+        """递归遍历 HIR 树，收集标识符引用。
+
+        对引入新绑定的结构（let/lambda/for/match pattern），
+        在递归子表达式时将新绑定加入 bound_names。
+        """
+        if expr is None:
+            return
+
+        # 标识符引用：检查是否为自由变量
+        if isinstance(expr, HIRIdentifier):
+            if expr.name not in bound_names:
+                free_vars.add(expr.name)
+            return
+
+        # let 声明：value 中引用的是外层变量，name 是新绑定
+        if isinstance(expr, HIRLetDecl):
+            self._collect_idents(expr.value, bound_names, free_vars)
+            return
+
+        # 块表达式：逐个处理，跟踪 let 引入的新绑定
+        if isinstance(expr, HIRBlockExpr):
+            block_bound = set(bound_names)
+            for sub in expr.exprs:
+                if isinstance(sub, HIRLetDecl):
+                    self._collect_idents(sub.value, block_bound, free_vars)
+                    block_bound.add(sub.name)
+                else:
+                    self._collect_idents(sub, block_bound, free_vars)
+            return
+
+        # 嵌套 lambda：其参数在内部是 bound 的
+        if isinstance(expr, HIRLambda):
+            lambda_bound = set(bound_names)
+            for name, _ in expr.params:
+                lambda_bound.add(name)
+            self._collect_idents(expr.body, lambda_bound, free_vars)
+            return
+
+        # for 循环：循环变量在新作用域中绑定
+        if isinstance(expr, HIRForExpr):
+            self._collect_idents(expr.iterable, bound_names, free_vars)
+            for_bound = set(bound_names)
+            for_bound.add(expr.variable)
+            self._collect_idents(expr.body, for_bound, free_vars)
+            if expr.step:
+                self._collect_idents(expr.step, for_bound, free_vars)
+            return
+
+        # 列表推导式：推导变量在新作用域中绑定
+        if isinstance(expr, HIRListComprehension):
+            self._collect_idents(expr.iterable, bound_names, free_vars)
+            lc_bound = set(bound_names)
+            lc_bound.add(expr.variable)
+            self._collect_idents(expr.result_expr, lc_bound, free_vars)
+            if expr.filter:
+                self._collect_idents(expr.filter, lc_bound, free_vars)
+            return
+
+        # match 表达式：模式可能绑定变量
+        if isinstance(expr, HIRMatchExpr):
+            self._collect_idents(expr.value, bound_names, free_vars)
+            for arm in expr.arms:
+                arm_bound = set(bound_names)
+                self._collect_pattern_binds(arm.pattern, arm_bound)
+                if arm.guard:
+                    self._collect_idents(arm.guard, arm_bound, free_vars)
+                self._collect_idents(arm.body, arm_bound, free_vars)
+            return
+
+        # 通用递归：通过数据驱动的子节点遍历处理其余节点类型
+        for item in _iter_hir_children(expr):
+            kind = item[0]
+            if kind in ("single", "optional"):
+                self._collect_idents(item[2], bound_names, free_vars)
+            elif kind == "list_item":
+                self._collect_idents(item[3], bound_names, free_vars)
+            elif kind in ("pair_key", "pair_val"):
+                self._collect_idents(item[3], bound_names, free_vars)
+            elif kind in ("arm_guard", "arm_body"):
+                self._collect_idents(item[3], bound_names, free_vars)
+
+    def _collect_pattern_binds(self, pattern, bound_names):
+        """收集模式中绑定的变量名，加入 bound_names 集合。"""
+        from .ir_nodes import (
+            HIRBindPattern,
+            HIRConstructorPattern,
+            HIRListPattern,
+            HIRTuplePattern,
+        )
+
+        if isinstance(pattern, HIRBindPattern):
+            bound_names.add(pattern.name)
+        elif isinstance(pattern, HIRConstructorPattern):
+            for fp in pattern.field_patterns:
+                self._collect_pattern_binds(fp, bound_names)
+        elif isinstance(pattern, HIRTuplePattern):
+            for ep in pattern.elements:
+                self._collect_pattern_binds(ep, bound_names)
+        elif isinstance(pattern, HIRListPattern):
+            for ep in pattern.elements:
+                self._collect_pattern_binds(ep, bound_names)
 
     # === 循环与控制流（调用已有的独立方法） ===
 

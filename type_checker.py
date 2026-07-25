@@ -1014,14 +1014,125 @@ class TypeChecker:
         self.env = old_env
         return body_ty
 
+    def _is_wildcard_like(self, pat) -> bool:
+        """检查模式是否为通配符或变量绑定（匹配所有值）。
+
+        通配符 _ 和变量绑定 x 都匹配任意值，
+        在完备性分析中视为完全覆盖。
+        """
+        from .ast_nodes import PatternWildcard, PatternIdentifier
+
+        return isinstance(pat, (PatternWildcard, PatternIdentifier))
+
+    def _check_patterns_exhaustive(
+        self, patterns: List, subject_type: NovaType
+    ) -> bool:
+        """递归检查一组模式是否集体完备地覆盖给定类型的所有值。
+
+        支持嵌套模式：
+        - ADT 构造器：递归检查所有构造器及其子模式的完备性
+        - 元组：递归检查每个位置的完备性
+        - Bool：检查 true 和 false 都被覆盖
+        - 列表：基本完备性检查（保守策略）
+        - Int/Float/String/Char：无限值域，无通配符则不完备
+        """
+        # 通配符/变量绑定 → 完备
+        for p in patterns:
+            if self._is_wildcard_like(p):
+                return True
+
+        from .ast_nodes import (
+            PatternBool,
+            PatternConstructor,
+            PatternList,
+            PatternTuple,
+        )
+
+        # ADT 类型：检查所有构造器是否被完全覆盖
+        if isinstance(subject_type, ADTType):
+            all_variants = self.env.get_all_adt_variants()
+            variants = all_variants.get(subject_type.name)
+            if not variants:
+                return True  # 无法确定变体信息，假设完备
+
+            # 收集每个构造器的子模式列表
+            covered = {}  # constructor_name -> List[List[Pattern]]
+            for p in patterns:
+                if isinstance(p, PatternConstructor):
+                    if p.name in {vname for vname, _ in variants}:
+                        if p.name not in covered:
+                            covered[p.name] = []
+                        covered[p.name].append(p.fields)
+
+            for vname, ftypes in variants:
+                if vname not in covered:
+                    return False  # 构造器未覆盖
+                # 递归检查子模式是否集体完备
+                if not self._check_sub_patterns_exhaustive(
+                    covered[vname], ftypes
+                ):
+                    return False
+            return True
+
+        # Bool 类型：检查 true 和 false 都被覆盖
+        if isinstance(subject_type, PrimType) and subject_type.name == "Bool":
+            covered_bools = set()
+            for p in patterns:
+                if isinstance(p, PatternBool):
+                    covered_bools.add(str(p.value))
+            return "True" in covered_bools and "False" in covered_bools
+
+        # 元组类型：递归检查每个位置是否集体完备
+        if isinstance(subject_type, TupleType):
+            tuple_patterns = [p for p in patterns if isinstance(p, PatternTuple)]
+            if not tuple_patterns:
+                return False
+            for i, elem_type in enumerate(subject_type.elements):
+                pos_patterns = [
+                    p.elements[i]
+                    for p in tuple_patterns
+                    if i < len(p.elements)
+                ]
+                if not self._check_patterns_exhaustive(pos_patterns, elem_type):
+                    return False
+            return True
+
+        # List 类型：保守处理（有列表模式即视为可能完备）
+        if isinstance(subject_type, ListType):
+            return any(isinstance(p, PatternList) for p in patterns)
+
+        # Int/Float/String/Char：无限值域，无通配符则不完备
+        return False
+
+    def _check_sub_patterns_exhaustive(
+        self, sub_patterns_list: List[List], field_types: List[NovaType]
+    ) -> bool:
+        """检查同一构造器的多个分支的子模式是否集体完备。
+
+        对每个字段位置，收集所有分支在该位置的子模式，
+        递归调用 _check_patterns_exhaustive 检查是否完备。
+        """
+        if not sub_patterns_list:
+            return False
+
+        for i, field_type in enumerate(field_types):
+            pos_patterns = [
+                sp[i] for sp in sub_patterns_list if i < len(sp)
+            ]
+            if not self._check_patterns_exhaustive(pos_patterns, field_type):
+                return False
+        return True
+
     def _check_match_exhaustiveness(
         self, subject_type: NovaType, arms: List, match_expr: MatchExpr
     ):
         """检查 match 表达式的模式覆盖是否完备。
 
-        当前支持：
-        - ADT 类型：确保所有构造器都被覆盖
+        支持嵌套模式完备性检查：
+        - ADT 类型：递归检查所有构造器及其子模式的完备性
         - Bool 类型：确保 true 和 false 都被覆盖
+        - 元组类型：递归检查每个位置的完备性
+        - 列表类型：基本完备性检查
         - 通配符 (_) 和变量绑定视为覆盖所有剩余情况
         - 检测冗余分支（通配符/变量绑定之后的分支）
         - 检测字面量模式冗余（重复的字面量值）
@@ -1029,7 +1140,6 @@ class TypeChecker:
         from .ast_nodes import (
             PatternBool,
             PatternChar,
-            PatternConstructor,
             PatternFloat,
             PatternIdentifier,
             PatternInt,
@@ -1041,7 +1151,6 @@ class TypeChecker:
         line = match_expr.span.line if match_expr.span else -1
         column = match_expr.span.column if match_expr.span else -1
 
-        covered_constructors = set()
         has_wildcard_or_var = False
         has_guarded_wildcard_or_var = False
         redundant_arms = []
@@ -1064,10 +1173,7 @@ class TypeChecker:
                     has_guarded_wildcard_or_var = True
                 else:
                     has_wildcard_or_var = True
-            elif isinstance(pat, PatternConstructor):
-                covered_constructors.add(pat.name)
             elif isinstance(pat, PatternBool):
-                covered_constructors.add(str(pat.value))
                 # 字面量冗余检测：Bool
                 if not arm_has_guard:
                     key = "bool"
@@ -1133,46 +1239,69 @@ class TypeChecker:
                 column=column,
             )
 
-        # 如果存在通配符或变量绑定，视为完备
+        # 如果存在无 guard 的通配符或变量绑定，视为完备
         if has_wildcard_or_var:
             return
 
-        # 对 ADT 类型检查构造器覆盖
-        if isinstance(subject_type, ADTType):
-            all_variants = self.env.get_all_adt_variants()
-            variants = all_variants.get(subject_type.name)
-            if variants:
-                expected = {vname for vname, _ in variants}
-                missing = expected - covered_constructors
-                if missing:
-                    missing_list = ", ".join(sorted(missing))
-                    raise TypeCheckError(
-                        f"match 表达式不完备：缺失构造器 {missing_list}",
-                        line=line,
-                        column=column,
-                    )
-
-        # 对 Bool 类型检查 true/false 覆盖
-        if isinstance(subject_type, PrimType) and subject_type.name == "Bool":
-            if "True" not in covered_constructors or "False" not in covered_constructors:
-                missing = []
-                if "True" not in covered_constructors:
-                    missing.append("true")
-                if "False" not in covered_constructors:
-                    missing.append("false")
-                raise TypeCheckError(
-                    f"match 表达式不完备：缺失布尔值 {', '.join(missing)}",
-                    line=line,
-                    column=column,
-                )
-
-        # 没有分支时视为不完备（除非类型为空，但 Nova 暂不支持空类型）
+        # 没有分支时视为不完备
         if not arms:
             raise TypeCheckError(
                 "match 表达式必须至少有一个分支",
                 line=line,
                 column=column,
             )
+
+        # 递归检查模式完备性（支持嵌套模式）
+        all_patterns = [arm.pattern for arm in arms]
+        if not self._check_patterns_exhaustive(all_patterns, subject_type):
+            # 生成更有帮助的错误消息
+            from .ast_nodes import PatternConstructor
+
+            if isinstance(subject_type, ADTType):
+                all_variants = self.env.get_all_adt_variants()
+                variants = all_variants.get(subject_type.name)
+                if variants:
+                    covered_names = {
+                        p.name
+                        for p in all_patterns
+                        if isinstance(p, PatternConstructor)
+                    }
+                    expected = {vname for vname, _ in variants}
+                    missing = expected - covered_names
+                    if missing:
+                        missing_list = ", ".join(sorted(missing))
+                        raise TypeCheckError(
+                            f"match 表达式不完备：缺失构造器 {missing_list}",
+                            line=line,
+                            column=column,
+                        )
+                    # 构造器都已覆盖但子模式不完备
+                    raise TypeCheckError(
+                        "match 表达式不完备：构造器的子模式未完全覆盖所有情况，"
+                        "考虑添加通配符子模式（如 Some(_)）",
+                        line=line,
+                        column=column,
+                    )
+            elif isinstance(subject_type, PrimType) and subject_type.name == "Bool":
+                raise TypeCheckError(
+                    "match 表达式不完备：缺失 true 或 false 分支",
+                    line=line,
+                    column=column,
+                )
+            elif isinstance(subject_type, TupleType):
+                raise TypeCheckError(
+                    "match 表达式不完备：元组模式的元素位置未完全覆盖，"
+                    "考虑添加通配符元素（如 (_, _)）",
+                    line=line,
+                    column=column,
+                )
+            else:
+                raise TypeCheckError(
+                    "match 表达式可能不完备：考虑添加通配符分支 (_) "
+                    "确保覆盖所有情况",
+                    line=line,
+                    column=column,
+                )
 
     def _check_pattern(self, pattern, subject_type: NovaType, env: TypeEnv, match_expr):
         """检查模式与类型的匹配

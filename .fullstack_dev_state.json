@@ -1,7 +1,7 @@
 {
-  "cycles": 22,
-  "frontend_completed": 15,
-  "backend_completed": 17,
+  "cycles": 23,
+  "frontend_completed": 16,
+  "backend_completed": 18,
   "last_review_cycle": 21,
   "current_review_cycle": 24,
   "completed_tasks": [
@@ -37,7 +37,9 @@
     "backend_wasm_data_build_fill",
     "review_cycle_21",
     "frontend_literal_pattern_redundancy",
-    "backend_fix_native_runtime_call_bugs"
+    "backend_fix_native_runtime_call_bugs",
+    "frontend_nested_pattern_check",
+    "backend_closure_mir_lowering"
   ],
   "failed_tasks": [],
   "deprecated_tasks": [
@@ -46,6 +48,28 @@
     "backend_wasm_gc_types"
   ],
   "task_history": [
+    {
+      "cycle": 23,
+      "task_id": "frontend_nested_pattern_check",
+      "name": "实现嵌套模式完备性检查",
+      "track": "frontend",
+      "difficulty": "medium",
+      "priority": 60,
+      "result": "success",
+      "details": "在 type_checker.py 中新增嵌套模式完备性检查。新增 _is_wildcard_like 辅助方法判断通配符/变量绑定模式。新增 _check_patterns_exhaustive 递归方法，支持 ADT 构造器子模式递归检查（验证所有变体被覆盖且子模式集体完备）和元组类型逐位置检查。新增 _check_sub_patterns_exhaustive 对同一构造器的多个实例做转置后递归检查。重写 _check_match_exhaustiveness 调用新方法。约新增 100 行递归检查代码。395 测试全部通过，无回归。",
+      "timestamp": "2026-07-25 17:15"
+    },
+    {
+      "cycle": 23,
+      "task_id": "backend_closure_mir_lowering",
+      "name": "修复 MIR lambda 降级——编译 lambda 函数体",
+      "track": "backend",
+      "difficulty": "hard",
+      "priority": 85,
+      "result": "success",
+      "details": "重写 mir_lowering.py 的 _lower_lambda 方法，从占位实现升级为完整的 lambda 函数编译。核心实现：(1) 新增 _collect_free_vars/_collect_idents/_collect_pattern_binds 自由变量分析方法，递归遍历 HIR 树收集 lambda 体内引用的外层变量，正确处理 let/lambda/for/match 等引入新绑定的结构。(2) 新增 _save_context/_restore_context 上下文切换机制，在 lambda 编译前后保存/恢复外层函数的 env/ssa_counter/block_counter/all_blocks 等状态。(3) _lower_lambda 流程：生成唯一函数名 __lambda_N → 分析自由变量 → 确定捕获变量（在 env 中的自由变量）→ 保存上下文 → 构造 HIRFunction（捕获变量作为隐式前缀参数 + lambda 自身参数）→ 复用 _lower_function 编译 lambda 体 → 注册到 lambda_functions 收集器 → 恢复上下文 → 生成 MIRClosureCreate（携带 fn_name 和 captures SSA 名列表）。(4) 在 lower 方法中注册所有 lambda 函数到 MIRModule.functions。功能验证：无捕获 lambda（captures=[]）、有捕获 lambda（captures=['v0']）、嵌套 lambda（内层正确捕获外层+更外层变量）全部正确。LIR 降级也正确生成 LIRClosureCreate（capture_count、src_locs、dst_loc）。这是所有后端闭包支持的前置条件。新增约 200 行代码，395 测试全部通过，无回归。",
+      "timestamp": "2026-07-25 17:30"
+    },
     {
       "cycle": 22,
       "task_id": "frontend_literal_pattern_redundancy",
@@ -111,7 +135,7 @@
       "difficulty": "hard",
       "priority": 85,
       "estimated_effort": "4-6小时",
-      "status": "pending",
+      "status": "completed",
       "source": "review_21_audit",
       "depends_on": []
     },
@@ -147,7 +171,7 @@
       "difficulty": "medium",
       "priority": 60,
       "estimated_effort": "4-6小时",
-      "status": "pending",
+      "status": "completed",
       "source": "review_21_audit",
       "depends_on": []
     },

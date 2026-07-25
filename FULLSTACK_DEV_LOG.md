@@ -4,6 +4,49 @@
 
 ---
 
+## 第 23 轮 — 2026-07-25 17:30
+
+> 普通开发轮：前端嵌套模式完备性检查 + 后端闭包 MIR 降级
+
+---
+
+### 前端任务：实现嵌套模式完备性检查（frontend_nested_pattern_check）
+
+- **结果**: 成功
+- **难度**: medium | **优先级**: 60
+- **为什么选这个**: 前端线最后一个待做任务。评审指出嵌套模式完备性检查是模式匹配系统的薄弱点，当前仅做顶层构造器覆盖分析，不递归检查子模式。medium 难度，是前端线收官之作。
+- **详情**: 在 `type_checker.py` 中新增嵌套模式完备性检查。新增 `_is_wildcard_like` 辅助方法判断通配符/变量绑定模式。新增 `_check_patterns_exhaustive` 递归方法，支持 ADT 构造器子模式递归检查（验证所有变体被覆盖且子模式集体完备）和元组类型逐位置检查。新增 `_check_sub_patterns_exhaustive` 对同一构造器的多个实例做转置后递归检查。重写 `_check_match_exhaustiveness` 调用新方法。约新增 100 行递归检查代码。
+- **前端下一步**: 前端线所有任务已全部完成（16/17 含 1 废弃），进入纯维护模式。后续如有新需求可在评审轮添加。
+
+---
+
+### 后端任务：修复 MIR lambda 降级——编译 lambda 函数体（backend_closure_mir_lowering）
+
+- **结果**: 成功
+- **难度**: hard | **优先级**: 85
+- **为什么选这个**: 第 21 轮评审指出 MIR 层 `_lower_lambda` 不编译 lambda 函数体是 P1 系统性缺失，是所有后端闭包支持的前置条件。路线图明确标注"第 23 轮"优先执行。hard 难度但价值极高——打通后 lambda 函数体可正确经过 HIR→MIR→LIR 全链路降级。
+- **详情**: 重写 `mir_lowering.py` 的 `_lower_lambda` 方法，从占位实现升级为完整的 lambda 函数编译。核心实现：
+  1. **自由变量分析**：新增 `_collect_free_vars`/`_collect_idents`/`_collect_pattern_binds` 递归方法，遍历 HIR 树收集 lambda 体内引用的外层变量，正确处理 `let`/`lambda`/`for`/`match` 等引入新绑定的结构，避免误将内层绑定的变量标记为自由变量。
+  2. **上下文切换**：新增 `_save_context`/`_restore_context` 方法，在 lambda 编译前后保存/恢复外层函数的 `env`/`ssa_counter`/`block_counter`/`all_blocks`/`current_block`/`ssa_types`/`loop_stack` 等状态，确保 lambda 编译不影响外层。
+  3. **lambda 编译流程**：生成唯一函数名 `__lambda_N` → 分析自由变量 → 确定捕获变量（在 `env` 中的自由变量）→ 保存上下文 → 构造 `HIRFunction`（捕获变量作为隐式前缀参数 + lambda 自身参数）→ 复用 `_lower_function` 编译 lambda 体 → 注册到 `lambda_functions` 收集器 → 恢复上下文 → 生成 `MIRClosureCreate`（携带 `fn_name` 和 `captures` SSA 名列表）。
+  4. **模块注册**：在 `lower` 方法中将所有 lambda 函数注册到 `MIRModule.functions`。
+  - **功能验证**：无捕获 lambda（`captures=[]`）、有捕获 lambda（`captures=['v0']`）、嵌套 lambda（内层正确捕获外层+更外层变量，`captures=['v1', 'v0']`）全部正确。LIR 降级也正确生成 `LIRClosureCreate`（`capture_count`、`src_locs`、`dst_loc`）。
+  - 新增约 200 行代码。
+- **后端下一步**: 实现原生后端闭包创建与间接调用（`backend_native_closure_impl`，hard/82）——利用已编译的 lambda 函数体和捕获变量信息，在原生后端实现 `LIRClosureCreate`（调用 `nova_closure_new`）和 `LIRCallIndirect`（解包闭包→间接调用）。
+
+---
+
+### 测试前后对比
+
+| 阶段 | 通过数 | 总数 | 失败 |
+|------|--------|------|------|
+| 基线（开发前） | 395 | 395 | 0 |
+| 最终验证 | 395 | 395 | 0 |
+
+无回归，测试通过率 100%。
+
+---
+
 ## 第 22 轮 — 2026-07-25 06:12
 
 > 普通开发轮：前端字面量模式冗余检测 + 后端 P0 bug 修复
