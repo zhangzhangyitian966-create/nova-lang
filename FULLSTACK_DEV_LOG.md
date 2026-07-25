@@ -4,6 +4,252 @@
 
 ---
 
+## 第 27 轮评审 — 2026-07-25 20:40
+
+> 三轮回顾评审：第 25-27 轮总结 + 双线路线图调整
+
+---
+
+### 三轮回顾总结（第 25-27 轮）
+
+**完成任务统计：**
+
+| 轨道 | 完成数 | 三轮前总数 | 三轮后总数 | 完成率变化 |
+|------|--------|-----------|-----------|-----------|
+| 前端 | 2 | 16/18 | 18/19 | 88.9% → **94.7%** |
+| 后端 | 4 | 16/24 | 21/29 | 66.7% → **72.4%** |
+| 评审 | 1 | - | - | - |
+| **总计** | **7** | **33/43** | **40/48** | **76.7% → 83.3%** |
+
+**三轮产出质量：** 7/7 全部成功，无失败任务，测试通过率 100%（395 passed），无回归。
+**难度构成：** 2 easy + 2 medium + 2 hard + 1 review（hard 任务成功率 100%）
+
+---
+
+### 深度代码审计重大发现
+
+#### P0：必须立即修复
+
+**P0-1：native_backend.py `_emit_closure_create` fn_ptr 传 NULL**
+- `native_backend.py:1085`：`e.mov_reg_imm64(RDI, 0)`，fn_ptr 显式传 NULL
+- 闭包创建后无法调用目标函数，运行时产生未定义行为
+- 根因：lambda 函数地址收集机制尚未实现
+
+**P0-2：wasm_backend.py `_compile_closure_create` fn_ptr 传 NULL**
+- `wasm_backend.py:727`：`(i32.const 0)`，fn_ptr 传 NULL
+- 与 Native 后端同一问题，Wasm 闭包同样无法调用
+- 根因：lambda 函数表索引管理尚未实现
+
+**P0-3：lir_lowering.py `_lower_call` 未处理 SSA callee**
+- `lir_lowering.py:450-465`：`_lower_call` 把 `instr.callee` 直接透传为 `LIRCall.callee`
+- 当 callee 是 SSA 值（闭包/函数指针）时，生成的 `LIRCall` 携带无效函数名 `"v12"`
+- 后端 `_emit_call` 会尝试链接名为 `"v12"` 的函数，必然失败
+- **这是架构级 P0 问题**：闭包调用在所有后端均被错误编译为直接函数调用
+- 根因：LIR 降级未区分函数字符串 callee 和 SSA 值 callee
+
+#### P1：应尽快修复
+
+**P1-1：mir_lowering.py `_lower_lambda` return_type 为 None 时崩溃**
+- `mir_lowering.py:467`：`hir_expr.return_type.kind` 假设 return_type 一定存在
+- `HIRLambda.return_type` 是 Optional，可能为 None，直接 AttributeError
+- 根因：缺少防御式类型检查
+
+**P1-2：native_backend.py `_emit_call_indirect` 未保护 caller-saved 返回值目标**
+- `_emit_call_indirect` 采用"全部 push/pop"保守方案保存 caller-saved GPR
+- 但如果 `dst_name` 对应的 vreg 被分配在 caller-saved 寄存器中，call 后该寄存器已被破坏
+- `ctx.store_from_reg(dst_name, RAX)` 会写入错误的物理位置
+- 根因：未参照 `_emit_call` 的 `need_retval_slot` 逻辑保护返回值目标
+
+**P1-3：type_checker.py 1756 行大文件病**
+- 文件规模 1756 行，超过 64KB，维护成本高
+- 模式匹配完备性/冗余检测逻辑与类型检查主逻辑耦合
+- 根因：多轮增量开发导致文件膨胀，未进行模块拆分
+
+**P1-4：无 lambda 后端执行测试**
+- `tests/` 全域没有任何测试验证 lambda/closure 经后端编译后能产生正确结果
+- `test_c_codegen.py` 的 `test_closure` 只检查生成代码包含 `"NovaClosure"`，**不执行**
+- 根因：测试设计未覆盖闭包端到端场景
+
+#### P2：建议改进
+
+**P2-1：wasm_backend.py `_compile_call_indirect` 边界检查不完整**
+- 参数数组填充时仅检查一次 `arg_idx < len(instr.src_locs)`
+- 若 `arg_count` 大于 `len(instr.src_locs) - 1`，会访问越界
+
+**P2-2：列表模式完备性过于保守**
+- `_check_patterns_exhaustive` 对 `ListType` 直接返回 `False`
+- 精确列表模式（如 `[1, 2, 3]`）也误报不完备
+- 根因：策略过于保守，未区分"精确长度+通配符"场景
+
+**P2-3：parser 错误列表只抛出第一个**
+- `parser._errors` 收集多个错误，但最终只抛出第一个
+- 调用方难以获取完整诊断信息
+
+**P2-4：parser 块内错误恢复粒度偏粗**
+- `_parse_block` 中同步失败后仅跳过分号
+- 若持续遇到无法识别的 token，可能丢弃剩余整个块
+
+---
+
+### 前端线评估
+
+**质量评分：85/100（上轮 82/100，提升 3 分）**
+
+**质量趋势：功能成熟，工程债可控**
+
+| 层面 | 完成度 | 说明 |
+|------|--------|------|
+| 词法分析 | 90% | Token 覆盖全面 |
+| 语法分析 | 86% | 错误恢复已实现，lambda 同步边界已修复 |
+| AST 设计 | 90% | 覆盖全部语法结构 |
+| 类型系统 | ~90% | _unify_types 覆盖全面，let-polymorphism 就绪 |
+| 模式匹配 | ~80% | 顶层+嵌套完备性+冗余检测就绪；列表模式保守 |
+
+**进展亮点：**
+- 第 25 轮完成列表模式完备性检查（medium）
+- 第 26 轮完成 parser lambda 同步边界修复（easy）
+- 前端线 18/19 完成，任务池已空
+
+**最大短板：**
+1. **type_checker.py 大文件病**（P1）——1756 行，建议拆分为 `pattern_checker.py`
+2. **列表模式完备性过于保守**（P2）——精确列表模式误报
+
+**结论：前端线功能完成 94.7%，调度表模式成熟，注释质量良好。投入产出比已极低，进入纯维护模式。下 3 轮不安排前端任务，100% 投入后端。**
+
+---
+
+### 后端线评估
+
+**质量评分：C 75/100 | Native 62/100 | Wasm 58/100**
+
+**进度评估：**
+
+| 排名 | 后端 | 完成度 | 评分 | 关键缺失 |
+|------|------|--------|------|----------|
+| 1 | C | ~75% | 75/100 | 不区分内外函数；无执行验证 |
+| 2 | Native | ~62% | 62/100 | 闭包 fn_ptr NULL；caller-saved 保护缺失 |
+| 3 | Wasm | ~58% | 58/100 | 闭包 fn_ptr NULL；边界检查不完整 |
+| 4 | Cranelift | <30% | N/A | 仅有框架 |
+
+**质量趋势：闭包框架大幅进步，但 P0 未清零**
+- 第 25 轮：原生后端闭包实现（hard，P95）——清零 P0-1（未初始化 RAX），但引入 fn_ptr=NULL
+- 第 26 轮：Wasm 后端闭包实现（hard，P90）——清零 P0-2（多参数 indirect 丢弃），但引入 fn_ptr=NULL
+- 第 27 轮：审计发现 LIR SSA callee 降级缺失（P0-3）——所有后端闭包调用均错误编译
+- 整体：闭包创建和调用框架已完成，但 fn_ptr 回填和 LIR 降级是最后两个 P0 障碍
+
+**最大短板：**
+1. **LIR SSA callee 未降级为 LIRCallIndirect**（P0）——闭包调用在所有后端错误编译
+2. **Native/Wasm fn_ptr=NULL**（P0）——闭包创建后无法调用目标函数
+3. **后端执行测试完全缺失**（P1）——闭包代码生成无端到端验证
+
+**价值评估：下阶段最高价值任务**
+1. LIR SSA callee 降级（medium，P99）——P0 架构问题，所有后端闭包调用的闸门
+2. 原生后端 fn_ptr 回填（hard，P95）——清零 P0-1
+3. Wasm 后端 fn_ptr 回填（hard，P90）——清零 P0-2
+4. 闭包后端执行测试（medium，P85）——建立质量保障
+
+---
+
+### 综合评估
+
+**前后端平衡性：严重失衡**
+- 前端：18/19 = 94.7% 完成，任务池已空
+- 后端：21/29 = 72.4% 完成（含 3 废弃，实际 21/26 = 80.8%）
+- **建议投入比例：前端 0% / 后端 100%**
+
+**方向评估：方向正确，但需要聚焦闭包闭环**
+- 第 24 轮评审设定的方向（P0 清零 → C 后端闭包闭环 → 跨后端一致性测试）
+- 第 25-26 轮完成了 Native/Wasm 闭包框架，但引入了新 P0（fn_ptr=NULL）
+- 审计发现 LIR SSA callee 降级缺失是更深层的 P0 架构问题
+- 闭包/lambda 全链路仍不可用，但仅剩最后两个障碍
+
+**效率评估：每轮平均产出优秀**
+- 三轮完成 6 个功能任务 + 1 个评审，全部成功
+- 2 easy + 2 medium + 2 hard，hard 任务成功率 100%
+- 0 失败任务，零回归记录
+
+---
+
+### 问题总结与根因分析
+
+| 问题 | 严重度 | 根因 | 修复方案 |
+|------|--------|------|----------|
+| Native fn_ptr 传 NULL | P0 | lambda 函数地址收集机制未实现 | 实现编译期函数地址收集与回填 |
+| Wasm fn_ptr 传 NULL | P0 | lambda 函数表索引管理未实现 | 实现 Wasm 函数表注册与索引传递 |
+| LIR SSA callee 未降级 | P0 | _lower_call 假设 callee 永远是函数字符串 | 增加 SSA 值判断，降级为 LIRCallIndirect |
+| mir_lowering return_type None 崩溃 | P1 | 缺少防御式类型检查 | 增加 return_type 为 None 的 fallback |
+| native caller-saved 保护缺失 | P1 | 未参照 _emit_call 的 retval_slot 逻辑 | 增加 need_retval_slot 检查 |
+| 无后端执行测试 | P1 | 测试设计未覆盖闭包端到端场景 | 编写 C 后端编译+gcc+运行测试 |
+| type_checker 大文件病 | P1 | 多轮增量开发未拆分模块 | 拆分为 pattern_checker.py |
+
+**根因模式：占位代码积累 + 架构级遗漏 + 测试未跟上**
+- 多轮开发中，无法完成的指令以"TODO"或零值占位（fn_ptr=NULL）
+- LIR 降级层未考虑到 callee 可能是 SSA 值，属于架构级遗漏
+- lambda 降级代码（第 23 轮新增）和闭包后端代码（第 25-26 轮新增）均处于"无测试保护"状态
+- 建议：每轮新增的复杂功能必须配套至少 1 个端到端测试
+
+---
+
+### 下阶段方向与理由
+
+**第 28-30 轮聚焦计划：**
+
+| 轮次 | 前端 | 后端 | 理由 |
+|------|------|------|------|
+| 28 | 维护 | LIR SSA callee 降级(P99) + MIR lambda 鲁棒性(P82) | P0 架构问题优先，easy 任务并行 |
+| 29 | 维护 | 原生 fn_ptr 回填(P95) + 闭包执行测试(P85) | 清零 P0-1，建立测试保障 |
+| 30 | 维护 | Wasm fn_ptr 回填(P90) + 评审 | 清零 P0-2，三轮回顾 |
+
+**理由：**
+1. LIR SSA callee 降级是最高优先级 P0——它阻塞了所有后端的闭包调用路径
+2. fn_ptr 回填是次高优先级——Native/Wasm 闭包创建后无法调用
+3. 执行测试必须跟上——无测试保护的代码容易引入回归
+4. 前端任务池已空，下 3 轮不安排前端任务，100% 投入后端
+
+---
+
+### 任务池变更说明
+
+**标记完成 1 个：**
+
+| 任务 ID | 名称 | 原因 |
+|---------|------|------|
+| backend_c_closure_fnptr | 实现 C 后端闭包函数指针非 NULL | 审计确认 lir_c_backend.py 已实现 trampoline+fn_ptr，fn_ptr 指向 `nova_trampoline_<lambda_name>` |
+
+**新增 3 个任务：**
+
+| 任务 ID | 名称 | 优先级 | 来源 | 理由 |
+|---------|------|--------|------|------|
+| backend_native_fn_ptr | 实现原生后端闭包 fn_ptr 回填 | 95 | review_27_audit | 闭包 fn_ptr NULL 导致无法调用 |
+| backend_wasm_fn_ptr | 实现 Wasm 后端闭包 fn_ptr 回填 | 90 | review_27_audit | 闭包 fn_ptr NULL 导致无法调用 |
+| backend_closure_e2e_test | 实现闭包后端执行测试 | 85 | review_27_audit | 无 lambda 后端端到端验证 |
+
+**升级优先级 2 个：**
+
+| 任务 ID | 原优先级 | 新优先级 | 原因 |
+|---------|---------|---------|------|
+| backend_lir_callee_ssa | 70 | 99 | P0 架构问题，所有后端闭包调用的闸门 |
+| backend_mir_lambda_robust | 75 | 82 | P1 崩溃风险，防御式编程 |
+
+**降低优先级 4 个：**
+
+| 任务 ID | 原优先级 | 新优先级 | 原因 |
+|---------|---------|---------|------|
+| backend_native_instr_selection | 58 | 50 | 非关键路径，闭包之后 |
+| backend_wasm_stack_balance | 52 | 45 | 审计发现实际风险低于预期 |
+| backend_lir_phi_lowering_verify | 46 | 42 | Phi 降级已稳定运行多轮 |
+| backend_unify_c_codegen | 48 | 40 | 旧路径迁移，当前价值最低 |
+
+---
+
+### 下轮计划
+
+- **前端**: 维护模式，不安排新任务
+- **后端**: **实现 LIR 降级 MIRCall SSA callee 为 LIRCallIndirect**（medium，P99）——P0 架构问题，闭包调用进入所有后端的闸门
+- **后端**: **修复 MIR lambda 降级的边界崩溃风险**（easy，P82）——防御式编程，崩溃风险
+
+---
+
 ## 第 26 轮开发 — 2026-07-25 20:30
 
 > 普通开发轮：前端 parser lambda 同步边界修复 + 后端 Wasm 闭包支持实现

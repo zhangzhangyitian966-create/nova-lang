@@ -1,8 +1,8 @@
 {
-  "cycles": 26,
+  "cycles": 27,
   "frontend_completed": 18,
-  "backend_completed": 20,
-  "last_review_cycle": 24,
+  "backend_completed": 21,
+  "last_review_cycle": 27,
   "current_review_cycle": 27,
   "completed_tasks": [
     "frontend_try_expr_typecheck",
@@ -44,7 +44,9 @@
     "frontend_list_pattern_exhaustive",
     "backend_native_closure_impl",
     "frontend_parser_lambda_sync",
-    "backend_wasm_closure_impl"
+    "backend_wasm_closure_impl",
+    "review_cycle_27",
+    "backend_c_closure_fnptr"
   ],
   "failed_tasks": [],
   "deprecated_tasks": [
@@ -53,6 +55,17 @@
     "backend_wasm_gc_types"
   ],
   "task_history": [
+    {
+      "cycle": 27,
+      "task_id": "review_cycle_27",
+      "name": "第 27 轮 - 双线路线图评审",
+      "track": "review",
+      "difficulty": "review",
+      "priority": 0,
+      "result": "success",
+      "details": "第九次三轮回顾评审（第 25-27 轮）。深度代码审计发现 3 个 P0（native_backend/wasm_backend fn_ptr 传 NULL 导致闭包无法调用、lir_lowering _lower_call 未处理 SSA callee 导致闭包调用错误编译为直接调用）、4 个 P1（mir_lowering _lower_lambda return_type is None 崩溃、native_backend _emit_call_indirect 未保护 caller-saved 返回值目标、type_checker.py 1756 行大文件病、parser 块内错误恢复粒度偏粗）、4 个 P2（wasm _compile_call_indirect 边界检查不完整、列表模式完备性过于保守、无后端执行测试、parser 错误列表只抛出第一个）。前端评估：质量 85/100，18/19 完成（94.7%），调度表模式成熟，大文件病是最大工程债。后端评估：C 75%/Native 62%/Wasm 58%，闭包框架完成但 fn_ptr 未回填（Native/Wasm P0），LIR SSA callee 降级缺失（P0 架构问题），测试覆盖严重缺失（无 lambda 后端执行测试）。综合：前后端严重失衡，投入比建议前端 0% / 后端 100%。任务池变更：backend_c_closure_fnptr 标记完成（审计确认已实现 trampoline+fn_ptr）、backend_lir_callee_ssa 升级 P99、backend_mir_lambda_robust 升 P82、新增 backend_native_fn_ptr(P95)、backend_wasm_fn_ptr(P90)、backend_closure_e2e_test(P85)，降低 4 个非关键任务优先级。",
+      "timestamp": "2026-07-25 20:40"
+    },
     {
       "cycle": 26,
       "task_id": "frontend_parser_lambda_sync",
@@ -188,88 +201,64 @@
   ],
   "tasks": [
     {
-      "task_id": "frontend_parser_lambda_sync",
-      "name": "增强 parser 错误恢复对 lambda 起始符的支持",
-      "description": "在 parser.py 的 _STMT_BOUNDARY_TOKENS 和 _synchronize_to_declaration_boundary 中添加 PIPE（lambda 起始符 '|'）作为有效的同步停止标记。修复评审报告 P2-3 项：parser 错误恢复对 lambda 顶层表达式处理弱。",
-      "track": "frontend",
-      "difficulty": "easy",
-      "priority": 55,
-      "estimated_effort": "30分钟",
-      "status": "completed",
-      "source": "review_24_audit",
-      "depends_on": []
+      "task_id": "backend_lir_callee_ssa",
+      "name": "实现 LIR 降级 MIRCall SSA callee 为 LIRCallIndirect",
+      "description": "当前 lir_lowering.py 的 _lower_call 把 instr.callee 直接当函数名字符串，若 callee 是 SSA 值（闭包/函数指针），生成的 LIRCall 会携带无效函数名并被后端错误编译为直接函数调用。修复：当 callee 是 SSA 值（以字母开头且不在已知函数名表中）时降级为 LIRCallIndirect，第一个 src_loc 为闭包对象，后续为参数。这是闭包调用进入所有后端的闸门。",
+      "track": "backend",
+      "difficulty": "medium",
+      "priority": 99,
+      "estimated_effort": "2-3小时",
+      "status": "pending",
+      "source": "review_27_audit",
+      "depends_on": ["backend_closure_mir_lowering"]
     },
     {
-      "task_id": "backend_native_closure_impl",
-      "name": "实现原生后端闭包创建与间接调用",
-      "description": "实现 LIRClosureCreate：调用 nova_closure_new(fn_ptr, captured, capture_count) 创建闭包对象。实现 LIRCallIndirect：调用 nova_closure_call(closure, args, arg_count) 实现闭包调用。System V ABI 兼容。P0 修复：原 _emit_closure_create 执行 store_from_reg(dst_name, RAX) 但 RAX 未经初始化，已修复为正确生成闭包对象代码。fn_ptr 当前传 NULL（占位），后续轮次修复为真实函数地址。",
+      "task_id": "backend_native_fn_ptr",
+      "name": "实现原生后端闭包 fn_ptr 回填",
+      "description": "native_backend.py _emit_closure_create 中 fn_ptr 显式传 NULL（e.mov_reg_imm64(RDI, 0)），导致闭包创建后无法调用目标函数。修复：在编译期收集 lambda 函数地址（通过标签或绝对地址），将真实函数指针传入 nova_closure_new。可参考 C 后端 trampoline 方案或直接在编译期确定 lambda 地址。",
       "track": "backend",
       "difficulty": "hard",
       "priority": 95,
       "estimated_effort": "4-6小时",
-      "status": "completed",
-      "source": "review_21_audit",
-      "depends_on": ["backend_closure_mir_lowering"]
+      "status": "pending",
+      "source": "review_27_audit",
+      "depends_on": ["backend_native_closure_impl"]
     },
     {
-      "task_id": "backend_wasm_closure_impl",
-      "name": "实现 Wasm 后端完整闭包支持",
-      "description": "替换当前的占位实现。LIRClosureCreate：调用 nova_closure_new 创建闭包对象。LIRCallIndirect：实现多参数间接调用方案（解包闭包→加载函数指针→通过 call_indirect 调用）。在 _emit_imports 中声明 nova_closure_new 和 nova_closure_call 运行时函数导入。P0 修复要求：当前多参数间接调用直接 pass 丢弃，必须生成正确代码或显式抛出 NotImplementedError。",
+      "task_id": "backend_wasm_fn_ptr",
+      "name": "实现 Wasm 后端闭包 fn_ptr 回填",
+      "description": "wasm_backend.py _compile_closure_create 中 fn_ptr 传 NULL（i32.const 0），导致闭包创建后无法调用目标函数。修复：将 lambda 函数指针（函数表索引或绝对地址）传入 nova_closure_new。Wasm 需通过函数表（funcref table）管理 lambda 函数引用。",
       "track": "backend",
       "difficulty": "hard",
       "priority": 90,
       "estimated_effort": "4-6小时",
-      "status": "completed",
-      "source": "review_21_audit",
-      "depends_on": ["backend_closure_mir_lowering"]
+      "status": "pending",
+      "source": "review_27_audit",
+      "depends_on": ["backend_wasm_closure_impl"]
+    },
+    {
+      "task_id": "backend_closure_e2e_test",
+      "name": "实现闭包后端执行测试",
+      "description": "当前 tests/ 全域没有任何测试验证 lambda/closure 经后端编译后能产生正确结果。test_backends.py 无 lambda 测试，test_native_backend.py 无闭包指令测试，test_c_codegen.py test_closure 只检查生成代码包含 NovaClosure 但不执行。修复：在 test_backends.py 中添加 C 后端端到端闭包执行测试（编译→gcc→运行→验证输出），在 test_native_backend.py 中添加闭包指令编码测试。",
+      "track": "backend",
+      "difficulty": "medium",
+      "priority": 85,
+      "estimated_effort": "3-4小时",
+      "status": "pending",
+      "source": "review_27_audit",
+      "depends_on": []
     },
     {
       "task_id": "backend_mir_lambda_robust",
       "name": "修复 MIR lambda 降级的边界崩溃风险",
-      "description": "修复 mir_lowering.py 中 _lower_lambda 的 3 个边界问题：(1) fn_type.params[-1] 假设 ir_type 一定是函数类型，需增加防御式类型检查；(2) _collect_free_vars 对 HIRAssignExpr 仅递归 value 不处理 target，复杂左值可能漏分析；(3) 嵌套 lambda 中循环变量捕获场景测试。新增约 30 行防御代码。",
+      "description": "修复 mir_lowering.py 中 _lower_lambda 的边界问题：hir_expr.return_type 是 Optional 可能为 None，当前直接访问 .kind 会导致 AttributeError。增加防御式类型检查，当 return_type 为 None 时回退到 TypeVar。",
       "track": "backend",
       "difficulty": "easy",
-      "priority": 75,
+      "priority": 82,
       "estimated_effort": "1-2小时",
       "status": "pending",
       "source": "review_24_audit",
       "depends_on": ["backend_closure_mir_lowering"]
-    },
-    {
-      "task_id": "backend_lir_callee_ssa",
-      "name": "实现 LIR 降级 MIRCall SSA callee 为 LIRCallIndirect",
-      "description": "当前 lir_lowering.py 的 _lower_call 把 instr.callee 直接当函数名字符串，若 callee 是 SSA 值（闭包/函数指针），生成的 LIRCall 会携带无效函数名。修复：当 callee 是 SSA 值时降级为 LIRCallIndirect。",
-      "track": "backend",
-      "difficulty": "medium",
-      "priority": 70,
-      "estimated_effort": "2-3小时",
-      "status": "pending",
-      "source": "review_24_audit",
-      "depends_on": ["backend_closure_mir_lowering"]
-    },
-    {
-      "task_id": "backend_c_closure_fnptr",
-      "name": "实现 C 后端闭包函数指针非 NULL",
-      "description": "当前 lir_c_backend.py 的 LIRClosureCreate 生成 nova_closure_new(capture_count, NULL, env_arg)，第二个参数函数指针恒为 NULL，导致闭包创建后无法真正调用目标函数。修复：从 lambda 函数名生成正确的函数指针引用，使 C 后端闭包真正可用。",
-      "track": "backend",
-      "difficulty": "medium",
-      "priority": 68,
-      "estimated_effort": "2-3小时",
-      "status": "pending",
-      "source": "review_24_audit",
-      "depends_on": ["backend_closure_mir_lowering"]
-    },
-    {
-      "task_id": "frontend_list_pattern_exhaustive",
-      "name": "实现列表模式完备性检查",
-      "description": "当前 _check_patterns_exhaustive 对 ListType 返回 any(isinstance(p, PatternList) for p in patterns)，只要存在 PatternList 就返回 True，这是错误的。修复：由于列表长度无限，固定长度的 PatternList 无法覆盖所有情况，通配符/变量绑定已在上方处理，因此 ListType 分支应返回 False。",
-      "track": "frontend",
-      "difficulty": "medium",
-      "priority": 65,
-      "estimated_effort": "2-3小时",
-      "status": "completed",
-      "source": "review_24_audit",
-      "depends_on": ["frontend_pattern_exhaustiveness"]
     },
     {
       "task_id": "backend_native_instr_selection",
@@ -277,7 +266,7 @@
       "description": "添加指令选择优化：xor eax, eax 替代 mov rax, 0（节省 5 字节且更快）、test reg, reg 替代 cmp reg, 0、使用 LEA 做加法+移位组合。低难度高收益的代码质量优化。",
       "track": "backend",
       "difficulty": "easy",
-      "priority": 58,
+      "priority": 50,
       "estimated_effort": "2-4小时",
       "status": "pending",
       "source": "review_3",
@@ -289,22 +278,10 @@
       "description": "为 WasmGC 后端添加栈深度跟踪与验证。深度审计发现由于所有值通过 local.get/local.set 中转，实际栈平衡风险低于预期，但仍需验证 block 边界处的栈一致性。",
       "track": "backend",
       "difficulty": "medium",
-      "priority": 52,
+      "priority": 45,
       "estimated_effort": "1-2天",
       "status": "pending",
       "source": "review_3",
-      "depends_on": []
-    },
-    {
-      "task_id": "backend_unify_c_codegen",
-      "name": "统一 C 后端（旧路径迁移到 LIR 路径）",
-      "description": "将旧的 c_codegen.py（AST级C代码生成）功能迁移到 lir_c_backend.py（LIR级C代码生成），淘汰旧路径。LIR C 后端已功能完整（22 种 LIR 指令全覆盖），主要差距在闭包支持。",
-      "track": "backend",
-      "difficulty": "hard",
-      "priority": 48,
-      "estimated_effort": "2-3天",
-      "status": "pending",
-      "source": "quality_analysis",
       "depends_on": []
     },
     {
@@ -313,8 +290,20 @@
       "description": "系统验证 MIR Phi 节点降级到 LIR 线性指令序列的正确性。Phi 降级已修复 critical edge 和 MIRMatchJump 后继块两个 bug，实际运行良好，但缺少系统性测试验证。",
       "track": "backend",
       "difficulty": "medium",
-      "priority": 46,
+      "priority": 42,
       "estimated_effort": "3-5小时",
+      "status": "pending",
+      "source": "quality_analysis",
+      "depends_on": []
+    },
+    {
+      "task_id": "backend_unify_c_codegen",
+      "name": "统一 C 后端（旧路径迁移到 LIR 路径）",
+      "description": "将旧的 c_codegen.py（AST级C代码生成）功能迁移到 lir_c_backend.py（LIR级C代码生成），淘汰旧路径。LIR C 后端已功能完整（22 种 LIR 指令全覆盖），主要差距在闭包支持。",
+      "track": "backend",
+      "difficulty": "hard",
+      "priority": 40,
+      "estimated_effort": "2-3天",
       "status": "pending",
       "source": "quality_analysis",
       "depends_on": []
