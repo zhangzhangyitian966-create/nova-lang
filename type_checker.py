@@ -1097,9 +1097,13 @@ class TypeChecker:
                     return False
             return True
 
-        # List 类型：保守处理（有列表模式即视为可能完备）
+        # List 类型：列表长度无限，固定长度的 PatternList 无法覆盖所有情况。
+        # 通配符/变量绑定已在上方处理，到达此处意味着没有通配符覆盖。
+        # PatternList(elements=[]) 仅覆盖空列表，
+        # PatternList(elements=[...]) 仅覆盖对应确切长度的列表。
+        # 由于列表长度无限，没有通配符/变量绑定的情况下不可能完备。
         if isinstance(subject_type, ListType):
-            return any(isinstance(p, PatternList) for p in patterns)
+            return False
 
         # Int/Float/String/Char：无限值域，无通配符则不完备
         return False

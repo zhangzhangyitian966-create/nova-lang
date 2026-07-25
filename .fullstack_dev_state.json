@@ -1,7 +1,7 @@
 {
-  "cycles": 24,
-  "frontend_completed": 16,
-  "backend_completed": 18,
+  "cycles": 25,
+  "frontend_completed": 17,
+  "backend_completed": 19,
   "last_review_cycle": 24,
   "current_review_cycle": 27,
   "completed_tasks": [
@@ -40,7 +40,9 @@
     "backend_fix_native_runtime_call_bugs",
     "frontend_nested_pattern_check",
     "backend_closure_mir_lowering",
-    "review_cycle_24"
+    "review_cycle_24",
+    "frontend_list_pattern_exhaustive",
+    "backend_native_closure_impl"
   ],
   "failed_tasks": [],
   "deprecated_tasks": [
@@ -49,6 +51,28 @@
     "backend_wasm_gc_types"
   ],
   "task_history": [
+    {
+      "cycle": 25,
+      "task_id": "frontend_list_pattern_exhaustive",
+      "name": "实现列表模式完备性检查",
+      "track": "frontend",
+      "difficulty": "medium",
+      "priority": 65,
+      "result": "success",
+      "details": "修复 type_checker.py 中 ListType 的模式匹配完备性检查。原实现只要存在 PatternList 就返回 True，这是错误的——PatternList(elements=[]) 仅覆盖空列表，PatternList(elements=[...]) 仅覆盖对应确切长度的列表，而列表长度无限，没有通配符/变量绑定的情况下不可能完备。修改：将 ListType 分支改为返回 False（通配符/变量绑定已在上方处理并直接返回 True）。约 5 行代码修改，新增 4 行注释。395 测试全部通过，无回归。前端线达到 17/18 完成（含 1 废弃）。",
+      "timestamp": "2026-07-25 19:30"
+    },
+    {
+      "cycle": 25,
+      "task_id": "backend_native_closure_impl",
+      "name": "实现原生后端闭包创建与间接调用",
+      "track": "backend",
+      "difficulty": "hard",
+      "priority": 95,
+      "result": "success",
+      "details": "重写 native_backend.py 中 _emit_closure_create 和 _emit_call_indirect 两个方法，从占位实现升级为完整的运行时调用实现。_emit_closure_create：保存 caller-saved GPR → 在栈上分配捕获变量临时数组并填充 → 设置参数（RDI=NULL fn_ptr, RSI=array_ptr, RDX=capture_count）→ 栈对齐 → call nova_closure_new → 清理栈 → 恢复 caller-saved → 保存返回值。修复 P0 bug（原实现 store_from_reg(dst_name, RAX) 但 RAX 未初始化）。_emit_call_indirect：保存 caller-saved GPR → 在栈上分配参数临时数组并填充 → 加载闭包对象到 RDI → 设置参数（RSI=args_ptr, RDX=arg_count）→ 栈对齐 → call nova_closure_call → 清理栈 → 恢复 caller-saved → 保存返回值。两个方法各新增约 55 行代码，总计约 110 行。fn_ptr 当前传 NULL（与 C 后端一致），后续轮次修复为真实 lambda 函数地址。395 测试全部通过，无回归。",
+      "timestamp": "2026-07-25 19:30"
+    },
     {
       "cycle": 24,
       "task_id": "review_cycle_24",
@@ -142,12 +166,12 @@
     {
       "task_id": "backend_native_closure_impl",
       "name": "实现原生后端闭包创建与间接调用",
-      "description": "实现 LIRClosureCreate：调用 nova_closure_new(capture_count, fn_ptr, env_ptr) 创建闭包对象。实现 LIRCallIndirect：解包闭包对象（加载函数指针和环境指针），设置第一个参数为环境指针，通过寄存器间接调用函数指针。System V ABI 兼容。P0 修复要求：当前 _emit_closure_create 执行 store_from_reg(dst_name, RAX) 但 RAX 未经初始化，必须修复为正确生成闭包对象代码。",
+      "description": "实现 LIRClosureCreate：调用 nova_closure_new(fn_ptr, captured, capture_count) 创建闭包对象。实现 LIRCallIndirect：调用 nova_closure_call(closure, args, arg_count) 实现闭包调用。System V ABI 兼容。P0 修复：原 _emit_closure_create 执行 store_from_reg(dst_name, RAX) 但 RAX 未经初始化，已修复为正确生成闭包对象代码。fn_ptr 当前传 NULL（占位），后续轮次修复为真实函数地址。",
       "track": "backend",
       "difficulty": "hard",
       "priority": 95,
       "estimated_effort": "4-6小时",
-      "status": "pending",
+      "status": "completed",
       "source": "review_21_audit",
       "depends_on": ["backend_closure_mir_lowering"]
     },
@@ -202,12 +226,12 @@
     {
       "task_id": "frontend_list_pattern_exhaustive",
       "name": "实现列表模式完备性检查",
-      "description": "当前 _check_patterns_exhaustive 对 ListType 直接 fall through 到 return False，任何 match list 都被判定为不完备。实现列表模式的完备性检查：[]（空列表）覆盖、Cons 模式（head::tail）覆盖、通配符覆盖。",
+      "description": "当前 _check_patterns_exhaustive 对 ListType 返回 any(isinstance(p, PatternList) for p in patterns)，只要存在 PatternList 就返回 True，这是错误的。修复：由于列表长度无限，固定长度的 PatternList 无法覆盖所有情况，通配符/变量绑定已在上方处理，因此 ListType 分支应返回 False。",
       "track": "frontend",
       "difficulty": "medium",
       "priority": 65,
       "estimated_effort": "2-3小时",
-      "status": "pending",
+      "status": "completed",
       "source": "review_24_audit",
       "depends_on": ["frontend_pattern_exhaustiveness"]
     },

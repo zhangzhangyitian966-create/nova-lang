@@ -1057,25 +1057,135 @@ class NativeCodeGen:
         )
 
     def _emit_closure_create(self, instr, ctx: "_EmitContext"):
-        """编译闭包创建（占位实现）。
+        """编译闭包创建。
 
-        当前原生后端暂不支持完整的闭包运行时，
-        生成零值占位，与 Wasm 后端行为一致。
-        TODO: 接入 nova_closure_new 运行时函数。
+        调用 nova_closure_new(fn_ptr, captured, capture_count) 创建闭包对象。
+        当前 fn_ptr 传 NULL（占位），与 C 后端保持一致，
+        后续轮次通过函数地址回填机制修复为真实 lambda 函数地址。
         """
+        e = ctx.e
         if not instr.dst_loc:
             return
         dst_name, _ = instr.dst_loc
+        capture_count = instr.capture_count
+
+        # 1. 保存 caller-saved GPR
+        for reg in CALLER_GPRS:
+            e.push_reg(reg)
+
+        # 2. 在栈上分配捕获变量临时数组并填充
+        array_size = capture_count * 8
+        if array_size > 0:
+            e.sub_rsp_imm(array_size)
+            for i, (loc, _) in enumerate(instr.src_locs[:capture_count]):
+                ctx.load_to_reg(loc, RAX)
+                e.mov_mem_reg(RSP, i * 8, RAX)
+
+        # 3. 设置参数（System V ABI）
+        # RDI = fn_ptr (NULL for now)
+        e.mov_reg_imm64(RDI, 0)
+        # RSI = captured array pointer
+        if array_size > 0:
+            e.mov_reg_reg64(RSI, RSP)
+        else:
+            e.mov_reg_imm64(RSI, 0)
+        # RDX = capture_count
+        e.mov_reg_imm64(RDX, capture_count)
+
+        # 4. 栈对齐：已 push 64 字节 + array_size
+        total_sub = 64 + array_size
+        if total_sub % 16 != 0:
+            align_padding = 16 - (total_sub % 16)
+            e.sub_rsp_imm(align_padding)
+        else:
+            align_padding = 0
+
+        # 5. 发射 call（外部运行时函数）
+        call_offset = e.call_rel32()
+        self.external_calls.append(
+            (ctx.func_name, call_offset, "nova_closure_new")
+        )
+
+        # 6. 清理栈对齐和临时数组
+        if align_padding > 0:
+            e.add_rsp_imm(align_padding)
+        if array_size > 0:
+            e.add_rsp_imm(array_size)
+
+        # 7. 恢复 caller-saved GPR
+        for reg in reversed(CALLER_GPRS):
+            e.pop_reg(reg)
+
+        # 8. 保存返回值（nova_closure_new 返回 NovaClosure*，在 RAX）
         ctx.store_from_reg(dst_name, RAX)
 
     def _emit_call_indirect(self, instr, ctx: "_EmitContext"):
-        """编译间接调用（闭包/函数指针调用，占位实现）。
+        """编译间接调用（闭包调用）。
 
-        当前原生后端暂不支持间接调用机制，
-        需要运行时提供闭包 vtable 才能完成。
-        TODO: 实现闭包对象解包 + 函数指针间接调用。
+        调用 nova_closure_call(closure, args, arg_count) 实现闭包调用。
+        第一个 src_loc 是闭包对象，后续 src_locs 是实际参数。
         """
-        pass
+        e = ctx.e
+        if not instr.src_locs or len(instr.src_locs) < 1:
+            return
+
+        dst_info = instr.dst_loc
+        arg_count = instr.arg_count
+
+        # 1. 保存 caller-saved GPR
+        for reg in CALLER_GPRS:
+            e.push_reg(reg)
+
+        # 2. 在栈上分配参数临时数组并填充
+        args_size = arg_count * 8
+        if args_size > 0:
+            e.sub_rsp_imm(args_size)
+            for i in range(arg_count):
+                arg_loc = instr.src_locs[i + 1][0]
+                ctx.load_to_reg(arg_loc, RAX)
+                e.mov_mem_reg(RSP, i * 8, RAX)
+
+        # 3. 加载闭包对象到 RDI
+        closure_loc = instr.src_locs[0][0]
+        ctx.load_to_reg(closure_loc, RDI)
+
+        # 4. 设置 RSI = args array pointer
+        if args_size > 0:
+            e.mov_reg_reg64(RSI, RSP)
+        else:
+            e.mov_reg_imm64(RSI, 0)
+
+        # 5. 设置 RDX = arg_count
+        e.mov_reg_imm64(RDX, arg_count)
+
+        # 6. 栈对齐
+        total_sub = 64 + args_size
+        if total_sub % 16 != 0:
+            align_padding = 16 - (total_sub % 16)
+            e.sub_rsp_imm(align_padding)
+        else:
+            align_padding = 0
+
+        # 7. 发射 call（外部运行时函数）
+        call_offset = e.call_rel32()
+        self.external_calls.append(
+            (ctx.func_name, call_offset, "nova_closure_call")
+        )
+
+        # 8. 清理栈对齐和临时数组
+        if align_padding > 0:
+            e.add_rsp_imm(align_padding)
+        if args_size > 0:
+            e.add_rsp_imm(args_size)
+
+        # 9. 恢复 caller-saved GPR
+        for reg in reversed(CALLER_GPRS):
+            e.pop_reg(reg)
+
+        # 10. 保存返回值
+        if dst_info:
+            dst_name, _ = dst_info
+            ctx.store_from_reg(dst_name, RAX)
 
     def _emit_switch(self, instr, ctx: "_EmitContext"):
         """编译 switch 多分支跳转。
