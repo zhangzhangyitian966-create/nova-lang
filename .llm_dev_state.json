@@ -1,5 +1,5 @@
 {
-  "cycles": 52,
+  "cycles": 53,
   "completed_tasks": [
     "establish_quality_gate",
     "refactor_nova_type_to_c",
@@ -111,10 +111,28 @@
     "low_quality_issues_cleanup_v2",
     "review_cycle_51",
     "c_backend_closure_support",
-    "c_backend_closure_phase3"
+    "c_backend_closure_phase3",
+    "refactor_eval_binary_op",
+    "refactor_lower_function"
   ],
   "failed_tasks": [],
   "task_history": [
+    {
+      "cycle": 53,
+      "task_id": "refactor_eval_binary_op",
+      "status": "completed",
+      "source": "审查驱动",
+      "reason": "审查日志第1502轮 Top10 复杂函数中 Evaluator._eval_binary_op CC=20（排名#5）。该函数被错误标注为 cycle 38 已重构，第50轮已移除虚假标注。函数是典型的长 if-elif 链，调度表化重构难度低、风险小、收益快。",
+      "details": "将 _eval_binary_op 从 13 个 elif 分支的长链重构为类级 _BINOP_HANDLERS 调度表（11 个运算符→lambda 映射），主函数通过 dict.get() 查找并调用 handler。保留 &&/|| 短路求值和 / 除零检查的特殊处理逻辑（语义不同，不适合放入统一调度表）。函数补充完整 docstring（说明短路求值和调度表分派策略）。CC 从 20 降至约 6。测试 395/395 通过，零回归。"
+    },
+    {
+      "cycle": 53,
+      "task_id": "refactor_lower_function",
+      "status": "completed",
+      "source": "审查驱动",
+      "reason": "审查日志第1502轮 Top10 复杂函数中 LIRLowering._lower_function CC=20（排名#6）。该函数被错误标注为 cycle 42 已重构，第50轮已移除虚假标注。函数 153 行，包含 Phi 预分配、指令降级、Critical Edge Splitting 三阶段逻辑，可清晰分层拆分。",
+      "details": "将 _lower_function 从 153 行重构为 6 个方法的分层结构：1) _lower_function 主函数压缩至约 25 行（三阶段 orchestration）；2) _preallocate_phi_locations() 提取 Phi 节点预分配逻辑（约 15 行）；3) _lower_block_instructions() 提取非终结指令降级（约 8 行）；4) _process_terminator() 提取终结器分发逻辑（约 20 行）；5) _process_terminator_with_edge_blocks() 按终结器类型二次分发（约 15 行）；6) _process_branch_edge_blocks() 处理 MIRBranch 的 true/false 边缘块创建（约 25 行）；7) _process_switch_edge_blocks() 处理 MIRSwitch/MIRMatchJump 的边缘块创建（约 20 行）。每个子方法圈复杂度降至 5-8。所有新方法补充完整 docstring（参数说明、Critical Edge Splitting 策略说明）。测试 395/395 通过，零回归。"
+    },
     {
       "cycle": 52,
       "task_id": "c_backend_closure_phase3",
@@ -196,7 +214,7 @@
       "details": "将 _lower_if_expr 从 106 行重构为分层结构：1) 新增 _lower_branch_body() 通用分支处理方法，消除 true/false 分支的 30 行镜像重复代码，返回 (result, modified_vars) 元组；2) 新增 _insert_merge_phis() 处理 merge 块 Phi 节点插入（约 35 行独立逻辑）；3) 新增 _insert_result_phi() 处理 if 表达式结果 Phi（约 15 行独立逻辑）；4) _lower_if_expr 主函数从 106 行压缩至约 25 行（CC≈8）。测试 395/395 通过，零回归。"
     }
   ],
-  "current_cycle": 52,
+  "current_cycle": 53,
   "baseline_tests": 395,
   "current_tests": 395,
   "last_review_cycle": 51,
@@ -293,7 +311,7 @@
       "priority": 60,
       "category": "engineering",
       "estimated": "2-3 小时",
-      "status": "pending",
+      "status": "completed",
       "depends_on": [],
       "reason": "审查日志第1502轮 Top10 复杂函数中 _eval_binary_op CC=20（排名#5）。该函数被错误标注为 cycle 38 已重构，第50轮已移除虚假标注。函数是典型的长 if-elif 链，调度表化重构难度低、风险小。[审查驱动]"
     },
@@ -317,7 +335,7 @@
       "priority": 57,
       "category": "engineering",
       "estimated": "3-5 小时",
-      "status": "pending",
+      "status": "completed",
       "depends_on": [],
       "reason": "审查日志第1502轮 Top10 复杂函数中 _lower_function CC=20（排名#9）。该函数被错误标注为 cycle 42 已重构，第50轮已移除虚假标注。函数逻辑可分为 Phi 分配、critical edge splitting、指令降级三阶段，可分层拆分。[审查驱动]"
     },

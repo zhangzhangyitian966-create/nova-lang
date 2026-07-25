@@ -124,6 +124,12 @@ REFACTORED_FUNCTIONS = {
     "ir/pass_manager.py::PassManager.run": {
         "old_cc": 15, "cycle": 14, "note": "Pass 管理重构"
     },
+    "evaluator.py::Evaluator._eval_binary_op": {
+        "old_cc": 20, "cycle": 53, "note": "调度表化重构 CC≈6（_BINOP_HANDLERS）"
+    },
+    "ir/lir_lowering.py::LIRLowering._lower_function": {
+        "old_cc": 20, "cycle": 53, "note": "分层拆分重构 CC≈8（6个子方法）"
+    },
 }
 
 

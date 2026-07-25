@@ -117,9 +117,9 @@
 | ✅ | 审查数据同步机制（REFACTORED_FUNCTIONS 标注） | easy | 50 | 1-2 小时 | - |
 | ✅ | LOW 级问题批量治理 v2（ir/ 模块 docstring） | easy | 48 | 2-4 小时 | - |
 | ⏳ | 精准清理 print_debug（真实调试残留） | easy | 50 | 1-2 小时 | - |
-| ⏳ | 重构 Evaluator._eval_binary_op 降低圈复杂度 | medium | 60 | 2-3 小时 | - |
+| ✅ | 重构 Evaluator._eval_binary_op 降低圈复杂度 | medium | 60 | 2-3 小时 | - |
 | ⏳ | 重构 MIRLowering._lower_match_expr 降低圈复杂度 | medium | 58 | 3-5 小时 | - |
-| ⏳ | 重构 LIRLowering._lower_function 降低圈复杂度 | medium | 57 | 3-5 小时 | - |
+| ✅ | 重构 LIRLowering._lower_function 降低圈复杂度 | medium | 57 | 3-5 小时 | - |
 
 ---
 
@@ -136,10 +136,10 @@
 
 ---
 
-**进度**: 93/100 (93%)
-- **已完成**: 93
+**进度**: 95/100 (95%)
+- **已完成**: 95 (+2)
 - **进行中**: 0
-- **待开发**: 6
+- **待开发**: 4
 - **已废弃**: 1
 
-> 注：第51轮路线图评审完成。五维评估结果：方向正确、质量持续提升、效率稳定、价值高、审查对齐优秀60%。核心决策：① c_backend_closure_phase3 优先级强制提升至 80（连续多轮推迟）；② 新增 3 个审查驱动重构任务（_eval_binary_op/_lower_match_expr/_lower_function CC=20）；③ 质量门禁成功落地，审查数据可信度恢复。下阶段方向：第52轮强制单任务攻坚 c_backend_closure_phase3，解锁 C 后端完整闭包支持。
+> 注：第53轮普通开发轮完成。审查驱动完成 Top10 复杂度函数重构 2/3（_eval_binary_op CC 20→6、_lower_function CC 20→分层后各子方法约5-8）。剩余 _lower_match_expr（CC=20）为本质复杂度，建议下轮评审时重新评估优先级。测试 395/395 通过，零回归。下阶段方向：第54轮为评审轮（54%3==0），全面回顾第52-53轮开发成果并规划第55-57轮。

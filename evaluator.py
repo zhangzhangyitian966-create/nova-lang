@@ -764,8 +764,27 @@ class Evaluator:
     def _eval_continue_expr(self, expr: ContinueExpr) -> Any:
         raise ContinueSignal()
 
+    # 二元操作符调度表（短路求值 / 和 % 除外）
+    _BINOP_HANDLERS = {
+        "+": lambda l, r: l + r,
+        "-": lambda l, r: l - r,
+        "*": lambda l, r: l * r,
+        "%": lambda l, r: l % r,
+        "++": lambda l, r: l + r,  # 字符串拼接
+        "==": lambda l, r: l == r,
+        "!=": lambda l, r: l != r,
+        "<": lambda l, r: l < r,
+        ">": lambda l, r: l > r,
+        "<=": lambda l, r: l <= r,
+        ">=": lambda l, r: l >= r,
+    }
+
     def _eval_binary_op(self, expr: BinaryOp) -> Any:
-        """求值二元操作"""
+        """求值二元操作。
+
+        短路求值运算符（&&、||）和除法（/）单独处理，
+        其余运算符通过 _BINOP_HANDLERS 调度表分派。
+        """
         # 短路求值
         if expr.op == "&&":
             left = self.eval_expr(expr.left)
@@ -782,34 +801,17 @@ class Evaluator:
         left = self.eval_expr(expr.left)
         right = self.eval_expr(expr.right)
 
-        if expr.op == "+":
-            return left + right
-        elif expr.op == "-":
-            return left - right
-        elif expr.op == "*":
-            return left * right
-        elif expr.op == "/":
+        # 除法需要特殊处理整数除零
+        if expr.op == "/":
             if isinstance(left, int) and isinstance(right, int):
                 if right == 0:
                     raise RuntimeError_("除零错误")
                 return left // right  # 整数除法
             return left / right
-        elif expr.op == "%":
-            return left % right
-        elif expr.op == "++":
-            return left + right  # 字符串拼接
-        elif expr.op == "==":
-            return left == right
-        elif expr.op == "!=":
-            return left != right
-        elif expr.op == "<":
-            return left < right
-        elif expr.op == ">":
-            return left > right
-        elif expr.op == "<=":
-            return left <= right
-        elif expr.op == ">=":
-            return left >= right
+
+        handler = self._BINOP_HANDLERS.get(expr.op)
+        if handler:
+            return handler(left, right)
 
         raise RuntimeError_(f"未知的操作符 '{expr.op}'")
 
