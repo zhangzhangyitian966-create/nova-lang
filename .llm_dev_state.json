@@ -1,5 +1,5 @@
 {
-  "cycles": 54,
+  "cycles": 55,
   "completed_tasks": [
     "establish_quality_gate",
     "refactor_nova_type_to_c",
@@ -114,10 +114,28 @@
     "c_backend_closure_phase3",
     "refactor_eval_binary_op",
     "refactor_lower_function",
-    "review_cycle_54"
+    "review_cycle_54",
+    "refactor_check_match_exhaustiveness",
+    "refactor_lower_match_expr"
   ],
   "failed_tasks": [],
   "task_history": [
+    {
+      "cycle": 55,
+      "task_id": "refactor_check_match_exhaustiveness",
+      "status": "completed",
+      "source": "审查驱动",
+      "reason": "审查日志第1502轮 Top1 复杂函数 TypeChecker._check_match_exhaustiveness CC=39（全项目最高），连续多轮审查 Top1。第54轮路线图评审明确规划为第55轮主攻任务。函数含 6 段高度重复的 isinstance 分发链（PatternBool/Int/Float/String/Char + Wildcard/Identifier），是典型的可调度表化重构目标。",
+      "details": "将 _check_match_exhaustiveness 从 179 行 CC=39 重构为 4 个方法分层结构：1) _classify_arm_pattern() 新方法，使用 _LITERAL_TYPE_MAP 映射表消除 6 段重复 isinstance 分发链，返回 (kind, key, value, has_guard) 元组（约 35 行，CC≈6）；2) _detect_redundant_arms() 新方法，接收分类后的 arm 列表，独立执行冗余检测逻辑（约 25 行，CC≈5）；3) _generate_missing_message() 新方法，按 ADT/Bool/Tuple/其他 四种类型生成有针对性的不完备错误消息（约 40 行，CC≈5）；4) _check_match_exhaustiveness 主函数压缩至约 35 行编排逻辑（冗余检测→快速返回→递归完备性→错误消息，CC≈4）。测试 395/395 通过，零回归。"
+    },
+    {
+      "cycle": 55,
+      "task_id": "refactor_lower_match_expr",
+      "status": "completed",
+      "source": "审查驱动",
+      "reason": "审查日志第1502轮 Top7 复杂函数 MIRLowering._lower_match_expr CC=20，任务池优先级 65。Top10 中最后一个未重构的编译器核心函数。函数 134 行，含 Phi 构建和变量修改收集两大块独立逻辑，可清晰提取为独立方法。",
+      "details": "将 _lower_match_expr 从 134 行重构为 3 个方法分层结构：1) _collect_arm_modifications() 新方法，提取每个 arm body 块中相对于 pre_env 的变量修改收集逻辑（约 15 行，CC≈3）；2) _build_merge_phis() 新方法，提取 merge 块的 Phi 节点构建逻辑（变量 Phi + 结果 Phi 两阶段，约 55 行，CC≈6）；3) _lower_match_expr 主函数压缩至约 60 行编排逻辑（块创建→arm 循环→失败块→merge Phi，CC≈8）。同时修复了 old_block 未使用的变量。测试 395/395 通过，零回归。"
+    },
     {
       "cycle": 54,
       "task_id": "review_cycle_54",
@@ -223,7 +241,7 @@
       "details": "将 _lower_if_expr 从 106 行重构为分层结构：1) 新增 _lower_branch_body() 通用分支处理方法，消除 true/false 分支的 30 行镜像重复代码，返回 (result, modified_vars) 元组；2) 新增 _insert_merge_phis() 处理 merge 块 Phi 节点插入（约 35 行独立逻辑）；3) 新增 _insert_result_phi() 处理 if 表达式结果 Phi（约 15 行独立逻辑）；4) _lower_if_expr 主函数从 106 行压缩至约 25 行（CC≈8）。测试 395/395 通过，零回归。"
     }
   ],
-  "current_cycle": 54,
+  "current_cycle": 55,
   "baseline_tests": 395,
   "current_tests": 395,
   "last_review_cycle": 54,
@@ -231,12 +249,12 @@
     {
       "id": "refactor_check_match_exhaustiveness",
       "name": "重构 TypeChecker._check_match_exhaustiveness 降低圈复杂度",
-      "description": "TypeChecker._check_match_exhaustiveness 圈复杂度 39（全项目最高），处理模式匹配完备性检查（字面量/通配符/绑定/构造器/嵌套模式）。拆分为字面量完备性、构造器完备性、嵌套模式递归检查、冗余模式检测四个独立方法，将 CC 从 39 降至约 12。",
+      "description": "TypeChecker._check_match_exhaustiveness 圈复杂度 39（全项目最高），处理模式匹配完备性检查（字面量/通配符/绑定/构造器/嵌套模式）。已通过提取 _classify_arm_pattern（映射表化）、_detect_redundant_arms、_generate_missing_message 三个独立方法完成重构。",
       "difficulty": "hard",
       "priority": 85,
       "category": "engineering",
       "estimated": "1-2 天",
-      "status": "pending",
+      "status": "completed",
       "depends_on": [],
       "reason": "全项目最高复杂度函数 CC=39，连续多轮审查报告 Top1，编译器正确性保障的核心。极端复杂度意味着极高 bug 风险，必须优先处理。[审查驱动]"
     },
@@ -289,12 +307,12 @@
     {
       "id": "refactor_lower_match_expr",
       "name": "重构 MIRLowering._lower_match_expr 降低圈复杂度",
-      "description": "MIRLowering._lower_match_expr 圈复杂度 20，134 行。处理模式匹配分支生成逻辑（字面量/通配符/绑定/构造器）。提取分支生成逻辑为独立方法，降低主函数复杂度。",
+      "description": "MIRLowering._lower_match_expr 圈复杂度 20，134 行。已通过提取 _collect_arm_modifications 和 _build_merge_phis 两个独立方法完成重构。",
       "difficulty": "medium",
       "priority": 65,
       "category": "engineering",
       "estimated": "3-5 小时",
-      "status": "pending",
+      "status": "completed",
       "depends_on": [],
       "reason": "审查日志第1502轮 Top10 复杂函数中 _lower_match_expr CC=20（排名#7）。Top10 中最后一个未重构的审查驱动函数。提升优先级 58→65。[审查驱动]"
     },

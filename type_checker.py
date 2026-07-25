@@ -1127,6 +1127,140 @@ class TypeChecker:
                 return False
         return True
 
+    def _classify_arm_pattern(self, arm):
+        """分类 match arm 的模式，返回 (kind, key, value, has_guard) 元组。
+
+        kind 取值：
+        - 'wildcard': PatternWildcard 或 PatternIdentifier（无 guard）
+        - 'guarded_wildcard': PatternWildcard 或 PatternIdentifier（有 guard）
+        - 'literal': 字面量模式（int/float/string/char/bool），key 为类型标识，
+          value 为字面量值（NaN 返回 None 表示不可比较）
+        - 'other': 其他模式类型（如 PatternConstructor），不参与冗余检测
+
+        此方法消除了 6 种字面量类型的重复 isinstance 分发链，
+        将原来每种类型约 8 行的分支逻辑统一为一张映射表。
+        """
+        from .ast_nodes import (
+            PatternBool,
+            PatternChar,
+            PatternFloat,
+            PatternIdentifier,
+            PatternInt,
+            PatternString,
+            PatternWildcard,
+        )
+
+        pat = arm.pattern
+        has_guard = arm.guard is not None
+
+        # 通配符/变量绑定
+        if isinstance(pat, (PatternWildcard, PatternIdentifier)):
+            kind = "guarded_wildcard" if has_guard else "wildcard"
+            return (kind, None, None, has_guard)
+
+        # 字面量类型 → (kind, type_key, literal_value, has_guard) 映射表
+        # 消除 6 段重复的 isinstance 分支
+        _LITERAL_TYPE_MAP = {
+            PatternBool: ("literal", "bool", lambda p: str(p.value)),
+            PatternInt: ("literal", "int", lambda p: p.value),
+            PatternFloat: ("literal", "float", lambda p: p.value if p.value == p.value else None),
+            PatternString: ("literal", "string", lambda p: p.value),
+            PatternChar: ("literal", "char", lambda p: p.value),
+        }
+
+        for pat_cls, (kind, key, val_fn) in _LITERAL_TYPE_MAP.items():
+            if isinstance(pat, pat_cls):
+                val = val_fn(pat)
+                return (kind, key, val, has_guard)
+
+        return ("other", None, None, has_guard)
+
+    def _detect_redundant_arms(self, arms):
+        """检测 match 表达式中的冗余分支。
+
+        冗余规则：
+        - 多个无 guard 通配符/变量绑定：第二个及之后的冗余
+        - 重复的字面量值（同类型）：后出现的冗余
+        - NaN 不视为冗余（NaN != NaN）
+
+        返回 (redundant_indices, has_wildcard_or_var) 元组。
+        """
+        seen_literals = {}  # key: 类型标识, value: set of seen values
+        has_wildcard_or_var = False
+        redundant = []
+
+        for i, arm in enumerate(arms):
+            kind, key, val, has_guard = self._classify_arm_pattern(arm)
+
+            if kind == "wildcard":
+                if has_wildcard_or_var:
+                    redundant.append(i)
+                else:
+                    has_wildcard_or_var = True
+            elif kind == "literal" and not has_guard and val is not None:
+                # NaN 安全：val is None 表示 NaN，不参与冗余比较
+                if key not in seen_literals:
+                    seen_literals[key] = set()
+                if val in seen_literals[key]:
+                    redundant.append(i)
+                else:
+                    seen_literals[key].add(val)
+
+        return (redundant, has_wildcard_or_var)
+
+    def _generate_missing_message(self, subject_type, all_patterns, line, column):
+        """根据 subject_type 生成匹配不完备的详细错误消息。
+
+        按 ADT/Bool/Tuple/其他 四种类型分别生成有针对性的提示，
+        帮助用户快速定位缺失的分支。
+        """
+        from .ast_nodes import PatternConstructor
+
+        if isinstance(subject_type, ADTType):
+            all_variants = self.env.get_all_adt_variants()
+            variants = all_variants.get(subject_type.name)
+            if variants:
+                covered_names = {
+                    p.name
+                    for p in all_patterns
+                    if isinstance(p, PatternConstructor)
+                }
+                expected = {vname for vname, _ in variants}
+                missing = expected - covered_names
+                if missing:
+                    missing_list = ", ".join(sorted(missing))
+                    raise TypeCheckError(
+                        f"match 表达式不完备：缺失构造器 {missing_list}",
+                        line=line,
+                        column=column,
+                    )
+                raise TypeCheckError(
+                    "match 表达式不完备：构造器的子模式未完全覆盖所有情况，"
+                    "考虑添加通配符子模式（如 Some(_)）",
+                    line=line,
+                    column=column,
+                )
+        elif isinstance(subject_type, PrimType) and subject_type.name == "Bool":
+            raise TypeCheckError(
+                "match 表达式不完备：缺失 true 或 false 分支",
+                line=line,
+                column=column,
+            )
+        elif isinstance(subject_type, TupleType):
+            raise TypeCheckError(
+                "match 表达式不完备：元组模式的元素位置未完全覆盖，"
+                "考虑添加通配符元素（如 (_, _)）",
+                line=line,
+                column=column,
+            )
+        else:
+            raise TypeCheckError(
+                "match 表达式可能不完备：考虑添加通配符分支 (_) "
+                "确保覆盖所有情况",
+                line=line,
+                column=column,
+            )
+
     def _check_match_exhaustiveness(
         self, subject_type: NovaType, arms: List, match_expr: MatchExpr
     ):
@@ -1140,102 +1274,16 @@ class TypeChecker:
         - 通配符 (_) 和变量绑定视为覆盖所有剩余情况
         - 检测冗余分支（通配符/变量绑定之后的分支）
         - 检测字面量模式冗余（重复的字面量值）
-        """
-        from .ast_nodes import (
-            PatternBool,
-            PatternChar,
-            PatternFloat,
-            PatternIdentifier,
-            PatternInt,
-            PatternString,
-            PatternWildcard,
-        )
 
+        编排逻辑：冗余检测 → 快速返回 → 递归完备性 → 错误消息
+        """
         # 提取行号列号用于报错
         line = match_expr.span.line if match_expr.span else -1
         column = match_expr.span.column if match_expr.span else -1
 
-        has_wildcard_or_var = False
-        has_guarded_wildcard_or_var = False
-        redundant_arms = []
-
-        # 字面量模式冗余检测：按类型分组，记录已见值
-        # key: 字面量类型标识 ("int", "float", "string", "char", "bool")
-        # value: set of seen literal values
-        seen_literals = {}
-
-        for i, arm in enumerate(arms):
-            pat = arm.pattern
-            arm_has_guard = arm.guard is not None
-            if isinstance(pat, (PatternWildcard, PatternIdentifier)):
-                if has_wildcard_or_var:
-                    # 多个通配符/变量绑定，后续全部冗余
-                    redundant_arms.append(i)
-                elif arm_has_guard:
-                    # 含 guard 的通配符/变量绑定不视为完备覆盖，
-                    # 因为 guard 可能拒绝某些值
-                    has_guarded_wildcard_or_var = True
-                else:
-                    has_wildcard_or_var = True
-            elif isinstance(pat, PatternBool):
-                # 字面量冗余检测：Bool
-                if not arm_has_guard:
-                    key = "bool"
-                    val = str(pat.value)
-                    if key not in seen_literals:
-                        seen_literals[key] = set()
-                    if val in seen_literals[key]:
-                        redundant_arms.append(i)
-                    else:
-                        seen_literals[key].add(val)
-            elif isinstance(pat, PatternInt):
-                # 字面量冗余检测：Int
-                if not arm_has_guard:
-                    key = "int"
-                    val = pat.value
-                    if key not in seen_literals:
-                        seen_literals[key] = set()
-                    if val in seen_literals[key]:
-                        redundant_arms.append(i)
-                    else:
-                        seen_literals[key].add(val)
-            elif isinstance(pat, PatternFloat):
-                # 字面量冗余检测：Float（NaN 不等，其他按值比较）
-                if not arm_has_guard and pat.value == pat.value:  # NaN safe
-                    key = "float"
-                    val = pat.value
-                    if key not in seen_literals:
-                        seen_literals[key] = set()
-                    if val in seen_literals[key]:
-                        redundant_arms.append(i)
-                    else:
-                        seen_literals[key].add(val)
-            elif isinstance(pat, PatternString):
-                # 字面量冗余检测：String
-                if not arm_has_guard:
-                    key = "string"
-                    val = pat.value
-                    if key not in seen_literals:
-                        seen_literals[key] = set()
-                    if val in seen_literals[key]:
-                        redundant_arms.append(i)
-                    else:
-                        seen_literals[key].add(val)
-            elif isinstance(pat, PatternChar):
-                # 字面量冗余检测：Char
-                if not arm_has_guard:
-                    key = "char"
-                    val = pat.value
-                    if key not in seen_literals:
-                        seen_literals[key] = set()
-                    if val in seen_literals[key]:
-                        redundant_arms.append(i)
-                    else:
-                        seen_literals[key].add(val)
-
-        # 报告冗余分支
+        # 阶段 1: 冗余分支检测
+        redundant_arms, has_wildcard_or_var = self._detect_redundant_arms(arms)
         if redundant_arms:
-            # 只报告第一个冗余分支，避免信息过载
             first = redundant_arms[0]
             raise TypeCheckError(
                 f"match 分支 {first} 是冗余的：之前的分支已经覆盖了所有情况",
@@ -1243,11 +1291,11 @@ class TypeChecker:
                 column=column,
             )
 
-        # 如果存在无 guard 的通配符或变量绑定，视为完备
+        # 阶段 2: 无 guard 通配符/变量绑定视为完备
         if has_wildcard_or_var:
             return
 
-        # 没有分支时视为不完备
+        # 阶段 3: 空分支视为不完备
         if not arms:
             raise TypeCheckError(
                 "match 表达式必须至少有一个分支",
@@ -1255,57 +1303,10 @@ class TypeChecker:
                 column=column,
             )
 
-        # 递归检查模式完备性（支持嵌套模式）
+        # 阶段 4: 递归检查模式完备性（支持嵌套模式）
         all_patterns = [arm.pattern for arm in arms]
         if not self._check_patterns_exhaustive(all_patterns, subject_type):
-            # 生成更有帮助的错误消息
-            from .ast_nodes import PatternConstructor
-
-            if isinstance(subject_type, ADTType):
-                all_variants = self.env.get_all_adt_variants()
-                variants = all_variants.get(subject_type.name)
-                if variants:
-                    covered_names = {
-                        p.name
-                        for p in all_patterns
-                        if isinstance(p, PatternConstructor)
-                    }
-                    expected = {vname for vname, _ in variants}
-                    missing = expected - covered_names
-                    if missing:
-                        missing_list = ", ".join(sorted(missing))
-                        raise TypeCheckError(
-                            f"match 表达式不完备：缺失构造器 {missing_list}",
-                            line=line,
-                            column=column,
-                        )
-                    # 构造器都已覆盖但子模式不完备
-                    raise TypeCheckError(
-                        "match 表达式不完备：构造器的子模式未完全覆盖所有情况，"
-                        "考虑添加通配符子模式（如 Some(_)）",
-                        line=line,
-                        column=column,
-                    )
-            elif isinstance(subject_type, PrimType) and subject_type.name == "Bool":
-                raise TypeCheckError(
-                    "match 表达式不完备：缺失 true 或 false 分支",
-                    line=line,
-                    column=column,
-                )
-            elif isinstance(subject_type, TupleType):
-                raise TypeCheckError(
-                    "match 表达式不完备：元组模式的元素位置未完全覆盖，"
-                    "考虑添加通配符元素（如 (_, _)）",
-                    line=line,
-                    column=column,
-                )
-            else:
-                raise TypeCheckError(
-                    "match 表达式可能不完备：考虑添加通配符分支 (_) "
-                    "确保覆盖所有情况",
-                    line=line,
-                    column=column,
-                )
+            self._generate_missing_message(subject_type, all_patterns, line, column)
 
     def _check_pattern(self, pattern, subject_type: NovaType, env: TypeEnv, match_expr):
         """检查模式与类型的匹配

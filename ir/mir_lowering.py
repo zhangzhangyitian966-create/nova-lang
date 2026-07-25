@@ -819,6 +819,79 @@ class MIRLowering:
         return None
 
 
+    def _collect_arm_modifications(self, arm_body_blocks, pre_env):
+        """收集每个 arm body 块中相对于 pre_env 的变量修改。
+
+        返回列表，每个元素是 {name: modified_ssa} 字典，
+        表示该 arm 修改了哪些变量以及修改后的 SSA 名。
+        """
+        modified_envs = []
+        for body_block in arm_body_blocks:
+            modified = {}
+            for name, ssa in self.env.items():
+                if name not in pre_env or pre_env[name] != ssa:
+                    modified[name] = ssa
+            modified_envs.append(modified)
+            # 恢复 env 到 pre_env，为下一个 arm 准备
+            self.env = dict(pre_env)
+        return modified_envs
+
+    def _build_merge_phis(self, merge_block, hir_expr, arm_body_blocks,
+                         arm_modified_envs, arm_results, pre_env):
+        """在 merge 块中为所有被修改的变量和表达式结果构建 Phi 节点。
+
+        阶段一：变量 Phi — 找出所有在任一 arm 中被修改的变量，
+        收集每个 arm 的来源值（修改后的值或进入 match 前的值），
+        至少两个不同来源时插入 Phi。
+
+        阶段二：结果 Phi — 收集各 arm 的表达式结果 SSA，
+        构建 match 表达式本身的值 Phi。
+
+        返回 merge_ssa（match 表达式的结果 SSA 名，可能为 None）。
+        """
+        # 找出所有在任一 arm 中被修改的变量
+        all_modified_names = set()
+        for modified in arm_modified_envs:
+            all_modified_names.update(modified.keys())
+
+        # 阶段一：变量 Phi
+        for name in all_modified_names:
+            phi_sources = []
+            for i, arm_block in enumerate(arm_body_blocks):
+                if name in arm_modified_envs[i]:
+                    phi_sources.append((arm_block.label, arm_modified_envs[i][name]))
+                elif name in pre_env:
+                    phi_sources.append((arm_block.label, pre_env[name]))
+
+            if len(phi_sources) >= 2:
+                phi_type = UNIT_TYPE
+                for _, src_ssa in phi_sources:
+                    if src_ssa in self.ssa_types:
+                        phi_type = self.ssa_types[src_ssa]
+                        break
+                instr = MIRPhi(phi_type)
+                instr.sources = phi_sources
+                instr.result_name = self._new_ssa()
+                merge_block.instructions.append(instr)
+                self.env[name] = instr.result_name
+                self.ssa_types[instr.result_name] = phi_type
+
+        # 阶段二：表达式结果 Phi
+        result_phi_sources = []
+        for i, arm_block in enumerate(arm_body_blocks):
+            if arm_results[i]:
+                result_phi_sources.append((arm_block.label, arm_results[i]))
+
+        merge_ssa = None
+        if result_phi_sources:
+            instr = MIRPhi(hir_expr.ir_type)
+            instr.sources = result_phi_sources
+            instr.result_name = self._new_ssa()
+            merge_block.instructions.append(instr)
+            merge_ssa = instr.result_name
+
+        return merge_ssa
+
     def _lower_match_expr(self, hir_expr, block):
         """
         降级 match 表达式：实现真正的模式匹配分支逻辑。
@@ -833,6 +906,8 @@ class MIRLowering:
         SSA 语义：
           - 每个 arm 在独立的 env 上下文中运行（arm 间隔离）
           - 多个 arm 都修改的变量，在 merge 块插入 Phi 节点
+
+        编排流程：块创建 → arm 循环(检查+body) → 失败块 → merge Phi
         """
         value_ssa = self._lower_expr(hir_expr.value, block)
         arms = hir_expr.arms
@@ -840,33 +915,31 @@ class MIRLowering:
             return None
 
         merge_block = MIRBasicBlock(self._new_block())
-        arm_body_blocks = []  # 每个 arm 的 body 块，用于收集 Phi source
-        arm_results = []  # 每个 arm body 的结果 SSA 名
-        arm_modified_envs = []  # 每个 arm 修改的 env {name: ssa}
+        fail_block = MIRBasicBlock(self._new_block())
 
         # 为每个 arm 创建检查块和 body 块
         check_blocks = [MIRBasicBlock(self._new_block()) for _ in range(len(arms))]
         body_blocks = [MIRBasicBlock(self._new_block()) for _ in range(len(arms))]
-        # 最后一个 arm 之后的失败块（理论上穷举匹配不会到达）
-        fail_block = MIRBasicBlock(self._new_block())
 
         # 入口块跳转到第一个 arm 的检查块
         block.terminator = MIRJump(check_blocks[0].label)
 
         # 保存进入 match 前的 env 状态
         pre_env = dict(self.env)
-        old_block = self.current_block
+        self.current_block = block
+
+        # --- arm 循环：模式检查 + body 降级 ---
+        arm_results = []
+        arm_body_blocks = []
 
         for i, arm in enumerate(arms):
-            # 每个 arm 开始前恢复 env（arm 间隔离）
             self.env = dict(pre_env)
 
-            # --- 模式检查块 ---
+            # 模式检查块：生成模式比较代码
             self.current_block = check_blocks[i]
             next_check = (
                 check_blocks[i + 1].label if i + 1 < len(arms) else fail_block.label
             )
-
             self._lower_pattern(
                 arm.pattern,
                 value_ssa or "",
@@ -874,13 +947,11 @@ class MIRLowering:
                 body_blocks[i].label,
                 next_check,
             )
-
-            # 如果检查块没有被设置 terminator（比如通配符模式无条件匹配），
-            # 默认跳转到 body 块
+            # 通配符模式可能未设置 terminator，默认跳转到 body 块
             if check_blocks[i].terminator is None:
                 check_blocks[i].terminator = MIRJump(body_blocks[i].label)
 
-            # --- arm body 块 ---
+            # arm body 块：降级 arm 表达式
             self.current_block = body_blocks[i]
             arm_result = self._lower_expr(arm.body, body_blocks[i])
             if body_blocks[i].terminator is None:
@@ -889,66 +960,21 @@ class MIRLowering:
             arm_body_blocks.append(body_blocks[i])
             arm_results.append(arm_result)
 
-            # 收集本 arm 修改的变量
-            modified = {}
-            for name, ssa in self.env.items():
-                if name not in pre_env or pre_env[name] != ssa:
-                    modified[name] = ssa
-            arm_modified_envs.append(modified)
-
-        # --- 失败块（理论不可达，放一个 panic） ---
+        # --- 失败块（理论不可达）---
         self.env = dict(pre_env)
         self.current_block = fail_block
         fail_block.terminator = MIRPanic("non-exhaustive match")
 
-        # --- merge 块：为被修改的变量插入 Phi + 表达式结果 Phi ---
+        # --- 收集 arm 变量修改 ---
+        arm_modified_envs = self._collect_arm_modifications(arm_body_blocks, pre_env)
+
+        # --- merge 块：Phi 节点 ---
         self.current_block = merge_block
         self.env = dict(pre_env)
-
-        # 找出所有在任一 arm 中被修改的变量
-        all_modified_names = set()
-        for modified in arm_modified_envs:
-            all_modified_names.update(modified.keys())
-
-        for name in all_modified_names:
-            phi_sources = []
-
-            for i, arm_block in enumerate(arm_body_blocks):
-                if name in arm_modified_envs[i]:
-                    # 本 arm 修改了该变量，用修改后的值
-                    phi_sources.append((arm_block.label, arm_modified_envs[i][name]))
-                elif name in pre_env:
-                    # 本 arm 未修改，用进入 match 前的值
-                    phi_sources.append((arm_block.label, pre_env[name]))
-
-            # 至少两个不同来源才需要 Phi
-            if len(phi_sources) >= 2:
-                # 从第一个 source 的 SSA 类型推断 Phi 类型
-                phi_type = UNIT_TYPE
-                for _, src_ssa in phi_sources:
-                    if src_ssa in self.ssa_types:
-                        phi_type = self.ssa_types[src_ssa]
-                        break
-                instr = MIRPhi(phi_type)
-                instr.sources = phi_sources
-                instr.result_name = self._new_ssa()
-                merge_block.instructions.append(instr)
-                self.env[name] = instr.result_name
-                self.ssa_types[instr.result_name] = phi_type
-
-        # --- 表达式结果 Phi（match 表达式本身的值）---
-        result_phi_sources = []
-        for i, arm_block in enumerate(arm_body_blocks):
-            if arm_results[i]:
-                result_phi_sources.append((arm_block.label, arm_results[i]))
-
-        merge_ssa = None
-        if result_phi_sources:
-            instr = MIRPhi(hir_expr.ir_type)
-            instr.sources = result_phi_sources
-            instr.result_name = self._new_ssa()
-            merge_block.instructions.append(instr)
-            merge_ssa = instr.result_name
+        merge_ssa = self._build_merge_phis(
+            merge_block, hir_expr, arm_body_blocks,
+            arm_modified_envs, arm_results, pre_env
+        )
 
         self.all_blocks.extend(check_blocks + body_blocks + [fail_block, merge_block])
         self.current_block = merge_block
