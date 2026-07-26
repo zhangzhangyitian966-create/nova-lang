@@ -1,6 +1,7 @@
 {
-  "cycles": 56,
+  "cycles": 57,
   "completed_tasks": [
+    "review_cycle_57",
     "establish_quality_gate",
     "refactor_nova_type_to_c",
     "fix_refactored_annotations",
@@ -123,6 +124,14 @@
   ],
   "failed_tasks": [],
   "task_history": [
+    {
+      "cycle": 57,
+      "task_id": "review_cycle_57",
+      "status": "completed",
+      "source": "评审轮",
+      "reason": "第57轮路线图评审，每3轮一次的例行评审。总结第55-56轮开发成果，评估方向/质量/效率/价值/审查对齐五维表现，规划第58-60轮方向。",
+      "details": "完成第57轮路线图评审：五维评估（方向优秀、质量持续提升、效率优秀、价值极高、审查对齐优秀83%）。关键发现：第55轮重构 _check_match_exhaustiveness (CC=39→4) 时提取的子函数 _check_patterns_exhaustive CC=30 成为新的全项目最高复杂度函数，需进一步拆分。Top10 复杂度函数 10/10 已完成首轮重构。新增 2 个高价值任务（refactor_check_patterns_exhaustive P85、compiler_vm_unit_tests P80）。下阶段方向：子函数复杂度深化+测试盲区补齐。"
+    },
     {
       "cycle": 56,
       "task_id": "refactor_parser_parse_pattern",
@@ -268,15 +277,39 @@
       "details": "将 _lower_if_expr 从 106 行重构为分层结构：1) 新增 _lower_branch_body() 通用分支处理方法，消除 true/false 分支的 30 行镜像重复代码，返回 (result, modified_vars) 元组；2) 新增 _insert_merge_phis() 处理 merge 块 Phi 节点插入（约 35 行独立逻辑）；3) 新增 _insert_result_phi() 处理 if 表达式结果 Phi（约 15 行独立逻辑）；4) _lower_if_expr 主函数从 106 行压缩至约 25 行（CC≈8）。测试 395/395 通过，零回归。"
     }
   ],
-  "current_cycle": 56,
-  "baseline_tests": 395,
+  "current_cycle": 57,
+  "baseline_tests": 396,
   "current_tests": 400,
-  "last_review_cycle": 54,
+  "last_review_cycle": 57,
   "tasks": [
+    {
+      "id": "refactor_check_patterns_exhaustive",
+      "name": "重构 TypeChecker._check_patterns_exhaustive 降低圈复杂度",
+      "description": "TypeChecker._check_patterns_exhaustive 圈复杂度 30（全项目最高），约130行，负责递归检查一组模式是否集体完备地覆盖给定类型的所有值。处理 ADT/Bool/Tuple/List/无限值域 五类类型的分支逻辑。是第55轮重构 _check_match_exhaustiveness 时提取出的子函数，其内部仍需进一步拆分。",
+      "difficulty": "hard",
+      "priority": 85,
+      "category": "engineering",
+      "estimated": "1-2 天",
+      "status": "pending",
+      "depends_on": [],
+      "reason": "全项目当前最高复杂度函数 CC=30，由 _check_match_exhaustiveness 重构后提取。ADT/List 分支逻辑复杂，需拆分为 _check_adt_patterns_exhaustive、_check_bool_patterns_exhaustive、_check_tuple_patterns_exhaustive、_check_list_patterns_exhaustive 四个独立方法。[审查驱动]"
+    },
+    {
+      "id": "compiler_vm_unit_tests",
+      "name": "为 compiler.py + vm.py 建立单元测试基线",
+      "description": "BytecodeCompiler 和 NovaVM 是 Nova 核心执行路径，但当前测试覆盖率极低。compiler.py 仅在 test_nova.py 尾部有一次简单调用，vm.py 仅在 benchmarks 中运行。需编写最小单元测试覆盖 BytecodeCompiler.compile() 和 NovaVM.run() 的基本路径（算术运算、变量绑定、函数调用、控制流）。",
+      "difficulty": "medium",
+      "priority": 80,
+      "category": "test",
+      "estimated": "3-5 小时",
+      "status": "pending",
+      "depends_on": [],
+      "reason": " Explore 深度审计确认 compiler.py 和 vm.py 是最大测试盲区。字节码编译器和虚拟机是默认执行路径（nova run），缺乏测试意味着任何变更都可能导致无感知的回归。[自主发现]"
+    },
     {
       "id": "refactor_check_match_exhaustiveness",
       "name": "重构 TypeChecker._check_match_exhaustiveness 降低圈复杂度",
-      "description": "TypeChecker._check_match_exhaustiveness 圈复杂度 39（全项目最高），处理模式匹配完备性检查（字面量/通配符/绑定/构造器/嵌套模式）。已通过提取 _classify_arm_pattern（映射表化）、_detect_redundant_arms、_generate_missing_message 三个独立方法完成重构。",
+      "description": "TypeChecker._check_match_exhaustiveness 圈复杂度 39（全项目最高），处理模式匹配完备性检查（字面量/通配符/绑定/构造器/嵌套模式）。已通过提取 _classify_arm_pattern（映射表化）、_detect_redundant_arms、_generate_missing_message、_check_patterns_exhaustive 四个独立方法完成重构。",
       "difficulty": "hard",
       "priority": 85,
       "category": "engineering",
@@ -290,14 +323,14 @@
       "name": "Native/Wasm 后端闭包 fn_ptr 回填",
       "description": "Native 和 Wasm 后端的闭包创建时 fn_ptr 仍传 NULL，lambda 无法实际通过这些后端执行。Native 用编译期标签地址，Wasm 用 funcref table。C 后端已通过 trampoline 实现，Native/Wasm 可参考类似模式。",
       "difficulty": "hard",
-      "priority": 82,
+      "priority": 80,
       "category": "backend",
       "estimated": "4-6 小时",
       "status": "pending",
       "depends_on": [
         "c_backend_closure_phase3"
       ],
-      "reason": "C 后端闭包已完整可用，但 Native/Wasm 闭链路未闭环阻塞了 lambda 通过这些后端执行。所有后端闭包框架就绪，只差最后一步 fn_ptr 回填。[自主发现]"
+      "reason": "C 后端闭包已完整可用，但 Native/Wasm 闭链路未闭环阻塞了 lambda 通过这些后端执行。所有后端闭包框架就绪，只差最后一步 fn_ptr 回填。优先级下调 82→80，让位于 compiler_vm_unit_tests。[自主发现]"
     },
     {
       "id": "closure_backend_e2e_test",
