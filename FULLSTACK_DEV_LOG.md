@@ -4,6 +4,111 @@
 
 ---
 
+## 第 32 轮 — 2026-07-26 16:40
+
+> 前端：修复赋值可变性检查+未知类型名报错 + 后端：实现闭包后端执行测试（C 后端）
+
+---
+
+### 本轮概览
+
+| 轨道 | 任务 | 难度 | 优先级 | 结果 |
+|------|------|------|--------|------|
+| 前端 | 修复赋值可变性检查+未知类型名报错 | easy | 65 | ✅ 成功 |
+| 后端 | 实现闭包后端执行测试（C 后端） | medium | 88 | ✅ 成功 |
+
+**测试前后对比**：395 passed → 400 passed（+5 闭包测试，无回归）
+**本轮清零**：P1-B（闭包后端端到端测试完全缺失）、修复 MIR 闭包调用降级 bug
+
+---
+
+### 前端任务：修复赋值可变性检查+未知类型名报错
+
+**为什么选这个**：前端线进入维护模式（任务池已空），Explore 审计发现多个类型检查器正确性 bug。其中赋值不检查可变性是最严重的——`let` 绑定的变量本应不可变，但当前可以被赋值，这违反了语言的核心语义。未知类型名静默降级也是危险问题（拼写错误的类型不会报错）。两个 bug 都是 easy 难度，一起修修复成本低收益高。
+
+**预期价值**：修复两个类型检查器正确性 bug，提升类型系统可靠性，防止用户因拼写错误或误用不可变变量而产生的运行时错误。
+
+**实现详情**：
+
+修改文件：`type_checker.py`
+
+**1. 赋值可变性检查**（约 45 行）
+
+- `TypeEnv` 类新增 `mutables: Set[str]` 集合，记录可变绑定名称
+- `define()` 方法新增 `mutable: bool = False` 参数，可变时加入 mutables 集合
+- 新增 `is_mutable(name)` 方法：向上查找所有父环境，判断绑定是否可变
+- `check_decl` 中 `LetBinding` → `define(..., mutable=False)`，`MutBinding` → `define(..., mutable=True)`
+- `_check_let_binding` / `_check_mut_binding` 同样传入 mutable 标记
+- `_check_assignment` 新增可变性检查：对不可变绑定赋值时抛出清晰错误（含位置信息）
+- 同时为所有赋值相关错误（未定义、类型不匹配）添加 line/column 位置信息
+
+**2. 未知类型名报错**（约 15 行）
+
+- `_from_ast_type` 中 `TypeIdentifier` 分支：从静默返回 `PrimType(name)` 改为抛出 `TypeCheckError`
+- `_setup_builtins` 中注册 6 个基本类型（Int/Float/String/Bool/Char/Unit）到 `env.types`，供 `_from_ast_type` 查找
+- 错误消息：`"未知的类型 'X'（检查是否拼写正确，或是否缺少类型定义）"`
+
+**代码量**：新增约 60 行
+**测试结果**：400 测试全部通过，无回归
+**前端线进度**：22/23 完成（含 1 废弃）
+
+---
+
+### 后端任务：实现闭包后端执行测试（C 后端）
+
+**为什么选这个**：路线图明确计划第 32 轮做此任务（P88）。评审报告 P1-B 项指出闭包后端端到端测试完全缺失，这是质量保障的关键缺口。C 后端的闭包实现已经完成，但缺少验证。先从 C 后端入手，因为可以通过 gcc 编译验证，建立质量基线。
+
+**预期价值**：清零 P1-B（闭包后端端到端测试完全缺失），建立后端闭包的质量基线。首次实现闭包从源码→编译→gcc验证的全链路测试。
+
+**实现详情**：
+
+修改 2 个文件，新增约 195 行代码：
+
+**1. `tests/test_backends.py` — 新增 TestCBackendClosure 测试类（约 190 行）
+
+5 个测试用例：
+
+| 测试 | 内容 |
+|------|------|
+| `test_closure_create_c_code` | LIRClosureCreate 生成 nova_closure_new 调用验证 |
+| `test_closure_call_indirect_c_code` | LIRCallIndirect 生成 nova_closure_call 验证 |
+| `test_closure_source_to_c` | 端到端源码→LIR→C 代码验证（make_adder 示例） |
+| `test_closure_c_code_compiles_with_gcc` | 生成 C 代码通过 gcc 语法检查（skipUnless(gcc)） |
+| `test_mir_closure_call_is_indirect` | 验证 MIR 降级时闭包变量调用为 SSA callee |
+
+辅助方法 `_make_closure_lir_module()`：构造包含闭包创建和调用的 LIR Module 用于单元测试。
+
+**2. `ir/mir_lowering.py` — 修复闭包调用降级 bug（约 7 行）**
+
+`_lower_call_expr` 方法修复：
+- 原代码：`HIRIdentifier` callee 直接用名字 → 所有标识符都当作直接函数调用
+- 新代码：先查 `self.env`，如果在环境中（变量/闭包），用 SSA 值间接调用；否则（函数名）用字符串直接调用
+- 修复了闭包变量调用被错误编译为直接函数调用的严重 bug（之前 add5(10) 会生成 nova_fn_add5 而不是 nova_closure_call）
+
+**清零的问题**：
+- P1-B：闭包后端端到端测试完全缺失
+- 附带修复：MIR 闭包调用降级为直接调用的 bug
+
+**代码量**：测试约 190 行 + MIR 修复约 7 行 = 约 197 行
+**测试结果**：400 测试全部通过（新增 5 个），无回归
+**后端线进度**：25/33 完成（含 4 废弃）
+
+---
+
+### 前端下一步
+
+- 修复管道操作符类型检查逻辑错误（高优先级正确性 bug）
+- 修复递归函数类型推断不完整（高优先级正确性 bug）
+- 全面提升错误消息质量和位置信息
+
+### 后端下一步
+
+- 第 33 轮：实现 Wasm 后端闭包 fn_ptr 回填（P90）
+- 第 33 轮：修复 C 后端 trampoline double 返回值 UB（P55）
+- 后续：原生后端闭包端到端执行测试（依赖运行时链接）
+
+---
+
 ## 第 31 轮 — 2026-07-26 16:15
 
 > 前端：精确化列表模式完备性检查 + 后端：原生后端闭包 fn_ptr trampoline 方案

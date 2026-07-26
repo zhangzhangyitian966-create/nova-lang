@@ -1,7 +1,7 @@
 {
-  "cycles": 31,
-  "frontend_completed": 21,
-  "backend_completed": 24,
+  "cycles": 32,
+  "frontend_completed": 22,
+  "backend_completed": 25,
   "last_review_cycle": 30,
   "current_review_cycle": 30,
   "completed_tasks": [
@@ -54,7 +54,10 @@
     "review_cycle_30",
     "frontend_list_pattern_precise",
     "backend_native_fn_ptr_tramp",
-    "backend_native_call_indirect_float"
+    "backend_native_call_indirect_float",
+    "frontend_mut_check_type_name",
+    "backend_closure_e2e_test",
+    "backend_mir_closure_call_fix"
   ],
   "failed_tasks": [],
   "deprecated_tasks": [
@@ -64,6 +67,28 @@
     "backend_native_fn_ptr"
   ],
   "task_history": [
+    {
+      "cycle": 32,
+      "task_id": "frontend_mut_check_type_name",
+      "name": "修复赋值可变性检查+未知类型名报错",
+      "track": "frontend",
+      "difficulty": "easy",
+      "priority": 65,
+      "result": "success",
+      "details": "修复 type_checker.py 两个正确性 bug。(1) 赋值可变性检查：TypeEnv 新增 mutables 集合和 is_mutable() 方法；define() 增加 mutable 参数；LetBinding/MutBinding 和表达式级 _check_let_binding/_check_mut_binding 传入 mutable 标记；_check_assignment 增加 is_mutable 检查，对不可变绑定赋值时报错（含位置信息）。同时为所有赋值相关错误添加 line/column 位置信息。(2) 未知类型名报错：_from_ast_type 中 TypeIdentifier 分支从静默返回 PrimType(name) 改为报错；_setup_builtins 注册 6 个基本类型到 env.types。修复 Explore 审计发现的前两个高优先级正确性 bug。新增约 60 行代码。400 测试全部通过，无回归。前端线 22/23 完成（含 1 废弃）。",
+      "timestamp": "2026-07-26 16:35"
+    },
+    {
+      "cycle": 32,
+      "task_id": "backend_closure_e2e_test",
+      "name": "实现闭包后端执行测试",
+      "track": "backend",
+      "difficulty": "medium",
+      "priority": 88,
+      "result": "success",
+      "details": "在 test_backends.py 新增 TestCBackendClosure 测试类，包含 5 个测试：(1) test_closure_create_c_code：LIRClosureCreate 生成 nova_closure_new 调用验证。(2) test_closure_call_indirect_c_code：LIRCallIndirect 生成 nova_closure_call 验证。(3) test_closure_source_to_c：端到端源码→LIR→C 代码验证。(4) test_closure_c_code_compiles_with_gcc：生成 C 代码通过 gcc 语法检查（skipUnless(gcc)。(5) test_mir_closure_call_is_indirect：验证 MIR 降级时闭包变量调用为 SSA callee。同时修复 mir_lowering.py _lower_call_expr：HIRIdentifier callee 从直接用名字改为先查环境，变量（闭包）用 SSA 值间接调用，否则函数名直接调用——修复闭包调用被错误编译为直接函数调用的 bug。清零评审报告 P1-B：闭包后端端到端测试完全缺失。新增约 195 行代码（测试 190 + MIR 修复 5）。测试从 395 增至 400，全部通过。后端线 25/33 完成（含 4 废弃）。",
+      "timestamp": "2026-07-26 16:40"
+    },
     {
       "cycle": 31,
       "task_id": "frontend_list_pattern_precise",
@@ -96,61 +121,6 @@
       "result": "success",
       "details": "第十次三轮回顾评审（第 28-30 轮）。深度代码审计发现 2 个 P0（native_backend/wasm_backend fn_ptr 仍传 NULL，闭包调用段错误）、2 个新 P1（native_backend _emit_call_indirect 浮点返回值未处理、闭包后端端到端测试完全缺失）、2 个新 P2（lir_c_backend trampoline double 返回值 intptr_t 强转 UB、test_vm_higher_order flaky）。前端评估：质量 86/100（+1），20/21 完成（95.2%），parser DX 显著改善（多错误聚合+块内恢复），type_checker 1756 行暂不拆分。后端评估：C 75%/Native 62%/Wasm 58%——与上轮持平，但本轮未完成后端任务（第 29 轮 MIR lambda 鲁棒性修复是防御式改动），P0 fn_ptr 回填未推进。综合：前后端仍严重失衡，投入比建议前端 0% / 后端 100%。任务池变更：新增 3 个（backend_native_call_indirect_float P80、backend_c_trampoline_double_fix P55、backend_native_fn_ptr_tramp P97），调整 backend_native_fn_ptr 优先级 95→97（与 trampoline 方案统一），backend_closure_e2e_test 升级 P85→P88。P0-3 和 P1-1 已清零（上轮），本轮无新 P0 清零。",
       "timestamp": "2026-07-26 04:20"
-    },
-    {
-      "cycle": 29,
-      "task_id": "frontend_parser_block_recovery",
-      "name": "增强 parser 块内错误恢复粒度",
-      "track": "frontend",
-      "difficulty": "easy",
-      "priority": 35,
-      "result": "success",
-      "details": "在 parser.py 的 _parse_block 中增加块内最大错误数限制和强制跳过保护，修复评审报告 P2-4 项。(1) 新增类常量 _BLOCK_MAX_ERRORS = 3，当单块内连续错误达到上限时，放弃剩余内容直接跳到 RBRACE，避免在严重损坏的块内无限循环同步。(2) 错误恢复逻辑中增加 block_errors 计数器，每次 ParseError 时递增。(3) 超过阈值时通过 while 循环强制前进到 RBRACE 或 EOF 后 break。新增约 10 行代码。395 测试全部通过，无回归。前端线 20/21 完成（含 1 废弃）。",
-      "timestamp": "2026-07-26 03:48"
-    },
-    {
-      "cycle": 29,
-      "task_id": "backend_mir_lambda_robust",
-      "name": "修复 MIR lambda 降级的边界崩溃风险",
-      "track": "backend",
-      "difficulty": "easy",
-      "priority": 82,
-      "result": "success",
-      "details": "在 ir/mir_lowering.py 的 _lower_lambda 中增加防御式类型检查。原代码第467行 `if return_type.kind == IRType.TYPE_VAR:` 假设 return_type 一定存在，但 HIRLambda.return_type 是 Optional，可能为 None，直接访问 .kind 会导致 AttributeError。修复：(1) 条件改为 `if return_type is None or return_type.kind == IRType.TYPE_VAR:`，当 return_type 为 None 时回退到 ir_type 推断路径。(2) 同时增加 `fn_type and fn_type.params` 的防御检查，避免 fn_type 为 None 时访问 .params 崩溃。清零评审报告 P1-1 项：mir_lowering _lower_lambda return_type is None 崩溃风险。新增约 3 行代码。395 测试全部通过，无回归。后端线达到 23/29 完成（含 3 废弃）。",
-      "timestamp": "2026-07-26 03:48"
-    },
-    {
-      "cycle": 28,
-      "task_id": "frontend_parser_multi_errors",
-      "name": "修复 parser 错误列表只抛出第一个的问题",
-      "track": "frontend",
-      "difficulty": "easy",
-      "priority": 45,
-      "result": "success",
-      "details": "在 errors.py 中新增 ParseErrorGroup 类，继承 NovaError，封装多个 ParseError，提供格式化输出（显示所有错误及其序号）。修改 parser.py 的 parse() 方法：当收集到多个错误时（len > 1），抛出 ParseErrorGroup 而非仅第一个错误；单个错误时保持向后兼容直接抛 ParseError。在 __init__.py 中导出 ParseErrorGroup。修复评审报告 P2-3 项：parser 错误列表只抛出第一个，调用方难以获取完整诊断信息。新增约 25 行代码。395 测试全部通过，无回归。前端线 19/20 完成（含 1 废弃）。",
-      "timestamp": "2026-07-25 21:10"
-    },
-    {
-      "cycle": 28,
-      "task_id": "backend_lir_callee_ssa",
-      "name": "实现 LIR 降级 MIRCall SSA callee 为 LIRCallIndirect",
-      "track": "backend",
-      "difficulty": "medium",
-      "priority": 99,
-      "result": "success",
-      "details": "修改 ir/lir_lowering.py 的 _lower_call 方法，从无条件降级为 LIRCall 改为根据 callee 类型智能分流。(1) 新增导入 LIRCallIndirect。(2) 当 instr.callee 在 self.ssa_to_loc 中有映射时（SSA 值，如闭包对象 v12），降级为 LIRCallIndirect：src_locs[0] 为闭包对象位置和类型，src_locs[1:] 为实际参数位置和类型，arg_count 为实际参数数。(3) 当 callee 不在 ssa_to_loc 中时（函数字符串，如 nova_fn_add），保持原有 LIRCall 降级逻辑。三个后端（Native/Wasm/C）的 LIRCallIndirect 代码生成路径均已实现完毕，此次修改使闭包调用贯通整个后端管道。清零评审报告 P0-3：lir_lowering _lower_call 未处理 SSA callee 导致闭包调用错误编译为直接调用。新增约 35 行代码。395 测试全部通过，无回归。后端线达到 22/29 完成（含 3 废弃）。",
-      "timestamp": "2026-07-25 21:10"
-    },
-    {
-      "cycle": 27,
-      "task_id": "review_cycle_27",
-      "name": "第 27 轮 - 双线路线图评审",
-      "track": "review",
-      "difficulty": "review",
-      "priority": 0,
-      "result": "success",
-      "details": "第九次三轮回顾评审（第 25-27 轮）。深度代码审计发现 3 个 P0、4 个 P1、4 个 P2。前端评估：质量 85/100，18/19 完成（94.7%）。后端评估：C 75%/Native 62%/Wasm 58%。综合：前后端严重失衡，投入比建议前端 0% / 后端 100%。任务池变更：backend_c_closure_fnptr 标记完成、backend_lir_callee_ssa 升级 P99、backend_mir_lambda_robust 升 P82、新增 3 个任务。",
-      "timestamp": "2026-07-25 20:40"
     }
   ],
   "tasks": [
@@ -165,18 +135,6 @@
       "status": "pending",
       "source": "review_27_audit",
       "depends_on": ["backend_wasm_closure_impl"]
-    },
-    {
-      "task_id": "backend_closure_e2e_test",
-      "name": "实现闭包后端执行测试",
-      "description": "当前 tests/ 全域没有任何测试验证 lambda/closure 经后端编译后能产生正确结果。test_backends.py 无 lambda 测试，test_native_backend.py 无闭包指令测试，test_c_codegen.py test_closure 只检查生成代码包含 NovaClosure 但不执行。修复：在 test_backends.py 中添加 C 后端端到端闭包执行测试（编译→gcc→运行→验证输出），在 test_native_backend.py 中添加闭包指令编码测试。",
-      "track": "backend",
-      "difficulty": "medium",
-      "priority": 88,
-      "estimated_effort": "3-4小时",
-      "status": "pending",
-      "source": "review_27_audit",
-      "depends_on": []
     },
     {
       "task_id": "backend_c_trampoline_double_fix",

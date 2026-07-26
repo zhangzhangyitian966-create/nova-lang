@@ -226,13 +226,16 @@ class TypeEnv:
     def __init__(self, parent: Optional["TypeEnv"] = None):
         self.parent = parent
         self.types: Dict[str, NovaType] = {}
+        self.mutables: Set[str] = set()  # 可变绑定的名称集合
         self.adt_variants: Dict[str, List[tuple]] = (
             {}
         )  # adt_name -> [(variant_name, [field_types])]
         self.aliases: Dict[str, NovaType] = {}
 
-    def define(self, name: str, ty: NovaType):
+    def define(self, name: str, ty: NovaType, mutable: bool = False):
         self.types[name] = ty
+        if mutable:
+            self.mutables.add(name)
 
     def lookup(self, name: str) -> Optional[NovaType]:
         if name in self.types:
@@ -240,6 +243,14 @@ class TypeEnv:
         if self.parent:
             return self.parent.lookup(name)
         return None
+
+    def is_mutable(self, name: str) -> bool:
+        """检查绑定是否可变（mut）。向上查找所有父环境。"""
+        if name in self.mutables:
+            return True
+        if self.parent:
+            return self.parent.is_mutable(name)
+        return False
 
     def get_all_adt_variants(self) -> Dict[str, List[tuple]]:
         """获取当前环境及所有父环境的 ADT 变体信息"""
@@ -280,6 +291,14 @@ class TypeChecker:
 
     def _setup_builtins(self):
         """注册内置函数和类型的类型签名"""
+        # 注册基本类型到环境中（供 _from_ast_type 查找）
+        self.env.types["Int"] = INT_T
+        self.env.types["Float"] = FLOAT_T
+        self.env.types["String"] = STRING_T
+        self.env.types["Bool"] = BOOL_T
+        self.env.types["Char"] = CHAR_T
+        self.env.types["Unit"] = UNIT_T
+
         # 内置 Option 和 Result
         self.env.adt_variants["Option"] = [("Some", [TypeVar("T")]), ("None", [])]
         self.env.adt_variants["Result"] = [
@@ -388,17 +407,21 @@ class TypeChecker:
                         line,
                         col,
                     )
-            self.env.define(decl.name, self._unify_and_resolve(ty))
+            self.env.define(decl.name, self._unify_and_resolve(ty), mutable=False)
 
         elif isinstance(decl, MutBinding):
             ty = self.check_expr(decl.value)
             if decl.type_annotation:
                 annotated = self._from_ast_type(decl.type_annotation)
                 if not self._unify_types(ty, annotated):
+                    line = decl.span.line if decl.span else -1
+                    col = decl.span.column if decl.span else -1
                     raise TypeCheckError(
-                        f"mut 绑定 '{decl.name}' 的推断类型 {ty} 与标注类型 {annotated} 不匹配"
+                        f"mut 绑定 '{decl.name}' 的推断类型 {ty} 与标注类型 {annotated} 不匹配",
+                        line,
+                        col,
                     )
-            self.env.define(decl.name, self._unify_and_resolve(ty))
+            self.env.define(decl.name, self._unify_and_resolve(ty), mutable=True)
 
         elif isinstance(decl, FnDef):
             # 注册函数类型（支持递归）
@@ -756,10 +779,14 @@ class TypeChecker:
         if expr.type_annotation:
             annotated = self._from_ast_type(expr.type_annotation)
             if not self._unify_types(val_ty, annotated):
+                line = expr.span.line if expr.span else -1
+                col = expr.span.column if expr.span else -1
                 raise TypeCheckError(
-                    f"let 绑定类型不匹配：推断为 {val_ty}，标注为 {annotated}"
+                    f"let 绑定类型不匹配：推断为 {val_ty}，标注为 {annotated}",
+                    line,
+                    col,
                 )
-        self.env.define(expr.name, self._unify_and_resolve(val_ty))
+        self.env.define(expr.name, self._unify_and_resolve(val_ty), mutable=False)
         return UNIT_T
 
     def _check_mut_binding(self, expr) -> NovaType:
@@ -768,21 +795,41 @@ class TypeChecker:
         if expr.type_annotation:
             annotated = self._from_ast_type(expr.type_annotation)
             if not self._unify_types(val_ty, annotated):
+                line = expr.span.line if expr.span else -1
+                col = expr.span.column if expr.span else -1
                 raise TypeCheckError(
-                    f"mut 绑定类型不匹配：推断为 {val_ty}，标注为 {annotated}"
+                    f"mut 绑定类型不匹配：推断为 {val_ty}，标注为 {annotated}",
+                    line,
+                    col,
                 )
-        self.env.define(expr.name, self._unify_and_resolve(val_ty))
+        self.env.define(expr.name, self._unify_and_resolve(val_ty), mutable=True)
         return UNIT_T
 
     def _check_assignment(self, expr) -> NovaType:
-        """检查赋值表达式，确保目标已定义且类型兼容。返回 UNIT_T。"""
+        """检查赋值表达式，确保目标是 mut 绑定且类型兼容。返回 UNIT_T。"""
         val_ty = self.check_expr(expr.value)
         existing = self.env.lookup(expr.name)
         if existing is None:
-            raise TypeCheckError(f"赋值目标 '{expr.name}' 未定义")
-        if not self._unify_types(val_ty, existing):
+            line = expr.span.line if expr.span else -1
+            col = expr.span.column if expr.span else -1
             raise TypeCheckError(
-                f"赋值类型不匹配：'{expr.name}' 为 {existing}，值为 {val_ty}"
+                f"赋值目标 '{expr.name}' 未定义", line, col
+            )
+        if not self.env.is_mutable(expr.name):
+            line = expr.span.line if expr.span else -1
+            col = expr.span.column if expr.span else -1
+            raise TypeCheckError(
+                f"无法赋值给不可变绑定 '{expr.name}'（使用 mut 声明可变变量）",
+                line,
+                col,
+            )
+        if not self._unify_types(val_ty, existing):
+            line = expr.span.line if expr.span else -1
+            col = expr.span.column if expr.span else -1
+            raise TypeCheckError(
+                f"赋值类型不匹配：'{expr.name}' 为 {existing}，值为 {val_ty}",
+                line,
+                col,
             )
         return UNIT_T
 
@@ -1596,11 +1643,16 @@ class TypeChecker:
             return UNIT_T
         elif isinstance(type_node, TypeIdentifier):
             name = type_node.name
+            # 先检查别名
             if name in self.env.aliases:
                 return self.env.aliases[name]
+            # 再检查环境中的类型（包括 ADT、基本类型等）
             if name in self.env.types:
                 return self.env.types[name]
-            return PrimType(name)
+            # 未知类型名：报错而不是静默降级
+            raise TypeCheckError(
+                f"未知的类型 '{name}'（检查是否拼写正确，或是否缺少类型定义）"
+            )
         elif isinstance(type_node, TypeGeneric):
             base = type_node.base
             params = [self._from_ast_type(p) for p in type_node.params]

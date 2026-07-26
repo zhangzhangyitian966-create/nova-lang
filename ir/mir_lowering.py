@@ -345,7 +345,14 @@ class MIRLowering:
             arg_ssas.append(arg_ssa or "")
         instr = MIRCall(hir_expr.ir_type)
         if isinstance(hir_expr.function, HIRIdentifier):
-            instr.callee = hir_expr.function.name
+            name = hir_expr.function.name
+            # 判断是函数名（直接调用）还是变量（如闭包，间接调用）
+            if name in self.env:
+                # 变量（闭包）-> 使用 SSA 值，间接调用
+                instr.callee = self.env[name]
+            else:
+                # 函数名 -> 使用字符串，直接调用
+                instr.callee = name
         else:
             func_ssa = self._lower_expr(hir_expr.function, block)
             instr.callee = func_ssa or ""

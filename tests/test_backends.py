@@ -521,5 +521,202 @@ class TestLowering(unittest.TestCase):
         self.assertIn("main", lir.functions)
 
 
+# ============================================================
+# C 后端闭包测试
+# ============================================================
+
+class TestCBackendClosure(unittest.TestCase):
+    """C 后端闭包支持测试"""
+
+    def _make_closure_lir_module(self):
+        """创建包含闭包创建和调用的 LIR Module 用于测试"""
+        from nova.ir.ir_nodes import (
+            LIRModule, LIRFunction, LIRClosureCreate, LIRCallIndirect,
+            LIRLabel, LIRLoadConst, LIRReturn, INT_TYPE, CLOSURE_TYPE,
+        )
+
+        module = LIRModule(name="test_closure")
+
+        # main 函数：创建闭包并调用
+        main_fn = LIRFunction(
+            name="main",
+            params=[],
+            return_type=INT_TYPE,
+        )
+        main_fn.body = [
+            LIRLabel(name="bb0"),
+            LIRLoadConst(value=5, const_type="int"),       # r0 = 5 (捕获变量)
+            LIRLoadConst(value=10, const_type="int"),      # r1 = 10 (用户参数)
+            LIRClosureCreate(fn_name="__lambda_0", capture_count=1),  # r2 = closure
+            LIRCallIndirect(arg_count=1),                  # r3 = closure(r1)
+            LIRReturn(),
+        ]
+        # 设置位置
+        main_fn.body[1].dst_loc = ("r0", INT_TYPE)
+        main_fn.body[2].dst_loc = ("r1", INT_TYPE)
+        main_fn.body[3].src_locs = [("r0", INT_TYPE)]
+        main_fn.body[3].dst_loc = ("r2", CLOSURE_TYPE)
+        main_fn.body[4].src_locs = [("r2", CLOSURE_TYPE), ("r1", INT_TYPE)]
+        main_fn.body[4].dst_loc = ("r3", INT_TYPE)
+
+        # lambda 函数
+        lambda_fn = LIRFunction(
+            name="__lambda_0",
+            params=[("captured_n", INT_TYPE), ("x", INT_TYPE)],
+            return_type=INT_TYPE,
+        )
+        lambda_fn.body = [
+            LIRLabel(name="bb0"),
+            LIRLoadConst(value=0, const_type="int"),  # placeholder
+            LIRReturn(),
+        ]
+        lambda_fn.body[1].dst_loc = ("r0", INT_TYPE)
+
+        module.functions["main"] = main_fn
+        module.functions["__lambda_0"] = lambda_fn
+        return module
+
+    def test_closure_create_c_code(self):
+        """LIRClosureCreate 应生成 nova_closure_new 调用"""
+        from nova.backend.lir_c_backend import LIRCBackend
+
+        module = self._make_closure_lir_module()
+        backend = LIRCBackend()
+        c_code = backend.compile(module)
+
+        # 验证闭包创建
+        self.assertIn("nova_closure_new", c_code)
+        # 验证 trampoline 函数存在
+        self.assertIn("nova_trampoline___lambda_0", c_code)
+        # 验证捕获变量数组分配
+        self.assertIn("nova_alloc", c_code)
+
+    def test_closure_call_indirect_c_code(self):
+        """LIRCallIndirect 应生成 nova_closure_call 调用"""
+        from nova.backend.lir_c_backend import LIRCBackend
+
+        module = self._make_closure_lir_module()
+        backend = LIRCBackend()
+        c_code = backend.compile(module)
+
+        # 验证闭包间接调用
+        self.assertIn("nova_closure_call", c_code)
+        # 验证参数数组打包
+        self.assertIn("nova_args_", c_code)
+
+    def test_closure_source_to_c(self):
+        """端到端：闭包源码应能正确编译为 C 代码"""
+        source = """
+            fn make_adder(n: Int) -> (Int) -> Int {
+                |x: Int| -> Int { x + n }
+            }
+            fn main() -> Int {
+                let add5 = make_adder(5)
+                add5(10)
+            }
+        """
+        lir = source_to_lir(source)
+
+        from nova.backend.lir_c_backend import LIRCBackend
+        backend = LIRCBackend()
+        c_code = backend.compile(lir)
+
+        # 验证闭包创建
+        self.assertIn("nova_closure_new", c_code)
+        # 验证闭包调用
+        self.assertIn("nova_closure_call", c_code)
+        # 验证 trampoline
+        self.assertIn("nova_trampoline___lambda", c_code)
+        # 验证 lambda 函数存在
+        self.assertIn("nova_fn___lambda", c_code)
+        # 验证 make_adder 返回闭包
+        self.assertIn("NovaClosure*", c_code)
+
+    @unittest.skipUnless(
+        __import__("shutil").which("gcc"),
+        "gcc not available"
+    )
+    def test_closure_c_code_compiles_with_gcc(self):
+        """生成的闭包 C 代码应能通过 gcc 编译（语法检查）"""
+        import subprocess
+        import shutil
+
+        source = """
+            fn make_adder(n: Int) -> (Int) -> Int {
+                |x: Int| -> Int { x + n }
+            }
+            fn main() -> Int {
+                let add5 = make_adder(5)
+                add5(10)
+            }
+        """
+        lir = source_to_lir(source)
+
+        from nova.backend.lir_c_backend import LIRCBackend
+        backend = LIRCBackend()
+        c_code = backend.compile(lir)
+
+        runtime_dir = os.path.join(
+            os.path.dirname(__file__), "..", "runtime"
+        )
+
+        with tempfile.NamedTemporaryFile(
+            suffix=".c", mode="w", delete=False
+        ) as f:
+            f.write(c_code)
+            f.flush()
+            try:
+                result = subprocess.run(
+                    ["gcc", "-fsyntax-only", "-I", runtime_dir, f.name],
+                    capture_output=True, text=True, timeout=10
+                )
+                # 允许警告，但不允许错误
+                self.assertEqual(
+                    result.returncode, 0,
+                    f"GCC 编译失败: {result.stderr}"
+                )
+            finally:
+                os.unlink(f.name)
+
+    def test_mir_closure_call_is_indirect(self):
+        """MIR 降级：闭包变量的调用应该是间接调用（SSA callee）"""
+        from nova.ir.hir_lowering import HIRLowering
+        from nova.ir.mir_lowering import MIRLowering
+        from nova.lexer import Lexer
+        from nova.parser import Parser
+        from nova.type_checker import TypeChecker
+
+        source = """
+            fn make_adder(n: Int) -> (Int) -> Int {
+                |x: Int| -> Int { x + n }
+            }
+            fn main() -> Int {
+                let add5 = make_adder(5)
+                add5(10)
+            }
+        """
+        tokens = Lexer(source).tokenize()
+        ast = Parser(tokens).parse()
+        TypeChecker().check_program(ast)
+        hir = HIRLowering().lower(ast)
+        mir = MIRLowering().lower(hir)
+
+        # main 函数中第二个 call (add5(10)) 的 callee 应该是 SSA 变量（如 v1）
+        # 而不是字符串 "add5"
+        main_fn = mir.functions["main"]
+        call_count = 0
+        for block in main_fn.basic_blocks:
+            for instr in block.instructions:
+                from nova.ir.ir_nodes import MIRCall
+                if isinstance(instr, MIRCall):
+                    call_count += 1
+                    if call_count == 2:  # 第二个 call 是 add5(10)
+                        # callee 应该是 SSA 变量名（以 v 开头），不是 "add5"
+                        self.assertTrue(
+                            instr.callee.startswith("v"),
+                            f"闭包调用的 callee 应该是 SSA 变量，实际是: {instr.callee}"
+                        )
+
+
 if __name__ == "__main__":
     unittest.main()
