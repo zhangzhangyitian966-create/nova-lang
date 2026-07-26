@@ -321,6 +321,28 @@ class X86_64Emitter:
             self.emit_byte(self._modrm(0b10, reg & 7, base & 7))
             self.emit_int32(offset)
 
+    def movq_xmm_gpr(self, xmm_reg, gpr_reg):
+        """movq xmm_reg, gpr_reg  — 将 GPR 的低 64 位搬移到 XMM 寄存器"""
+        self.emit_byte(0xF2)
+        rex_r = (xmm_reg >> 3) & 1
+        rex_b = (gpr_reg >> 3) & 1
+        if rex_r or rex_b:
+            self._rex(0, rex_r, 0, rex_b)
+        self.emit_byte(0x0F)
+        self.emit_byte(0x6E)  # movq xmm, r/m64
+        self.emit_byte(self._modrm(0b11, xmm_reg & 7, gpr_reg & 7))
+
+    def movq_gpr_xmm(self, gpr_reg, xmm_reg):
+        """movq gpr_reg, xmm_reg  — 将 XMM 寄存器的低 64 位搬移到 GPR"""
+        self.emit_byte(0xF2)
+        rex_r = (xmm_reg >> 3) & 1
+        rex_b = (gpr_reg >> 3) & 1
+        if rex_r or rex_b:
+            self._rex(0, rex_r, 0, rex_b)
+        self.emit_byte(0x0F)
+        self.emit_byte(0xD6)  # movq r/m64, xmm
+        self.emit_byte(self._modrm(0b11, xmm_reg & 7, gpr_reg & 7))
+
     def addsd_reg_reg(self, dst, src):
         """addsd dst, src"""
         self.emit_byte(0xF2)

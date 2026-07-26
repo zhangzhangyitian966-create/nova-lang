@@ -1097,12 +1097,59 @@ class TypeChecker:
                     return False
             return True
 
-        # List 类型：列表长度无限，固定长度的 PatternList 无法覆盖所有情况。
+        # List 类型：列表长度无限，固定长度的 PatternList 无法覆盖所有长度。
         # 通配符/变量绑定已在上方处理，到达此处意味着没有通配符覆盖。
-        # PatternList(elements=[]) 仅覆盖空列表，
-        # PatternList(elements=[...]) 仅覆盖对应确切长度的列表。
-        # 由于列表长度无限，没有通配符/变量绑定的情况下不可能完备。
+        # 进行精细分析：
+        # 1. 收集所有 PatternList 模式，按长度分组
+        # 2. 检查每个长度组的元素模式是否集体完备
+        # 3. 即使所有已知长度都完备，由于列表长度无限，整体仍不完备
+        #    （除非有 cons/rest 模式，但 Nova 当前不支持）
+        # 分析结果存储在 self._last_list_exhaustive_info 中用于错误消息
         if isinstance(subject_type, ListType):
+            list_patterns = [p for p in patterns if isinstance(p, PatternList)]
+            if list_patterns:
+                # 按长度分组
+                by_length: Dict[int, List] = {}
+                for p in list_patterns:
+                    n = len(p.elements)
+                    if n not in by_length:
+                        by_length[n] = []
+                    by_length[n].append(p)
+
+                # 检查每个长度组的元素是否完备
+                lengths_covered = set()
+                for length, pats in by_length.items():
+                    if length == 0:
+                        # 空列表：只要有一个 [] 模式就覆盖了
+                        lengths_covered.add(0)
+                    else:
+                        # 非空列表：检查每个位置的元素模式是否集体完备
+                        all_positions_complete = True
+                        for i in range(length):
+                            pos_patterns = [
+                                p.elements[i]
+                                for p in pats
+                                if i < len(p.elements)
+                            ]
+                            if not self._check_patterns_exhaustive(
+                                pos_patterns, subject_type.elem_type
+                            ):
+                                all_positions_complete = False
+                                break
+                        if all_positions_complete:
+                            lengths_covered.add(length)
+
+                # 存储分析结果供错误消息使用
+                self._last_list_exhaustive_info = {
+                    "lengths_covered": sorted(lengths_covered),
+                    "total_length_groups": len(by_length),
+                }
+            else:
+                self._last_list_exhaustive_info = {
+                    "lengths_covered": [],
+                    "total_length_groups": 0,
+                }
+            # 列表长度无限，固定长度模式永远无法完全覆盖
             return False
 
         # Int/Float/String/Char：无限值域，无通配符则不完备
@@ -1253,6 +1300,33 @@ class TypeChecker:
                 line=line,
                 column=column,
             )
+        elif isinstance(subject_type, ListType):
+            # 列表类型：根据精细分析结果给出针对性提示
+            info = getattr(self, "_last_list_exhaustive_info", None)
+            if info and info["total_length_groups"] > 0:
+                lengths = info["lengths_covered"]
+                if lengths:
+                    lengths_str = ", ".join(str(n) for n in lengths)
+                    raise TypeCheckError(
+                        f"match 表达式不完备：列表模式仅覆盖了长度为 {lengths_str} 的情况，"
+                        f"列表长度可以是任意值，考虑添加通配符分支 (_)",
+                        line=line,
+                        column=column,
+                    )
+                else:
+                    raise TypeCheckError(
+                        "match 表达式不完备：列表模式的元素位置未完全覆盖，"
+                        "且列表长度可以是任意值，考虑添加通配符分支 (_)",
+                        line=line,
+                        column=column,
+                    )
+            else:
+                raise TypeCheckError(
+                    "match 表达式不完备：列表长度可以是任意值，"
+                    "固定长度模式无法覆盖所有情况，考虑添加通配符分支 (_)",
+                    line=line,
+                    column=column,
+                )
         else:
             raise TypeCheckError(
                 "match 表达式可能不完备：考虑添加通配符分支 (_) "

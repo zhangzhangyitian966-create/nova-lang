@@ -1,7 +1,7 @@
 {
-  "cycles": 30,
-  "frontend_completed": 20,
-  "backend_completed": 23,
+  "cycles": 31,
+  "frontend_completed": 21,
+  "backend_completed": 24,
   "last_review_cycle": 30,
   "current_review_cycle": 30,
   "completed_tasks": [
@@ -51,15 +51,41 @@
     "backend_lir_callee_ssa",
     "frontend_parser_block_recovery",
     "backend_mir_lambda_robust",
-    "review_cycle_30"
+    "review_cycle_30",
+    "frontend_list_pattern_precise",
+    "backend_native_fn_ptr_tramp",
+    "backend_native_call_indirect_float"
   ],
   "failed_tasks": [],
   "deprecated_tasks": [
     "frontend_type_var_strict",
     "backend_wasm_indirect_multiarg",
-    "backend_wasm_gc_types"
+    "backend_wasm_gc_types",
+    "backend_native_fn_ptr"
   ],
   "task_history": [
+    {
+      "cycle": 31,
+      "task_id": "frontend_list_pattern_precise",
+      "name": "精确化列表模式完备性检查",
+      "track": "frontend",
+      "difficulty": "easy",
+      "priority": 50,
+      "result": "success",
+      "details": "改进 type_checker.py 列表模式完备性检查，从直接返回False改为精细分析。(1) 在 _check_patterns_exhaustive 中对 ListType 增加按长度分组分析：收集所有 PatternList 模式，按长度分组，检查每个长度组的元素模式是否集体完备，将分析结果存入 self._last_list_exhaustive_info。(2) 在 _generate_missing_message 中为 ListType 增加专门的错误消息分支，根据分析结果显示已覆盖的列表长度，给出更有针对性的提示。清零评审报告 P2-2 项：列表模式完备性过于保守（恒为 False），精确列表模式误报不完备。新增约 75 行代码。395 测试全部通过，无回归。前端线达到 21/22 完成（含 1 废弃）。",
+      "timestamp": "2026-07-26 16:10"
+    },
+    {
+      "cycle": 31,
+      "task_id": "backend_native_fn_ptr_tramp",
+      "name": "实现原生后端闭包 fn_ptr trampoline 方案",
+      "track": "backend",
+      "difficulty": "hard",
+      "priority": 97,
+      "result": "success",
+      "details": "实现原生后端闭包 fn_ptr trampoline 方案，清零评审报告 P0-1 项。共修改 3 个文件：(1) x86_64.py 新增 movq_xmm_gpr 和 movq_gpr_xmm 指令（XMM↔GPR 64位搬移），约 22 行。(2) native_backend.py 新增 _is_lambda_name、_find_capture_count、_generate_trampoline 三个辅助方法；compile() 方法集成 trampoline 生成；_emit_closure_create 改用 LEA 加载 trampoline 地址替代 NULL；_emit_call_indirect 增加浮点返回值处理（清零 P1-A）；_generate_elf 增加 trampoline 代码段、trampoline 内部 call 回填、闭包 fn_ptr LEA 回填三个阶段。新增约 190 行代码。(3) 闭包程序通过完整编译管道成功生成 ELF（make_adder + add5(10) 示例）。清零 P0-1（native fn_ptr NULL）和 P1-A（call_indirect 浮点返回值）。395 测试全部通过，无回归。后端线达到 24/32 完成（含 4 废弃）。",
+      "timestamp": "2026-07-26 16:15"
+    },
     {
       "cycle": 30,
       "task_id": "review_cycle_30",
@@ -129,30 +155,6 @@
   ],
   "tasks": [
     {
-      "task_id": "backend_native_fn_ptr_tramp",
-      "name": "实现原生后端闭包 fn_ptr trampoline 方案",
-      "description": "native_backend.py _emit_closure_create 中 fn_ptr 显式传 NULL（e.mov_reg_imm64(RDI, 0)），导致闭包创建后无法调用目标函数。修复方案：(1) 为每个 __lambda_N 函数生成对应的 trampoline 汇编代码（参考 C 后端方案），trampoline 从 captured 数组解包参数后调用实际 lambda 函数；(2) 在 _emit_closure_create 中将 trampoline 标签地址作为 fn_ptr 传入 nova_closure_new（通过 lea_reg_label 或后期标签回填）。同时修复 _emit_call_indirect 的浮点返回值问题（P1-A：当前只从 RAX 读取，需增加 XMM0 浮点返回值路径）。",
-      "track": "backend",
-      "difficulty": "hard",
-      "priority": 97,
-      "estimated_effort": "5-7小时",
-      "status": "pending",
-      "source": "review_30_audit",
-      "depends_on": ["backend_native_closure_impl"]
-    },
-    {
-      "task_id": "backend_native_fn_ptr",
-      "name": "实现原生后端闭包 fn_ptr 回填（已升级为 trampoline 方案）",
-      "description": "已被 backend_native_fn_ptr_tramp 替代。保留此任务以记录历史。trampoline 方案与 C 后端一致，从 captured 数组解包参数后调用实际 lambda 函数。",
-      "track": "backend",
-      "difficulty": "hard",
-      "priority": 95,
-      "estimated_effort": "4-6小时",
-      "status": "pending",
-      "source": "review_27_audit",
-      "depends_on": ["backend_native_closure_impl"]
-    },
-    {
       "task_id": "backend_wasm_fn_ptr",
       "name": "实现 Wasm 后端闭包 fn_ptr 回填",
       "description": "wasm_backend.py _compile_closure_create 中 fn_ptr 传 NULL（i32.const 0），导致闭包创建后无法调用目标函数。修复：将 lambda 函数指针（函数表索引或绝对地址）传入 nova_closure_new。Wasm 需通过函数表（funcref table）管理 lambda 函数引用。",
@@ -174,18 +176,6 @@
       "estimated_effort": "3-4小时",
       "status": "pending",
       "source": "review_27_audit",
-      "depends_on": []
-    },
-    {
-      "task_id": "backend_native_call_indirect_float",
-      "name": "修复原生后端 _emit_call_indirect 浮点返回值处理",
-      "description": "native_backend.py _emit_call_indirect（第 1185-1188 行）当前只从 RAX 读取返回值，未处理浮点返回值（XMM0）的情况。当闭包返回浮点值时，nova_closure_call 将结果放在 XMM0，但代码从 RAX 读取，导致错误的返回值。修复：参照 _emit_call 的 dst_is_float 检测和 need_retval_slot 栈槽机制，增加浮点返回值分支。",
-      "track": "backend",
-      "difficulty": "easy",
-      "priority": 80,
-      "estimated_effort": "1-2小时",
-      "status": "pending",
-      "source": "review_30_audit",
       "depends_on": []
     },
     {

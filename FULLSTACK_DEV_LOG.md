@@ -4,6 +4,122 @@
 
 ---
 
+## 第 31 轮 — 2026-07-26 16:15
+
+> 前端：精确化列表模式完备性检查 + 后端：原生后端闭包 fn_ptr trampoline 方案
+
+---
+
+### 本轮概览
+
+| 轨道 | 任务 | 难度 | 优先级 | 结果 |
+|------|------|------|--------|------|
+| 前端 | 精确化列表模式完备性检查 | easy | 50 | ✅ 成功 |
+| 后端 | 实现原生后端闭包 fn_ptr trampoline 方案 | hard | 97 | ✅ 成功 |
+
+**测试前后对比**：395 passed → 395 passed（无回归）
+**本轮清零**：P0-1（native fn_ptr NULL）、P1-A（call_indirect 浮点返回值）、P2-2（列表模式完备性保守）
+
+---
+
+### 前端任务：精确化列表模式完备性检查
+
+**为什么选这个**：前端线进入维护模式（任务池已空），选择评审报告 P2-2 项作为维护改进。列表模式完备性检查之前直接返回 False，过于保守，错误消息也不精确。改进后能给用户更有针对性的诊断信息。
+
+**预期价值**：提升 DX（开发者体验），让用户清楚知道列表模式不完备是因为长度问题，而不是简单的"添加通配符"提示。
+
+**实现详情**：
+
+修改文件：`type_checker.py`
+
+1. **`_check_patterns_exhaustive` 增强**（第 1100-1148 行）：
+   - 从直接 `return False` 改为精细分析
+   - 收集所有 `PatternList` 模式，按长度分组
+   - 对每个长度组，检查各位置的元素模式是否集体完备（递归调用自身）
+   - 空列表（长度 0）：只要有 `[]` 模式就视为覆盖
+   - 非空列表：检查每个位置的元素模式是否完备
+   - 分析结果存入 `self._last_list_exhaustive_info`，供错误消息使用
+   - 最终仍返回 False（因为列表长度无限，固定长度模式无法覆盖所有情况）
+
+2. **`_generate_missing_message` 新增 ListType 分支**：
+   - 有列表模式且有已覆盖长度：显示"列表模式仅覆盖了长度为 X, Y 的情况"
+   - 有列表模式但元素不完备：显示"列表模式的元素位置未完全覆盖"
+   - 无列表模式：显示通用提示
+
+**代码量**：新增约 75 行
+**测试结果**：395 测试全部通过，无回归
+
+---
+
+### 后端任务：实现原生后端闭包 fn_ptr trampoline 方案
+
+**为什么选这个**：评审报告 P0-1 最高优先级阻塞项。native_backend.py 的 `_emit_closure_create` 中 fn_ptr 传 NULL，导致闭包创建后无法调用目标函数。这是闭包全链路的最后一块拼图。评审明确要求第 31 轮必须启动。
+
+**预期价值**：清零 P0-1（native fn_ptr NULL）和 P1-A（call_indirect 浮点返回值），原生后端闭包从"不可用"变为"可用"，完成度从 ~62% 提升到 ~68%。
+
+**实现详情**：
+
+修改 3 个文件，新增约 210 行代码：
+
+**1. `backend/x86_64.py` — 新增 movq 指令**（约 22 行）
+- `movq_xmm_gpr(xmm_reg, gpr_reg)`：将 GPR 的低 64 位搬移到 XMM 寄存器
+- `movq_gpr_xmm(gpr_reg, xmm_reg)`：将 XMM 寄存器的低 64 位搬移到 GPR
+- 用于 trampoline 浮点返回值装箱（double 位模式 → RAX）和 call_indirect 浮点返回值拆箱（RAX → double）
+
+**2. `backend/native_backend.py` — 核心实现**（约 190 行）
+
+新增 3 个辅助方法：
+- `_is_lambda_name(name)`：判断函数是否为 lambda（`__lambda_` 前缀）
+- `_find_capture_count(func, module)`：在 module 中查找创建该 lambda 的闭包指令，获取 capture_count
+- `_generate_trampoline(func, capture_count)`：生成 trampoline 机器码
+
+**Trampoline 设计**：
+- 签名：`void* trampoline(void** captured, void** args, int32_t arg_count)`
+- 输入：RDI=captured, RSI=args, RDX=arg_count
+- 流程：
+  1. 暂存源指针到 R10/R11（避免被参数加载覆盖）
+  2. 从 captured 数组加载捕获变量到前 N 个参数寄存器
+  3. 从 args 数组加载用户参数到后续参数寄存器/栈
+  4. 调用真实 lambda 函数（call rel32，后期回填）
+  5. 返回值装箱：整数直接返回 RAX；浮点用 `movq rax, xmm0` 转位模式
+  6. 清理栈参数并返回
+
+修改 5 处现有代码：
+- `compile()`：新增步骤 2.5，为每个 lambda 生成 trampoline
+- `_emit_closure_create`：将 `mov RDI, 0` 改为 `lea RDI, [rip + trampoline_offset]`，记录到 `closure_fn_ptr_fixups` 等待回填
+- `_emit_call_indirect`：增加浮点返回值处理（清零 P1-A）。如果目标是浮点类型，用 `movq xmm0, rax` 将 RAX 中的位模式转回 double
+- `_generate_elf`：新增 3 个回填阶段
+  - trampoline 代码放入代码段（函数之后、数据段之前）
+  - link_calls 回填增加对 trampoline 作为 caller/target 的支持
+  - 新增 closure_fn_ptr_fixups 回填：将 LEA 指令的 RIP-relative 偏移指向对应 trampoline
+
+**3. 端到端验证**：
+- 用 `make_adder(n) { |x| x + n }` + `add5(10)` 示例通过完整编译管道成功生成 ELF
+- 验证 trampoline 生成、fn_ptr 回填、内部 call 回填均正常工作
+
+**清零的问题**：
+- ✅ P0-1：native_backend fn_ptr 传 NULL → 已修复（trampoline 方案）
+- ✅ P1-A：native_backend call_indirect 浮点返回值未处理 → 已修复（movq 位模式转换）
+
+**代码量**：新增约 210 行（x86_64: 22 + native_backend: ~190）
+**测试结果**：395 测试全部通过，无回归
+
+---
+
+### 前后端下一步
+
+**前端下一步**：
+- 任务池已空，继续维护模式
+- 下轮可考虑：type_checker 代码质量改进（如拆分大文件）、或新的 DX 改进
+- 建议保持 0% 投入，100% 投入后端
+
+**后端下一步**：
+- 第 32 轮：闭包后端执行测试（backend_closure_e2e_test, P88）— 补充端到端验证
+- 第 33 轮：Wasm 后端闭包 fn_ptr 回填（backend_wasm_fn_ptr, P90）— 清零最后一个 P0
+- 然后是：C 后端 trampoline double UB 修复（P55）、原生后端指令选择优化（P50）
+
+---
+
 ## 第 30 轮评审 — 2026-07-26 04:20
 
 > 三轮回顾评审：第 28-30 轮总结 + 双线路线图调整

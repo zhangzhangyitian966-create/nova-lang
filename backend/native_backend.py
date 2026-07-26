@@ -151,6 +151,8 @@ class NativeCodeGen:
         self.link_calls = []  # [(caller_func_name, code_offset_in_func, target_func_name)]
         self.data_fixups = []  # [(func_name, code_offset_in_func, data_offset, kind)]
         self.external_calls = []  # [(caller_func_name, code_offset_in_func, external_func_name)]
+        self.closure_fn_ptr_fixups = []  # [(caller_func_name, code_offset_in_func, lambda_name)]
+        self.trampoline_code = {}  # lambda_name -> trampoline machine code bytes
         # 常量值 -> 数据段偏移的映射（用于快速查找）
         self._float_const_map = {}  # value_str -> data_offset
         self._string_const_map = {}  # value -> data_offset
@@ -161,6 +163,8 @@ class NativeCodeGen:
         self.link_calls = []
         self.data_fixups = []
         self.external_calls = []
+        self.closure_fn_ptr_fixups = []
+        self.trampoline_code = {}
 
         # 1. 收集所有字符串和浮点常量
         self._collect_constants(lir_module)
@@ -169,6 +173,14 @@ class NativeCodeGen:
         func_code = {}
         for name, func in lir_module.functions.items():
             func_code[name] = self._compile_function(func)
+
+        # 2.5 为每个 lambda 函数生成 trampoline
+        for name, func in lir_module.functions.items():
+            if self._is_lambda_name(name):
+                # 从闭包创建指令中获取 capture_count
+                capture_count = self._find_capture_count(func, lir_module)
+                tramp_code = self._generate_trampoline(func, capture_count)
+                self.trampoline_code[name] = tramp_code
 
         # 3. 生成 _start 入口
         start_code = self._generate_start(func_code, lir_module)
@@ -201,6 +213,122 @@ class NativeCodeGen:
                             self.string_constants.append((value_bytes, offset))
                             self._string_const_map[key] = offset
                             offset += len(value_bytes)
+
+    def _is_lambda_name(self, name: str) -> bool:
+        """判断函数名是否为 lambda 函数（__lambda_ 前缀）"""
+        return name.startswith("__lambda_")
+
+    def _find_capture_count(self, func: LIRFunction, module: LIRModule) -> int:
+        """在整个 module 中查找创建指定 lambda 闭包的指令，获取 capture_count。
+
+        遍历所有函数的所有指令，找到 LIRClosureCreate 且 fn_name 匹配的。
+        找不到则返回 0。
+        """
+        for fn in module.functions.values():
+            for instr in fn.body:
+                if isinstance(instr, LIRClosureCreate):
+                    if instr.fn_name == func.name:
+                        return instr.capture_count
+        return 0
+
+    def _generate_trampoline(self, func: LIRFunction, capture_count: int) -> bytes:
+        """为 lambda 函数生成闭包调用约定的 trampoline 机器码。
+
+        闭包调用约定（C 侧 nova_closure_call）：
+            void* fn_ptr(void** captured, void** args, int32_t arg_count)
+        输入寄存器（System V ABI）：RDI=captured, RSI=args, RDX=arg_count
+
+        Trampoline 职责：
+        1. 从 captured 数组解包捕获变量到参数寄存器
+        2. 从 args 数组解包用户参数到后续参数寄存器/栈
+        3. 调用真实的 lambda 函数
+        4. 将返回值装箱为 void*（整数/指针直接返回，浮点用 movq 转位模式）
+        5. 返回
+
+        返回值约定：返回值在 RAX（整数位模式），对于浮点是 double 的位表示。
+        """
+        e = X86_64Emitter()
+        total_params = len(func.params)
+        user_param_count = total_params - capture_count
+
+        # 保存源指针到临时寄存器（R10=captured, R11=args）
+        # RDI 和 RSI 会被参数加载覆盖，所以先暂存
+        e.mov_reg_reg64(R10, RDI)  # r10 = captured (void**)
+        e.mov_reg_reg64(R11, RSI)  # r11 = args (void**)
+
+        # ARG_REGS = [RDI, RSI, RDX, RCX, R8, R9] — 前 6 个整数参数寄存器
+        from .x86_64 import ARG_REGS
+
+        # 1. 加载捕获变量到参数寄存器（前 capture_count 个参数）
+        for i in range(min(capture_count, len(ARG_REGS))):
+            # captured[i] -> ARG_REGS[i]
+            e.mov_reg_mem(ARG_REGS[i], R10, i * 8)
+
+        # 2. 加载用户参数到后续参数寄存器
+        reg_args_used = min(capture_count, len(ARG_REGS))
+        remaining_regs = len(ARG_REGS) - reg_args_used
+        stack_args_count = max(0, user_param_count - remaining_regs)
+
+        for i in range(min(user_param_count, remaining_regs)):
+            arg_reg_idx = capture_count + i
+            # args[i] -> ARG_REGS[arg_reg_idx]
+            e.mov_reg_mem(ARG_REGS[arg_reg_idx], R11, i * 8)
+
+        # 3. 超出寄存器的参数压栈（从右往左压）
+        # 注意：call 之前栈上已经有返回地址（8B），所以栈是 8 mod 16
+        # 压入 N 个参数后，再 call 会再压 8B 返回地址
+        # 我们需要确保 call 前 RSP 是 16 字节对齐
+        if stack_args_count > 0:
+            # 先对齐栈（如果需要）
+            # 当前：caller 的 RSP 在 call 前是 16 对齐的
+            # call 压入 8B 返回地址后，进入 trampoline 时 RSP = 8 mod 16
+            # 我们还没 push 任何东西，所以当前 RSP = 8 mod 16
+            # 压入 stack_args_count 个 8B 参数后：
+            # RSP = 8 - stack_args_count * 8 (mod 16)
+            # 然后 call lambda 会再压 8B：
+            # RSP = 16 - stack_args_count * 8 (mod 16)
+            # 需要 = 0 mod 16
+            # 所以 stack_args_count * 8 ≡ 0 (mod 16)
+            # 即 stack_args_count 为偶数时不需要额外对齐，奇数时需要 8B 对齐
+            if stack_args_count % 2 == 1:
+                e.sub_rsp_imm(8)  # 对齐填充
+
+            # 从右往左压栈（最后一个参数先压）
+            for i in range(stack_args_count - 1, -1, -1):
+                arg_idx = remaining_regs + i  # 用户参数索引
+                # 加载 args[arg_idx] 到 RAX 临时寄存器，然后压栈
+                e.mov_reg_mem(RAX, R11, arg_idx * 8)
+                e.push_reg(RAX)
+
+        # 4. 调用真实 lambda 函数
+        # 使用 call rel32，在 _generate_elf 中回填
+        call_offset = e.call_rel32()
+        # 记录：trampoline 函数本身是调用者，目标是 lambda 函数
+        # 我们用特殊的名字标记 trampoline 的 call
+        tramp_name = f"__trampoline_{func.name}"
+        self.link_calls.append((tramp_name, call_offset, func.name))
+
+        # 5. 返回值处理：将返回值装箱为 void*（64 位）
+        # 对于整数/指针返回：RAX 已经是返回值，直接返回
+        # 对于浮点返回：XMM0 中有 double，需要用 movq 转到 RAX
+        # 问题：我们不知道返回类型是整数还是浮点
+        # 方案：根据 func.return_type 判断
+        if func.return_type and func.return_type.kind == IRType.FLOAT:
+            # 浮点返回：将 XMM0 的 64 位搬移到 RAX
+            e.movq_gpr_xmm(RAX, XMM0)
+        # 否则：整数/指针返回，RAX 已经是正确值
+
+        # 6. 清理栈参数（如果有）
+        if stack_args_count > 0:
+            pop_size = stack_args_count * 8
+            if stack_args_count % 2 == 1:
+                pop_size += 8  # 加上对齐填充
+            e.add_rsp_imm(pop_size)
+
+        # 7. 返回
+        e.ret()
+
+        return bytes(e.code)
 
     def _compile_function(self, func: LIRFunction) -> bytes:
         """编译单个函数为机器码。
@@ -1060,8 +1188,8 @@ class NativeCodeGen:
         """编译闭包创建。
 
         调用 nova_closure_new(fn_ptr, captured, capture_count) 创建闭包对象。
-        当前 fn_ptr 传 NULL（占位），与 C 后端保持一致，
-        后续轮次通过函数地址回填机制修复为真实 lambda 函数地址。
+        fn_ptr 指向该 lambda 对应的 trampoline 函数地址，
+        trampoline 负责从 captured/args 数组解包参数并调用实际 lambda。
         """
         e = ctx.e
         if not instr.dst_loc:
@@ -1082,8 +1210,12 @@ class NativeCodeGen:
                 e.mov_mem_reg(RSP, i * 8, RAX)
 
         # 3. 设置参数（System V ABI）
-        # RDI = fn_ptr (NULL for now)
-        e.mov_reg_imm64(RDI, 0)
+        # RDI = fn_ptr — 加载 trampoline 函数地址（RIP-relative LEA）
+        # 先占位，后续在 _generate_elf 中回填
+        lea_offset = e.lea_reg_rip(RDI, 0)
+        self.closure_fn_ptr_fixups.append(
+            (ctx.func_name, lea_offset, instr.fn_name)
+        )
         # RSI = captured array pointer
         if array_size > 0:
             e.mov_reg_reg64(RSI, RSP)
@@ -1124,6 +1256,12 @@ class NativeCodeGen:
 
         调用 nova_closure_call(closure, args, arg_count) 实现闭包调用。
         第一个 src_loc 是闭包对象，后续 src_locs 是实际参数。
+
+        返回值处理：
+        - nova_closure_call 返回 void*（在 RAX 中）。
+        - 对于整数/指针返回：RAX 直接就是返回值。
+        - 对于浮点返回：trampoline 将 double 的位模式放在 RAX 中，
+          我们需要用 movq 转到 XMM 寄存器再存储。
         """
         e = ctx.e
         if not instr.src_locs or len(instr.src_locs) < 1:
@@ -1131,6 +1269,12 @@ class NativeCodeGen:
 
         dst_info = instr.dst_loc
         arg_count = instr.arg_count
+
+        # 判断返回值是否为浮点
+        dst_is_float = False
+        if dst_info:
+            _, dst_type = dst_info
+            dst_is_float = dst_type.kind == IRType.FLOAT
 
         # 1. 保存 caller-saved GPR
         for reg in CALLER_GPRS:
@@ -1185,7 +1329,12 @@ class NativeCodeGen:
         # 10. 保存返回值
         if dst_info:
             dst_name, _ = dst_info
-            ctx.store_from_reg(dst_name, RAX)
+            if dst_is_float:
+                # 浮点返回：RAX 中是 double 的位模式，转到 XMM0 再存储
+                e.movq_xmm_gpr(XMM0, RAX)
+                ctx.store_from_reg(dst_name, XMM0, is_float=True)
+            else:
+                ctx.store_from_reg(dst_name, RAX)
 
     def _emit_switch(self, instr, ctx: "_EmitContext"):
         """编译 switch 多分支跳转。
@@ -1279,6 +1428,14 @@ class NativeCodeGen:
             code.extend(fc)
             code_offset = len(code)
 
+        # 各 trampoline（放在函数之后，数据段之前）
+        trampoline_offsets = {}
+        for lambda_name, tc in self.trampoline_code.items():
+            tramp_name = f"__trampoline_{lambda_name}"
+            trampoline_offsets[tramp_name] = code_offset
+            code.extend(tc)
+            code_offset = len(code)
+
         # 2. 构建数据段
         data = bytearray()
         for value_bytes, _ in self.float_constants:
@@ -1357,12 +1514,19 @@ class NativeCodeGen:
             # 计算 rel32 字段在代码段中的偏移
             if caller_name == "_start":
                 patch_pos = code_off_in_func
+            elif caller_name in func_offsets:
+                patch_pos = func_offsets[caller_name] + code_off_in_func
+            elif caller_name in trampoline_offsets:
+                # trampoline 内部的 call
+                patch_pos = trampoline_offsets[caller_name] + code_off_in_func
             else:
-                patch_pos = func_offsets.get(caller_name, 0) + code_off_in_func
+                continue  # 未知调用者，跳过
 
             # 确定目标函数的虚拟地址
             if target_name in func_offsets:
                 target_vaddr = base_addr + func_offsets[target_name]
+            elif target_name in trampoline_offsets:
+                target_vaddr = base_addr + trampoline_offsets[target_name]
             else:
                 # 外部函数（如 nova_init/nova_cleanup）暂时无法解析
                 # 在完整实现中应通过链接器处理，这里保持 0 偏移
@@ -1372,6 +1536,30 @@ class NativeCodeGen:
             # call rel32: opcode E8 (1B) + rel32 (4B)，rel32 基准是 rel32 字段末尾
             rel32_pos_vaddr = base_addr + patch_pos
             next_instr_vaddr = rel32_pos_vaddr + 4  # rel32 字段长度 = 4 字节
+            rel_offset = target_vaddr - next_instr_vaddr
+
+            struct.pack_into("<i", code, patch_pos, rel_offset)
+
+        # 5.6 回填闭包 fn_ptr（RIP-relative LEA）
+        #    每个 _emit_closure_create 中的 lea rdi, [rip + offset] 需要回填
+        #    目标是对应 lambda 的 trampoline 地址
+        for func_name, code_off_in_func, lambda_name in self.closure_fn_ptr_fixups:
+            # 计算 LEA 指令的 rel32 字段在代码段中的偏移
+            if func_name == "_start":
+                patch_pos = code_off_in_func
+            else:
+                patch_pos = func_offsets.get(func_name, 0) + code_off_in_func
+
+            # 目标：trampoline 的虚拟地址
+            tramp_name = f"__trampoline_{lambda_name}"
+            if tramp_name not in trampoline_offsets:
+                continue  # 找不到对应 trampoline，跳过
+
+            target_vaddr = base_addr + trampoline_offsets[tramp_name]
+
+            # lea reg, [rip + offset]: rel32 基准是 rel32 字段末尾
+            rel32_pos_vaddr = base_addr + patch_pos
+            next_instr_vaddr = rel32_pos_vaddr + 4
             rel_offset = target_vaddr - next_instr_vaddr
 
             struct.pack_into("<i", code, patch_pos, rel_offset)

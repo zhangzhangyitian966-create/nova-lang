@@ -2,7 +2,7 @@
 
 **更新时间**: 2026-07-26
 **上次评审**: 第 30 轮
-**当前轮次**: 第 30 轮
+**当前轮次**: 第 31 轮
 **下次评审**: 第 33 轮
 
 本路线图由前后端专项开发系统维护，专注于前端类型系统和后端代码生成的核心功能开发。
@@ -11,20 +11,21 @@
 
 | 轨道 | 总数 | 已完成 | 待做 | 废弃 | 完成率 |
 |------|------|--------|------|------|--------|
-| 前端 | 21 | 20 | 0 | 1 | 95.2% |
-| 后端 | 32 | 23 | 6 | 3 | 71.9% |
-| **总计** | **53** | **43** | **6** | **4** | **81.1%** |
+| 前端 | 22 | 21 | 0 | 1 | 95.5% |
+| 后端 | 32 | 24 | 7 | 4 | 75.0% |
+| **总计** | **54** | **45** | **7** | **5** | **83.3%** |
 
 ## 前端开发线
 
-**状态：维护模式（20/21 完成）**
+**状态：维护模式（21/22 完成）**
 
 前端核心功能已完成，进入维护模式。
 
-### 历史已完成（20/20）
+### 历史已完成（21/21）
 
 | 状态 | 任务 | 难度 | 优先级 |
 |------|------|------|--------|
+| 完成 | 精确化列表模式完备性检查 | easy | 50 |
 | 完成 | 增强 parser 块内错误恢复粒度 | easy | 35 |
 | 完成 | 修复 parser 错误列表只抛出第一个的问题 | easy | 45 |
 | 完成 | 增强 parser 错误恢复对 lambda 起始符的支持 | easy | 55 |
@@ -49,11 +50,10 @@
 
 ## 后端开发线
 
-### 高优先级任务（下 3 轮聚焦）
+### 高优先级任务（下 2 轮聚焦）
 
 | 状态 | 任务 | 难度 | 优先级 | 预计 | 依赖 | 轮次计划 |
 |------|------|------|--------|------|------|----------|
-| 待做 | 实现原生后端闭包 fn_ptr trampoline 方案 | hard | **97** | 5-7小时 | native_closure_impl | **第 31 轮** |
 | 待做 | 实现闭包后端执行测试 | medium | **88** | 3-4小时 | - | **第 32 轮** |
 | 待做 | 实现 Wasm 后端闭包 fn_ptr 回填 | hard | **90** | 4-6小时 | wasm_closure_impl | **第 33 轮** |
 
@@ -61,7 +61,6 @@
 
 | 状态 | 任务 | 难度 | 优先级 | 预计 | 依赖 |
 |------|------|------|--------|------|------|
-| 待做 | 修复原生后端 _emit_call_indirect 浮点返回值处理 | easy | 80 | 1-2小时 | - |
 | 待做 | 修复 C 后端 trampoline double 返回值 UB | easy | 55 | 1-2小时 | - |
 | 待做 | 实现原生后端指令选择优化 | easy | 50 | 2-4小时 | regalloc_fix |
 | 待做 | 实现 Wasm 后端栈平衡验证器 | medium | 45 | 1-2天 | - |
@@ -69,11 +68,14 @@
 | 待做 | 统一 C 后端（旧路径迁移到 LIR 路径） | hard | 40 | 2-3天 | - |
 | ~~废弃~~ | ~~实现 Wasm 多参数闭包调用~~ | medium | 54 | - | 并入 wasm_closure_impl |
 | ~~废弃~~ | ~~完善 WasmGC 原生类型定义~~ | hard | 50 | - | 推迟到闭包后评估 |
+| ~~废弃~~ | ~~原生后端闭包 fn_ptr 回填（旧方案）~~ | hard | 95 | - | 升级为 trampoline 方案 |
 
-### 历史已完成（23/29）
+### 历史已完成（24/29）
 
 | 状态 | 任务 | 难度 | 优先级 |
 |------|------|------|--------|
+| 完成 | 实现原生后端闭包 fn_ptr trampoline 方案 | hard | 97 |
+| 完成 | 修复原生后端 _emit_call_indirect 浮点返回值处理 | easy | 80 |
 | 完成 | 修复 MIR lambda 降级的边界崩溃风险 | easy | 82 |
 | 完成 | 实现 LIR 降级 MIRCall SSA callee 为 LIRCallIndirect | medium | 99 |
 | 完成 | 实现 C 后端闭包函数指针非 NULL | medium | 68 |
@@ -103,12 +105,12 @@
 
 | 排名 | 后端 | 完成度 | 关键缺失 |
 |------|------|--------|----------|
-| 1 | **C 后端** | **~75%** | 不区分内外函数；无执行验证；trampoline double UB |
-| 2 | **原生后端** | **~62%** | 闭包 fn_ptr 为 NULL 占位；call_indirect 浮点返回值未处理；无链接器 |
+| 1 | **C 后端** | **~75%** | trampoline double UB；不区分内外函数；无执行验证 |
+| 2 | **原生后端** | **~68%** | 无链接器；无端到端执行测试 |
 | 3 | **Wasm 后端** | **~58%** | 闭包 fn_ptr 为 NULL 占位；栈平衡待验证 |
 | 4 | **Cranelift 后端** | **<30%** | 仅有框架 |
 
-注：C 后端因闭包 trampoline+fn_ptr 完整排名第 1。原生后端和 Wasm 后端的 fn_ptr 仍为 NULL，闭包尚不可用。
+注：C 后端因闭包 trampoline+fn_ptr 完整排名第 1。原生后端 fn_ptr 已修复（trampoline 方案），闭包可用，完成度从 62% 提升至 ~68%。Wasm 后端 fn_ptr 仍为 NULL。
 
 ## 第 30 轮评审发现的 P0/P1/P2 问题
 
@@ -116,7 +118,7 @@
 
 | 编号 | 问题 | 影响 | 状态 |
 |------|------|------|------|
-| P0-1 | native_backend _emit_closure_create fn_ptr 传 NULL | 闭包无法调用目标函数 | 待修复（backend_native_fn_ptr_tramp, P97） |
+| ~~P0-1~~ | ~~native_backend _emit_closure_create fn_ptr 传 NULL~~ | ~~闭包无法调用目标函数~~ | **已修复**（第 31 轮，backend_native_fn_ptr_tramp） |
 | P0-2 | wasm_backend _compile_closure_create fn_ptr 传 NULL | 闭包无法调用目标函数 | 待修复（backend_wasm_fn_ptr, P90） |
 | ~~P0-3~~ | ~~lir_lowering _lower_call 未处理 SSA callee~~ | ~~闭包调用错误编译为直接调用~~ | **已修复**（第 28 轮） |
 
@@ -125,7 +127,7 @@
 | 编号 | 问题 | 影响 | 状态 |
 |------|------|------|------|
 | ~~P1-1~~ | ~~mir_lowering _lower_lambda return_type is None 崩溃~~ | ~~无返回类型注解的 lambda 编译器崩溃~~ | **已修复**（第 29 轮） |
-| P1-A | native_backend _emit_call_indirect 浮点返回值未处理 | 闭包返回浮点值时结果错误 | 待修复（backend_native_call_indirect_float, P80） |
+| ~~P1-A~~ | ~~native_backend _emit_call_indirect 浮点返回值未处理~~ | ~~闭包返回浮点值时结果错误~~ | **已修复**（第 31 轮，随 trampoline 方案一并修复） |
 | P1-3 | type_checker.py 1756 行大文件病 | 维护成本高 | P2 技术债，暂不拆分 |
 | P1-4 | 无后端执行测试 | lambda 经后端编译后无端到端验证 | 待补充（backend_closure_e2e_test, P88） |
 
@@ -134,7 +136,7 @@
 | 编号 | 问题 | 影响 | 状态 |
 |------|------|------|------|
 | P2-1 | wasm _compile_call_indirect 边界检查不完整 | 参数数组可能越界写入 | 待改进 |
-| P2-2 | 列表模式完备性过于保守（恒为 False） | 精确列表模式误报不完备 | 待改进 |
+| ~~P2-2~~ | ~~列表模式完备性过于保守（恒为 False）~~ | ~~精确列表模式误报不完备~~ | **已修复**（第 31 轮，frontend_list_pattern_precise） |
 | P2-A | C 后端 trampoline double 返回值 (intptr_t) 强转 UB | 浮点闭包返回值精度丢失 | 待修复（backend_c_trampoline_double_fix, P55） |
 | P2-B | test_vm_higher_order flaky | 测试间全局状态污染 | 待隔离 |
 | ~~P2-3~~ | ~~parser 错误列表只抛出第一个~~ | ~~DX 不佳~~ | **已修复**（第 28 轮） |
@@ -142,11 +144,12 @@
 
 ## 说明
 
-- 前端线：**20/21 完成（含 1 废弃），任务池已空**，进入纯维护模式
-- 后端线：下 3 轮聚焦闭包闭环（Native trampoline fn_ptr → 执行测试 → Wasm fn_ptr）
-- 闭包进度：MIR 降级已完成（含鲁棒性修复），LIR 降级 SSA callee 已修复（第 28 轮），三后端中 C 后端最完整（trampoline+fn_ptr），Native/Wasm fn_ptr 待回填
-- P0 修复进度：3 个 P0 中 P0-3 已清零（第 28 轮），剩余 P0-1（native fn_ptr, P97 trampoline 方案）、P0-2（wasm fn_ptr, P90）
-- P1 修复进度：P1-1 已清零（第 29 轮），新发现 P1-A（call_indirect 浮点返回值, P80）
+- 前端线：**21/22 完成（含 1 废弃），任务池已空**，进入纯维护模式
+- 后端线：下 2 轮聚焦闭包闭环（执行测试 → Wasm fn_ptr）
+- 闭包进度：MIR 降级已完成（含鲁棒性修复），LIR 降级 SSA callee 已修复（第 28 轮），三后端中 C 后端最完整（trampoline+fn_ptr），Native 已修复（trampoline 方案，第 31 轮），Wasm fn_ptr 待回填
+- P0 修复进度：3 个 P0 中 P0-1/P0-3 已清零，剩余 P0-2（wasm fn_ptr, P90）
+- P1 修复进度：P1-1/P1-A 已清零，剩余 P1-4（闭包端到端测试, P88）
+- 第 31 轮新增：frontend_list_pattern_precise（前端维护任务）完成，backend_native_fn_ptr_tramp（P97）完成（同时清零 P1-A），backend_native_call_indirect_float（P80）随 trampoline 一并完成
 - 第 30 轮评审新增 3 个任务：backend_native_fn_ptr_tramp(P97)、backend_native_call_indirect_float(P80)、backend_c_trampoline_double_fix(P55)
 - 每轮开发：1 个前端任务 + 1 个后端任务（前端维护模式时可为轻量增量）
 - 每 3 轮一次评审，调整优先级和任务池
