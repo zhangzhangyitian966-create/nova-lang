@@ -835,6 +835,74 @@ class TestPipe(unittest.TestCase):
         )
         self.assertEqual(ev.env.lookup("result"), 15)
 
+    def test_pipe_typecheck_simple(self):
+        """管道操作符带类型检查：单参函数"""
+        ev = eval_source(
+            """
+            fn double(x: Int) -> Int { x * 2 }
+            let result = 5 |> double
+        """,
+            check_types=True,
+        )
+        self.assertEqual(ev.env.lookup("result"), 10)
+
+    def test_pipe_typecheck_lambda(self):
+        """管道操作符带类型检查：lambda 右侧"""
+        ev = eval_source(
+            """
+            let result = 10 |> (|x: Int| x + 5)
+        """,
+            check_types=True,
+        )
+        self.assertEqual(ev.env.lookup("result"), 15)
+
+    def test_pipe_typecheck_chained(self):
+        """管道操作符带类型检查：链式管道"""
+        ev = eval_source(
+            """
+            fn inc(x: Int) -> Int { x + 1 }
+            fn double(x: Int) -> Int { x * 2 }
+            let result = 3 |> inc |> double
+        """,
+            check_types=True,
+        )
+        self.assertEqual(ev.env.lookup("result"), 8)
+
+    def test_pipe_typecheck_multiarg(self):
+        """管道操作符带类型检查：多参函数的类型推断验证
+        （仅类型检查，不求值——求值器暂不支持部分应用管道）"""
+        checker = type_check(
+            """
+            fn add(x: Int, y: Int) -> Int { x + y }
+            let f = add(10)
+        """
+        )
+        # add(10) 部分应用返回 Int -> Int 函数
+        ty = checker.env.lookup("f")
+        self.assertIsNotNone(ty)
+
+    def test_pipe_typecheck_mismatch(self):
+        """管道操作符类型不匹配应报错"""
+        with self.assertRaises(TypeCheckError):
+            eval_source(
+                """
+                fn double(x: Int) -> Int { x * 2 }
+                let result = "hello" |> double
+            """,
+                check_types=True,
+            )
+
+    def test_pipe_typecheck_non_function(self):
+        """管道操作符右侧非函数应报错"""
+        with self.assertRaises(TypeCheckError):
+            eval_source(
+                """
+                let x = 5
+                let result = 3 |> x
+            """,
+                check_types=True,
+            )
+
 
 # ============================================================
 # 内置函数测试

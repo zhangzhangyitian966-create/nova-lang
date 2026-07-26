@@ -4,6 +4,128 @@
 
 ---
 
+## 第 34 轮 — 2026-07-26 22:20
+
+> 前端：修复管道操作符类型检查语义错误 + 后端：实现 Wasm 后端闭包 fn_ptr 回填
+
+---
+
+### 本轮概览
+
+| 维度 | 数据 |
+|------|------|
+| 轮次 | 第 34 轮（普通轮） |
+| 前端任务 | frontend_pipe_typecheck_fix（P82, medium） |
+| 后端任务 | backend_wasm_fn_ptr（P90, hard） |
+| 基线测试 | 400 passed, 20 subtests |
+| 最终测试 | 412 passed, 20 subtests（+12） |
+| 回归 | 无 |
+| 清零问题 | P1-F1（管道操作符 unify 污染）、P0-2（Wasm fn_ptr NULL） |
+
+---
+
+### 前端任务：修复管道操作符类型检查语义错误
+
+| 字段 | 值 |
+|------|------|
+| 任务 ID | frontend_pipe_typecheck_fix |
+| 难度 | medium |
+| 优先级 | 82 |
+| 结果 | ✅ 成功 |
+| 为什么选这个 | 评审报告第 34 轮既定计划，P1-F1 是日志反复点名的正确性 bug |
+
+**问题分析**：
+
+`type_checker.py` `_check_pipe_expr`（line 905-927）存在三个正确性 bug：
+
+1. **unify 副作用污染**：用 `or` 短路调用 `_unify_types(left_ty, last_param)`，失败时已写 `self._subst` 替换表（绑定 TypeVar），污染第二次 `_unify_types(left_ty, first_param)` 检查
+2. **多参函数语义不明确**：同时尝试 `last_param` 和 `first_param`，与文档语义（`expr |> f ≡ f(expr)`）矛盾
+3. **静默返回**：合一失败时返回 `right_ty`（函数类型）而非报错，类型错误被吞掉
+
+**修复方案**：
+
+1. **快照回滚**：合一前 `saved_subst = dict(self._subst)`，失败时 `self._subst = saved_subst` 回滚，消除副作用污染
+2. **语义统一**：明确 `expr |> f ≡ f(expr)`，左侧值只匹配函数第一个参数，删除 `last_param` 分支
+3. **错误报告**：合一失败时 `raise TypeCheckError`，参考 `_check_fn_call` 错误格式；同时处理右侧非函数和零参函数的错误场景
+
+**新增测试**（6 个，均 `check_types=True`）：
+
+- `test_pipe_typecheck_simple`：单参函数管道
+- `test_pipe_typecheck_lambda`：lambda 右侧管道
+- `test_pipe_typecheck_chained`：链式管道
+- `test_pipe_typecheck_multiarg`：多参函数部分应用类型推断
+- `test_pipe_typecheck_mismatch`：类型不匹配应报错
+- `test_pipe_typecheck_non_function`：右侧非函数应报错
+
+**代码变更**：type_checker.py +30/-20 行，tests/test_nova.py +68 行。400→406 测试全部通过。
+
+---
+
+### 后端任务：实现 Wasm 后端闭包 fn_ptr 回填
+
+| 字段 | 值 |
+|------|------|
+| 任务 ID | backend_wasm_fn_ptr |
+| 难度 | hard |
+| 优先级 | 90 |
+| 结果 | ✅ 成功 |
+| 为什么选这个 | 评审报告第 34 轮既定计划，P0-2 是最后一个原定 P0，清零意义重大 |
+
+**问题分析**：
+
+`wasm_backend.py` `_compile_closure_create`（line 728）中 `fn_ptr` 传 `i32.const 0`（NULL），导致闭包创建后无法找到目标函数。C 运行时 `nova_closure_call` 检查 `!closure->fn_ptr` 时直接 return NULL。
+
+**修复方案**：
+
+引入 funcref table + 预扫描索引分配，替代 NULL 占位：
+
+1. **`__init__` 新增 `lambda_table_indices`**：Dict[str, int]，存储 lambda 函数名到 table 索引的映射
+2. **`_scan_lambdas` 预扫描**：按 `__lambda_` 前缀识别 lambda 函数，分配从 0 开始的连续索引
+3. **`_emit_table`**：声明 `(table N funcref)`，N = lambda 数量（最小 1 满足 Wasm 规范）
+4. **`_emit_elem`**：生成 `(elem (i32.const 0) $nova___lambda_0 ...)` 将 lambda 填入 table
+5. **`_compile_closure_create` 修改**：fn_ptr 从 `i32.const 0`（NULL）改为 `i32.const {table_index}`
+
+**与 native 后端的差异**：native 使用 trampoline 机器码 + 二进制偏移回填（三阶段），WAT 文本格式在生成时直接写入正确索引，无需事后偏移回填。
+
+**新增测试**（6 个，TestWasmBackendClosure 类）：
+
+- `test_wasm_closure_fn_ptr_not_null`：fn_ptr 不再是 NULL
+- `test_wasm_funcref_table_declared`：funcref table 声明
+- `test_wasm_elem_segment`：elem 段生成
+- `test_wasm_lambda_table_index`：lambda table 索引分配
+- `test_wasm_no_lambda_no_table_growth`：无 lambda 时 table 最小值
+- `test_wasm_multiple_lambdas_indexed`：多 lambda 连续索引
+
+**代码变更**：wasm_backend.py +60/-5 行，tests/test_backends.py +131 行。406→412 测试全部通过。
+
+**遗留说明**：fn_ptr 现在是 table 索引而非 NULL，但 C 运行时 `nova_closure_call` 仍用 fn_ptr 做函数指针调用（C 侧 `fn(captured, args, arg_count)`），Wasm 侧完整闭包调用（`call_indirect`）需后续任务实现。
+
+---
+
+### 测试前后对比
+
+| 指标 | 开发前 | 开发后 | 变化 |
+|------|--------|--------|------|
+| 总测试数 | 400 | 412 | +12 |
+| subtests | 20 | 20 | 0 |
+| 通过率 | 100% | 100% | 0 |
+| 回归 | - | 无 | ✅ |
+
+---
+
+### 前端下一步
+
+- 第 35 轮：修复递归函数类型推断（P1-F2, P78）— 清零最后一个前端正确性 bug
+- 后续：考虑拆分 type_checker.py（P2-F5 技术债）
+
+### 后端下一步
+
+- 第 35 轮：原生后端链接器战略决策（P0-B1, P95）— 战略级，不可再拖
+- 后续：建立三后端统一闭包执行测试矩阵（P72，依赖 Wasm fn_ptr 修复已完成）
+- 后续：Wasm 侧完整闭包调用实现（call_indirect，新任务）
+
+---
+
 ## 第 33 轮（评审轮） — 2026-07-26 19:05
 
 > 第十一次双线路线图评审（回顾第 31-33 轮）

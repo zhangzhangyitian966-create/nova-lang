@@ -1,9 +1,9 @@
 {
-  "cycles": 32,
-  "frontend_completed": 22,
-  "backend_completed": 25,
-  "last_review_cycle": 30,
-  "current_review_cycle": 33,
+  "cycles": 34,
+  "frontend_completed": 23,
+  "backend_completed": 26,
+  "last_review_cycle": 33,
+  "current_review_cycle": 36,
   "completed_tasks": [
     "frontend_try_expr_typecheck",
     "backend_native_label_patch",
@@ -57,7 +57,10 @@
     "backend_native_call_indirect_float",
     "frontend_mut_check_type_name",
     "backend_closure_e2e_test",
-    "backend_mir_closure_call_fix"
+    "backend_mir_closure_call_fix",
+    "review_cycle_33",
+    "frontend_pipe_typecheck_fix",
+    "backend_wasm_fn_ptr"
   ],
   "failed_tasks": [],
   "deprecated_tasks": [
@@ -67,6 +70,28 @@
     "backend_native_fn_ptr"
   ],
   "task_history": [
+    {
+      "cycle": 34,
+      "task_id": "frontend_pipe_typecheck_fix",
+      "name": "修复管道操作符类型检查语义错误",
+      "track": "frontend",
+      "difficulty": "medium",
+      "priority": 82,
+      "result": "success",
+      "details": "修复 type_checker.py _check_pipe_expr 三个正确性 bug。(1) unify 副作用污染：用 or 短路调用 _unify_types，第一次失败时已写 self._subst 替换表污染第二次检查。改为快照回滚模式——合一前 saved_subst = dict(self._subst)，失败时 self._subst = saved_subst 回滚。(2) 多参函数语义不明确：原代码同时尝试 last_param 和 first_param，与文档语义矛盾。明确 expr |> f ≡ f(expr)，左侧值只匹配函数第一个参数。(3) 静默返回 right_ty：合一失败时不报错，返回函数类型。改为 raise TypeCheckError，参考 _check_fn_call 错误格式。同时处理右侧非函数和零参函数的错误场景。新增 6 个带类型检查的管道测试（单参、lambda、链式、多参部分应用、类型不匹配报错、非函数报错）。清零评审报告 P1-F1。新增约 70 行代码（修复 30 + 测试 60）。400→406 测试全部通过，无回归。前端线 23/24 完成。",
+      "timestamp": "2026-07-26 22:15"
+    },
+    {
+      "cycle": 34,
+      "task_id": "backend_wasm_fn_ptr",
+      "name": "实现 Wasm 后端闭包 fn_ptr 回填",
+      "track": "backend",
+      "difficulty": "hard",
+      "priority": 90,
+      "result": "success",
+      "details": "实现 Wasm 后端闭包 fn_ptr 回填，清零评审报告 P0-2。共修改 1 个文件 + 新增 1 个测试类。(1) wasm_backend.py __init__ 新增 lambda_table_indices 字典，存储 lambda 函数名到 funcref table 索引的映射。(2) compile 流程新增 _scan_lambdas 预扫描（按 __lambda_ 前缀识别，分配从 0 开始的连续索引）、_emit_table（声明 (table N funcref)，N=lambda 数量，最小 1）、_emit_elem（生成 (elem (i32.const 0) $nova___lambda_0 ...) 将 lambda 填入 table）。(3) _compile_closure_create 中 fn_ptr 从 i32.const 0（NULL）改为 i32.const {table_index}，使用预扫描分配的索引。与 native 后端的 trampoline 回填方案不同，WAT 文本格式在生成时直接写入正确索引，无需事后偏移回填。新增 TestWasmBackendClosure 测试类 6 个测试：fn_ptr 不再 NULL、funcref table 声明、elem 段生成、lambda table 索引、无 lambda 时 table 最小值、多 lambda 连续索引。清零 P0-2（wasm fn_ptr NULL）。新增约 190 行代码（后端 60 + 测试 130）。406→412 测试全部通过，无回归。后端线 26/34 完成。注：fn_ptr 现在是 table 索引而非 NULL，但 C 运行时 nova_closure_call 仍用 fn_ptr 做函数指针调用，Wasm 侧完整闭包调用（call_indirect）需后续任务实现。",
+      "timestamp": "2026-07-26 22:20"
+    },
     {
       "cycle": 33,
       "task_id": "review_cycle_33",
@@ -143,7 +168,7 @@
       "difficulty": "hard",
       "priority": 90,
       "estimated_effort": "4-6小时",
-      "status": "pending",
+      "status": "completed",
       "source": "review_27_audit",
       "depends_on": ["backend_wasm_closure_impl"]
     },
@@ -167,7 +192,7 @@
       "difficulty": "medium",
       "priority": 82,
       "estimated_effort": "2-3小时",
-      "status": "pending",
+      "status": "completed",
       "source": "review_33_audit",
       "depends_on": []
     },

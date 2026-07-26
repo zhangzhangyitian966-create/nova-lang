@@ -73,23 +73,31 @@ class WasmGCBackend:
         self.string_table: Dict[str, int] = {}  # 字符串 -> 数据段偏移
         self.string_counter = 0
         self._instr_dispatch = self._build_instr_dispatch_table()
+        # lambda 函数 -> funcref table 索引映射
+        # 用于闭包 fn_ptr 回填：fn_ptr 存储 table 索引而非 NULL
+        self.lambda_table_indices: Dict[str, int] = {}
 
     def compile(self, lir_module: LIRModule) -> str:
         """将 LIR Module 编译为 WAT（WebAssembly Text Format）"""
         self.output_lines = []
         self.string_table = {}
         self.string_counter = 0
+        self.lambda_table_indices = {}
 
         # 预扫描字符串常量
         self._scan_strings(lir_module)
+        # 预扫描 lambda 函数，分配 funcref table 索引
+        self._scan_lambdas(lir_module)
 
         self._emit_header()
         self._emit_types()
         self._emit_imports()
         self._emit_memory()
+        self._emit_table()
         self._emit_globals(lir_module)
         self._emit_string_data()
         self._emit_functions(lir_module)
+        self._emit_elem(lir_module)
         self._emit_start_function(lir_module)
 
         return "\n".join(self.output_lines)
@@ -190,6 +198,48 @@ class WasmGCBackend:
         """声明线性内存"""
         self._emit(";; ---- 内存 ----")
         self._emit('(memory (export "memory") 100)')
+        self._emit("")
+
+    def _scan_lambdas(self, lir_module: LIRModule):
+        """预扫描所有 lambda 函数，分配 funcref table 索引。
+
+        lambda 函数名以 __lambda_ 前缀标识（与 native 后端一致）。
+        每个 lambda 分配一个从 0 开始的整数索引，用于 funcref table。
+        闭包创建时 fn_ptr 传入此索引，替代之前的 NULL 占位。
+        """
+        idx = 0
+        for name in lir_module.functions:
+            if name.startswith("__lambda_"):
+                self.lambda_table_indices[name] = idx
+                idx += 1
+
+    def _emit_table(self):
+        """声明 funcref table，用于闭包间接调用。
+
+        table 大小等于 lambda 函数数量（至少 1 以满足 Wasm 规范）。
+        每个 lambda 函数通过 elem 段填入 table 对应索引位置。
+        """
+        table_size = max(len(self.lambda_table_indices), 1)
+        self._emit(";; ---- funcref table（闭包间接调用） ----")
+        self._emit(f"(table {table_size} funcref)")
+        self._emit("")
+
+    def _emit_elem(self, lir_module: LIRModule):
+        """生成 elem 段，将 lambda 函数填入 funcref table。
+
+        按 _scan_lambdas 分配的索引顺序，将每个 lambda 函数的引用
+        写入 table 对应位置。WAT 文本格式在生成时直接写入正确索引，
+        无需像 native 后端那样做事后偏移回填。
+        """
+        if not self.lambda_table_indices:
+            return
+        self._emit(";; ---- elem 段（填充 funcref table） ----")
+        # 按索引排序
+        sorted_lambdas = sorted(
+            self.lambda_table_indices.items(), key=lambda x: x[1]
+        )
+        func_refs = " ".join(f"$nova_{name}" for name, _ in sorted_lambdas)
+        self._emit(f'(elem (i32.const 0) {func_refs})')
         self._emit("")
 
     def _emit_globals(self, lir_module: LIRModule):
@@ -704,8 +754,8 @@ class WasmGCBackend:
 
         调用 nova_closure_new(fn_ptr, captured, capture_count)。
         捕获变量通过 nova_alloc 分配临时数组在线性内存中打包。
-        fn_ptr 当前传 NULL（占位），与 Native/C 后端保持一致，
-        后续轮次通过函数地址回填机制修复为真实 lambda 函数地址。
+        fn_ptr 传入 lambda 函数的 funcref table 索引（替代之前的 NULL 占位），
+        使闭包创建后可通过 table 索引找到目标函数。
         """
         capture_count = instr.capture_count
 
@@ -724,8 +774,9 @@ class WasmGCBackend:
                     self._emit(f"(i64.store offset={i * 8} align=8)")
 
         # 2. 压入 nova_closure_new 的参数（按声明顺序：fn_ptr, captured, capture_count）
-        # fn_ptr（NULL 占位）
-        self._emit("(i32.const 0)")
+        # fn_ptr：lambda 函数的 funcref table 索引（不再是 NULL）
+        fn_idx = self.lambda_table_indices.get(instr.fn_name, 0)
+        self._emit(f"(i32.const {fn_idx})")
 
         # 捕获数组指针
         if capture_count > 0:

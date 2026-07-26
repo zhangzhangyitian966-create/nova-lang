@@ -362,6 +362,137 @@ class TestBackendIntegration(unittest.TestCase):
             self.assertFalse(result)  # False 表示只生成了 WAT
 
 
+class TestWasmBackendClosure(unittest.TestCase):
+    """Wasm 后端闭包 fn_ptr 回填测试"""
+
+    def _make_closure_lir_module(self):
+        """创建包含闭包创建和调用的 LIR Module 用于测试"""
+        from nova.ir.ir_nodes import (
+            LIRClosureCreate, LIRCallIndirect, CLOSURE_TYPE,
+        )
+
+        module = LIRModule(name="test_wasm_closure")
+
+        # main 函数：创建闭包并调用
+        main_fn = LIRFunction(
+            name="main",
+            params=[],
+            return_type=INT_TYPE,
+        )
+        main_fn.body = [
+            LIRLabel(name="bb0"),
+            LIRLoadConst(value=5, const_type="int"),       # r0 = 5 (捕获变量)
+            LIRLoadConst(value=10, const_type="int"),      # r1 = 10 (用户参数)
+            LIRClosureCreate(fn_name="__lambda_0", capture_count=1),  # r2 = closure
+            LIRCallIndirect(arg_count=1),                  # r3 = closure(r1)
+            LIRReturn(),
+        ]
+        main_fn.body[1].dst_loc = ("r0", INT_TYPE)
+        main_fn.body[2].dst_loc = ("r1", INT_TYPE)
+        main_fn.body[3].src_locs = [("r0", INT_TYPE)]
+        main_fn.body[3].dst_loc = ("r2", CLOSURE_TYPE)
+        main_fn.body[4].src_locs = [("r2", CLOSURE_TYPE), ("r1", INT_TYPE)]
+        main_fn.body[4].dst_loc = ("r3", INT_TYPE)
+
+        # lambda 函数
+        lambda_fn = LIRFunction(
+            name="__lambda_0",
+            params=[("captured_n", INT_TYPE), ("x", INT_TYPE)],
+            return_type=INT_TYPE,
+        )
+        lambda_fn.body = [
+            LIRLabel(name="bb0"),
+            LIRLoadConst(value=0, const_type="int"),
+            LIRReturn(),
+        ]
+        lambda_fn.body[1].dst_loc = ("r0", INT_TYPE)
+
+        module.functions["main"] = main_fn
+        module.functions["__lambda_0"] = lambda_fn
+        return module
+
+    def test_wasm_closure_fn_ptr_not_null(self):
+        """闭包创建时 fn_ptr 不再是 NULL，而是 table 索引"""
+        module = self._make_closure_lir_module()
+        backend = WasmGCBackend()
+        wat = backend.compile(module)
+        # 应包含 nova_closure_new 调用
+        self.assertIn("nova_closure_new", wat)
+        # __lambda_0 应被分配 table 索引 0
+        self.assertEqual(backend.lambda_table_indices.get("__lambda_0"), 0)
+        # WAT 中应包含 i32.const 0 作为 fn_ptr（table 索引）
+        # 注意：fn_ptr 是 nova_closure_new 的第一个参数，在 call 之前压栈
+        self.assertIn("(call $nova_closure_new)", wat)
+
+    def test_wasm_funcref_table_declared(self):
+        """WAT 应声明 funcref table"""
+        module = self._make_closure_lir_module()
+        backend = WasmGCBackend()
+        wat = backend.compile(module)
+        self.assertIn("table", wat)
+        self.assertIn("funcref", wat)
+
+    def test_wasm_elem_segment(self):
+        """WAT 应包含 elem 段，将 lambda 函数填入 table"""
+        module = self._make_closure_lir_module()
+        backend = WasmGCBackend()
+        wat = backend.compile(module)
+        self.assertIn("elem", wat)
+        self.assertIn("$nova___lambda_0", wat)
+
+    def test_wasm_lambda_table_index(self):
+        """lambda 函数应被分配 table 索引 0"""
+        module = self._make_closure_lir_module()
+        backend = WasmGCBackend()
+        backend.compile(module)
+        self.assertIn("__lambda_0", backend.lambda_table_indices)
+        self.assertEqual(backend.lambda_table_indices["__lambda_0"], 0)
+
+    def test_wasm_no_lambda_no_table_growth(self):
+        """无 lambda 函数时 table 大小为 1（最小值）"""
+        from nova.ir.ir_nodes import LIRPanic
+        module = LIRModule(name="test_no_closure")
+        main_fn = LIRFunction(name="main", params=[], return_type=UNIT_TYPE)
+        main_fn.body = [LIRLabel(name="bb0"), LIRReturn()]
+        module.functions["main"] = main_fn
+        backend = WasmGCBackend()
+        wat = backend.compile(module)
+        self.assertIn("(table 1 funcref)", wat)
+
+    def test_wasm_multiple_lambdas_indexed(self):
+        """多个 lambda 函数应被分配连续索引"""
+        from nova.ir.ir_nodes import LIRClosureCreate, CLOSURE_TYPE
+        module = LIRModule(name="test_multi_lambda")
+        main_fn = LIRFunction(name="main", params=[], return_type=INT_TYPE)
+        main_fn.body = [
+            LIRLabel(name="bb0"),
+            LIRLoadConst(value=1, const_type="int"),
+            LIRClosureCreate(fn_name="__lambda_0", capture_count=0),
+            LIRLoadConst(value=2, const_type="int"),
+            LIRClosureCreate(fn_name="__lambda_1", capture_count=0),
+            LIRReturn(),
+        ]
+        main_fn.body[1].dst_loc = ("r0", INT_TYPE)
+        main_fn.body[2].src_locs = []
+        main_fn.body[2].dst_loc = ("r1", CLOSURE_TYPE)
+        main_fn.body[3].dst_loc = ("r2", INT_TYPE)
+        main_fn.body[4].src_locs = []
+        main_fn.body[4].dst_loc = ("r3", CLOSURE_TYPE)
+
+        for lname in ["__lambda_0", "__lambda_1"]:
+            lfn = LIRFunction(name=lname, params=[("x", INT_TYPE)], return_type=INT_TYPE)
+            lfn.body = [LIRLabel(name="bb0"), LIRLoadConst(value=0, const_type="int"), LIRReturn()]
+            lfn.body[1].dst_loc = ("r0", INT_TYPE)
+            module.functions[lname] = lfn
+
+        module.functions["main"] = main_fn
+        backend = WasmGCBackend()
+        wat = backend.compile(module)
+        self.assertEqual(backend.lambda_table_indices["__lambda_0"], 0)
+        self.assertEqual(backend.lambda_table_indices["__lambda_1"], 1)
+        self.assertIn("(table 2 funcref)", wat)
+
+
 # ============================================================
 # IR 节点测试
 # ============================================================

@@ -905,26 +905,37 @@ class TypeChecker:
     def _check_pipe_expr(self, expr) -> NovaType:
         """检查管道表达式 expr |> f，验证左侧值与右侧函数参数兼容。
 
+        语义明确：expr |> f 等价于 f(expr)，即左侧值作为函数第一个参数。
         返回右侧函数的返回类型。
         """
-        # expr |> f  等价于 f(expr)
         left_ty = self.check_expr(expr.left)
         right_ty = self.check_expr(expr.right)
-        if isinstance(right_ty, FnType):
-            if len(right_ty.param_types) >= 1:
-                # 检查管道值是否与函数最后一个参数兼容
-                # 因为管道的典型用法是 f(arg1) |> 等价于 f(piped_value)
-                last_param = (
-                    right_ty.param_types[-1] if right_ty.param_types else None
-                )
-                # 也检查第一个参数（直接调用场景）
-                first_param = right_ty.param_types[0]
-                if self._unify_types(
-                    left_ty, last_param
-                ) or self._unify_types(left_ty, first_param):
-                    return self._unify_and_resolve(right_ty.return_type)
-        # 如果无法确定，返回右侧类型
-        return right_ty
+
+        if not isinstance(right_ty, FnType):
+            # 右侧不是函数，无法管道
+            raise TypeCheckError(
+                f"管道操作符右侧必须是函数类型，得到 {right_ty}"
+            )
+
+        if len(right_ty.param_types) < 1:
+            raise TypeCheckError("管道操作符右侧函数不接受任何参数")
+
+        # 语义：expr |> f ≡ f(expr)，左侧值匹配函数第一个参数。
+        # 使用快照回滚机制避免 unify 失败时污染替换表：
+        # _unify_types 成功会写 self._subst，若直接用 or 短路，
+        # 第一次失败但途中绑定了 TypeVar 会污染第二次检查。
+        first_param = right_ty.param_types[0]
+        saved_subst = dict(self._subst)  # 快照
+        if self._unify_types(left_ty, first_param):
+            return self._unify_and_resolve(right_ty.return_type)
+
+        # 合一失败：回滚替换表，然后报错
+        self._subst = saved_subst
+        expected = self._apply_subst(first_param)
+        actual = self._apply_subst(left_ty)
+        raise TypeCheckError(
+            f"管道操作符类型不匹配：左侧 {actual} 无法匹配函数第一个参数 {expected}"
+        )
 
     def _check_field_access(self, expr) -> NovaType:
         """字段访问的类型检查。
