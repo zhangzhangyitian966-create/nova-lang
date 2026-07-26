@@ -3,7 +3,7 @@
   "frontend_completed": 22,
   "backend_completed": 25,
   "last_review_cycle": 30,
-  "current_review_cycle": 30,
+  "current_review_cycle": 33,
   "completed_tasks": [
     "frontend_try_expr_typecheck",
     "backend_native_label_patch",
@@ -67,6 +67,17 @@
     "backend_native_fn_ptr"
   ],
   "task_history": [
+    {
+      "cycle": 33,
+      "task_id": "review_cycle_33",
+      "name": "第 33 轮 - 双线路线图评审",
+      "track": "review",
+      "difficulty": "review",
+      "priority": 0,
+      "result": "success",
+      "details": "第十一次三轮回顾评审（第 31-33 轮）。深度代码审计 13 个核心文件 12940 行。新发现 P0-B1（native_backend 无链接器，运行时调用 call rel32 保持 0 偏移，ELF 不可执行）——战略级盲点。确认 P0-2（wasm fn_ptr 仍 NULL）、P2-A（C 后端 trampoline double UB）仍存在。前端评估：质量 88/100（+2），22/23 完成（95.7%），维护模式，新增 2 个正确性 bug（P1-F1 管道操作符 unify 污染+静默返回、P1-F2 递归函数不支持相互递归）。后端评估：C 75%/Native 68%/Wasm 58%——与上轮持平，第 31-32 轮清零 P0-1 和 P1-A/P1-B，但新发现 P0-B1 无链接器。综合：前后端失衡加剧（95.7% vs 75.8%），三后端无一能正确执行闭包程序。新增 7 个任务（frontend_pipe_typecheck_fix P82、frontend_recursive_fn_typecheck P78、backend_native_linker_strategy P95、backend_unified_closure_e2e_test P72、backend_native_regalloc_call_site P52），下 3 轮聚焦：P0 清零（Wasm fn_ptr + 链接器决策）+ 前端正确性修复 + 建立端到端执行基线。",
+      "timestamp": "2026-07-26 19:05"
+    },
     {
       "cycle": 32,
       "task_id": "frontend_mut_check_type_name",
@@ -146,6 +157,66 @@
       "estimated_effort": "1-2小时",
       "status": "pending",
       "source": "review_30_audit",
+      "depends_on": []
+    },
+    {
+      "task_id": "frontend_pipe_typecheck_fix",
+      "name": "修复管道操作符类型检查语义错误",
+      "description": "type_checker.py _check_pipe_expr (line 905-927) 存在三个问题：(1) 用 or 短路表示匹配最后或第一个参数，但 unify 有副作用（写替换表），先匹配 last 失败时已污染状态；(2) 多参函数行为不明确；(3) 失败时静默返回 right_ty（函数类型）而非报错。修复：先拷贝替换表再合一、失败时报错、明确管道语义。",
+      "track": "frontend",
+      "difficulty": "medium",
+      "priority": 82,
+      "estimated_effort": "2-3小时",
+      "status": "pending",
+      "source": "review_33_audit",
+      "depends_on": []
+    },
+    {
+      "task_id": "frontend_recursive_fn_typecheck",
+      "name": "修复递归函数类型推断不支持相互递归",
+      "description": "type_checker.py (line 426-448) 仅支持函数体内引用自身名字的单向递归（先 define 后检查 body），不支持相互递归（函数 A 调用后定义的函数 B）。无前向声明机制。对无返回类型注解的递归函数，return_type 用 TypeVar 占位但未约束。修复：引入两遍扫描或前向声明机制支持相互递归。",
+      "track": "frontend",
+      "difficulty": "medium",
+      "priority": 78,
+      "estimated_effort": "3-4小时",
+      "status": "pending",
+      "source": "review_33_audit",
+      "depends_on": []
+    },
+    {
+      "task_id": "backend_native_linker_strategy",
+      "name": "原生后端链接器战略决策与实现",
+      "description": "P0-B1：native_backend.py 无链接器，所有 nova_* 运行时函数 call rel32 保持 0 偏移，ELF 不可执行任何非 trivial 程序。三选一决策：(a) 内置链接器嵌入 nova_runtime.o；(b) 接入 gcc 作为链接器（放弃零依赖）；(c) 暂时降级原生后端为代码生成器，执行依赖 C 后端。这是战略级决策。",
+      "track": "backend",
+      "difficulty": "hard",
+      "priority": 95,
+      "estimated_effort": "1-2天",
+      "status": "pending",
+      "source": "review_33_audit",
+      "depends_on": []
+    },
+    {
+      "task_id": "backend_unified_closure_e2e_test",
+      "name": "建立三后端统一闭包执行测试矩阵",
+      "description": "当前三后端闭包实现分叉，无统一验证基线。建立同一 make_adder 程序在 C/Native/Wasm 三后端验证返回值的测试矩阵。C 后端用 gcc 编译执行、Native 后端用 ELF 执行（依赖链接器）、Wasm 后端用 wat2wasm+wasmtime 验证。",
+      "track": "backend",
+      "difficulty": "medium",
+      "priority": 72,
+      "estimated_effort": "4-6小时",
+      "status": "pending",
+      "source": "review_33_audit",
+      "depends_on": ["backend_wasm_fn_ptr"]
+    },
+    {
+      "task_id": "backend_native_regalloc_call_site",
+      "name": "寄存器分配器添加调用点活跃区间切口",
+      "description": "P1-B2：native_backend.py 寄存器分配器不感知调用点，靠手动 push 全部 caller-saved 兜底（正确但极低效）。修复：在调用点添加活跃区间切口，仅保存实际被 caller-saved 寄存器占用且活跃的 vreg。",
+      "track": "backend",
+      "difficulty": "hard",
+      "priority": 52,
+      "estimated_effort": "6-8小时",
+      "status": "pending",
+      "source": "review_33_audit",
       "depends_on": []
     },
     {
