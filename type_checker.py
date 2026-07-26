@@ -1466,67 +1466,89 @@ class TypeChecker:
         for p in pattern.elements:
             self._check_pattern(p, subject_type.elem_type, env, match_expr)
 
+    # 二元操作分发表：操作符 -> 检查方法
+    # 将原来 60+ 行的 _check_binary_op 拆分为按操作类别分发的辅助方法，
+    # 使主方法圈复杂度从 20 降至 3 左右。
+    _BINARY_OP_HANDLERS = {
+        "+": "_check_arithmetic_op",
+        "-": "_check_arithmetic_op",
+        "*": "_check_arithmetic_op",
+        "/": "_check_arithmetic_op",
+        "%": "_check_modulo_op",
+        "++": "_check_string_concat_op",
+        "==": "_check_comparison_op",
+        "!=": "_check_comparison_op",
+        "<": "_check_comparison_op",
+        ">": "_check_comparison_op",
+        "<=": "_check_comparison_op",
+        ">=": "_check_comparison_op",
+        "&&": "_check_logical_op",
+        "||": "_check_logical_op",
+    }
+
     def _check_binary_op(self, expr: BinaryOp) -> NovaType:
-        """检查二元操作"""
+        """检查二元操作
+
+        使用分发表将不同操作符路由到对应的辅助检查方法，
+        避免在主方法中堆积大量 if-elif 分支。
+        """
         left_ty = self.check_expr(expr.left)
         right_ty = self.check_expr(expr.right)
 
-        # 算术操作
-        if expr.op in ("+", "-", "*", "/"):
-            if self._unify_types(left_ty, INT_T) and self._unify_types(
-                right_ty, INT_T
-            ):
-                return INT_T
-            if self._unify_types(left_ty, FLOAT_T) and self._unify_types(
-                right_ty, FLOAT_T
-            ):
-                return FLOAT_T
+        handler_name = self._BINARY_OP_HANDLERS.get(expr.op)
+        if handler_name is None:
+            raise TypeCheckError(f"未知的操作符 '{expr.op}'")
+
+        handler = getattr(self, handler_name)
+        return handler(expr.op, left_ty, right_ty)
+
+    def _check_arithmetic_op(self, op: str, left_ty: NovaType, right_ty: NovaType) -> NovaType:
+        """检查算术操作 (+, -, *, /)：要求两侧同为 Int 或同为 Float"""
+        if self._unify_types(left_ty, INT_T) and self._unify_types(right_ty, INT_T):
+            return INT_T
+        if self._unify_types(left_ty, FLOAT_T) and self._unify_types(right_ty, FLOAT_T):
+            return FLOAT_T
+        raise TypeCheckError(
+            f"操作符 '{op}' 的操作数类型不兼容：{left_ty} 和 {right_ty}"
+        )
+
+    def _check_modulo_op(self, op: str, left_ty: NovaType, right_ty: NovaType) -> NovaType:
+        """检查取模操作 (%)：要求两侧均为 Int"""
+        if self._unify_types(left_ty, INT_T) and self._unify_types(right_ty, INT_T):
+            return INT_T
+        raise TypeCheckError(f"操作符 '%' 需要 Int 类型操作数")
+
+    def _check_string_concat_op(self, op: str, left_ty: NovaType, right_ty: NovaType) -> NovaType:
+        """检查字符串拼接 (++)：要求两侧均为 String"""
+        if self._unify_types(left_ty, STRING_T) and self._unify_types(right_ty, STRING_T):
+            return STRING_T
+        raise TypeCheckError(f"操作符 '++' 需要 String 类型操作数")
+
+    def _check_comparison_op(self, op: str, left_ty: NovaType, right_ty: NovaType) -> NovaType:
+        """检查比较操作 (==, !=, <, >, <=, >=)"""
+        # 所有比较操作都要求左右操作数类型兼容
+        if not self._unify_types(left_ty, right_ty):
             raise TypeCheckError(
-                f"操作符 '{expr.op}' 的操作数类型不兼容：{left_ty} 和 {right_ty}"
+                f"操作符 '{op}' 的操作数类型不兼容：{left_ty} 和 {right_ty}"
             )
-
-        if expr.op == "%":
-            if self._unify_types(left_ty, INT_T) and self._unify_types(
-                right_ty, INT_T
+        # 有序比较（< > <= >=）额外要求数值类型
+        if op in ("<", ">", "<=", ">="):
+            if not (
+                self._unify_types(left_ty, INT_T)
+                or self._unify_types(left_ty, FLOAT_T)
             ):
-                return INT_T
-            raise TypeCheckError(f"操作符 '%' 需要 Int 类型操作数")
-
-        # 字符串拼接
-        if expr.op == "++":
-            if self._unify_types(left_ty, STRING_T) and self._unify_types(
-                right_ty, STRING_T
-            ):
-                return STRING_T
-            raise TypeCheckError(f"操作符 '++' 需要 String 类型操作数")
-
-        # 比较操作
-        if expr.op in ("==", "!=", "<", ">", "<=", ">="):
-            # 所有比较操作都要求左右操作数类型兼容
-            if not self._unify_types(left_ty, right_ty):
                 raise TypeCheckError(
-                    f"操作符 '{expr.op}' 的操作数类型不兼容：{left_ty} 和 {right_ty}"
+                    f"操作符 '{op}' 需要数值类型操作数，得到 {left_ty}"
                 )
-            # 有序比较（< > <= >=）额外要求数值类型
-            if expr.op in ("<", ">", "<=", ">="):
-                if not (
-                    self._unify_types(left_ty, INT_T)
-                    or self._unify_types(left_ty, FLOAT_T)
-                ):
-                    raise TypeCheckError(
-                        f"操作符 '{expr.op}' 需要数值类型操作数，得到 {left_ty}"
-                    )
-            return BOOL_T
+        return BOOL_T
 
-        # 逻辑操作
-        if expr.op in ("&&", "||"):
-            if not self._unify_types(left_ty, BOOL_T):
-                raise TypeCheckError(f"'&&' 左侧必须是 Bool，得到 {left_ty}")
-            if not self._unify_types(right_ty, BOOL_T):
-                raise TypeCheckError(f"'&&' 右侧必须是 Bool，得到 {right_ty}")
-            return BOOL_T
-
-        raise TypeCheckError(f"未知的操作符 '{expr.op}'")
+    def _check_logical_op(self, op: str, left_ty: NovaType, right_ty: NovaType) -> NovaType:
+        """检查逻辑操作 (&&, ||)：要求两侧均为 Bool"""
+        if not self._unify_types(left_ty, BOOL_T):
+            raise TypeCheckError(f"'{op}' 左侧必须是 Bool，得到 {left_ty}")
+        if not self._unify_types(right_ty, BOOL_T):
+            raise TypeCheckError(f"'{op}' 右侧必须是 Bool，得到 {right_ty}")
+        return BOOL_T
 
     def _check_unary_op(self, expr: UnaryOp) -> NovaType:
         """检查一元操作"""

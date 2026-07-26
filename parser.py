@@ -702,89 +702,127 @@ class Parser:
     # ----------------------------------------------------------
 
     def _parse_pattern(self):
-        """解析模式"""
+        """解析模式
+
+        使用分发方法处理不同 TokenType 的模式：
+        - 简单字面量（通配符、布尔、整数、浮点、字符串）
+        - 负数模式
+        - 列表模式 [...]
+        - 元组模式 (a, b)
+        - 构造器模式 Name(args...) 或标识符模式
+        """
         tok = self._cur()
 
-        # 通配符 _
-        if tok.type == TokenType.UNDERSCORE:
-            self._advance()
-            return PatternWildcard(span=self._span(tok))
-
-        # 布尔
-        if tok.type == TokenType.BOOL:
-            self._advance()
-            return PatternBool(value=(tok.value == "true"), span=self._span(tok))
-
-        # 整数
-        if tok.type == TokenType.INT:
-            self._advance()
-            return PatternInt(value=int(tok.value), span=self._span(tok))
-
-        # 浮点数
-        if tok.type == TokenType.FLOAT:
-            self._advance()
-            return PatternFloat(value=float(tok.value), span=self._span(tok))
-
-        # 字符串
-        if tok.type == TokenType.STRING:
-            self._advance()
-            return PatternString(value=tok.value, span=self._span(tok))
+        # 简单字面量模式
+        literal = self._parse_simple_literal_pattern(tok)
+        if literal is not None:
+            return literal
 
         # 负数模式
         if tok.type == TokenType.MINUS:
-            self._advance()
-            next_tok = self._cur()
-            if next_tok.type == TokenType.INT:
-                self._advance()
-                return PatternInt(value=-int(next_tok.value), span=self._span(tok))
-            if next_tok.type == TokenType.FLOAT:
-                self._advance()
-                return PatternFloat(value=-float(next_tok.value), span=self._span(tok))
+            return self._parse_negative_pattern(tok)
 
         # 列表模式 [...]
         if tok.type == TokenType.LBRACKET:
-            self._advance()
-            elems = []
-            if self._peek_type() != TokenType.RBRACKET:
-                elems.append(self._parse_pattern())
-                while self._match(TokenType.COMMA):
-                    elems.append(self._parse_pattern())
-            self._expect(TokenType.RBRACKET)
-            return PatternList(elements=elems, span=self._span(tok))
+            return self._parse_list_pattern(tok)
 
         # 元组模式 (a, b)
         if tok.type == TokenType.LPAREN:
-            self._advance()
-            elems = []
-            if self._peek_type() != TokenType.RPAREN:
-                elems.append(self._parse_pattern())
-                while self._match(TokenType.COMMA):
-                    elems.append(self._parse_pattern())
-            self._expect(TokenType.RPAREN)
-            if len(elems) == 1:
-                return elems[0]
-            return PatternTuple(elements=elems, span=self._span(tok))
+            return self._parse_tuple_pattern(tok)
 
         # 构造器模式 Name(args...) 或标识符
         if tok.type == TokenType.IDENT:
-            self._advance()
-            name = tok.value
-            if self._peek_type() == TokenType.LPAREN:
-                self._advance()
-                fields = []
-                if self._peek_type() != TokenType.RPAREN:
-                    fields.append(self._parse_pattern())
-                    while self._match(TokenType.COMMA):
-                        fields.append(self._parse_pattern())
-                self._expect(TokenType.RPAREN)
-                return PatternConstructor(
-                    name=name, fields=fields, span=self._span(tok)
-                )
-            return PatternIdentifier(name=name, span=self._span(tok))
+            return self._parse_constructor_or_identifier_pattern(tok)
 
         raise ParseError(
             f"无效的模式 '{tok.value}'", tok.line, tok.column, source=self._source
         )
+
+    def _parse_simple_literal_pattern(self, tok: Token):
+        """解析简单字面量模式（通配符、布尔、整数、浮点、字符串）
+
+        如果当前 token 是简单字面量类型，消费 token 并返回对应 Pattern 节点；
+        否则返回 None，由调用方继续尝试其他模式类型。
+        """
+        if tok.type == TokenType.UNDERSCORE:
+            self._advance()
+            return PatternWildcard(span=self._span(tok))
+        if tok.type == TokenType.BOOL:
+            self._advance()
+            return PatternBool(value=(tok.value == "true"), span=self._span(tok))
+        if tok.type == TokenType.INT:
+            self._advance()
+            return PatternInt(value=int(tok.value), span=self._span(tok))
+        if tok.type == TokenType.FLOAT:
+            self._advance()
+            return PatternFloat(value=float(tok.value), span=self._span(tok))
+        if tok.type == TokenType.STRING:
+            self._advance()
+            return PatternString(value=tok.value, span=self._span(tok))
+        return None
+
+    def _parse_negative_pattern(self, tok: Token):
+        """解析负数模式（-N 或 -F）
+
+        消费 MINUS token 后，要求下一个 token 必须是 INT 或 FLOAT，
+        否则抛出 ParseError。
+        """
+        self._advance()
+        next_tok = self._cur()
+        if next_tok.type == TokenType.INT:
+            self._advance()
+            return PatternInt(value=-int(next_tok.value), span=self._span(tok))
+        if next_tok.type == TokenType.FLOAT:
+            self._advance()
+            return PatternFloat(value=-float(next_tok.value), span=self._span(tok))
+        raise ParseError(
+            f"负数模式后应为整数或浮点数，得到 '{next_tok.value}'",
+            next_tok.line, next_tok.column, source=self._source
+        )
+
+    def _parse_list_pattern(self, tok: Token):
+        """解析列表模式 [elem1, elem2, ...]"""
+        self._advance()
+        elems = []
+        if self._peek_type() != TokenType.RBRACKET:
+            elems.append(self._parse_pattern())
+            while self._match(TokenType.COMMA):
+                elems.append(self._parse_pattern())
+        self._expect(TokenType.RBRACKET)
+        return PatternList(elements=elems, span=self._span(tok))
+
+    def _parse_tuple_pattern(self, tok: Token):
+        """解析元组模式 (a, b) 或括号表达式 (a)
+
+        单个元素时退化为该元素本身（与表达式语法一致）。
+        """
+        self._advance()
+        elems = []
+        if self._peek_type() != TokenType.RPAREN:
+            elems.append(self._parse_pattern())
+            while self._match(TokenType.COMMA):
+                elems.append(self._parse_pattern())
+        self._expect(TokenType.RPAREN)
+        if len(elems) == 1:
+            return elems[0]
+        return PatternTuple(elements=elems, span=self._span(tok))
+
+    def _parse_constructor_or_identifier_pattern(self, tok: Token):
+        """解析构造器模式 Name(args...) 或标识符模式 Name"""
+        self._advance()
+        name = tok.value
+        if self._peek_type() == TokenType.LPAREN:
+            self._advance()
+            fields = []
+            if self._peek_type() != TokenType.RPAREN:
+                fields.append(self._parse_pattern())
+                while self._match(TokenType.COMMA):
+                    fields.append(self._parse_pattern())
+            self._expect(TokenType.RPAREN)
+            return PatternConstructor(
+                name=name, fields=fields, span=self._span(tok)
+            )
+        return PatternIdentifier(name=name, span=self._span(tok))
 
     # ----------------------------------------------------------
     # 逻辑或 (||)

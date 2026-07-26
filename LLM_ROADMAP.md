@@ -116,11 +116,13 @@
 | ✅ | 修复 REFACTORED_FUNCTIONS 虚假标注 | easy | 50 | 1 小时 | - |
 | ✅ | 审查数据同步机制（REFACTORED_FUNCTIONS 标注） | easy | 50 | 1-2 小时 | - |
 | ✅ | LOW 级问题批量治理 v2（ir/ 模块 docstring） | easy | 48 | 2-4 小时 | - |
-| ⏳ | 精准清理 print_debug（真实调试残留） | easy | 50 | 1-2 小时 | - |
+| ✅ | 精准清理 print_debug（真实调试残留） | easy | 50 | 1-2 小时 | - |
 | ✅ | 重构 Evaluator._eval_binary_op 降低圈复杂度 | medium | 60 | 2-3 小时 | - |
-| ⏳ | 重构 MIRLowering._lower_match_expr 降低圈复杂度 | medium | 65 | 3-5 小时 | - |
+| ✅ | 重构 MIRLowering._lower_match_expr 降低圈复杂度 | medium | 65 | 3-5 小时 | - |
 | ✅ | 重构 LIRLowering._lower_function 降低圈复杂度 | medium | 57 | 3-5 小时 | - |
-| ⏳ | 重构 TypeChecker._check_match_exhaustiveness 降低圈复杂度 | hard | 85 | 1-2 天 | - |
+| ✅ | 重构 TypeChecker._check_match_exhaustiveness 降低圈复杂度 | hard | 85 | 1-2 天 | - |
+| ✅ | 重构 Parser._parse_pattern 降低圈复杂度 | medium | 55 | 2-3 小时 | - |
+| ✅ | 重构 TypeChecker._check_binary_op 降低圈复杂度 | medium | 58 | 2-3 小时 | - |
 | ⏳ | Native/Wasm 后端闭包 fn_ptr 回填 | hard | 82 | 4-6 小时 | c_backend_closure_phase3 |
 | ⏳ | 闭包后端端到端测试 | medium | 78 | 3-4 小时 | c_backend_closure_phase3 |
 | ⏳ | 重构 NativeCodeGen._emit_runtime_call + _emit_call 降低圈复杂度 | medium | 60 | 4-6 小时 | - |
@@ -140,10 +142,10 @@
 
 ---
 
-**进度**: 99/104 (95.2%)
-- **已完成**: 99 (+2：refactor_check_match_exhaustiveness, refactor_lower_match_expr)
+**进度**: 104/109 (95.4%)
+- **已完成**: 104 (+5：refactor_check_match_exhaustiveness, refactor_lower_match_expr, refactor_parser_parse_pattern, clean_print_debug, refactor_type_checker_check_binary_op)
 - **进行中**: 0
 - **待开发**: 4
 - **已废弃**: 1
 
-> 注：第55轮开发完成。全项目最高复杂度函数 _check_match_exhaustiveness CC=39 成功重构至 CC≈4（-89%），Top10 重构进度 8/10。审查对齐率连续 3 轮 100%。下阶段方向：后端完整性推进（第56轮）。第57轮为路线图评审轮。
+> 注：第56轮开发完成。Top10 复杂度函数**全部重构完成**（10/10），_parse_pattern CC=20→4（-80%），_check_binary_op CC=20→3（-85%）。审查对齐率 67%（2/3 来自审查发现）。第57轮为路线图评审轮。

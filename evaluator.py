@@ -216,9 +216,8 @@ class Evaluator:
     # ----------------------------------------------------------
 
     def _builtin_print(self, *args):
-        """内置 print 函数，格式化首个参数后输出到控制台和缓冲区。"""
+        """内置 print 函数，格式化首个参数后输出到缓冲区。"""
         val = self._format_value(args[0])
-        print(val)
         self._output.append(val)
         return UNIT_VALUE
 
