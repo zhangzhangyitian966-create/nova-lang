@@ -287,6 +287,27 @@ class X86_64Emitter:
         # 记录需要回填的位置
         return self.current_offset() - 4
 
+    # === RIP-relative MOV 指令 ===
+    def mov_reg_rip(self, reg):
+        """mov reg, [rip + disp32] (RIP-relative 64-bit load)
+        返回需要回填的 32 位偏移位置
+        """
+        self._rex_rb(reg, 0)
+        self.emit_byte(0x8B)
+        self.emit_byte(self._modrm(0b00, reg & 7, 5))  # RIP-relative
+        self.emit_int32(0)  # 占位
+        return self.current_offset() - 4
+
+    def mov_rip_reg(self, reg):
+        """mov [rip + disp32], reg (RIP-relative 64-bit store)
+        返回需要回填的 32 位偏移位置
+        """
+        self._rex_rb(reg, 0)
+        self.emit_byte(0x89)
+        self.emit_byte(self._modrm(0b00, reg & 7, 5))  # RIP-relative
+        self.emit_int32(0)  # 占位
+        return self.current_offset() - 4
+
     def movsd_reg_mem(self, reg, base, offset):
         """movsd reg, [base + offset]  （从内存加载双精度浮点数到 XMM 寄存器）"""
         self.emit_byte(0xF2)

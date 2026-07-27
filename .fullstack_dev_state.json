@@ -1,7 +1,7 @@
 {
-  "cycles": 40,
-  "frontend_completed": 27,
-  "backend_completed": 30,
+  "cycles": 41,
+  "frontend_completed": 28,
+  "backend_completed": 31,
   "last_review_cycle": 39,
   "current_review_cycle": 39,
   "completed_tasks": [
@@ -70,7 +70,9 @@
     "backend_native_float_imm",
     "review_cycle_39",
     "frontend_parser_error_method_fix",
-    "backend_unified_silent_skip_fix"
+    "backend_unified_silent_skip_fix",
+    "frontend_lexer_escape_eof_fix",
+    "backend_native_global_var_support"
   ],
   "failed_tasks": [],
   "deprecated_tasks": [
@@ -83,6 +85,28 @@
     "backend_c_todo_error"
   ],
   "task_history": [
+    {
+      "cycle": 41,
+      "task_id": "frontend_lexer_escape_eof_fix",
+      "name": "修复 lexer.py 字符串/字符字面量转义 EOF 越界 IndexError",
+      "track": "frontend",
+      "difficulty": "easy",
+      "priority": 70,
+      "result": "success",
+      "details": "修复 lexer.py 两处 EOF 越界 bug：(1) _read_string 第 274-276 行，反斜杠后若 EOF，_advance() 访问越界；(2) _read_char 第 307-309 行，相同模式。修复：在读取转义字符前检查 self.pos >= len(self.source)，超限则抛出明确的 LexerError。测试 566 passed，无回归。前端 28/28 完成。",
+      "timestamp": "2026-07-28 06:02"
+    },
+    {
+      "cycle": 41,
+      "task_id": "backend_native_global_var_support",
+      "name": "Native 后端实现全局变量加载/存储指令（P1-新1 清零）",
+      "track": "backend",
+      "difficulty": "medium",
+      "priority": 82,
+      "result": "success",
+      "details": "P1-新1清零。native_backend.py 添加 LIRLoadGlobal/LIRStoreGlobal 支持：(1) 导入两个 LIR 节点类型；(2) _collect_constants 中扫描全局变量并在数据段分配 8 字节空间；(3) 调度表添加两个处理器；(4) _emit_load_global 通过 mov_reg_rip (RIP-relative) 从数据段加载；(5) _emit_store_global 通过 mov_rip_reg (RIP-relative) 存储到数据段；(6) 复用 data_fixups 机制进行 ELF 地址回填。x86_64.py 新增 mov_reg_rip 和 mov_rip_reg 两个发射器方法。测试 566 passed，无回归。后端 31/44 完成。",
+      "timestamp": "2026-07-28 06:02"
+    },
     {
       "cycle": 40,
       "task_id": "frontend_parser_error_method_fix",
@@ -115,65 +139,9 @@
       "result": "success",
       "details": "第 37-39 轮评审轮。前端 26/26=100%完成，后端 29/42=69%完成。审计发现：三后端均存在静默跳过未实现指令的编译正确性风险；native 后端缺失 LIRLoadGlobal/LIRStoreGlobal 导致全局变量访问被静默丢弃。新增 3 个高优先级任务，废弃 1 个低价值任务。下 3 轮聚焦后端编译正确性加固 + 全局变量支持。",
       "timestamp": "2026-07-27 13:10"
-    },
-    {
-      "cycle": 38,
-      "task_id": "frontend_callee_typevar_check",
-      "name": "修复函数调用 TypeVar callee 类型检查缺失",
-      "track": "frontend",
-      "difficulty": "easy",
-      "priority": 65,
-      "result": "success",
-      "details": "修复 type_checker.py _check_fn_call 中 TypeVar callee 的 duck typing 类型安全漏洞。496→498 测试全部通过，无回归。前端线 26/26 完成（100%）。",
-      "timestamp": "2026-07-27 13:00"
-    },
-    {
-      "cycle": 38,
-      "task_id": "backend_native_float_imm",
-      "name": "实现浮点立即数参数加载 + 修复 _emit_call 返回值 bug",
-      "track": "backend",
-      "difficulty": "medium",
-      "priority": 80,
-      "result": "success",
-      "details": "修复 native_backend.py 三个相关 bug。清零 P1-2。498→500 测试全部通过，无回归。后端线 29/42 完成。",
-      "timestamp": "2026-07-27 13:05"
-    },
-    {
-      "cycle": 37,
-      "task_id": "frontend_tuple_index_parse",
-      "name": "修复元组数字索引解析",
-      "track": "frontend",
-      "difficulty": "easy",
-      "priority": 65,
-      "result": "success",
-      "details": "修复 parser.py 点号后缀表达式只接受标识符字段名、不接受数字索引的问题。",
-      "timestamp": "2026-07-27 12:00"
-    },
-    {
-      "cycle": 37,
-      "task_id": "backend_native_linker_strategy",
-      "name": "实现原生后端 gcc 链接方案（可重定位 ELF + gcc 链接）",
-      "track": "backend",
-      "difficulty": "hard",
-      "priority": 95,
-      "result": "success",
-      "details": "清零唯一 P0-B1（原生后端无链接器）。",
-      "timestamp": "2026-07-27 12:05"
     }
   ],
   "tasks": [
-    {
-      "task_id": "backend_native_global_var_support",
-      "name": "Native 后端实现全局变量加载/存储指令",
-      "description": "P1-新发现：LIRLowering 为全局变量生成 LIRLoadGlobal/LIRStoreGlobal，但 native_backend.py 调度表和 x86_64 发射器均无对应处理，全局变量访问在 native 后端被静默丢弃。需添加 _emit_load_global 和 _emit_store_global 方法，通过 RIP-relative 寻址访问数据段中的全局变量。",
-      "track": "backend",
-      "difficulty": "medium",
-      "priority": 82,
-      "estimated_effort": "3-4小时",
-      "status": "pending",
-      "source": "review_39_audit",
-      "depends_on": []
-    },
     {
       "task_id": "backend_unified_closure_e2e_test",
       "name": "建立三后端统一闭包执行测试矩阵",

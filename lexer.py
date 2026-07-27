@@ -273,6 +273,8 @@ class Lexer:
                 return Token(TokenType.STRING, result, start_line, start_col)
             elif ch == "\\":
                 self._advance()  # 跳过反斜杠
+                if self.pos >= len(self.source):
+                    raise self._make_error("字符串转义序列不完整（文件结尾）", start_line, start_col)
                 esc = self._advance()
                 # 处理转义字符
                 if esc == "n":
@@ -306,6 +308,8 @@ class Lexer:
         ch = self.source[self.pos]
         if ch == "\\":
             self._advance()  # 跳过反斜杠
+            if self.pos >= len(self.source):
+                raise self._make_error("字符转义序列不完整（文件结尾）", start_line, start_col)
             esc = self._advance()
             if esc == "n":
                 ch = "\n"

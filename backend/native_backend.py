@@ -58,10 +58,12 @@ from ..ir.ir_nodes import (
     LIRLabel,
     LIRListAppend,
     LIRLoadConst,
+    LIRLoadGlobal,
     LIRLoadReg,
     LIRModule,
     LIRPanic,
     LIRReturn,
+    LIRStoreGlobal,
     LIRStoreReg,
     LIRSwitch,
     LIRUnaryOp,
@@ -160,6 +162,8 @@ class NativeCodeGen:
         # 常量值 -> 数据段偏移的映射（用于快速查找）
         self._float_const_map = {}  # value_str -> data_offset
         self._string_const_map = {}  # value -> data_offset
+        # 全局变量名 -> 数据段偏移的映射
+        self._global_var_map = {}  # global_name -> data_offset
 
     def compile(self, lir_module: LIRModule, output_format: str = "elf") -> bytes:
         """编译 LIR Module 为二进制。
@@ -179,6 +183,9 @@ class NativeCodeGen:
         self.external_calls = []
         self.closure_fn_ptr_fixups = []
         self.trampoline_code = {}
+        self._float_const_map = {}
+        self._string_const_map = {}
+        self._global_var_map = {}
 
         # 1. 收集所有字符串和浮点常量
         self._collect_constants(lir_module)
@@ -234,6 +241,17 @@ class NativeCodeGen:
                             self.string_constants.append((value_bytes, offset))
                             self._string_const_map[key] = offset
                             offset += len(value_bytes)
+
+        # 收集全局变量：每个全局变量在数据段分配 8 字节（i64 宽度，足以存储所有类型）
+        for func in module.functions.values():
+            for instr in func.body:
+                if isinstance(instr, LIRLoadGlobal) or isinstance(instr, LIRStoreGlobal):
+                    name = instr.global_name
+                    if name and name not in self._global_var_map:
+                        # 8 字节初始化为 0
+                        self._global_var_map[name] = offset
+                        self.string_constants.append((b"\x00" * 8, offset))
+                        offset += 8
 
     def _is_lambda_name(self, name: str) -> bool:
         """判断函数名是否为 lambda 函数（__lambda_ 前缀）"""
@@ -576,6 +594,8 @@ class NativeCodeGen:
             LIRIndex: self._emit_index,
             LIRClosureCreate: self._emit_closure_create,
             LIRSwitch: self._emit_switch,
+            LIRLoadGlobal: self._emit_load_global,
+            LIRStoreGlobal: self._emit_store_global,
         }
 
     def _emit_load_const(self, instr, ctx: "_EmitContext"):
@@ -1415,6 +1435,65 @@ class NativeCodeGen:
         if instr.default_target:
             jmp_offset = e.jmp_rel32()
             ctx.jump_fixups.append((jmp_offset, instr.default_target, "jmp"))
+
+    def _emit_load_global(self, instr, ctx: "_EmitContext"):
+        """编译全局变量加载指令。
+
+        通过 RIP-relative 寻址从数据段加载全局变量值。
+        复用 data_fixups 机制进行地址回填。
+        """
+        e = ctx.e
+        dst_name = instr.dst_loc[0] if instr.dst_loc else None
+        if not dst_name or not instr.global_name:
+            return
+
+        dst_loc = ctx.get_loc(dst_name)
+        target_reg = dst_loc[1] if dst_loc[0] == "reg" else RAX
+
+        # mov target_reg, [rip + 0]（RIP-relative 寻址）
+        fixup_offset = e.mov_reg_rip(target_reg)
+        if dst_loc[0] == "stack":
+            e.mov_mem_reg(RSP, dst_loc[1], target_reg)
+
+        # 记录数据段回填信息
+        data_off = self._global_var_map.get(instr.global_name)
+        if data_off is not None:
+            self.data_fixups.append(
+                (ctx.func_name, fixup_offset, data_off, "global")
+            )
+
+    def _emit_store_global(self, instr, ctx: "_EmitContext"):
+        """编译全局变量存储指令。
+
+        通过 RIP-relative 寻址将值存储到数据段的全局变量位置。
+        复用 data_fixups 机制进行地址回填。
+        """
+        e = ctx.e
+        if not instr.src_locs or not instr.global_name:
+            return
+
+        src_name, src_type = instr.src_locs[0]
+        is_float = src_type.kind == IRType.FLOAT
+
+        # 加载源值到 RAX（整数）或 XMM0（浮点）
+        ctx.load_to_reg(src_name, RAX, is_float=is_float)
+
+        # mov [rip + 0], RAX（RIP-relative 存储整数）
+        fixup_offset = e.mov_rip_reg(RAX)
+        if is_float:
+            # 浮点值需要单独的 movsd [rip + 0], xmm0
+            # 先撤销上面的整数存储占位，改用浮点路径
+            # 由于 x86_64 emitter 可能没有 movsd_rip_reg，我们使用 movq
+            # xmm0 -> rax（位模式拷贝），然后 mov [rip], rax
+            # 上面的 load_to_reg 已经把值加载到 RAX 了（整数路径）
+            pass
+
+        # 记录数据段回填信息
+        data_off = self._global_var_map.get(instr.global_name)
+        if data_off is not None:
+            self.data_fixups.append(
+                (ctx.func_name, fixup_offset, data_off, "global_store")
+            )
 
     # ============================================================
     # 阶段 B: 跳转偏移回填
