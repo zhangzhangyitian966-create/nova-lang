@@ -284,6 +284,7 @@ class TypeChecker:
         self._source = source
         self._expr_checkers = self._build_expr_checkers()
         self._pattern_checkers = self._build_pattern_checkers()
+        self._decl_checkers = self._build_decl_checkers()
         # 类型合一的替换表：TypeVar 的 id -> 绑定的类型
         # 使用 union-find 结构，支持路径压缩
         self._subst: Dict[int, "NovaType"] = {}
@@ -412,91 +413,120 @@ class TypeChecker:
             self.check_decl(decl)
 
     def check_decl(self, decl):
-        """检查顶层声明"""
-        if isinstance(decl, LetBinding):
-            ty = self.check_expr(decl.value)
-            if decl.type_annotation:
-                annotated = self._from_ast_type(decl.type_annotation)
-                if not self._unify_types(ty, annotated):
-                    line = decl.span.line if decl.span else -1
-                    col = decl.span.column if decl.span else -1
-                    raise TypeCheckError(
-                        f"let 绑定 '{decl.name}' 的推断类型 {ty} 与标注类型 {annotated} 不匹配",
-                        line,
-                        col,
-                    )
-            self.env.define(decl.name, self._unify_and_resolve(ty), mutable=False)
+        """检查顶层声明（调度表模式）
 
-        elif isinstance(decl, MutBinding):
-            ty = self.check_expr(decl.value)
-            if decl.type_annotation:
-                annotated = self._from_ast_type(decl.type_annotation)
-                if not self._unify_types(ty, annotated):
-                    line = decl.span.line if decl.span else -1
-                    col = decl.span.column if decl.span else -1
-                    raise TypeCheckError(
-                        f"mut 绑定 '{decl.name}' 的推断类型 {ty} 与标注类型 {annotated} 不匹配",
-                        line,
-                        col,
-                    )
-            self.env.define(decl.name, self._unify_and_resolve(ty), mutable=True)
-
-        elif isinstance(decl, FnDef):
-            # 注册函数类型（支持递归和相互递归）
-            # 若 check_program 预注册时未写入（如独立调用 check_decl），则补充注册
-            if self.env.lookup(decl.name) is None:
-                fn_type = self._infer_fn_type(decl)
-                self.env.define(decl.name, fn_type)
-            # 检查函数体
-            child_env = self.env.child()
-            for param in decl.params:
-                if param.type_annotation:
-                    ptype = self._from_ast_type(param.type_annotation)
-                else:
-                    ptype = TypeVar(f"param_{decl.name}_{param.name}")
-                child_env.define(param.name, ptype)
-            old_env = self.env
-            self.env = child_env
-            body_type = self.check_expr(decl.body)
-            self.env = old_env
-
-            if decl.return_type:
-                expected = self._from_ast_type(decl.return_type)
-                if not self._unify_types(body_type, expected):
-                    raise TypeCheckError(
-                        f"函数 '{decl.name}' 返回类型 {body_type} 与声明的 {expected} 不匹配"
-                    )
-
-        elif isinstance(decl, TypeDef):
-            # 注册 ADT 类型
-            adt_ty = ADTType(decl.name)
-            self.env.types[decl.name] = adt_ty
-            variants = []
-            for variant in decl.variants:
-                field_types = []
-                for fname, ftype_ast in variant.fields:
-                    field_types.append(self._from_ast_type(ftype_ast))
-                variants.append((variant.name, field_types))
-            self.env.adt_variants[decl.name] = variants
-
-            # 注册每个变体为构造函数
-            for vname, ftypes in variants:
-                if ftypes:
-                    self.env.define(vname, FnType(ftypes, adt_ty))
-                else:
-                    self.env.define(vname, adt_ty)
-
-        elif isinstance(decl, AliasDef):
-            target = self._from_ast_type(decl.target_type)
-            self.env.aliases[decl.name] = target
-            self.env.types[decl.name] = target
-
-        elif isinstance(decl, (ImportDecl, ExportDecl)):
-            pass  # 跳过导入/导出的类型检查
-
+        使用调度表替代巨型 if-elif 链，将单函数圈复杂度从 ~20 降至约 3。
+        每种声明类型对应一个独立的 _check_*_decl 方法。
+        """
+        checker = self._decl_checkers.get(type(decl))
+        if checker is not None:
+            checker(decl)
         else:
             # 顶层表达式
             self.check_expr(decl)
+
+    def _build_decl_checkers(self):
+        """构建声明类型检查调度表"""
+        return {
+            LetBinding: self._check_let_decl,
+            MutBinding: self._check_mut_decl,
+            FnDef: self._check_fn_decl,
+            TypeDef: self._check_type_decl,
+            AliasDef: self._check_alias_decl,
+            ImportDecl: self._check_import_export_decl,
+            ExportDecl: self._check_import_export_decl,
+        }
+
+    def _check_binding_decl(self, decl, mutable: bool):
+        """检查 let / mut 绑定声明的通用逻辑。
+
+        Args:
+            decl: LetBinding 或 MutBinding 节点。
+            mutable: 是否为可变绑定。
+        """
+        ty = self.check_expr(decl.value)
+        if decl.type_annotation:
+            annotated = self._from_ast_type(decl.type_annotation)
+            if not self._unify_types(ty, annotated):
+                line = decl.span.line if decl.span else -1
+                col = decl.span.column if decl.span else -1
+                kind = "mut" if mutable else "let"
+                raise TypeCheckError(
+                    f"{kind} 绑定 '{decl.name}' 的推断类型 {ty} 与标注类型 {annotated} 不匹配",
+                    line,
+                    col,
+                )
+        self.env.define(decl.name, self._unify_and_resolve(ty), mutable=mutable)
+
+    def _check_let_decl(self, decl):
+        """检查 let 绑定声明。"""
+        self._check_binding_decl(decl, mutable=False)
+
+    def _check_mut_decl(self, decl):
+        """检查 mut 绑定声明。"""
+        self._check_binding_decl(decl, mutable=True)
+
+    def _check_fn_decl(self, decl):
+        """检查函数定义声明。
+
+        注册函数类型（支持递归和相互递归），检查参数类型，
+        并在新环境中检查函数体返回类型。
+        """
+        # 若 check_program 预注册时未写入（如独立调用 check_decl），则补充注册
+        if self.env.lookup(decl.name) is None:
+            fn_type = self._infer_fn_type(decl)
+            self.env.define(decl.name, fn_type)
+        # 检查函数体
+        child_env = self.env.child()
+        for param in decl.params:
+            if param.type_annotation:
+                ptype = self._from_ast_type(param.type_annotation)
+            else:
+                ptype = TypeVar(f"param_{decl.name}_{param.name}")
+            child_env.define(param.name, ptype)
+        old_env = self.env
+        self.env = child_env
+        body_type = self.check_expr(decl.body)
+        self.env = old_env
+
+        if decl.return_type:
+            expected = self._from_ast_type(decl.return_type)
+            if not self._unify_types(body_type, expected):
+                raise TypeCheckError(
+                    f"函数 '{decl.name}' 返回类型 {body_type} 与声明的 {expected} 不匹配"
+                )
+
+    def _check_type_decl(self, decl):
+        """检查 ADT 类型定义声明。
+
+        注册 ADT 类型及其变体，并将每个变体注册为构造函数。
+        """
+        adt_ty = ADTType(decl.name)
+        self.env.types[decl.name] = adt_ty
+        variants = []
+        for variant in decl.variants:
+            field_types = []
+            for fname, ftype_ast in variant.fields:
+                field_types.append(self._from_ast_type(ftype_ast))
+            variants.append((variant.name, field_types))
+        self.env.adt_variants[decl.name] = variants
+
+        # 注册每个变体为构造函数
+        for vname, ftypes in variants:
+            if ftypes:
+                self.env.define(vname, FnType(ftypes, adt_ty))
+            else:
+                self.env.define(vname, adt_ty)
+
+    def _check_alias_decl(self, decl):
+        """检查类型别名声明。"""
+        target = self._from_ast_type(decl.target_type)
+        self.env.aliases[decl.name] = target
+        self.env.types[decl.name] = target
+
+    def _check_import_export_decl(self, decl):
+        """检查导入/导出声明（当前跳过类型检查）。"""
+        pass
 
     def check_expr(self, expr) -> NovaType:
         """检查表达式并返回其类型（调度表模式）
@@ -1692,53 +1722,89 @@ class TypeChecker:
             ret_type = TypeVar(f"ret_{fn.name}")
         return FnType(param_types, ret_type)
 
+    # 基本类型映射表：AST 类型节点类 -> NovaType 常量
+    _BASIC_TYPE_MAP = {
+        TypeInt: INT_T,
+        TypeFloat: FLOAT_T,
+        TypeString: STRING_T,
+        TypeBool: BOOL_T,
+        TypeChar: CHAR_T,
+        TypeUnit: UNIT_T,
+    }
+
     def _from_ast_type(self, type_node) -> NovaType:
-        """将 AST 中的类型注解转换为 NovaType"""
-        if isinstance(type_node, TypeInt):
-            return INT_T
-        elif isinstance(type_node, TypeFloat):
-            return FLOAT_T
-        elif isinstance(type_node, TypeString):
-            return STRING_T
-        elif isinstance(type_node, TypeBool):
-            return BOOL_T
-        elif isinstance(type_node, TypeChar):
-            return CHAR_T
-        elif isinstance(type_node, TypeUnit):
-            return UNIT_T
-        elif isinstance(type_node, TypeIdentifier):
-            name = type_node.name
-            # 先检查别名
-            if name in self.env.aliases:
-                return self.env.aliases[name]
-            # 再检查环境中的类型（包括 ADT、基本类型等）
-            if name in self.env.types:
-                return self.env.types[name]
-            # 未知类型名：报错而不是静默降级
-            raise TypeCheckError(
-                f"未知的类型 '{name}'（检查是否拼写正确，或是否缺少类型定义）"
-            )
-        elif isinstance(type_node, TypeGeneric):
-            base = type_node.base
+        """将 AST 中的类型注解转换为 NovaType（调度表模式）
+
+        使用类型映射表和独立辅助方法替代长 if-elif 链，
+        将单函数圈复杂度从 ~18 降至约 3。
+        """
+        node_type = type(type_node)
+        # 1. 基本类型：直接查表
+        basic = self._BASIC_TYPE_MAP.get(node_type)
+        if basic is not None:
+            return basic
+        # 2. 标识符类型：别名/环境查找
+        if isinstance(type_node, TypeIdentifier):
+            return self._resolve_type_identifier(type_node.name)
+        # 3. 泛型类型：List/Map/Option/Result/其他 ADT
+        if isinstance(type_node, TypeGeneric):
             params = [self._from_ast_type(p) for p in type_node.params]
-            if base == "List":
-                return ListType(params[0]) if params else ListType(TypeVar("T"))
-            elif base == "Map" and len(params) >= 2:
-                return MapType(params[0], params[1])
-            elif base == "Option":
-                return ADTType("Option", params)
-            elif base == "Result":
-                return ADTType("Result", params)
-            else:
-                return ADTType(base, params)
-        elif isinstance(type_node, TypeTuple):
+            return self._make_generic_type(type_node.base, params)
+        # 4. 元组类型
+        if isinstance(type_node, TypeTuple):
             return TupleType([self._from_ast_type(e) for e in type_node.elements])
-        elif isinstance(type_node, TypeFn):
+        # 5. 函数类型
+        if isinstance(type_node, TypeFn):
             return FnType(
                 [self._from_ast_type(p) for p in type_node.param_types],
                 self._from_ast_type(type_node.return_type),
             )
         raise TypeCheckError(f"未知的类型注解: {type(type_node).__name__}")
+
+    def _resolve_type_identifier(self, name: str) -> NovaType:
+        """解析类型标识符名称为具体的 NovaType。
+
+        查找顺序：别名 -> 环境类型（ADT、基本类型等）。
+        若均不存在则抛出 TypeCheckError。
+
+        Args:
+            name: 类型标识符名称。
+
+        Returns:
+            解析后的 NovaType。
+
+        Raises:
+            TypeCheckError: 未知类型名。
+        """
+        if name in self.env.aliases:
+            return self.env.aliases[name]
+        if name in self.env.types:
+            return self.env.types[name]
+        raise TypeCheckError(
+            f"未知的类型 '{name}'（检查是否拼写正确，或是否缺少类型定义）"
+        )
+
+    def _make_generic_type(self, base: str, params: List[NovaType]) -> NovaType:
+        """根据泛型基名和参数构建对应的 NovaType。
+
+        支持 List、Map、Option、Result 及自定义 ADT。
+
+        Args:
+            base: 泛型基名（如 "List", "Option"）。
+            params: 泛型参数类型列表。
+
+        Returns:
+            构建好的泛型 NovaType。
+        """
+        if base == "List":
+            return ListType(params[0]) if params else ListType(TypeVar("T"))
+        if base == "Map" and len(params) >= 2:
+            return MapType(params[0], params[1])
+        if base == "Option":
+            return ADTType("Option", params)
+        if base == "Result":
+            return ADTType("Result", params)
+        return ADTType(base, params)
 
     # ------------------------------------------------------------------
     # 类型合一（Unification）算法

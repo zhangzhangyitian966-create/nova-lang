@@ -1,3 +1,89 @@
+## 2026-07-27 05:50 第61轮开发（普通开发轮）
+
+### 开发范围
+- **轮次**: 第 61 轮（普通开发轮）
+- **上轮评审**: 第 60 轮
+- **测试基线**: 486 passed + 20 subtests
+- **测试后**: 486 passed + 20 subtests（全通过）
+- **任务来源**: 审查驱动 100%（2/2）
+
+---
+
+### 审查日志研读摘要
+
+**第1505轮审查（最新）**：
+- 总问题 1176（MEDIUM 73 / LOW 1103）
+- Top10 复杂度函数中 TypeChecker.check_decl CC=20（#4）、_from_ast_type CC=18（#6）
+- 增量门禁 9 个误报（tests/ 目录测试固件小数字），第60轮已修复规则
+
+**第1506轮审查**：
+- 总问题 1185（MEDIUM 74 / LOW 1111）
+- 测试 481 passed / 1 failed（double闭包调用测试，第60轮评审已修复）
+- 复杂度指标持续向好：最高CC 25（_check_patterns_exhaustive已从Top10消失）、25+极复杂函数 0个
+
+**采纳的审查发现**：
+- check_decl CC=20 → 调度表化（Top10 #4）
+- _from_ast_type CC=18 → 调度表化（Top10 #6）
+
+---
+
+### 本轮任务
+
+| 任务 | 来源 | 状态 | 说明 |
+|------|------|------|------|
+| refactor_check_decl | 【审查驱动】 | 完成 | TypeChecker.check_decl 调度表化，CC 20→3 |
+| refactor_from_ast_type | 【审查驱动】 | 完成 | TypeChecker._from_ast_type 调度表化，CC 18→3 |
+
+---
+
+### 任务详情
+
+#### 1. refactor_check_decl
+
+**为什么选这个**：第60轮评审明确规划为第61轮主攻任务。check_decl 是 TypeChecker 处理顶层声明的核心路径，7分支 if-elif 链处理 Let/Mut/Fn/Type/Alias/Import/Export 声明。LetBinding 与 MutBinding 有约20行镜像重复代码。
+
+**实现**：
+1. 在 __init__ 中新增 `self._decl_checkers = self._build_decl_checkers()`
+2. `_build_decl_checkers()` 构建 7 种声明类型 → handler 映射表
+3. `_check_binding_decl(decl, mutable)` 通用方法消除 Let/Mut 重复（类型推断、标注校验、错误消息统一）
+4. 6 个类型专属方法：`_check_let_decl`、`_check_mut_decl`、`_check_fn_decl`、`_check_type_decl`、`_check_alias_decl`、`_check_import_export_decl`
+5. `check_decl` 主函数从 87 行压缩至约 10 行（查表→调用，CC≈3）
+
+**测试**：486 passed + 20 subtests，零回归。
+
+#### 2. refactor_from_ast_type
+
+**为什么选这个**：第60轮评审明确规划为第61轮主攻任务。_from_ast_type 是类型解析核心，9分支 if-elif 链处理基本类型/标识符/泛型/元组/函数类型。
+
+**实现**：
+1. 类级常量 `_BASIC_TYPE_MAP`（6 个基本类型映射），消除 6 个重复 if 分支
+2. `_resolve_type_identifier(name)` 提取别名/环境查找逻辑（含完整 docstring）
+3. `_make_generic_type(base, params)` 提取泛型类型构建（List/Map/Option/Result/其他 ADT）
+4. `_from_ast_type` 主函数从 47 行压缩至约 15 行（基本类型查表→标识符解析→泛型构建→元组→函数类型，CC≈3）
+
+**测试**：486 passed + 20 subtests，零回归。
+
+---
+
+### 测试前后对比
+
+| 指标 | 开发前 | 开发后 | 变化 |
+|------|--------|--------|------|
+| 通过测试 | 486 | 486 | → 无回归 |
+| 失败测试 | 0 | 0 | → 零失败 |
+| 新增测试 | 0 | 0 | → 本轮无新增 |
+
+---
+
+### 下一步计划
+
+第62轮（普通轮）预计任务：
+1. **closure_fn_ptr_backfill**（P80）: Native/Wasm 后端闭包 fn_ptr 回填
+2. **cfg_utils_unit_tests**（P50）: 循环优化基础设施单元测试
+3. **Native 后端 Top4 复杂函数处置**: 确认 deprecated 状态，更新审查关注列表
+
+---
+
 ## 2026-07-27 04:05 第60轮评审（路线图评审）
 
 ### 评审范围

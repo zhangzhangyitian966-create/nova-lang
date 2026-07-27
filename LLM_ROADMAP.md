@@ -131,8 +131,8 @@
 | ✅ | 重构 MIRLowering._collect_idents 调度表化 | medium | 65 | 2-3 小时 | - |
 | ✅ | 修复 C 后端 double 闭包调用返回路径 | easy | 50 | 30 分钟 | - |
 | ✅ | 修复增量门禁魔法数字误报 | easy | 50 | 30 分钟 | - |
-| ⏳ | 重构 TypeChecker.check_decl 调度表化 | medium | 55 | 2-3 小时 | - |
-| ⏳ | 重构 TypeChecker._from_ast_type 调度表化 | medium | 52 | 2-3 小时 | - |
+| ✅ | 重构 TypeChecker.check_decl 调度表化 | medium | 55 | 2-3 小时 | - |
+| ✅ | 重构 TypeChecker._from_ast_type 调度表化 | medium | 52 | 2-3 小时 | - |
 
 ---
 
@@ -149,10 +149,10 @@
 
 ---
 
-**进度**: 114/116 (98.3%)
-- **已完成**: 114 (+4：c_backend_closure_phase3, fix_closure_double_return, fix_incremental_gate_false_positives, 及本轮评审标注修正)
+**进度**: 116/118 (98.3%)
+- **已完成**: 116 (+2：refactor_check_decl, refactor_from_ast_type)
 - **进行中**: 0
-- **待开发**: 4（closure_fn_ptr_backfill P80, unify_c_backend P70, refactor_check_decl P55, refactor_from_ast_type P52）
+- **待开发**: 2（closure_fn_ptr_backfill P80, unify_c_backend P70）
 - **已废弃**: 1（native_call_abi）
 - **已冻结**: 1（refactor_native_emit_call — Native后端整体deprecated）
 

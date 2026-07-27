@@ -128,10 +128,28 @@
     "refactor_collect_idents_dispatch",
     "review_cycle_60",
     "fix_closure_double_return",
-    "fix_incremental_gate_false_positives"
+    "fix_incremental_gate_false_positives",
+    "refactor_check_decl",
+    "refactor_from_ast_type"
   ],
   "failed_tasks": [],
   "task_history": [
+    {
+      "cycle": 61,
+      "task_id": "refactor_check_decl",
+      "status": "completed",
+      "source": "审查驱动",
+      "reason": "审查日志第1505轮 check_decl CC=20（Top10 #4），TypeChecker 核心路径最后未调度表化的声明检查函数。第60轮评审明确规划为第61轮主攻任务。",
+      "details": "将 check_decl 从 87 行 CC=20 重构为调度表模式：1) 新增 _build_decl_checkers() 构建声明类型→handler映射表（7种声明类型）；2) 提取 _check_binding_decl() 通用方法消除 LetBinding/MutBinding 的镜像重复代码（约20行重复）；3) 新增6个类型专属方法：_check_let_decl、_check_mut_decl、_check_fn_decl、_check_type_decl、_check_alias_decl、_check_import_export_decl；4) check_decl 主函数压缩至约10行（查表→调用，CC≈3）。所有新方法补充完整docstring。测试486 passed + 20 subtests通过，零回归。"
+    },
+    {
+      "cycle": 61,
+      "task_id": "refactor_from_ast_type",
+      "status": "completed",
+      "source": "审查驱动",
+      "reason": "审查日志第1505轮 _from_ast_type CC=18（Top10 #6），TypeChecker 类型解析核心。第60轮评审明确规划为第61轮主攻任务。",
+      "details": "将 _from_ast_type 从 47 行 CC=18 重构为调度表+辅助方法模式：1) 新增类级常量 _BASIC_TYPE_MAP（6个基本类型映射），消除6个重复if分支；2) 新增 _resolve_type_identifier(name) 方法提取别名/环境查找逻辑（含完整docstring）；3) 新增 _make_generic_type(base, params) 方法提取泛型类型构建逻辑（List/Map/Option/Result/其他ADT）；4) _from_ast_type 主函数压缩至约15行（基本类型查表→标识符解析→泛型构建→元组→函数类型，CC≈3）。测试486 passed + 20 subtests通过，零回归。"
+    },
     {
       "cycle": 60,
       "task_id": "review_cycle_60",
@@ -341,8 +359,8 @@
       "details": "将 _lower_if_expr 从 106 行重构为分层结构：1) 新增 _lower_branch_body() 通用分支处理方法，消除 true/false 分支的 30 行镜像重复代码，返回 (result, modified_vars) 元组；2) 新增 _insert_merge_phis() 处理 merge 块 Phi 节点插入（约 35 行独立逻辑）；3) 新增 _insert_result_phi() 处理 if 表达式结果 Phi（约 15 行独立逻辑）；4) _lower_if_expr 主函数从 106 行压缩至约 25 行（CC≈8）。测试 395/395 通过，零回归。"
     }
   ],
-  "current_cycle": 60,
-  "baseline_tests": 396,
+  "current_cycle": 61,
+  "baseline_tests": 486,
   "current_tests": 486,
   "last_review_cycle": 60,
   "tasks": [
@@ -594,24 +612,24 @@
     {
       "id": "refactor_check_decl",
       "name": "重构 TypeChecker.check_decl 调度表化",
-      "description": "TypeChecker.check_decl 圈复杂度 20，7分支isinstance链处理Let/Mut/Fn/Type/Alias/Import/Export声明。典型调度表重构目标，难度低、风险小、位于编译器核心正确性路径。",
+      "description": "TypeChecker.check_decl 圈复杂度 20，87行。已重构为调度表模式：新增 _build_decl_checkers() 映射表（7种声明类型）、_check_binding_decl() 通用方法消除 Let/Mut 镜像重复、6个类型专属子方法。主函数 CC 降至约 3。",
       "difficulty": "medium",
       "priority": 55,
       "category": "engineering",
       "estimated": "2-3 小时",
-      "status": "pending",
+      "status": "completed",
       "depends_on": [],
       "reason": "审查日志第1505轮 check_decl CC=20，TypeChecker核心路径。7种声明类型分发逻辑清晰，调度表化后CC可降至约4。[审查驱动]"
     },
     {
       "id": "refactor_from_ast_type",
       "name": "重构 TypeChecker._from_ast_type 调度表化",
-      "description": "TypeChecker._from_ast_type 圈复杂度 18，9分支isinstance链+泛型参数递归处理AST类型节点（TypeName/TypeVar/TypeArrow/TypeTuple/TypeList/TypeRecord/TypeADT等）。",
+      "description": "TypeChecker._from_ast_type 圈复杂度 18，47行。已重构为调度表+辅助方法模式：新增类级 _BASIC_TYPE_MAP（6个基本类型映射）、_resolve_type_identifier() 方法提取别名/环境查找、_make_generic_type() 方法提取泛型构建。主函数 CC 降至约 3。",
       "difficulty": "medium",
       "priority": 52,
       "category": "engineering",
       "estimated": "2-3 小时",
-      "status": "pending",
+      "status": "completed",
       "depends_on": [],
       "reason": "审查日志第1505轮 _from_ast_type CC=18，TypeChecker类型解析核心。9种AST类型节点分发逻辑清晰，调度表化后CC可降至约5。[审查驱动]"
     },
