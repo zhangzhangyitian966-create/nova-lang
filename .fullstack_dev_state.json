@@ -1,8 +1,8 @@
 {
-  "cycles": 35,
+  "cycles": 36,
   "frontend_completed": 24,
   "backend_completed": 27,
-  "last_review_cycle": 33,
+  "last_review_cycle": 36,
   "current_review_cycle": 36,
   "completed_tasks": [
     "frontend_try_expr_typecheck",
@@ -62,7 +62,8 @@
     "frontend_pipe_typecheck_fix",
     "backend_wasm_fn_ptr",
     "frontend_recursive_fn_typecheck",
-    "backend_c_trampoline_double_fix"
+    "backend_c_trampoline_double_fix",
+    "review_cycle_36"
   ],
   "failed_tasks": [],
   "deprecated_tasks": [
@@ -72,6 +73,17 @@
     "backend_native_fn_ptr"
   ],
   "task_history": [
+    {
+      "cycle": 36,
+      "task_id": "review_cycle_36",
+      "name": "第 36 轮 - 双线路线图评审",
+      "track": "review",
+      "difficulty": "review",
+      "priority": 0,
+      "result": "success",
+      "details": "第十二次三轮回顾评审（第 34-36 轮）。深度代码审计 8 个核心文件 10,664 行代码，运行完整测试套件 486 测试全部通过。第 34 轮清零 P1-F1（管道操作符）和 P0-2（Wasm fn_ptr）。第 35 轮清零 P1-F2（相互递归）和 P2-A（C double UB），但评审发现调用点 double 返回值仍用 intptr_t 强转（修复不完整），当场修复并验证。前端评估：质量 90/100（+2），24/25 完成（96.0%），维护模式，所有已知正确性 bug 清零。后端评估：C 78%/Native 70%/Wasm 65%——C 和 Wasm 显著提升，Native 持平（链接器仍为 P0）。P0-2 和 P2-A 已清零，P0-B1（native 无链接器）仍是唯一 P0。Explore 审计新发现 3 个 P1（Wasm StoreReg 未完成、C 后端未实现指令静默生成注释、原生后端浮点立即数参数不支持）。综合：前后端失衡缓解但仍明显（96.0% vs 75.8%），下 3 轮聚焦 P0-B1 链接器决策 + 补齐后端功能缺口。新增 3 个任务（backend_wasm_store_reg P70、backend_native_float_imm P60、backend_c_todo_error P55）。",
+      "timestamp": "2026-07-27 04:15"
+    },
     {
       "cycle": 35,
       "task_id": "frontend_recursive_fn_typecheck",
@@ -185,54 +197,6 @@
   ],
   "tasks": [
     {
-      "task_id": "backend_wasm_fn_ptr",
-      "name": "实现 Wasm 后端闭包 fn_ptr 回填",
-      "description": "wasm_backend.py _compile_closure_create 中 fn_ptr 传 NULL（i32.const 0），导致闭包创建后无法调用目标函数。修复：将 lambda 函数指针（函数表索引或绝对地址）传入 nova_closure_new。Wasm 需通过函数表（funcref table）管理 lambda 函数引用。",
-      "track": "backend",
-      "difficulty": "hard",
-      "priority": 90,
-      "estimated_effort": "4-6小时",
-      "status": "completed",
-      "source": "review_27_audit",
-      "depends_on": ["backend_wasm_closure_impl"]
-    },
-    {
-      "task_id": "backend_c_trampoline_double_fix",
-      "name": "修复 C 后端 trampoline double 返回值 UB",
-      "description": "lir_c_backend.py 第 286 行 trampoline 中 double 返回值使用 (intptr_t) 强转为 void*，这是未定义行为（浮点值通过整数指针转换会丢失精度）。修复：对 double 返回值使用 malloc(sizeof(double)) + memcpy 方案，或在 NovaClosure 中增加类型标签区分整数/浮点返回值。",
-      "track": "backend",
-      "difficulty": "easy",
-      "priority": 55,
-      "estimated_effort": "1-2小时",
-      "status": "completed",
-      "source": "review_30_audit",
-      "depends_on": []
-    },
-    {
-      "task_id": "frontend_pipe_typecheck_fix",
-      "name": "修复管道操作符类型检查语义错误",
-      "description": "type_checker.py _check_pipe_expr (line 905-927) 存在三个问题：(1) 用 or 短路表示匹配最后或第一个参数，但 unify 有副作用（写替换表），先匹配 last 失败时已污染状态；(2) 多参函数行为不明确；(3) 失败时静默返回 right_ty（函数类型）而非报错。修复：先拷贝替换表再合一、失败时报错、明确管道语义。",
-      "track": "frontend",
-      "difficulty": "medium",
-      "priority": 82,
-      "estimated_effort": "2-3小时",
-      "status": "completed",
-      "source": "review_33_audit",
-      "depends_on": []
-    },
-    {
-      "task_id": "frontend_recursive_fn_typecheck",
-      "name": "修复递归函数类型推断不支持相互递归",
-      "description": "type_checker.py (line 426-448) 仅支持函数体内引用自身名字的单向递归（先 define 后检查 body），不支持相互递归（函数 A 调用后定义的函数 B）。无前向声明机制。对无返回类型注解的递归函数，return_type 用 TypeVar 占位但未约束。修复：引入两遍扫描或前向声明机制支持相互递归。",
-      "track": "frontend",
-      "difficulty": "medium",
-      "priority": 78,
-      "estimated_effort": "3-4小时",
-      "status": "completed",
-      "source": "review_33_audit",
-      "depends_on": []
-    },
-    {
       "task_id": "backend_native_linker_strategy",
       "name": "原生后端链接器战略决策与实现",
       "description": "P0-B1：native_backend.py 无链接器，所有 nova_* 运行时函数 call rel32 保持 0 偏移，ELF 不可执行任何非 trivial 程序。三选一决策：(a) 内置链接器嵌入 nova_runtime.o；(b) 接入 gcc 作为链接器（放弃零依赖）；(c) 暂时降级原生后端为代码生成器，执行依赖 C 后端。这是战略级决策。",
@@ -255,6 +219,42 @@
       "status": "pending",
       "source": "review_33_audit",
       "depends_on": ["backend_wasm_fn_ptr"]
+    },
+    {
+      "task_id": "backend_wasm_store_reg",
+      "name": "实现 Wasm 后端 LIRStoreReg 指令",
+      "description": "wasm_backend.py 中 LIRStoreReg 指令未完整实现，生成 ;; TODO: ... ;; 注释。这导致涉及寄存器存储的代码在 Wasm 目标下行为不正确或无法编译。需要实现完整的 local.set/local.tee 映射。",
+      "track": "backend",
+      "difficulty": "medium",
+      "priority": 70,
+      "estimated_effort": "3-5小时",
+      "status": "pending",
+      "source": "review_36_audit",
+      "depends_on": []
+    },
+    {
+      "task_id": "backend_native_float_imm",
+      "name": "实现原生后端浮点立即数参数加载",
+      "description": "native_backend.py _emit_call 在处理浮点立即数参数时触发 NotImplementedError（line 941 附近）。需要补充 XMM 寄存器加载浮点立即数的指令发射逻辑。",
+      "track": "backend",
+      "difficulty": "medium",
+      "priority": 60,
+      "estimated_effort": "3-4小时",
+      "status": "pending",
+      "source": "review_36_audit",
+      "depends_on": []
+    },
+    {
+      "task_id": "backend_c_todo_error",
+      "name": "修复 C 后端未实现指令静默生成注释问题",
+      "description": "lir_c_backend.py 调度表 else 分支对未实现指令生成 /* TODO: ... */ 注释而非报错或终止编译。这意味着某些边界程序可能生成无法编译的 C 代码。应改为抛出明确的 NotImplementedError。",
+      "track": "backend",
+      "difficulty": "easy",
+      "priority": 55,
+      "estimated_effort": "1-2小时",
+      "status": "pending",
+      "source": "review_36_audit",
+      "depends_on": []
     },
     {
       "task_id": "backend_native_regalloc_call_site",

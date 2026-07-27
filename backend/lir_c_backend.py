@@ -804,15 +804,17 @@ class LIRCBackend:
                     f"{dst} = {cast_expr}nova_closure_call((NovaClosure*){closure}, "
                     f"{args_array}, {arg_count});"
                 )
-            elif ret_c_type == "double":
-                # double 不能通过 intptr_t 强转（UB：浮点截断）
-                # 使用临时指针解引用进行安全的类型双关
-                tmp_ptr = f"_nova_double_ptr_{self._tmp_counter()}"
+            elif ret_c_type in ("double",):
+                # 对于浮点类型，不能通过 intptr_t 强转（UB：浮点截断）。
+                # trampoline 内部使用 malloc+memcpy 将 double 打包为 void*，
+                # 调用点使用临时指针 + memcpy 解包，并 free 避免内存泄漏。
+                tmp_ptr = f"_nova_ret_ptr_{self._tmp_counter()}"
                 self._emit(
-                    f"double* {tmp_ptr} = (double*)nova_closure_call((NovaClosure*){closure}, "
+                    f"void* {tmp_ptr} = nova_closure_call((NovaClosure*){closure}, "
                     f"{args_array}, {arg_count});"
                 )
-                self._emit(f"{dst} = *{tmp_ptr};")
+                self._emit(f"memcpy(&{dst}, {tmp_ptr}, sizeof(double));")
+                self._emit(f"free({tmp_ptr});")
             else:
                 cast_expr = f"({ret_c_type})"
                 self._emit(
