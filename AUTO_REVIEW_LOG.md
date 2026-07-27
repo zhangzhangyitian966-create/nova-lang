@@ -16399,3 +16399,212 @@ E   AssertionError: '(intptr_t)' unexpectedly found in '#include "nova_runtime.h
 ---
 
 *本报告由 Nova Auto Review v2.0 自动生成*
+
+---
+
+# 第 1507 轮 Nova 深度审查报告 (v2.0)
+
+> 生成时间: 2026-07-27 12:07:14
+> 审查版本: v0.3.0
+
+## 1. 审查概览
+
+| 指标 | 数值 |
+|------|------|
+| 扫描文件数 | 41 |
+| 代码行数 | 28,537 |
+| 函数总数 | 1666 |
+| 类总数 | 297 |
+| 发现问题数 | **1257** |
+| CRITICAL | 0 |
+| HIGH | 0 |
+| MEDIUM | 77 |
+| LOW | 1180 |
+
+### 严重程度分布
+
+- 🔴 **CRITICAL**: 0 个
+- 🟠 **HIGH**: 0 个
+- 🟡 **MEDIUM**: 77 个
+- 🟢 **LOW**: 1180 个
+
+## 2. 代码质量审查
+
+### 2.1 问题类型分布
+
+| 问题类型 | 数量 | 严重级别 |
+|----------|------|----------|
+| no_docstring | 586 | LOW |
+| magic_number | 477 | LOW |
+| print_debug | 103 | LOW |
+| unused_import | 32 | MEDIUM |
+| class_too_large | 20 | MEDIUM |
+| inconsistent_naming | 14 | LOW |
+| function_too_long | 9 | MEDIUM |
+| cyclomatic_complexity | 9 | MEDIUM |
+| too_broad_exception | 7 | MEDIUM |
+
+### 2.2 高优先级问题 (CRITICAL + HIGH)
+
+✅ 无高优先级问题
+
+### 2.3 各模块问题统计 (Top 10)
+
+| 模块 | 问题数 |
+|------|--------|
+| tests | 532 |
+| (root) | 366 |
+| backend | 240 |
+| ir | 118 |
+| tree-sitter-nova | 1 |
+
+## 3. 架构审查
+
+### 3.1 模块概览
+
+- 模块总数: **41**
+- 平均依赖数: **1.49**
+- 循环依赖: **0** 个
+- sys.path hack: **0** 处
+
+### 3.2 循环依赖
+
+✅ 未发现循环依赖
+
+### 3.3 耦合度分析
+
+#### 高被依赖模块 (入度 Top 10)
+
+| 模块 | 入度 (被依赖数) |
+|------|----------------|
+| ir.ir_nodes | 9 |
+| errors | 8 |
+| ast_nodes | 7 |
+| lexer | 5 |
+| parser | 4 |
+| type_checker | 4 |
+| environment | 3 |
+| compiler | 3 |
+| ir.cfg_utils | 2 |
+| evaluator | 2 |
+
+#### 高依赖模块 (出度 Top 10)
+
+| 模块 | 出度 (依赖数) |
+|------|--------------|
+|  | 10 |
+| backend.compiler_pipeline | 10 |
+| cli | 8 |
+| compiler_cli | 6 |
+| parser | 3 |
+| evaluator | 3 |
+| ir.hir_lowering | 2 |
+| backend.lir_c_backend | 2 |
+| backend.native_backend | 2 |
+| ir.mir_lowering | 2 |
+
+### 3.5 代码量分布
+
+| 目录 | 文件数 | 行数 | 占比 |
+|------|--------|------|------|
+| (root) | 14 | 10,007 | 35.1% |
+| ir | 7 | 6,768 | 23.7% |
+| tests | 11 | 6,477 | 22.7% |
+| backend | 8 | 5,206 | 18.2% |
+| tree-sitter-nova | 1 | 79 | 0.3% |
+
+## 4. 测试分析
+
+- 测试总数: **500**
+- 通过数: ✅ 495
+- 失败数: ❌ 1
+- 错误数: ⚠️  0
+- 跳过数: ⏭️  0
+- 通过率: **99.0%**
+- 耗时: 0s
+
+### 4.1 失败测试 (Top 5)
+
+1. **tests/test_nova.py::TestIntegration::test_pipe_full_program**
+   - 结果: failed
+   - 错误: tests/test_nova.py:1177: in test_pipe_full_program
+    ev = eval_source("""
+tests/test_nova.py:68: in eval_source
+    checker.check_program(ast)
+type_checker.py:413: in check_program
+    self.check_de
+
+## 5. 复杂度分析
+
+- 函数总数: **1660**
+- 平均圈复杂度: **2.43**
+- 最高复杂度: **29**
+
+### 5.1 复杂度分布
+
+| 复杂度区间 | 函数数 |
+|------------|--------|
+| 1-5 (简单) | 1492 |
+| 6-10 (中等) | 126 |
+| 11-15 (复杂) | 33 |
+| 16-25 (高复杂) | 7 |
+| 25+ (极复杂) | 2 |
+
+### 5.2 Top 10 最复杂函数
+
+| 排名 | 函数 | 文件 | 圈复杂度 |
+|------|------|------|----------|
+| 1 | NativeCodeGen._generate_relocatable_elf | `backend/native_backend.py` | 29 |
+| 2 | NativeCodeGen._emit_runtime_call | `backend/native_backend.py` | 28 |
+| 3 | HIRRewriter.generic_rewrite | `ir/ir_nodes.py` | 23 |
+| 4 | NativeCodeGen._emit_call | `backend/native_backend.py` | 21 |
+| 5 | NativeCodeGen._allocate_registers | `backend/native_backend.py` | 18 |
+| 6 | NativeCodeGen._generate_elf | `backend/native_backend.py` | 17 |
+| 7 | CCodeGen._c_type_from_type_expr | `c_codegen.py` | 17 |
+| 8 | Parser._parse_primary_expr | `parser.py` | 17 |
+| 9 | LoopInvariantCodeMotion._licm_loop | `ir/pass_manager.py` | 16 |
+| 10 | _is_incomplete | `cli.py` | 15 |
+
+## 7. 增量质量门禁
+
+❌ **门禁失败** — 发现 1 个增量质量问题
+
+- 检查文件数（有变更）: 4
+- 门禁问题数: 1
+
+### 7.1 门禁问题详情
+
+1. **[gate_new_magic_number]** `backend/native_backend.py:968`
+   - 增量门禁：新增魔法数字 8，必须定义为命名常量
+   - 代码: `while offset % 8 != 0:`
+
+### 7.2 门禁问题类型分布
+
+| 问题类型 | 数量 |
+|----------|------|
+| gate_new_magic_number | 1 |
+
+---
+
+## 8. 改进建议
+
+### P0 - 立即修复
+
+✅ 无 P0 级问题
+
+### P1 - 高优先级
+
+- 修复 1 个增量质量门禁问题（新增代码 docstring/魔法数字/命名规范）
+
+### P2 - 中优先级
+
+- 处理 77 个 MEDIUM 级别问题（函数过长、圈复杂度、未使用导入等）
+
+### P3 - 低优先级 / 优化
+
+- 清理 1180 个 LOW 级别问题（TODO、命名规范、魔法数字等）
+- 重构 Top 10 复杂函数中 9 个 CC>15 的函数
+
+---
+
+*本报告由 Nova Auto Review v2.0 自动生成*
