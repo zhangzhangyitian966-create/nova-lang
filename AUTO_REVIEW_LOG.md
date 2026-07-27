@@ -16161,3 +16161,241 @@
 ---
 
 *本报告由 Nova Auto Review v2.0 自动生成*
+
+---
+
+# 第 1506 轮 Nova 深度审查报告 (v2.0)
+
+> 生成时间: 2026-07-27 04:10:47
+> 审查版本: v0.3.0
+
+## 1. 审查概览
+
+| 指标 | 数值 |
+|------|------|
+| 扫描文件数 | 41 |
+| 代码行数 | 27,644 |
+| 函数总数 | 1635 |
+| 类总数 | 295 |
+| 发现问题数 | **1185** |
+| CRITICAL | 0 |
+| HIGH | 0 |
+| MEDIUM | 74 |
+| LOW | 1111 |
+
+### 严重程度分布
+
+- 🔴 **CRITICAL**: 0 个
+- 🟠 **HIGH**: 0 个
+- 🟡 **MEDIUM**: 74 个
+- 🟢 **LOW**: 1111 个
+
+## 2. 代码质量审查
+
+### 2.1 问题类型分布
+
+| 问题类型 | 数量 | 严重级别 |
+|----------|------|----------|
+| no_docstring | 582 | LOW |
+| magic_number | 412 | LOW |
+| print_debug | 103 | LOW |
+| unused_import | 29 | MEDIUM |
+| class_too_large | 20 | MEDIUM |
+| inconsistent_naming | 14 | LOW |
+| cyclomatic_complexity | 10 | MEDIUM |
+| function_too_long | 8 | MEDIUM |
+| too_broad_exception | 7 | MEDIUM |
+
+### 2.2 高优先级问题 (CRITICAL + HIGH)
+
+✅ 无高优先级问题
+
+### 2.3 各模块问题统计 (Top 10)
+
+| 模块 | 问题数 |
+|------|--------|
+| tests | 490 |
+| (root) | 366 |
+| backend | 210 |
+| ir | 118 |
+| tree-sitter-nova | 1 |
+
+## 3. 架构审查
+
+### 3.1 模块概览
+
+- 模块总数: **41**
+- 平均依赖数: **1.49**
+- 循环依赖: **0** 个
+- sys.path hack: **0** 处
+
+### 3.2 循环依赖
+
+✅ 未发现循环依赖
+
+### 3.3 耦合度分析
+
+#### 高被依赖模块 (入度 Top 10)
+
+| 模块 | 入度 (被依赖数) |
+|------|----------------|
+| ir.ir_nodes | 9 |
+| errors | 8 |
+| ast_nodes | 7 |
+| lexer | 5 |
+| type_checker | 4 |
+| parser | 4 |
+| environment | 3 |
+| compiler | 3 |
+| evaluator | 2 |
+| c_codegen | 2 |
+
+#### 高依赖模块 (出度 Top 10)
+
+| 模块 | 出度 (依赖数) |
+|------|--------------|
+|  | 10 |
+| backend.compiler_pipeline | 10 |
+| cli | 8 |
+| compiler_cli | 6 |
+| evaluator | 3 |
+| parser | 3 |
+| ir.pass_manager | 2 |
+| backend.native_backend | 2 |
+| type_checker | 2 |
+| backend.lir_c_backend | 2 |
+
+### 3.5 代码量分布
+
+| 目录 | 文件数 | 行数 | 占比 |
+|------|--------|------|------|
+| (root) | 14 | 9,922 | 35.9% |
+| ir | 7 | 6,768 | 24.5% |
+| tests | 11 | 6,170 | 22.3% |
+| backend | 8 | 4,705 | 17.0% |
+| tree-sitter-nova | 1 | 79 | 0.3% |
+
+## 4. 测试分析
+
+- 测试总数: **486**
+- 通过数: ✅ 481
+- 失败数: ❌ 1
+- 错误数: ⚠️  0
+- 跳过数: ⏭️  0
+- 通过率: **99.0%**
+- 耗时: 0s
+
+### 4.1 失败测试 (Top 5)
+
+1. **tests/test_backends.py::TestCBackendClosure::test_closure_trampoline_double_return**
+   - 结果: failed
+   - 错误: tests/test_backends.py:860: in test_closure_trampoline_double_return
+    self.assertNotIn("(intptr_t)", c_code)
+E   AssertionError: '(intptr_t)' unexpectedly found in '#include "nova_runtime.h"\n#incl
+
+## 5. 复杂度分析
+
+- 函数总数: **1629**
+- 平均圈复杂度: **2.43**
+- 最高复杂度: **25**
+
+### 5.1 复杂度分布
+
+| 复杂度区间 | 函数数 |
+|------------|--------|
+| 1-5 (简单) | 1466 |
+| 6-10 (中等) | 120 |
+| 11-15 (复杂) | 33 |
+| 16-25 (高复杂) | 10 |
+| 25+ (极复杂) | 0 |
+
+### 5.2 Top 10 最复杂函数
+
+| 排名 | 函数 | 文件 | 圈复杂度 |
+|------|------|------|----------|
+| 1 | NativeCodeGen._emit_runtime_call | `backend/native_backend.py` | 25 |
+| 2 | HIRRewriter.generic_rewrite | `ir/ir_nodes.py` | 23 |
+| 3 | NativeCodeGen._emit_call | `backend/native_backend.py` | 21 |
+| 4 | TypeChecker.check_decl | `type_checker.py` | 20 |
+| 5 | NativeCodeGen._allocate_registers | `backend/native_backend.py` | 18 |
+| 6 | TypeChecker._from_ast_type | `type_checker.py` | 18 |
+| 7 | NativeCodeGen._generate_elf | `backend/native_backend.py` | 17 |
+| 8 | CCodeGen._c_type_from_type_expr | `c_codegen.py` | 17 |
+| 9 | Parser._parse_primary_expr | `parser.py` | 17 |
+| 10 | LoopInvariantCodeMotion._licm_loop | `ir/pass_manager.py` | 16 |
+
+## 7. 增量质量门禁
+
+❌ **门禁失败** — 发现 9 个增量质量问题
+
+- 检查文件数（有变更）: 4
+- 门禁问题数: 9
+
+### 7.1 门禁问题详情
+
+1. **[gate_new_magic_number]** `tests/test_backends.py:908`
+   - 增量门禁：新增魔法数字 15，必须定义为命名常量
+   - 代码: `make_adder(5) 返回闭包 add5，add5(10) 应返回 15。`
+
+2. **[gate_new_magic_number]** `tests/test_backends.py:957`
+   - 增量门禁：新增魔法数字 15，必须定义为命名常量
+   - 代码: `run_result.returncode, 15,`
+
+3. **[gate_new_magic_number]** `tests/test_backends.py:958`
+   - 增量门禁：新增魔法数字 15，必须定义为命名常量
+   - 代码: `f"闭包执行结果应为 15 (5+10)，实际退出码: {run_result.returncode}"`
+
+4. **[gate_new_magic_number]** `tests/test_backends.py:983`
+   - 增量门禁：新增魔法数字 20，必须定义为命名常量
+   - 代码: `let f = make_combined(10, 20)`
+
+5. **[gate_new_magic_number]** `tests/test_backends.py:1019`
+   - 增量门禁：新增魔法数字 35，必须定义为命名常量
+   - 代码: `run_result.returncode, 35,`
+
+6. **[gate_new_magic_number]** `tests/test_backends.py:1020`
+   - 增量门禁：新增魔法数字 35，必须定义为命名常量
+   - 代码: `f"闭包执行结果应为 35 (5+10+20)，实际退出码: {run_result.returncode}"`
+
+7. **[gate_new_magic_number]** `tests/test_backends.py:1045`
+   - 增量门禁：新增魔法数字 21，必须定义为命名常量
+   - 代码: `double(21)`
+
+8. **[gate_new_magic_number]** `tests/test_backends.py:1080`
+   - 增量门禁：新增魔法数字 42，必须定义为命名常量
+   - 代码: `run_result.returncode, 42,`
+
+9. **[gate_new_magic_number]** `tests/test_backends.py:1081`
+   - 增量门禁：新增魔法数字 42，必须定义为命名常量
+   - 代码: `f"直接调用结果应为 42 (21*2)，实际退出码: {run_result.returncode}"`
+
+### 7.2 门禁问题类型分布
+
+| 问题类型 | 数量 |
+|----------|------|
+| gate_new_magic_number | 9 |
+
+---
+
+## 8. 改进建议
+
+### P0 - 立即修复
+
+✅ 无 P0 级问题
+
+### P1 - 高优先级
+
+- 修复 9 个增量质量门禁问题（新增代码 docstring/魔法数字/命名规范）
+
+### P2 - 中优先级
+
+- 处理 74 个 MEDIUM 级别问题（函数过长、圈复杂度、未使用导入等）
+
+### P3 - 低优先级 / 优化
+
+- 清理 1111 个 LOW 级别问题（TODO、命名规范、魔法数字等）
+- 重构 Top 10 复杂函数中 10 个 CC>15 的函数
+
+---
+
+*本报告由 Nova Auto Review v2.0 自动生成*
