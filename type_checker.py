@@ -389,7 +389,25 @@ class TypeChecker:
         self.env.define("pi", FnType([], FLOAT_T))
 
     def check_program(self, program: Program):
-        """检查整个程序"""
+        """检查整个程序
+
+        使用三遍扫描支持相互递归：
+        1. 先注册所有 TypeDef / AliasDef（供函数签名引用）
+        2. 预注册所有 FnDef 的函数类型（支持相互递归）
+        3. 完整检查所有声明（包括函数体）
+        """
+        # 第一遍：注册类型定义（ADT、别名）
+        for decl in program.declarations:
+            if isinstance(decl, (TypeDef, AliasDef)):
+                self.check_decl(decl)
+
+        # 第二遍：预注册函数类型（支持相互递归）
+        for decl in program.declarations:
+            if isinstance(decl, FnDef):
+                fn_type = self._infer_fn_type(decl)
+                self.env.define(decl.name, fn_type)
+
+        # 第三遍：完整检查所有声明
         for decl in program.declarations:
             self.check_decl(decl)
 
@@ -424,9 +442,11 @@ class TypeChecker:
             self.env.define(decl.name, self._unify_and_resolve(ty), mutable=True)
 
         elif isinstance(decl, FnDef):
-            # 注册函数类型（支持递归）
-            fn_type = self._infer_fn_type(decl)
-            self.env.define(decl.name, fn_type)
+            # 注册函数类型（支持递归和相互递归）
+            # 若 check_program 预注册时未写入（如独立调用 check_decl），则补充注册
+            if self.env.lookup(decl.name) is None:
+                fn_type = self._infer_fn_type(decl)
+                self.env.define(decl.name, fn_type)
             # 检查函数体
             child_env = self.env.child()
             for param in decl.params:

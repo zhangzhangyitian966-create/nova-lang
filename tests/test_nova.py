@@ -505,6 +505,36 @@ class TestTypeChecker(unittest.TestCase):
         ty = checker.env.lookup("add")
         self.assertIn("Int", str(ty))
 
+    def test_mutual_recursion_typecheck(self):
+        """相互递归函数应通过类型检查"""
+        source = """
+            fn is_even(n: Int) -> Bool {
+                if n == 0 then true else is_odd(n - 1)
+            }
+            fn is_odd(n: Int) -> Bool {
+                if n == 0 then false else is_even(n - 1)
+            }
+        """
+        checker = type_check(source)
+        even_ty = checker.env.lookup("is_even")
+        odd_ty = checker.env.lookup("is_odd")
+        self.assertIsNotNone(even_ty)
+        self.assertIsNotNone(odd_ty)
+        self.assertIn("Bool", str(even_ty))
+        self.assertIn("Bool", str(odd_ty))
+
+    def test_mutual_recursion_three_way(self):
+        """三向相互递归应通过类型检查"""
+        source = """
+            fn f(n: Int) -> Int { if n == 0 then 0 else g(n - 1) }
+            fn g(n: Int) -> Int { if n == 0 then 0 else h(n - 1) }
+            fn h(n: Int) -> Int { if n == 0 then 0 else f(n - 1) }
+        """
+        checker = type_check(source)
+        self.assertIsNotNone(checker.env.lookup("f"))
+        self.assertIsNotNone(checker.env.lookup("g"))
+        self.assertIsNotNone(checker.env.lookup("h"))
+
     def test_type_mismatch(self):
         with self.assertRaises(TypeCheckError):
             type_check("1 + true")

@@ -809,6 +809,56 @@ class TestCBackendClosure(unittest.TestCase):
             finally:
                 os.unlink(f.name)
 
+    def test_closure_trampoline_double_return(self):
+        """double 返回值的 trampoline 应使用 malloc+memcpy，而非 intptr_t 强转"""
+        from nova.ir.ir_nodes import (
+            LIRModule, LIRFunction, LIRClosureCreate, LIRCallIndirect,
+            LIRLabel, LIRLoadConst, LIRReturn, FLOAT_TYPE, CLOSURE_TYPE,
+        )
+        from nova.backend.lir_c_backend import LIRCBackend
+
+        module = LIRModule(name="test_closure_double")
+
+        main_fn = LIRFunction(
+            name="main", params=[], return_type=FLOAT_TYPE,
+        )
+        main_fn.body = [
+            LIRLabel(name="bb0"),
+            LIRLoadConst(value=3.14, const_type="float"),
+            LIRClosureCreate(fn_name="__lambda_0", capture_count=1),
+            LIRCallIndirect(arg_count=0),
+            LIRReturn(),
+        ]
+        main_fn.body[1].dst_loc = ("r0", FLOAT_TYPE)
+        main_fn.body[2].src_locs = [("r0", FLOAT_TYPE)]
+        main_fn.body[2].dst_loc = ("r1", CLOSURE_TYPE)
+        main_fn.body[3].src_locs = [("r1", CLOSURE_TYPE)]
+        main_fn.body[3].dst_loc = ("r2", FLOAT_TYPE)
+
+        lambda_fn = LIRFunction(
+            name="__lambda_0",
+            params=[("captured_f", FLOAT_TYPE)],
+            return_type=FLOAT_TYPE,
+        )
+        lambda_fn.body = [
+            LIRLabel(name="bb0"),
+            LIRLoadConst(value=0.0, const_type="float"),
+            LIRReturn(),
+        ]
+        lambda_fn.body[1].dst_loc = ("r0", FLOAT_TYPE)
+
+        module.functions["main"] = main_fn
+        module.functions["__lambda_0"] = lambda_fn
+
+        backend = LIRCBackend()
+        c_code = backend.compile(module)
+
+        # 验证使用 malloc + memcpy 而非 intptr_t 强转
+        self.assertIn("malloc(sizeof(double))", c_code)
+        self.assertIn("memcpy(_nova_ret_ptr", c_code)
+        # 确保不再出现危险的 intptr_t 强转 double
+        self.assertNotIn("(intptr_t)", c_code)
+
     def test_mir_closure_call_is_indirect(self):
         """MIR 降级：闭包变量的调用应该是间接调用（SSA callee）"""
         from nova.ir.hir_lowering import HIRLowering

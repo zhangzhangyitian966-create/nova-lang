@@ -4,6 +4,118 @@
 
 ---
 
+## 第 35 轮 — 2026-07-27 01:35
+
+> 前端：修复递归函数类型推断不支持相互递归 + 后端：修复 C 后端 trampoline double 返回值 UB
+
+---
+
+### 本轮概览
+
+| 维度 | 数据 |
+|------|------|
+| 轮次 | 第 35 轮（普通轮） |
+| 前端任务 | frontend_recursive_fn_typecheck（P78, medium） |
+| 后端任务 | backend_c_trampoline_double_fix（P55, easy） |
+| 基线测试 | 480 passed |
+| 最终测试 | 483 passed（+3） |
+| 回归 | 无 |
+| 清零问题 | P1-F2（相互递归）、P2-A（C double UB） |
+
+---
+
+### 前端任务：修复递归函数类型推断不支持相互递归
+
+| 字段 | 值 |
+|------|------|
+| 任务 ID | frontend_recursive_fn_typecheck |
+| 难度 | medium |
+| 优先级 | 78 |
+| 结果 | ✅ 成功 |
+| 为什么选这个 | 前端唯一待做任务，第 34 轮评审报告既定计划，清零 P1-F2 |
+
+**问题分析**：
+
+`type_checker.py` `check_program` 原为单遍扫描，处理 `FnDef` 时先注册函数类型再检查函数体。这只能支持函数调用自身（单向递归），因为后定义的函数类型尚未注册到环境，导致相互递归（函数 A 调用后定义的函数 B）失败。
+
+**修复方案**：
+
+引入三遍扫描：
+1. **第一遍**：注册所有 `TypeDef` / `AliasDef`（供函数签名中的类型注解引用）
+2. **第二遍**：预注册所有 `FnDef` 的函数类型到 `env`（支持相互递归）
+3. **第三遍**：完整检查所有声明（包括函数体）
+
+同时修改 `check_decl` 的 `FnDef` 分支：使用 `env.lookup` 检查函数是否已预注册，避免重复注册导致 `TypeVar` 对象不一致。
+
+**新增测试**（2 个）：
+
+- `test_mutual_recursion_typecheck`：`is_even` / `is_odd` 双向相互递归
+- `test_mutual_recursion_three_way`：`f` / `g` / `h` 三向相互递归
+
+**代码变更**：`type_checker.py` +16/-3 行，`tests/test_nova.py` +28 行。480→483 测试全部通过。
+
+---
+
+### 后端任务：修复 C 后端 trampoline double 返回值 UB
+
+| 字段 | 值 |
+|------|------|
+| 任务 ID | backend_c_trampoline_double_fix |
+| 难度 | easy |
+| 优先级 | 55 |
+| 结果 | ✅ 成功 |
+| 为什么选这个 | 第 34 轮评审报告既定计划，easy 难度快速清零 P2-A |
+
+**问题分析**：
+
+`lir_c_backend.py` `_emit_lambda_trampoline`（line 285-286）中 `double` 返回值使用 `(void*)(intptr_t){c_name}(...)` 强转。这是未定义行为：浮点值经 `intptr_t`（整数类型）转换会截断小数部分，无法通过指针转回恢复原始值。
+
+**修复方案**：
+
+对 `double` 返回值使用 `malloc + memcpy` 进行安全的类型双关：
+
+```c
+double _nova_ret = c_name(args);
+double* _nova_ret_ptr = (double*)malloc(sizeof(double));
+memcpy(_nova_ret_ptr, &_nova_ret, sizeof(double));
+return (void*)_nova_ret_ptr;
+```
+
+`string.h` 已在头文件包含列表中，无需新增依赖。
+
+**新增测试**：
+
+- `test_closure_trampoline_double_return`：构造 `FLOAT_TYPE` 返回值的 lambda LIR 模块，验证生成代码包含 `malloc(sizeof(double))` 和 `memcpy`，且不包含 `(intptr_t)`。
+
+**代码变更**：`backend/lir_c_backend.py` +5/-1 行，`tests/test_backends.py` +47 行。483 测试全部通过。
+
+---
+
+### 测试前后对比
+
+| 指标 | 开发前 | 开发后 | 变化 |
+|------|--------|--------|------|
+| 总测试数 | 480 | 483 | +3 |
+| subtests | 20 | 20 | 0 |
+| 通过率 | 100% | 100% | 0 |
+| 回归 | - | 无 | ✅ |
+
+---
+
+### 前端下一步
+
+- 前端任务池已清空（24/25 完成，1 废弃），进入纯维护模式
+- 后续仅响应审计发现的正确性 bug
+- 长期技术债：`type_checker.py` 1905 行单文件病（P2-F5，暂不拆分）
+
+### 后端下一步
+
+- **第 36 轮评审前**：原生后端链接器战略决策（P0-B1, P95）— 不可再拖
+- **第 36 轮评审前**：建立三后端统一闭包执行测试矩阵（P72）
+- 后续：Wasm 侧完整闭包调用（call_indirect）
+
+---
+
 ## 第 34 轮 — 2026-07-26 22:20
 
 > 前端：修复管道操作符类型检查语义错误 + 后端：实现 Wasm 后端闭包 fn_ptr 回填

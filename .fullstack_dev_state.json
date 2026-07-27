@@ -1,7 +1,7 @@
 {
-  "cycles": 34,
-  "frontend_completed": 23,
-  "backend_completed": 26,
+  "cycles": 35,
+  "frontend_completed": 24,
+  "backend_completed": 27,
   "last_review_cycle": 33,
   "current_review_cycle": 36,
   "completed_tasks": [
@@ -60,7 +60,9 @@
     "backend_mir_closure_call_fix",
     "review_cycle_33",
     "frontend_pipe_typecheck_fix",
-    "backend_wasm_fn_ptr"
+    "backend_wasm_fn_ptr",
+    "frontend_recursive_fn_typecheck",
+    "backend_c_trampoline_double_fix"
   ],
   "failed_tasks": [],
   "deprecated_tasks": [
@@ -70,6 +72,28 @@
     "backend_native_fn_ptr"
   ],
   "task_history": [
+    {
+      "cycle": 35,
+      "task_id": "frontend_recursive_fn_typecheck",
+      "name": "修复递归函数类型推断不支持相互递归",
+      "track": "frontend",
+      "difficulty": "medium",
+      "priority": 78,
+      "result": "success",
+      "details": "修复 type_checker.py check_program 单遍扫描导致相互递归失败的问题。引入三遍扫描：(1) 第一遍注册 TypeDef/AliasDef（供函数签名引用）；(2) 第二遍预注册所有 FnDef 的函数类型到 env（支持相互递归）；(3) 第三遍完整检查所有声明（包括函数体）。同时修改 check_decl 的 FnDef 分支，避免重复注册（使用 env.lookup 检查是否已存在）。新增 2 个相互递归测试：test_mutual_recursion_typecheck（is_even/is_odd 双向递归）、test_mutual_recursion_three_way（f/g/h 三向递归）。清零评审报告 P1-F2。482 测试全部通过，无回归。前端线 24/25 完成。",
+      "timestamp": "2026-07-27 01:30"
+    },
+    {
+      "cycle": 35,
+      "task_id": "backend_c_trampoline_double_fix",
+      "name": "修复 C 后端 trampoline double 返回值 UB",
+      "track": "backend",
+      "difficulty": "easy",
+      "priority": 55,
+      "result": "success",
+      "details": "修复 lir_c_backend.py _emit_lambda_trampoline 中 double 返回值通过 (void*)(intptr_t) 强转的问题（未定义行为：浮点值经整数转换会截断小数部分）。改为 malloc + memcpy 安全转换：double _nova_ret = c_name(args); double* _nova_ret_ptr = malloc(sizeof(double)); memcpy(_nova_ret_ptr, &_nova_ret, sizeof(double)); return (void*)_nova_ret_ptr;。string.h 已在头文件包含列表中。新增 test_closure_trampoline_double_return 测试：构造 FLOAT_TYPE 返回值的 lambda LIR 模块，验证生成代码包含 malloc(sizeof(double)) 和 memcpy，且不包含 (intptr_t)。清零评审报告 P2-A。482 测试全部通过，无回归。后端线 27/34 完成。",
+      "timestamp": "2026-07-27 01:35"
+    },
     {
       "cycle": 34,
       "task_id": "frontend_pipe_typecheck_fix",
@@ -180,7 +204,7 @@
       "difficulty": "easy",
       "priority": 55,
       "estimated_effort": "1-2小时",
-      "status": "pending",
+      "status": "completed",
       "source": "review_30_audit",
       "depends_on": []
     },
@@ -204,7 +228,7 @@
       "difficulty": "medium",
       "priority": 78,
       "estimated_effort": "3-4小时",
-      "status": "pending",
+      "status": "completed",
       "source": "review_33_audit",
       "depends_on": []
     },

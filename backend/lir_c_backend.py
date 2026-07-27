@@ -283,7 +283,12 @@ class LIRCBackend:
             if ret_type == "int64_t":
                 self._emit(f"return (void*)(intptr_t){c_name}({args_str});")
             elif ret_type == "double":
-                self._emit(f"return (void*)(intptr_t){c_name}({args_str});")
+                # double 不能通过 intptr_t 强转为 void*（UB：浮点截断）
+                # 使用 malloc + memcpy 进行安全的类型双关
+                self._emit(f"double _nova_ret = {c_name}({args_str});")
+                self._emit("double* _nova_ret_ptr = (double*)malloc(sizeof(double));")
+                self._emit("memcpy(_nova_ret_ptr, &_nova_ret, sizeof(double));")
+                self._emit("return (void*)_nova_ret_ptr;")
             elif ret_type == "bool":
                 self._emit(f"return (void*)(intptr_t){c_name}({args_str});")
             else:
