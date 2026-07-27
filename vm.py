@@ -800,33 +800,28 @@ class NovaVM:
         self.ip = loop_start
 
     def _op_break(self, instr):
-        # 跳出循环 - 需要清理栈并跳到循环结束
-        # 在 for 循环中弹出 (iter, index, result_list)
-        if self._for_iters:
-            self._for_iters.pop()
-            # 弹出 for 循环状态
-            if len(self.stack) >= 3:
-                self.stack.pop()  # body_result
-                result_list = self.stack.pop()  # result_list
-                self.stack.pop()  # index (for range)
-                self.stack.pop()  # iter (for range)
-                self.stack.append(result_list)
-        # 跳到当前 for_iter 的 end 位置
-        if self._for_iters:
-            self.ip = self._for_iters[-1].get("end_ip", self.ip)
-        else:
-            # 找到下一个 LOOP_END 的位置
-            while self.ip < len(self.code):
-                next_instr = self.code[self.ip]
-                if next_instr.opcode in (Op.LOOP_END, Op.CONST_UNIT):
-                    self.ip += 1
-                    break
-                self.ip += 1
+        """处理 break：清理 for 循环栈并跳到循环结束
+
+        编译器在 for 循环中使用 BREAK 指令（携带跳转目标）。
+        栈上有 [iterable, result_list]，弹出两者后压入 result_list 作为循环结果。
+        while 循环的 break 使用 JUMP 指令，不经过此 handler。
+        """
+        target_ip = instr.operands[0]
+        # For 循环：栈为 [iterable, result_list]
+        # _compile_block 的 POP 保证 break 发生时无额外值在栈上
+        if len(self.stack) >= 2:
+            result_list = self.stack.pop()
+            self.stack.pop()  # iterable
+            self.stack.append(result_list)  # 保留 result_list 作为循环结果
+        self.ip = target_ip
 
     def _op_continue(self, instr):
-        if self._for_iters:
-            self.ip = self._for_iters[-1]["loop_start"]
-        # while 循环中的 continue 由编译器生成适当的跳转处理
+        """处理 continue
+
+        编译器直接使用 JUMP 指令实现 continue（跳到 loop_start）。
+        此 handler 不会被调用，保留作为安全兜底。
+        """
+        pass
 
     def _op_loop(self, instr):
         loop_start = instr.operands[0]

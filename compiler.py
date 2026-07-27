@@ -253,6 +253,7 @@ class BytecodeCompiler:
         self._builtin_names: set = set()
         self._init_builtin_names()
         self._expr_dispatch = self._build_expr_dispatch_table()
+        self._loop_stack: List[Dict] = []  # 循环上下文栈，管理 break/continue 跳转目标
 
     def _build_expr_dispatch_table(self):
         """
@@ -495,16 +496,19 @@ class BytecodeCompiler:
         """编译 let 绑定"""
         self._compile_expr(expr.value)
         self.bytecode.emit_op(Op.STORE_VAR, expr.name, False)
+        self.bytecode.emit_op(Op.CONST_UNIT)  # 绑定语句求值结果为 Unit
 
     def _compile_mut_binding(self, expr: MutBinding):
         """编译 mut 绑定"""
         self._compile_expr(expr.value)
         self.bytecode.emit_op(Op.STORE_VAR, expr.name, True)
+        self.bytecode.emit_op(Op.CONST_UNIT)  # 绑定语句求值结果为 Unit
 
     def _compile_assignment(self, expr: Assignment):
         """编译赋值表达式"""
         self._compile_expr(expr.value)
         self.bytecode.emit_op(Op.STORE_VAR, expr.name, True)
+        self.bytecode.emit_op(Op.CONST_UNIT)  # 赋值语句求值结果为 Unit
 
     # ---- 数据结构 ----
 
@@ -535,32 +539,63 @@ class BytecodeCompiler:
     # ---- 循环 ----
 
     def _compile_break_expr(self, expr: BreakExpr):
-        """编译 break 表达式"""
-        self.bytecode.emit_op(Op.BREAK)
+        """编译 break 表达式
+
+        For 循环中：使用 BREAK 指令（VM 负责清理 [iterable, result_list] 栈并保留 result_list）
+        While 循环中：使用 JUMP 指令直接跳转（栈已干净，无需清理）
+        跳转目标在循环结束后回填。
+        """
+        if not self._loop_stack:
+            raise RuntimeError("break 必须在循环内使用")
+        ctx = self._loop_stack[-1]
+        if ctx['type'] == 'for':
+            # BREAK 指令：VM 清理 for 循环栈后跳转
+            jump_pos = self.bytecode.current_pos()
+            self.bytecode.emit_op(Op.BREAK, 0)  # target 占位
+            ctx['break_jumps'].append(jump_pos)
+        else:  # while
+            jump_pos = self.bytecode.current_pos()
+            self.bytecode.emit_op(Op.JUMP, 0)  # 占位
+            ctx['break_jumps'].append(jump_pos)
 
     def _compile_continue_expr(self, expr: ContinueExpr):
-        """编译 continue 表达式"""
-        self.bytecode.emit_op(Op.CONTINUE)
+        """编译 continue 表达式
+
+        For 和 while 循环：直接 JUMP 到 loop_start。
+        _compile_block 的 POP 保证 continue 发生时栈已干净。
+        """
+        if not self._loop_stack:
+            raise RuntimeError("continue 必须在循环内使用")
+        ctx = self._loop_stack[-1]
+        self.bytecode.emit_op(Op.JUMP, ctx['loop_start'])
 
     def _compile_binary_op(self, expr: BinaryOp):
         """编译二元操作"""
         op = expr.op
 
         if op == "&&":
+            # 短路求值：DUP 保留左值副本，POP_JUMP_IF_FALSE 弹出副本判断
+            # - left 为 false：副本弹出后保留原 false，跳到 end（结果 = false）
+            # - left 为 true：POP 弹出 true 副本，求值 right（结果 = right）
             self._compile_expr(expr.left)
+            self.bytecode.emit_op(Op.DUP)
             jump_pos = self.bytecode.current_pos()
             self.bytecode.emit_op(Op.POP_JUMP_IF_FALSE, 0)
+            self.bytecode.emit_op(Op.POP)
             self._compile_expr(expr.right)
             end_pos = self.bytecode.current_pos()
             self.bytecode.patch_jump(jump_pos, end_pos)
             return
 
         if op == "||":
+            # 短路求值：DUP 保留左值副本，JUMP_IF_TRUE 弹出副本判断
+            # - left 为 true：副本弹出后保留原 true，跳到 end（结果 = true）
+            # - left 为 false：POP 弹出 false 副本，求值 right（结果 = right）
             self._compile_expr(expr.left)
+            self.bytecode.emit_op(Op.DUP)
             jump_pos = self.bytecode.current_pos()
             self.bytecode.emit_op(Op.JUMP_IF_TRUE, 0)
-            # 如果 left 为 true，需要在栈上保留 true
-            # JUMP_IF_TRUE 不弹出，所以跳到 end 即可
+            self.bytecode.emit_op(Op.POP)
             self._compile_expr(expr.right)
             end_pos = self.bytecode.current_pos()
             self.bytecode.patch_jump(jump_pos, end_pos)
@@ -713,16 +748,24 @@ class BytecodeCompiler:
             end_pos = self.bytecode.current_pos()
             self.bytecode.patch_jump(jump_to_end, end_pos)
         else:
-            jump_to_end = self.bytecode.current_pos()
+            # 无 else：true 路径执行 then_branch 后需跳过 CONST_UNIT
+            jump_to_unit = self.bytecode.current_pos()
             self.bytecode.emit_op(Op.JUMP_IF_FALSE, 0)
 
             self._compile_expr(expr.then_branch)
 
-            end_pos = self.bytecode.current_pos()
-            self.bytecode.patch_jump(jump_to_end, end_pos)
+            # 跳过 CONST_UNIT，保留 then_branch 结果
+            jump_past_unit = self.bytecode.current_pos()
+            self.bytecode.emit_op(Op.JUMP, 0)
+
+            unit_pos = self.bytecode.current_pos()
+            self.bytecode.patch_jump(jump_to_unit, unit_pos)
 
             # 无 else 时，false 路径推入 Unit
             self.bytecode.emit_op(Op.CONST_UNIT)
+
+            end_pos = self.bytecode.current_pos()
+            self.bytecode.patch_jump(jump_past_unit, end_pos)
 
     def _compile_match(self, expr: MatchExpr):
         """编译模式匹配"""
@@ -834,16 +877,26 @@ class BytecodeCompiler:
             self.bytecode.emit_op(Op.POP)
 
     def _compile_block(self, expr: Block):
-        """编译代码块"""
+        """编译代码块
+
+        每个中间语句的求值结果弹出（POP），仅保留尾表达式的结果。
+        绑定语句（let/mut/assign）求值结果为 Unit，确保每条语句恰好留一个值。
+        """
         for stmt in expr.statements:
             self._compile_expr(stmt)
+            self.bytecode.emit_op(Op.POP)  # 弹出中间语句的结果
         if expr.tail_expression:
             self._compile_expr(expr.tail_expression)
         else:
             self.bytecode.emit_op(Op.CONST_UNIT)
 
     def _compile_for(self, expr: ForExpr):
-        """编译 for 循环"""
+        """编译 for 循环
+
+        栈布局：迭代期间保持 [iterable, result_list]。
+        循环体每次迭代留一个 body_result，LOOP_END 追加到 result_list。
+        break 使用 BREAK 指令（VM 负责清理栈），continue 使用 JUMP 回 loop_start。
+        """
         # 确定迭代器
         if (
             isinstance(expr.iterable, tuple)
@@ -870,6 +923,13 @@ class BytecodeCompiler:
         # 绑定循环变量
         self.bytecode.emit_op(Op.STORE_VAR, expr.var_name, False)
 
+        # 压入循环上下文（break/continue 跳转目标管理）
+        self._loop_stack.append({
+            'type': 'for',
+            'loop_start': loop_start,
+            'break_jumps': [],
+        })
+
         # 此时栈: [iterable, result_list]
         # 编译循环体
         self._compile_expr(expr.body)
@@ -884,14 +944,30 @@ class BytecodeCompiler:
         end_pos = self.bytecode.current_pos()
         self.bytecode.patch_jump(loop_start, end_pos)
 
+        # 回填所有 break 跳转到循环结束
+        for jump_pos in self._loop_stack[-1]['break_jumps']:
+            self.bytecode.patch_jump(jump_pos, end_pos)
+
+        self._loop_stack.pop()
+
     def _compile_while(self, expr: WhileExpr):
-        """编译 while 循环"""
+        """编译 while 循环
+
+        break 使用 JUMP 指令跳到循环结束，continue 使用 JUMP 回 loop_start。
+        """
         loop_start = self.bytecode.current_pos()
 
         self._compile_expr(expr.condition)
 
         jump_to_end = self.bytecode.current_pos()
         self.bytecode.emit_op(Op.POP_JUMP_IF_FALSE, 0)
+
+        # 压入循环上下文
+        self._loop_stack.append({
+            'type': 'while',
+            'loop_start': loop_start,
+            'break_jumps': [],
+        })
 
         self._compile_expr(expr.body)
         self.bytecode.emit_op(Op.POP)  # 弹出体结果
@@ -900,6 +976,12 @@ class BytecodeCompiler:
 
         end_pos = self.bytecode.current_pos()
         self.bytecode.patch_jump(jump_to_end, end_pos)
+
+        # 回填所有 break 跳转到循环结束
+        for jump_pos in self._loop_stack[-1]['break_jumps']:
+            self.bytecode.patch_jump(jump_pos, end_pos)
+
+        self._loop_stack.pop()
 
         self.bytecode.emit_op(Op.CONST_UNIT)
 

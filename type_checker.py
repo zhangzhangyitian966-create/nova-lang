@@ -1087,130 +1087,164 @@ class TypeChecker:
     ) -> bool:
         """递归检查一组模式是否集体完备地覆盖给定类型的所有值。
 
-        支持嵌套模式：
-        - ADT 构造器：递归检查所有构造器及其子模式的完备性
-        - 元组：递归检查每个位置的完备性
-        - Bool：检查 true 和 false 都被覆盖
-        - 列表：基本完备性检查（保守策略）
-        - Int/Float/String/Char：无限值域，无通配符则不完备
+        采用类型分发策略，将不同类型的完备性检查委托给专属子方法：
+        - ADT 构造器 → _check_adt_exhaustive
+        - Bool → _check_bool_exhaustive
+        - 元组 → _check_tuple_exhaustive
+        - 列表 → _check_list_exhaustive
+        - Int/Float/String/Char → 无限值域，无通配符则不完备
+
+        通配符 _ 和变量绑定 x 匹配任意值，在完备性分析中视为完全覆盖。
         """
         # 通配符/变量绑定 → 完备
         for p in patterns:
             if self._is_wildcard_like(p):
                 return True
 
-        from .ast_nodes import (
-            PatternBool,
-            PatternConstructor,
-            PatternList,
-            PatternTuple,
-        )
-
-        # ADT 类型：检查所有构造器是否被完全覆盖
+        # 按类型分发到专属检查方法
         if isinstance(subject_type, ADTType):
-            all_variants = self.env.get_all_adt_variants()
-            variants = all_variants.get(subject_type.name)
-            if not variants:
-                return True  # 无法确定变体信息，假设完备
-
-            # 收集每个构造器的子模式列表
-            covered = {}  # constructor_name -> List[List[Pattern]]
-            for p in patterns:
-                if isinstance(p, PatternConstructor):
-                    if p.name in {vname for vname, _ in variants}:
-                        if p.name not in covered:
-                            covered[p.name] = []
-                        covered[p.name].append(p.fields)
-
-            for vname, ftypes in variants:
-                if vname not in covered:
-                    return False  # 构造器未覆盖
-                # 递归检查子模式是否集体完备
-                if not self._check_sub_patterns_exhaustive(
-                    covered[vname], ftypes
-                ):
-                    return False
-            return True
-
-        # Bool 类型：检查 true 和 false 都被覆盖
+            return self._check_adt_exhaustive(patterns, subject_type)
         if isinstance(subject_type, PrimType) and subject_type.name == "Bool":
-            covered_bools = set()
-            for p in patterns:
-                if isinstance(p, PatternBool):
-                    covered_bools.add(str(p.value))
-            return "True" in covered_bools and "False" in covered_bools
-
-        # 元组类型：递归检查每个位置是否集体完备
+            return self._check_bool_exhaustive(patterns)
         if isinstance(subject_type, TupleType):
-            tuple_patterns = [p for p in patterns if isinstance(p, PatternTuple)]
-            if not tuple_patterns:
-                return False
-            for i, elem_type in enumerate(subject_type.elements):
-                pos_patterns = [
-                    p.elements[i]
-                    for p in tuple_patterns
-                    if i < len(p.elements)
-                ]
-                if not self._check_patterns_exhaustive(pos_patterns, elem_type):
-                    return False
-            return True
-
-        # List 类型：列表长度无限，固定长度的 PatternList 无法覆盖所有长度。
-        # 通配符/变量绑定已在上方处理，到达此处意味着没有通配符覆盖。
-        # 进行精细分析：
-        # 1. 收集所有 PatternList 模式，按长度分组
-        # 2. 检查每个长度组的元素模式是否集体完备
-        # 3. 即使所有已知长度都完备，由于列表长度无限，整体仍不完备
-        #    （除非有 cons/rest 模式，但 Nova 当前不支持）
-        # 分析结果存储在 self._last_list_exhaustive_info 中用于错误消息
+            return self._check_tuple_exhaustive(patterns, subject_type)
         if isinstance(subject_type, ListType):
-            list_patterns = [p for p in patterns if isinstance(p, PatternList)]
-            if list_patterns:
-                # 按长度分组
-                by_length: Dict[int, List] = {}
-                for p in list_patterns:
-                    n = len(p.elements)
-                    if n not in by_length:
-                        by_length[n] = []
-                    by_length[n].append(p)
-
-                # 检查每个长度组的元素是否完备
-                lengths_covered = set()
-                for length, pats in by_length.items():
-                    if length == 0:
-                        # 空列表：只要有一个 [] 模式就覆盖了
-                        lengths_covered.add(0)
-                    else:
-                        # 非空列表：检查每个位置的元素模式是否集体完备
-                        all_positions_complete = True
-                        for i in range(length):
-                            pos_patterns = [
-                                p.elements[i]
-                                for p in pats
-                                if i < len(p.elements)
-                            ]
-                            if not self._check_patterns_exhaustive(
-                                pos_patterns, subject_type.elem_type
-                            ):
-                                all_positions_complete = False
-                                break
-                        if all_positions_complete:
-                            lengths_covered.add(length)
-
-                # 存储分析结果供错误消息使用
-                self._last_list_exhaustive_info = {
-                    "lengths_covered": sorted(lengths_covered),
-                    "total_length_groups": len(by_length),
-                }
-            else:
-                self._last_list_exhaustive_info = {
-                    "lengths_covered": [],
-                    "total_length_groups": 0,
-                }
-            # 列表长度无限，固定长度模式永远无法完全覆盖
-            return False
+            return self._check_list_exhaustive(patterns, subject_type)
 
         # Int/Float/String/Char：无限值域，无通配符则不完备
+        return False
+
+    def _check_adt_exhaustive(
+        self, patterns: List, subject_type: ADTType
+    ) -> bool:
+        """检查 ADT 构造器模式是否覆盖所有变体。
+
+        遍历所有构造器变体，收集每个变体的子模式列表，
+        递归验证每个变体的子模式是否集体完备。
+        """
+        from .ast_nodes import PatternConstructor
+
+        all_variants = self.env.get_all_adt_variants()
+        variants = all_variants.get(subject_type.name)
+        if not variants:
+            return True  # 无法确定变体信息，假设完备
+
+        # 收集每个构造器的子模式列表
+        covered = {}  # constructor_name -> List[List[Pattern]]
+        for p in patterns:
+            if isinstance(p, PatternConstructor):
+                if p.name in {vname for vname, _ in variants}:
+                    if p.name not in covered:
+                        covered[p.name] = []
+                    covered[p.name].append(p.fields)
+
+        for vname, ftypes in variants:
+            if vname not in covered:
+                return False  # 构造器未覆盖
+            # 递归检查子模式是否集体完备
+            if not self._check_sub_patterns_exhaustive(
+                covered[vname], ftypes
+            ):
+                return False
+        return True
+
+    def _check_bool_exhaustive(self, patterns: List) -> bool:
+        """检查 Bool 模式是否同时覆盖 true 和 false。
+
+        收集所有 PatternBool 的值，验证 True 和 False 都被覆盖。
+        """
+        from .ast_nodes import PatternBool
+
+        covered_bools = set()
+        for p in patterns:
+            if isinstance(p, PatternBool):
+                covered_bools.add(str(p.value))
+        return "True" in covered_bools and "False" in covered_bools
+
+    def _check_tuple_exhaustive(
+        self, patterns: List, subject_type: TupleType
+    ) -> bool:
+        """检查元组模式是否覆盖每个位置的子类型。
+
+        对每个元素位置，收集所有 PatternTuple 在该位置的子模式，
+        递归调用 _check_patterns_exhaustive 验证每个位置是否完备。
+        """
+        from .ast_nodes import PatternTuple
+
+        tuple_patterns = [p for p in patterns if isinstance(p, PatternTuple)]
+        if not tuple_patterns:
+            return False
+        for i, elem_type in enumerate(subject_type.elements):
+            pos_patterns = [
+                p.elements[i]
+                for p in tuple_patterns
+                if i < len(p.elements)
+            ]
+            if not self._check_patterns_exhaustive(pos_patterns, elem_type):
+                return False
+        return True
+
+    def _check_list_exhaustive(
+        self, patterns: List, subject_type: ListType
+    ) -> bool:
+        """检查列表模式的完备性并存储分析信息。
+
+        列表长度无限，固定长度的 PatternList 无法覆盖所有长度。
+        进行精细分析：
+        1. 收集所有 PatternList 模式，按长度分组
+        2. 检查每个长度组的元素模式是否集体完备
+        3. 即使所有已知长度都完备，由于列表长度无限，整体仍不完备
+           （除非有 cons/rest 模式，但 Nova 当前不支持）
+
+        分析结果存储在 self._last_list_exhaustive_info 中用于错误消息。
+        无论结果如何，恒返回 False（列表长度无限）。
+        """
+        from .ast_nodes import PatternList
+
+        list_patterns = [p for p in patterns if isinstance(p, PatternList)]
+        if list_patterns:
+            # 按长度分组
+            by_length: Dict[int, List] = {}
+            for p in list_patterns:
+                n = len(p.elements)
+                if n not in by_length:
+                    by_length[n] = []
+                by_length[n].append(p)
+
+            # 检查每个长度组的元素是否完备
+            lengths_covered = set()
+            for length, pats in by_length.items():
+                if length == 0:
+                    # 空列表：只要有一个 [] 模式就覆盖了
+                    lengths_covered.add(0)
+                else:
+                    # 非空列表：检查每个位置的元素模式是否集体完备
+                    all_positions_complete = True
+                    for i in range(length):
+                        pos_patterns = [
+                            p.elements[i]
+                            for p in pats
+                            if i < len(p.elements)
+                        ]
+                        if not self._check_patterns_exhaustive(
+                            pos_patterns, subject_type.elem_type
+                        ):
+                            all_positions_complete = False
+                            break
+                    if all_positions_complete:
+                        lengths_covered.add(length)
+
+            # 存储分析结果供错误消息使用
+            self._last_list_exhaustive_info = {
+                "lengths_covered": sorted(lengths_covered),
+                "total_length_groups": len(by_length),
+            }
+        else:
+            self._last_list_exhaustive_info = {
+                "lengths_covered": [],
+                "total_length_groups": 0,
+            }
+        # 列表长度无限，固定长度模式永远无法完全覆盖
         return False
 
     def _check_sub_patterns_exhaustive(
