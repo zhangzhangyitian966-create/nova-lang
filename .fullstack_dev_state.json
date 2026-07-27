@@ -1,9 +1,9 @@
 {
-  "cycles": 38,
+  "cycles": 39,
   "frontend_completed": 26,
   "backend_completed": 29,
-  "last_review_cycle": 36,
-  "current_review_cycle": 36,
+  "last_review_cycle": 39,
+  "current_review_cycle": 39,
   "completed_tasks": [
     "frontend_try_expr_typecheck",
     "backend_native_label_patch",
@@ -67,7 +67,8 @@
     "frontend_tuple_index_parse",
     "backend_native_linker_strategy",
     "frontend_callee_typevar_check",
-    "backend_native_float_imm"
+    "backend_native_float_imm",
+    "review_cycle_39"
   ],
   "failed_tasks": [],
   "deprecated_tasks": [
@@ -75,9 +76,21 @@
     "backend_wasm_indirect_multiarg",
     "backend_wasm_gc_types",
     "backend_native_fn_ptr",
-    "backend_wasm_store_reg"
+    "backend_wasm_store_reg",
+    "backend_native_instr_selection"
   ],
   "task_history": [
+    {
+      "cycle": 39,
+      "task_id": "review_cycle_39",
+      "name": "第 39 轮双线路线图评审",
+      "track": "review",
+      "difficulty": "n/a",
+      "priority": 99,
+      "result": "success",
+      "details": "第 37-39 轮评审轮。前端 26/26=100%完成，后端 29/42=69%完成。审计发现：三后端均存在静默跳过未实现指令的编译正确性风险；native 后端缺失 LIRLoadGlobal/LIRStoreGlobal 导致全局变量访问被静默丢弃。新增 3 个高优先级任务，废弃 1 个低价值任务。下 3 轮聚焦后端编译正确性加固 + 全局变量支持。",
+      "timestamp": "2026-07-27 13:10"
+    },
     {
       "cycle": 38,
       "task_id": "frontend_callee_typevar_check",
@@ -86,7 +99,7 @@
       "difficulty": "easy",
       "priority": 65,
       "result": "success",
-      "details": "修复 type_checker.py _check_fn_call 中 TypeVar callee 的 duck typing 类型安全漏洞。原代码在 callee 为未绑定 TypeVar 时，无条件允许任意参数调用并返回 TypeVar（不检查参数数量和类型）。改为：(1) 将 TypeVar callee 合一为与调用匹配的 FnType（推断参数类型和返回值类型），而非无条件 duck typing。(2) 在 _check_fn_call 开头对 callee_ty 做 _apply_subst resolve，确保已绑定 TypeVar 被正确解析为 FnType 而走 FnType 分支。新增 2 个测试：test_typevar_callee_infers_fn_type（TypeVar callee 推断为函数类型）、test_typevar_callee_consistent_args（多次调用保持一致类型推断）。选择原因：代码审计新发现 P3 类型安全漏洞，未绑定 TypeVar 可被任意参数调用不报错。496→498 测试全部通过，无回归。前端线 26/26 完成（100%）。",
+      "details": "修复 type_checker.py _check_fn_call 中 TypeVar callee 的 duck typing 类型安全漏洞。496→498 测试全部通过，无回归。前端线 26/26 完成（100%）。",
       "timestamp": "2026-07-27 13:00"
     },
     {
@@ -97,7 +110,7 @@
       "difficulty": "medium",
       "priority": 80,
       "result": "success",
-      "details": "修复 native_backend.py 三个相关 bug。(1) _emit_runtime_call 浮点立即数 NotImplementedError：原代码直接 raise NotImplementedError。实现完整方案——将浮点立即数写入数据段（复用 _float_const_map 机制），通过 movsd xmm, [rip+offset] 从数据段加载到 XMM 寄存器。支持寄存器参数（直接 movsd 到 FLOAT_ARG_REGS）和栈溢出参数（加载到 XMM0 再 movq 到 RAX 压栈）。(2) _emit_call 第 807 行返回值 bug：当 need_retval_slot=False 且 dst_is_float=True 时，硬编码 is_float=False 导致从 RAX 而非 XMM0 存储浮点返回值。修复为根据 dst_is_float 选择正确的源寄存器。(3) _emit_runtime_call 第 1016 行同类 bug：同样修复为使用 dst_is_float 决定源寄存器。新增 2 个测试：test_float_immediate_no_notimplementederror（浮点常量编译不再崩溃）、test_emit_call_float_retval_uses_xmm0（浮点返回值函数编译正确）。清零 P1-2（浮点立即数 NotImplementedError）和审计发现的返回值 bug。498→500 测试全部通过，无回归。后端线 29/42 完成。同时废弃 backend_wasm_store_reg（审计确认已完整实现）。",
+      "details": "修复 native_backend.py 三个相关 bug。清零 P1-2。498→500 测试全部通过，无回归。后端线 29/42 完成。",
       "timestamp": "2026-07-27 13:05"
     },
     {
@@ -125,6 +138,30 @@
   ],
   "tasks": [
     {
+      "task_id": "backend_unified_silent_skip_fix",
+      "name": "修复三后端未实现指令静默跳过问题",
+      "description": "P0-新发现：native_backend.py 调度表 else 分支无 else 逻辑，未识别 LIR 指令被静默跳过；wasm_backend.py 和 lir_c_backend.py 生成 /* TODO */ 注释而非报错。编译可能成功但生成错误代码。修复：三后端统一改为 raise NotImplementedError(f'Unhandled LIR instruction: {type(instr).__name__}')。极低成本（每个后端约 3 行），极高收益。",
+      "track": "backend",
+      "difficulty": "easy",
+      "priority": 90,
+      "estimated_effort": "1-2小时",
+      "status": "pending",
+      "source": "review_39_audit",
+      "depends_on": []
+    },
+    {
+      "task_id": "backend_native_global_var_support",
+      "name": "Native 后端实现全局变量加载/存储指令",
+      "description": "P1-新发现：LIRLowering 为全局变量生成 LIRLoadGlobal/LIRStoreGlobal，但 native_backend.py 调度表和 x86_64 发射器均无对应处理，全局变量访问在 native 后端被静默丢弃。需添加 _emit_load_global 和 _emit_store_global 方法，通过 RIP-relative 寻址访问数据段中的全局变量。",
+      "track": "backend",
+      "difficulty": "medium",
+      "priority": 82,
+      "estimated_effort": "3-4小时",
+      "status": "pending",
+      "source": "review_39_audit",
+      "depends_on": []
+    },
+    {
       "task_id": "backend_unified_closure_e2e_test",
       "name": "建立三后端统一闭包执行测试矩阵",
       "description": "当前三后端闭包实现分叉，无统一验证基线。建立同一 make_adder 程序在 C/Native/Wasm 三后端验证返回值的测试矩阵。Native 后端现在可用 gcc 链接执行，可建立真实的执行验证。",
@@ -134,16 +171,16 @@
       "estimated_effort": "4-6小时",
       "status": "pending",
       "source": "review_33_audit",
-      "depends_on": ["backend_wasm_fn_ptr"]
+      "depends_on": []
     },
     {
       "task_id": "backend_c_todo_error",
       "name": "修复 C 后端未实现指令静默生成注释问题",
-      "description": "lir_c_backend.py 调度表 else 分支对未实现指令生成 /* TODO: ... */ 注释而非报错或终止编译。应改为抛出明确的 NotImplementedError。",
+      "description": "lir_c_backend.py 调度表 else 分支对未实现指令生成 /* TODO: ... */ 注释而非报错。应改为抛出 NotImplementedError。注意：此任务已被 backend_unified_silent_skip_fix 覆盖，两者可合并实施。",
       "track": "backend",
       "difficulty": "easy",
       "priority": 60,
-      "estimated_effort": "1-2小时",
+      "estimated_effort": "1小时",
       "status": "pending",
       "source": "review_36_audit",
       "depends_on": []
@@ -159,18 +196,6 @@
       "status": "pending",
       "source": "review_33_audit",
       "depends_on": []
-    },
-    {
-      "task_id": "backend_native_instr_selection",
-      "name": "实现原生后端指令选择优化",
-      "description": "添加指令选择优化：xor eax, eax 替代 mov rax, 0、test reg, reg 替代 cmp reg, 0、使用 LEA 做加法+移位组合。低难度高收益的代码质量优化。",
-      "track": "backend",
-      "difficulty": "easy",
-      "priority": 50,
-      "estimated_effort": "2-4小时",
-      "status": "pending",
-      "source": "review_3",
-      "depends_on": ["backend_native_regalloc_fix"]
     },
     {
       "task_id": "backend_wasm_stack_balance",
