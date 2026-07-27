@@ -944,12 +944,24 @@ class Parser:
                         args.append(self._parse_expression())
                 tok = self._expect(TokenType.RPAREN)
                 expr = FnCall(callee=expr, args=args, span=self._span(tok))
-            # 字段访问 expr.field
+            # 字段访问 expr.field 或元组数字索引 expr.0
             elif self._peek_type() == TokenType.DOT:
                 self._advance()
-                field_tok = self._expect(TokenType.IDENT)
+                # 支持两种形式：
+                #   obj.field  — 标识符字段名（ADT/结构体）
+                #   tuple.0    — 数字索引（元组）
+                if self._peek_type() == TokenType.IDENT:
+                    field_tok = self._advance()
+                    field_name = field_tok.value
+                elif self._peek_type() == TokenType.INT:
+                    field_tok = self._advance()
+                    field_name = field_tok.value
+                else:
+                    raise self._error(
+                        f"点号后期望字段名或数字索引，实际得到 {self._peek_type().name}"
+                    )
                 expr = FieldAccess(
-                    target=expr, field=field_tok.value, span=self._span(field_tok)
+                    target=expr, field=field_name, span=self._span(field_tok)
                 )
             else:
                 break

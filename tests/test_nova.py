@@ -705,6 +705,31 @@ class TestEvaluator(unittest.TestCase):
         ev = eval_source("let p = (1, 2)", check_types=False)
         self.assertEqual(ev.env.lookup("p"), (1, 2))
 
+    def test_tuple_field_access_by_index(self):
+        """元组数字索引访问：t.0, t.1"""
+        ev = eval_source(
+            """
+            let t = (42, 3.14, "hello")
+            let a = t.0
+            let b = t.1
+            let c = t.2
+            """,
+            check_types=True,
+        )
+        self.assertEqual(ev.env.lookup("a"), 42)
+        self.assertEqual(ev.env.lookup("b"), 3.14)
+        self.assertEqual(ev.env.lookup("c"), "hello")
+
+    def test_tuple_index_out_of_bounds(self):
+        """元组数字索引越界应报类型错误"""
+        with self.assertRaises(TypeCheckError):
+            eval_source("let t = (1, 2)\nlet x = t.5", check_types=True)
+
+    def test_tuple_index_non_numeric(self):
+        """元组用非数字字段名应报类型错误"""
+        with self.assertRaises(TypeCheckError):
+            eval_source("let t = (1, 2)\nlet x = t.foo", check_types=True)
+
     def test_closure(self):
         ev = eval_source(
             """

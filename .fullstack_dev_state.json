@@ -1,7 +1,7 @@
 {
-  "cycles": 36,
-  "frontend_completed": 24,
-  "backend_completed": 27,
+  "cycles": 37,
+  "frontend_completed": 25,
+  "backend_completed": 28,
   "last_review_cycle": 36,
   "current_review_cycle": 36,
   "completed_tasks": [
@@ -63,7 +63,9 @@
     "backend_wasm_fn_ptr",
     "frontend_recursive_fn_typecheck",
     "backend_c_trampoline_double_fix",
-    "review_cycle_36"
+    "review_cycle_36",
+    "frontend_tuple_index_parse",
+    "backend_native_linker_strategy"
   ],
   "failed_tasks": [],
   "deprecated_tasks": [
@@ -73,6 +75,28 @@
     "backend_native_fn_ptr"
   ],
   "task_history": [
+    {
+      "cycle": 37,
+      "task_id": "frontend_tuple_index_parse",
+      "name": "修复元组数字索引解析",
+      "track": "frontend",
+      "difficulty": "easy",
+      "priority": 65,
+      "result": "success",
+      "details": "修复 parser.py 点号后缀表达式只接受标识符字段名、不接受数字索引的问题。修改 _parse_postfix_expr 中 DOT 分支：新增 elif self._peek_type() == TokenType.INT 分支，将整数字面量作为 field_name 传给 FieldAccess 节点。这使得 t.0、t.1 等元组数字索引语法正确解析。新增 3 个测试：test_tuple_field_access_by_index（t.0/t.1/t.2 取值验证）、test_tuple_index_out_of_bounds（越界报 TypeCheckError）、test_tuple_index_non_numeric（非数字字段名报错）。选择原因：解析器代码分析发现元组索引是用户高频操作但当前完全不支持，修复简单且价值明确。496→499 测试全部通过，无回归。前端线 25/25 完成（100%）。",
+      "timestamp": "2026-07-27 12:00"
+    },
+    {
+      "cycle": 37,
+      "task_id": "backend_native_linker_strategy",
+      "name": "实现原生后端 gcc 链接方案（可重定位 ELF + gcc 链接）",
+      "track": "backend",
+      "difficulty": "hard",
+      "priority": 95,
+      "result": "success",
+      "details": "清零唯一 P0-B1（原生后端无链接器）。选择方案(b)：接入 gcc 作为链接器。实现内容：(1) compile() 方法新增 output_format 参数，支持 'elf'（独立可执行）和 'obj'（可重定位 .o 文件）两种输出格式。(2) 新增 _generate_relocatable_elf() 方法（约 350 行），生成完整 ELF64 可重定位目标文件，包含 .text/.data/.symtab/.strtab/.rela.text/.shstrtab/.note.GNU-stack 共 7 个节头，外部运行时符号（nova_init/cleanup/list_new 等）标记为 SHN_UNDEF，函数间调用和外部调用生成 R_X86_64_PC32 重定位条目。(3) 新增 compile_and_write() 方法，支持 use_gcc_link=True 参数，自动查找 libnova_runtime.a 并调用 gcc 进行链接（-no-pie -lm -lc -ldl）。(4) 新增 _compile_via_gcc() 方法，完整实现 .o 生成→临时文件→gcc 链接→清理的流程。(5) 新增 TestRelocatableELF 测试类 7 个测试：ELF 魔数验证、节头表存在、符号表包含 .symtab/.strtab、外部运行时符号 SHN_UNDEF、重定位表 .rela.text、不支持的格式报错、无 gcc 时报错。选择原因：P0-B1 是唯一 P0 问题，阻塞原生后端任何非 trivial 程序执行，战略价值最高。499→506 测试全部通过，无回归。后端线 28/42 完成。",
+      "timestamp": "2026-07-27 12:05"
+    },
     {
       "cycle": 36,
       "task_id": "review_cycle_36",
@@ -197,21 +221,33 @@
   ],
   "tasks": [
     {
-      "task_id": "backend_native_linker_strategy",
-      "name": "原生后端链接器战略决策与实现",
-      "description": "P0-B1：native_backend.py 无链接器，所有 nova_* 运行时函数 call rel32 保持 0 偏移，ELF 不可执行任何非 trivial 程序。三选一决策：(a) 内置链接器嵌入 nova_runtime.o；(b) 接入 gcc 作为链接器（放弃零依赖）；(c) 暂时降级原生后端为代码生成器，执行依赖 C 后端。这是战略级决策。",
+      "task_id": "backend_native_float_imm",
+      "name": "实现原生后端浮点立即数参数加载",
+      "description": "native_backend.py _emit_call 在处理浮点立即数参数时触发 NotImplementedError。需要补充 XMM 寄存器加载浮点立即数的指令发射逻辑：将浮点立即数写入 .rodata 段，通过 movsd xmm, [rip+offset] 加载。",
       "track": "backend",
-      "difficulty": "hard",
-      "priority": 95,
-      "estimated_effort": "1-2天",
+      "difficulty": "medium",
+      "priority": 80,
+      "estimated_effort": "3-4小时",
       "status": "pending",
-      "source": "review_33_audit",
+      "source": "review_36_audit",
+      "depends_on": []
+    },
+    {
+      "task_id": "backend_wasm_store_reg",
+      "name": "实现 Wasm 后端 LIRStoreReg 指令",
+      "description": "wasm_backend.py 中 LIRStoreReg 指令未完整实现，生成 ;; TODO: ... ;; 注释。需要实现完整的 local.set/local.tee 映射。",
+      "track": "backend",
+      "difficulty": "medium",
+      "priority": 75,
+      "estimated_effort": "3-5小时",
+      "status": "pending",
+      "source": "review_36_audit",
       "depends_on": []
     },
     {
       "task_id": "backend_unified_closure_e2e_test",
       "name": "建立三后端统一闭包执行测试矩阵",
-      "description": "当前三后端闭包实现分叉，无统一验证基线。建立同一 make_adder 程序在 C/Native/Wasm 三后端验证返回值的测试矩阵。C 后端用 gcc 编译执行、Native 后端用 ELF 执行（依赖链接器）、Wasm 后端用 wat2wasm+wasmtime 验证。",
+      "description": "当前三后端闭包实现分叉，无统一验证基线。建立同一 make_adder 程序在 C/Native/Wasm 三后端验证返回值的测试矩阵。Native 后端现在可用 gcc 链接执行，可建立真实的执行验证。",
       "track": "backend",
       "difficulty": "medium",
       "priority": 72,
@@ -221,36 +257,12 @@
       "depends_on": ["backend_wasm_fn_ptr"]
     },
     {
-      "task_id": "backend_wasm_store_reg",
-      "name": "实现 Wasm 后端 LIRStoreReg 指令",
-      "description": "wasm_backend.py 中 LIRStoreReg 指令未完整实现，生成 ;; TODO: ... ;; 注释。这导致涉及寄存器存储的代码在 Wasm 目标下行为不正确或无法编译。需要实现完整的 local.set/local.tee 映射。",
-      "track": "backend",
-      "difficulty": "medium",
-      "priority": 70,
-      "estimated_effort": "3-5小时",
-      "status": "pending",
-      "source": "review_36_audit",
-      "depends_on": []
-    },
-    {
-      "task_id": "backend_native_float_imm",
-      "name": "实现原生后端浮点立即数参数加载",
-      "description": "native_backend.py _emit_call 在处理浮点立即数参数时触发 NotImplementedError（line 941 附近）。需要补充 XMM 寄存器加载浮点立即数的指令发射逻辑。",
-      "track": "backend",
-      "difficulty": "medium",
-      "priority": 60,
-      "estimated_effort": "3-4小时",
-      "status": "pending",
-      "source": "review_36_audit",
-      "depends_on": []
-    },
-    {
       "task_id": "backend_c_todo_error",
       "name": "修复 C 后端未实现指令静默生成注释问题",
-      "description": "lir_c_backend.py 调度表 else 分支对未实现指令生成 /* TODO: ... */ 注释而非报错或终止编译。这意味着某些边界程序可能生成无法编译的 C 代码。应改为抛出明确的 NotImplementedError。",
+      "description": "lir_c_backend.py 调度表 else 分支对未实现指令生成 /* TODO: ... */ 注释而非报错或终止编译。应改为抛出明确的 NotImplementedError。",
       "track": "backend",
       "difficulty": "easy",
-      "priority": 55,
+      "priority": 60,
       "estimated_effort": "1-2小时",
       "status": "pending",
       "source": "review_36_audit",
@@ -262,7 +274,7 @@
       "description": "P1-B2：native_backend.py 寄存器分配器不感知调用点，靠手动 push 全部 caller-saved 兜底（正确但极低效）。修复：在调用点添加活跃区间切口，仅保存实际被 caller-saved 寄存器占用且活跃的 vreg。",
       "track": "backend",
       "difficulty": "hard",
-      "priority": 52,
+      "priority": 55,
       "estimated_effort": "6-8小时",
       "status": "pending",
       "source": "review_33_audit",

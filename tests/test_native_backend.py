@@ -431,5 +431,215 @@ class TestEndToEndNative(unittest.TestCase):
         self.assertEqual(len(ph), 56)
 
 
+class TestRelocatableELF(unittest.TestCase):
+    """可重定位 ELF (.o) 文件生成测试"""
+
+    def test_obj_is_elf(self):
+        """obj 格式产出合法的 ELF 文件"""
+        codegen = NativeCodeGen()
+        lir = LIRModule(name="test")
+        fn = LIRFunction("main", [], INT_TYPE)
+        fn.body = [
+            LIRLoadConst(value=0, const_type="int"),
+            LIRReturn(),
+        ]
+        lir.functions["main"] = fn
+
+        obj = codegen.compile(lir, output_format="obj")
+        self.assertEqual(obj[0:4], b'\x7fELF')
+        # e_type 应为 ET_REL (1)
+        e_type = struct.unpack('<H', obj[16:18])[0]
+        self.assertEqual(e_type, 1)
+
+    def test_obj_has_section_headers(self):
+        """obj 格式应有 section header table"""
+        codegen = NativeCodeGen()
+        lir = LIRModule(name="test")
+        fn = LIRFunction("main", [], INT_TYPE)
+        fn.body = [
+            LIRLoadConst(value=0, const_type="int"),
+            LIRReturn(),
+        ]
+        lir.functions["main"] = fn
+
+        obj = codegen.compile(lir, output_format="obj")
+        e_shoff = struct.unpack('<Q', obj[40:48])[0]
+        e_shnum = struct.unpack('<H', obj[60:62])[0]
+        self.assertGreater(e_shoff, 0, "shoff 应非零")
+        self.assertGreater(e_shnum, 0, "shnum 应非零")
+        # 每个节头 64 字节
+        self.assertEqual(len(obj), e_shoff + e_shnum * 64)
+
+    def test_obj_has_symtab(self):
+        """obj 格式应包含 .symtab 和 .strtab 节"""
+        codegen = NativeCodeGen()
+        lir = LIRModule(name="test")
+        fn = LIRFunction("main", [], INT_TYPE)
+        fn.body = [
+            LIRLoadConst(value=0, const_type="int"),
+            LIRReturn(),
+        ]
+        lir.functions["main"] = fn
+
+        obj = codegen.compile(lir, output_format="obj")
+        # 读取 shstrtab 获取节名
+        e_shoff = struct.unpack('<Q', obj[40:48])[0]
+        e_shnum = struct.unpack('<H', obj[60:62])[0]
+        e_shstrndx = struct.unpack('<H', obj[62:64])[0]
+
+        # 读取 shstrtab 的节头
+        shstr_shdr_off = e_shoff + e_shstrndx * 64
+        sh_offset = struct.unpack('<Q', obj[shstr_shdr_off+24:shstr_shdr_off+32])[0]
+        sh_size = struct.unpack('<Q', obj[shstr_shdr_off+32:shstr_shdr_off+40])[0]
+        shstrtab = obj[sh_offset:sh_offset+sh_size]
+
+        # 检查节名
+        section_names = set()
+        for i in range(e_shnum):
+            shdr_off = e_shoff + i * 64
+            sh_name_idx = struct.unpack('<I', obj[shdr_off:shdr_off+4])[0]
+            # 找到 NUL 终止的字符串
+            nul = shstrtab.find(b'\x00', sh_name_idx)
+            name = shstrtab[sh_name_idx:nul].decode('utf-8')
+            section_names.add(name)
+
+        self.assertIn('.text', section_names)
+        self.assertIn('.symtab', section_names)
+        self.assertIn('.strtab', section_names)
+        self.assertIn('.shstrtab', section_names)
+
+    def test_obj_has_external_symbols(self):
+        """obj 格式应包含 nova_init, nova_cleanup 等外部符号"""
+        codegen = NativeCodeGen()
+        lir = LIRModule(name="test")
+        fn = LIRFunction("main", [], INT_TYPE)
+        fn.body = [
+            LIRLoadConst(value=0, const_type="int"),
+            LIRReturn(),
+        ]
+        lir.functions["main"] = fn
+
+        obj = codegen.compile(lir, output_format="obj")
+
+        # 找到 .symtab 和 .strtab
+        e_shoff = struct.unpack('<Q', obj[40:48])[0]
+        e_shnum = struct.unpack('<H', obj[60:62])[0]
+        e_shstrndx = struct.unpack('<H', obj[62:64])[0]
+        shstr_shdr_off = e_shoff + e_shstrndx * 64
+        sh_offset = struct.unpack('<Q', obj[shstr_shdr_off+24:shstr_shdr_off+32])[0]
+        sh_size = struct.unpack('<Q', obj[shstr_shdr_off+32:shstr_shdr_off+40])[0]
+        shstrtab = obj[sh_offset:sh_offset+sh_size]
+
+        symtab_off = None
+        strtab_off = None
+        symtab_entsize = None
+        for i in range(e_shnum):
+            shdr_off = e_shoff + i * 64
+            sh_name_idx = struct.unpack('<I', obj[shdr_off:shdr_off+4])[0]
+            nul = shstrtab.find(b'\x00', sh_name_idx)
+            name = shstrtab[sh_name_idx:nul].decode('utf-8')
+            if name == '.symtab':
+                symtab_off = struct.unpack('<Q', obj[shdr_off+24:shdr_off+32])[0]
+                symtab_entsize = struct.unpack('<Q', obj[shdr_off+56:shdr_off+64])[0]
+            elif name == '.strtab':
+                strtab_off = struct.unpack('<Q', obj[shdr_off+24:shdr_off+32])[0]
+
+        self.assertIsNotNone(symtab_off, "应包含 .symtab")
+        self.assertIsNotNone(strtab_off, "应包含 .strtab")
+
+        # 读取所有符号名
+        sym_names = set()
+        strtab = obj[strtab_off:]
+        # 遍历符号表
+        idx = 0
+        while True:
+            off = symtab_off + idx * 24  # ELF64_SYM_SIZE = 24
+            if off + 24 > len(obj):
+                break
+            st_name = struct.unpack('<I', obj[off:off+4])[0]
+            st_info = obj[off+4]
+            st_shndx = struct.unpack('<H', obj[off+6:off+8])[0]
+
+            # 从 strtab 读名称
+            nul = strtab.find(b'\x00', st_name)
+            if nul < 0:
+                break
+            name = strtab[st_name:nul].decode('utf-8')
+            if name:
+                sym_names.add(name)
+            idx += 1
+            # 符号表由 sh_info 标记的局部/全局边界
+            # 简单做法：最多读 100 个
+            if idx > 100:
+                break
+
+        # 应包含 main 和 _start（全局函数符号）
+        self.assertIn('main', sym_names)
+        self.assertIn('_start', sym_names)
+        # 应包含外部运行时符号
+        self.assertIn('nova_init', sym_names)
+        self.assertIn('nova_cleanup', sym_names)
+
+    def test_obj_has_rela_text(self):
+        """obj 格式应包含 .rela.text 重定位表"""
+        codegen = NativeCodeGen()
+        lir = LIRModule(name="test")
+        fn = LIRFunction("main", [], INT_TYPE)
+        fn.body = [
+            LIRLoadConst(value=0, const_type="int"),
+            LIRReturn(),
+        ]
+        lir.functions["main"] = fn
+
+        obj = codegen.compile(lir, output_format="obj")
+
+        # 找到 .rela.text 节
+        e_shoff = struct.unpack('<Q', obj[40:48])[0]
+        e_shnum = struct.unpack('<H', obj[60:62])[0]
+        e_shstrndx = struct.unpack('<H', obj[62:64])[0]
+        shstr_shdr_off = e_shoff + e_shstrndx * 64
+        sh_offset = struct.unpack('<Q', obj[shstr_shdr_off+24:shstr_shdr_off+32])[0]
+        sh_size = struct.unpack('<Q', obj[shstr_shdr_off+32:shstr_shdr_off+40])[0]
+        shstrtab = obj[sh_offset:sh_offset+sh_size]
+
+        rela_text_size = 0
+        for i in range(e_shnum):
+            shdr_off = e_shoff + i * 64
+            sh_name_idx = struct.unpack('<I', obj[shdr_off:shdr_off+4])[0]
+            nul = shstrtab.find(b'\x00', sh_name_idx)
+            name = shstrtab[sh_name_idx:nul].decode('utf-8')
+            if name == '.rela.text':
+                rela_text_size = struct.unpack('<Q', obj[shdr_off+32:shdr_off+40])[0]
+                break
+
+        # _start 调用 nova_init, main, nova_cleanup -> 至少 3 个重定位
+        self.assertGreaterEqual(rela_text_size, 3 * 24)
+
+    def test_obj_format_invalid(self):
+        """不支持的输出格式应抛出 ValueError"""
+        codegen = NativeCodeGen()
+        lir = LIRModule(name="test")
+        fn = LIRFunction("main", [], INT_TYPE)
+        fn.body = [LIRLoadConst(value=0, const_type="int"), LIRReturn()]
+        lir.functions["main"] = fn
+
+        with self.assertRaises(ValueError):
+            codegen.compile(lir, output_format="coff")
+
+    def test_gcc_link_no_gcc(self):
+        """没有 gcc 时 _compile_via_gcc 应报错"""
+        codegen = NativeCodeGen()
+        lir = LIRModule(name="test")
+        fn = LIRFunction("main", [], INT_TYPE)
+        fn.body = [LIRLoadConst(value=0, const_type="int"), LIRReturn()]
+        lir.functions["main"] = fn
+
+        import os as _os
+        import unittest.mock as mock
+        with mock.patch('shutil.which', return_value=None):
+            with self.assertRaises(EnvironmentError):
+                codegen._compile_via_gcc(lir, "/tmp/test_nova_gcc")
+
+
 if __name__ == '__main__':
     unittest.main()

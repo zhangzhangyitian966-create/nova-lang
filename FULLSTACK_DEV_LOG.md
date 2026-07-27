@@ -4,6 +4,103 @@
 
 ---
 
+## 第 37 轮 — 2026-07-27 12:05
+
+> 普通开发轮 | 前端 + 后端双线完成 | P0-B1 清零
+
+---
+
+### 本轮概览
+
+| 维度 | 数据 |
+|------|------|
+| 前端任务 | 修复元组数字索引解析（frontend_tuple_index_parse） |
+| 后端任务 | 实现原生后端 gcc 链接方案（backend_native_linker_strategy） |
+| 测试基线 | 496 passed |
+| 测试结果 | 506 passed（+10），0 failed |
+| 回归 | 无 |
+| 前端完成率 | 25/25 = **100%** |
+| 后端完成率 | 28/42 = **66.7%** |
+| P0 清零 | P0-B1（原生后端无链接器） |
+
+---
+
+### 前端任务：修复元组数字索引解析
+
+**任务 ID**: frontend_tuple_index_parse
+**难度**: easy | **结果**: 成功
+
+**为什么选这个**: 解析器代码分析发现 `t.0`、`t.1` 等元组数字索引是用户高频操作，但 parser.py 的 `_parse_postfix_expr` DOT 分支只接受 `TokenType.IDENT`，数字字面量会被拒绝。修复简单且价值明确。
+
+**实现详情**:
+- 修改 `parser.py` 的 `_parse_postfix_expr` 方法
+- 在 DOT 后新增 `elif self._peek_type() == TokenType.INT` 分支
+- 将整数字面量的 value 作为 field_name 传入 `FieldAccess` 节点
+- 类型检查器已正确处理数字索引（TupleType 按索引匹配），无需修改
+
+**新增测试**（3 个）:
+- `test_tuple_field_access_by_index`: t.0/t.1/t.2 正确取值
+- `test_tuple_index_out_of_bounds`: 越界报 TypeCheckError
+- `test_tuple_index_non_numeric`: 非数字字段名报 TypeCheckError
+
+**前端线里程碑**: 25/25 = 100%，所有已知前端任务完成。
+
+---
+
+### 后端任务：实现原生后端 gcc 链接方案
+
+**任务 ID**: backend_native_linker_strategy
+**难度**: hard | **结果**: 成功
+
+**为什么选这个**: P0-B1 是唯一 P0 问题，阻塞原生后端任何涉及运行时函数调用的程序执行。选择方案(b)：接入 gcc 作为链接器，放弃零依赖但获得完整链接能力。
+
+**实现详情**:
+
+1. **compile() 方法改造**（新增 `output_format` 参数）
+   - `"elf"`: 独立 ELF 可执行（原有行为）
+   - `"obj"`: 生成可重定位 .o 文件（新增）
+
+2. **_generate_relocatable_elf() 方法**（约 350 行）
+   - 生成完整 ELF64 可重定位目标文件
+   - 包含 7 个节：.text/.data/.symtab/.strtab/.rela.text/.shstrtab/.note.GNU-stack
+   - 外部运行时符号标记 SHN_UNDEF，由链接器解析
+   - 函数间调用和外部调用生成 R_X86_64_PC32 重定位条目
+   - 数据段引用同样生成重定位
+
+3. **compile_and_write() 方法**
+   - 支持 `use_gcc_link=True` 参数
+   - 自动查找 libnova_runtime.a
+   - 调用 gcc 链接：`gcc nova.o libnova_runtime.a -o output -no-pie -lm -lc -ldl`
+
+4. **_compile_via_gcc() 方法**
+   - .o 生成 → 临时文件 → gcc 链接 → 清理
+   - 完善的错误处理（无 gcc/链接失败/超时）
+
+**新增测试**（7 个 TestRelocatableELF）:
+- obj 格式产出合法 ELF（e_type=ET_REL）
+- 节头表存在且正确
+- .symtab/.strtab 符号表完整
+- 外部运行时符号 SHN_UNDEF
+- .rela.text 重定位表存在
+- 不支持的格式报 ValueError
+- 无 gcc 时报 EnvironmentError
+
+**P0-B1 清零**: 原生后端现在可以通过 gcc 链接运行时库，具备执行非 trivial 程序的能力。
+
+---
+
+### 下一步计划
+
+**前端**: 所有已知任务已完成（100%），进入纯维护模式。后续可关注：(1) 代码质量改进 (2) 性能优化 (3) 新语言特性设计。
+
+**后端**: P0 清零后，下阶段重点：
+- 浮点立即数加载（backend_native_float_imm P80）——原生后端当前最高优先级
+- Wasm StoreReg 指令实现（backend_wasm_store_reg P75）
+- 统一闭包端到端执行测试矩阵（backend_unified_closure_e2e_test P72）
+- 第 39 轮为下次评审轮（第 37-39 轮回顾）
+
+---
+
 ## 第 36 轮（评审轮） — 2026-07-27 04:15
 
 > 第十二次双线路线图评审（回顾第 34-36 轮）

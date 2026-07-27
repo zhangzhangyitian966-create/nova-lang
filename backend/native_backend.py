@@ -2,11 +2,15 @@
 Nova 自研原生代码生成后端
 将 LIR 直接编译为 x86_64 机器码 + ELF 可执行文件
 
-零外部依赖 —— 不需要 gcc、clang、Cranelift、LLVM
+零外部依赖用于独立 ELF 生成。
+生成目标文件时（output_format="obj"）可选支持 gcc 链接。
 """
 
 import os
+import subprocess
 import struct
+import shutil
+import tempfile
 from typing import Dict
 
 from .x86_64 import (
@@ -157,8 +161,18 @@ class NativeCodeGen:
         self._float_const_map = {}  # value_str -> data_offset
         self._string_const_map = {}  # value -> data_offset
 
-    def compile(self, lir_module: LIRModule) -> bytes:
-        """编译 LIR Module 为 ELF 二进制"""
+    def compile(self, lir_module: LIRModule, output_format: str = "elf") -> bytes:
+        """编译 LIR Module 为二进制。
+
+        参数:
+            lir_module: 待编译的 LIR 模块。
+            output_format: 输出格式，默认为 "elf"（Linux ELF 可执行文件）。
+                - "elf": 生成完整的 ELF 可执行文件二进制。
+                保留该参数以便后续扩展其他输出格式（如原始机器码、目标文件等）。
+
+        返回:
+            编译产物的字节串。当 output_format="elf" 时返回 ELF 二进制。
+        """
         # 0. 重置编译状态
         self.link_calls = []
         self.data_fixups = []
@@ -185,8 +199,15 @@ class NativeCodeGen:
         # 3. 生成 _start 入口
         start_code = self._generate_start(func_code, lir_module)
 
-        # 4. 组装为 ELF
-        return self._generate_elf(func_code, start_code, lir_module)
+        # 4. 组装输出
+        if output_format == "elf":
+            return self._generate_elf(func_code, start_code, lir_module)
+        elif output_format == "obj":
+            return self._generate_relocatable_elf(func_code, start_code, lir_module)
+
+        raise ValueError(
+            f"不支持的输出格式: {output_format!r}（支持 'elf' 和 'obj'）"
+        )
 
     def _collect_constants(self, module):
         """收集数据段常量，并构建值到偏移的映射"""
@@ -1381,18 +1402,18 @@ class NativeCodeGen:
         # 设置参数：argc 在 [RSP], argv 在 [RSP+8]
         e.mov_reg_mem(RDI, RSP, 8)  # argv[0] = program name
 
-        # 调用 nova_init
+        # 调用 nova_init（外部运行时函数，归入 external_calls）
         call_init = e.call_rel32()
-        self.link_calls.append(("_start", call_init, "nova_init"))
+        self.external_calls.append(("_start", call_init, "nova_init"))
 
         # 调用 main
         if "main" in func_code:
             call_main = e.call_rel32()
             self.link_calls.append(("_start", call_main, "main"))
 
-        # 调用 nova_cleanup
+        # 调用 nova_cleanup（外部运行时函数，归入 external_calls）
         call_cleanup = e.call_rel32()
-        self.link_calls.append(("_start", call_cleanup, "nova_cleanup"))
+        self.external_calls.append(("_start", call_cleanup, "nova_cleanup"))
 
         # exit(0)
         e.mov_reg_imm64(RDI, 0)  # exit code
@@ -1573,6 +1594,354 @@ class NativeCodeGen:
 
         return bytes(elf)
 
+    def _generate_relocatable_elf(
+        self, func_code: Dict[str, bytes], start_code: bytes, module: LIRModule
+    ) -> bytes:
+        """生成 ELF64 可重定位目标文件（.o），供 gcc/ld 链接。
+
+        生成的 .o 文件包含：
+        - .text 代码段（所有函数 + _start + trampoline）
+        - .rodata 只读数据段（浮点常量 + 字符串常量）
+        - .symtab 符号表（所有函数 + 外部运行时符号）
+        - .strtab 字符串表
+        - .rela.text 代码段重定位表（call rel32 的 R_X86_64_PC32 重定位）
+        - .rela.rodata 数据段重定位表（data_fixups 的 R_X86_64_PC32 重定位）
+        - .note.GNU-stack（标记栈不可执行）
+
+        外部函数（nova_init, nova_cleanup, nova_list_new 等）
+        在符号表中标记为 SHN_UNDEF，由链接器解析。
+        """
+        # ── ELF64 常量 ──
+        ET_REL = 1  # 可重定位文件
+        SHT_NULL = 0
+        SHT_PROGBITS = 1
+        SHT_SYMTAB = 2
+        SHT_STRTAB = 3
+        SHT_RELA = 4
+        SHT_NOTE = 7
+        SHF_WRITE = 0x1
+        SHF_ALLOC = 0x2
+        SHF_EXECINSTR = 0x4
+        STB_LOCAL = 0
+        STB_GLOBAL = 1
+        STT_NOTYPE = 0
+        STT_FUNC = 2
+        STT_SECTION = 3
+        SHN_UNDEF = 0
+        R_X86_64_PC32 = 2  # S + A - P（call/lea 的 rel32）
+        R_X86_64_64 = 1    # S + A（绝对 64 位地址）
+        ELF64_SYM_SIZE = 24
+        ELF64_RELA_SIZE = 24
+
+        # ── 阶段 1: 收集函数名和位置 ──
+        code = bytearray()
+
+        # _start 入口
+        code.extend(start_code)
+        start_code_offset = 0
+        code_offset = len(code)
+
+        # 各用户函数
+        func_offsets = {}
+        for name, fc in func_code.items():
+            func_offsets[name] = code_offset
+            code.extend(fc)
+            code_offset = len(code)
+
+        # 各 trampoline
+        trampoline_offsets = {}
+        for lambda_name, tc in self.trampoline_code.items():
+            tramp_name = f"__trampoline_{lambda_name}"
+            trampoline_offsets[tramp_name] = code_offset
+            code.extend(tc)
+            code_offset = len(code)
+
+        # ── 阶段 2: 构建数据段 ──
+        data = bytearray()
+        for value_bytes, _ in self.float_constants:
+            data.extend(value_bytes)
+            while len(data) % 8 != 0:
+                data.append(0)
+        for value_bytes, _ in self.string_constants:
+            data.extend(value_bytes)
+
+        # ── 阶段 3: 构建字符串表 ──
+        # .strtab: 符号名 + 节名
+        strtab = bytearray(b"\x00")  # 索引 0 始终为空字符串
+
+        def _add_str(s: str) -> int:
+            """向 strtab 添加字符串，返回其起始索引。"""
+            encoded = s.encode("utf-8")
+            idx = len(strtab)
+            strtab.extend(encoded)
+            strtab.append(0)  # NUL 终止符
+            return idx
+
+        # 预先添加节名
+        shstrtab = bytearray(b"\x00")  # section header string table
+
+        def _add_shstr(s: str) -> int:
+            encoded = s.encode("utf-8")
+            idx = len(shstrtab)
+            shstrtab.extend(encoded)
+            shstrtab.append(0)
+            return idx
+
+        # 节名索引
+        idx_text = _add_shstr(".text")
+        idx_rodata = _add_shstr(".data")  # 用 .data 命名以便运行时库引用
+        idx_symtab = _add_shstr(".symtab")
+        idx_strtab = _add_shstr(".strtab")
+        idx_rela_text = _add_shstr(".rela.text")
+        idx_rela_data = _add_shstr(".rela.data")
+        idx_note = _add_shstr(".note.GNU-stack")
+        idx_shstrtab = _add_shstr(".shstrtab")
+
+        # ── 阶段 4: 构建符号表 ──
+        # NULL 符号（索引 0，必须存在）
+        symbols = [struct.pack("<IBBHQQ",
+            0, 0, 0, 0, 0, 0)]  # st_name=0, st_info=0, st_other=0, st_shndx=0, st_value=0, st_size=0
+
+        # 节符号（链接器需要，索引 1=.text, 2=.data）
+        def _section_symbol(name_idx, shndx):
+            return struct.pack("<IBBHQQ",
+                0,  # st_name（节符号通常无名）
+                (STT_SECTION << 4) | STB_LOCAL,
+                0,  # st_other
+                shndx,
+                0,  # st_value
+                0,  # st_size
+            )
+
+        sym_text = len(symbols)
+        symbols.append(_section_symbol(0, 1))  # .text section index = 1
+        sym_data = len(symbols)
+        symbols.append(_section_symbol(0, 2))  # .data section index = 2
+
+        # 函数符号
+        func_sym_map = {}  # func_name -> symbol index
+
+        def _add_func_symbol(name: str, offset: int, size: int):
+            name_idx = _add_str(name)
+            sym_idx = len(symbols)
+            # STT_FUNC | STB_GLOBAL, 对齐 16
+            info = (STT_FUNC << 4) | STB_GLOBAL
+            symbols.append(struct.pack("<IBBHQQ",
+                name_idx, info, 0, 1,  # shndx=1 -> .text
+                offset, size))
+            func_sym_map[name] = sym_idx
+            return sym_idx
+
+        # _start
+        _add_func_symbol("_start", start_code_offset, len(start_code))
+        # 用户函数
+        for name, fc in func_code.items():
+            _add_func_symbol(name, func_offsets[name], len(fc))
+        # trampoline 函数
+        for tramp_name, tc in self.trampoline_code.items():
+            _add_func_symbol(tramp_name, trampoline_offsets[tramp_name], len(tc))
+
+        # 外部运行时函数符号（SHN_UNDEF）
+        extern_sym_map = {}  # extern_name -> symbol index
+        extern_funcs = set()
+        for _, _, ext_name in self.external_calls:
+            extern_funcs.add(ext_name)
+        # _start 中也调用了 main（通过 link_calls），但 main 可能在 func_code 中
+        for _, _, ext_name in self.link_calls:
+            if ext_name not in func_offsets:
+                extern_funcs.add(ext_name)
+
+        for ext_name in sorted(extern_funcs):
+            name_idx = _add_str(ext_name)
+            sym_idx = len(symbols)
+            info = (STT_NOTYPE << 4) | STB_GLOBAL
+            symbols.append(struct.pack("<IBBHQQ",
+                name_idx, info, 0,  # st_other
+                SHN_UNDEF, 0, 0))
+            extern_sym_map[ext_name] = sym_idx
+
+        # ── 阶段 5: 构建重定位表 ──
+        # .rela.text: 代码段重定位
+        rela_text = bytearray()
+
+        def _add_rela(offset, sym_idx, rtype, addend=0):
+            rela_text.extend(struct.pack("<QQq",
+                offset,  # r_offset
+                sym_idx,  # r_info (symbol index in lower 32 bits)
+                addend,  # r_addend
+            ))
+            # 修正: r_info 高 32 位是 type，低 32 位是 sym_idx
+            # struct.pack 只打包了 sym_idx 到 8 字节，需要修正
+
+        # 实际构建 rela_text 列表
+        rela_text_entries = []  # (offset, sym_idx, rtype, addend)
+
+        # 5a. 函数间调用重定位（link_calls）
+        for caller_name, code_off_in_func, target_name in self.link_calls:
+            if caller_name == "_start":
+                patch_pos = code_off_in_func
+            elif caller_name in func_offsets:
+                patch_pos = func_offsets[caller_name] + code_off_in_func
+            elif caller_name in trampoline_offsets:
+                patch_pos = trampoline_offsets[caller_name] + code_off_in_func
+            else:
+                continue
+
+            if target_name in func_sym_map:
+                rela_text_entries.append((patch_pos, func_sym_map[target_name], R_X86_64_PC32, -4))
+            elif target_name in extern_sym_map:
+                rela_text_entries.append((patch_pos, extern_sym_map[target_name], R_X86_64_PC32, -4))
+
+        # 5b. 外部函数调用重定位（external_calls）
+        for caller_name, code_off_in_func, ext_name in self.external_calls:
+            if caller_name == "_start":
+                patch_pos = code_off_in_func
+            elif caller_name in func_offsets:
+                patch_pos = func_offsets[caller_name] + code_off_in_func
+            elif caller_name in trampoline_offsets:
+                patch_pos = trampoline_offsets[caller_name] + code_off_in_func
+            else:
+                continue
+
+            if ext_name in extern_sym_map:
+                rela_text_entries.append((patch_pos, extern_sym_map[ext_name], R_X86_64_PC32, -4))
+
+        # 5c. 数据段引用重定位（data_fixups）
+        for func_name, code_off_in_func, data_off, _kind in self.data_fixups:
+            if func_name == "_start":
+                patch_pos = code_off_in_func
+            else:
+                patch_pos = func_offsets.get(func_name, 0) + code_off_in_func
+            # 使用 .data 节符号，计算相对于 .data 起始的偏移
+            rela_text_entries.append((patch_pos, sym_data, R_X86_64_PC32, data_off - 4))
+
+        # 5d. 闭包 fn_ptr 引用重定位（closure_fn_ptr_fixups）
+        for func_name, code_off_in_func, lambda_name in self.closure_fn_ptr_fixups:
+            if func_name == "_start":
+                patch_pos = code_off_in_func
+            else:
+                patch_pos = func_offsets.get(func_name, 0) + code_off_in_func
+            tramp_name = f"__trampoline_{lambda_name}"
+            if tramp_name in func_sym_map:
+                rela_text_entries.append((patch_pos, func_sym_map[tramp_name], R_X86_64_PC32, -4))
+
+        # 序列化 rela_text
+        for offset, sym_idx, rtype, addend in rela_text_entries:
+            r_info = (rtype << 32) | sym_idx
+            rela_text.extend(struct.pack("<QQq", offset, r_info, addend))
+
+        # ── 阶段 6: 组装 ELF ──
+        # 节布局（从偏移 0 开始）：
+        #   ELF header (64B)
+        #   .text section
+        #   .data section
+        #   .rela.text section
+        #   .symtab section
+        #   .strtab section
+        #   .shstrtab section
+        #   .note.GNU-stack section
+        #   Section header table
+
+        ehdr_size = 64
+        text_offset = ehdr_size
+        data_offset = text_offset + len(code)
+        rela_text_offset = data_offset + len(data)
+        symtab_offset = rela_text_offset + len(rela_text)
+        strtab_offset = symtab_offset + len(b"".join(symbols))
+        shstrtab_offset = strtab_offset + len(strtab)
+        note_offset = shstrtab_offset + len(shstrtab)
+
+        # .note.GNU-stack 内容（空 note，仅标记属性）
+        note_content = b""
+
+        # Section header table 对齐到 8 字节
+        sh_offset_raw = note_offset + len(note_content)
+        sh_offset = (sh_offset_raw + 7) & ~7
+        sh_padding = sh_offset - sh_offset_raw
+
+        # 节头数量：NULL + .text + .data + .rela.text + .symtab + .strtab + .shstrtab + .note
+        shnum = 8
+
+        # ELF header
+        e_ident = bytearray(16)
+        e_ident[0:4] = b"\x7fELF"
+        e_ident[4] = 2   # 64-bit
+        e_ident[5] = 1   # little-endian
+        e_ident[6] = 1   # ELF version
+
+        ehdr = bytearray(e_ident)
+        ehdr.extend(struct.pack("<H", ET_REL))    # e_type: ET_REL
+        ehdr.extend(struct.pack("<H", 62))        # e_machine: EM_X86_64
+        ehdr.extend(struct.pack("<I", 1))         # e_version
+        ehdr.extend(struct.pack("<Q", 0))         # e_entry (无入口)
+        ehdr.extend(struct.pack("<Q", 0))         # e_phoff (无 program headers)
+        ehdr.extend(struct.pack("<Q", sh_offset)) # e_shoff
+        ehdr.extend(struct.pack("<I", 0))         # e_flags
+        ehdr.extend(struct.pack("<H", 64))        # e_ehsize
+        ehdr.extend(struct.pack("<H", 0))         # e_phentsize
+        ehdr.extend(struct.pack("<H", 0))         # e_phnum
+        ehdr.extend(struct.pack("<H", 64))        # e_shentsize
+        ehdr.extend(struct.pack("<H", shnum))     # e_shnum
+        ehdr.extend(struct.pack("<H", 6))         # e_shstrndx (.shstrtab is section 6)
+
+        # Section headers
+        # ELF64 Shdr 字段顺序：sh_name(I), sh_type(I), sh_flags(Q),
+        #   sh_addr(Q), sh_offset(Q), sh_size(Q), sh_link(I), sh_info(I),
+        #   sh_addralign(Q), sh_entsize(Q)
+        symtab_size = len(b"".join(symbols))
+                # ELF64 Shdr 格式（64字节）：
+        # sh_name(I) sh_type(I) sh_flags(Q) sh_addr(Q)
+        # sh_offset(Q) sh_size(Q) sh_link(I) sh_info(I)
+        # sh_addralign(Q) sh_entsize(Q)
+        _shdr_fmt = "<IIQQQQIIQQ"
+
+        shdr_null = struct.pack(_shdr_fmt,
+            0, SHT_NULL, 0, 0, 0, 0, 0, 0, 0, 0)
+        shdr_text = struct.pack(_shdr_fmt,
+            idx_text, SHT_PROGBITS, SHF_ALLOC | SHF_EXECINSTR,
+            0, text_offset, len(code), 0, 0, 16, 0)
+        shdr_data = struct.pack(_shdr_fmt,
+            idx_rodata, SHT_PROGBITS, SHF_ALLOC | SHF_WRITE,
+            0, data_offset, len(data), 0, 0, 8, 0)
+        shdr_rela_text = struct.pack(_shdr_fmt,
+            idx_rela_text, SHT_RELA, 0,
+            0, rela_text_offset, len(rela_text),
+            3, 1, 8, 24)
+        shdr_symtab = struct.pack(_shdr_fmt,
+            idx_symtab, SHT_SYMTAB, 0,
+            0, symtab_offset, symtab_size,
+            4, len(symbols), 8, ELF64_SYM_SIZE)
+        shdr_strtab = struct.pack(_shdr_fmt,
+            idx_strtab, SHT_STRTAB, 0,
+            0, strtab_offset, len(strtab), 0, 0, 1, 0)
+        shdr_shstrtab = struct.pack(_shdr_fmt,
+            idx_shstrtab, SHT_STRTAB, 0,
+            0, shstrtab_offset, len(shstrtab), 0, 0, 1, 0)
+        shdr_note = struct.pack(_shdr_fmt,
+            idx_note, SHT_NOTE, 0,
+            0, note_offset, len(note_content), 0, 0, 1, 0)
+
+        # 组装
+        result = bytearray(ehdr)
+        result.extend(code)                # .text
+        result.extend(data)                # .data
+        result.extend(rela_text)          # .rela.text
+        result.extend(b"".join(symbols)) # .symtab
+        result.extend(strtab)             # .strtab
+        result.extend(shstrtab)           # .shstrtab
+        result.extend(note_content)       # .note.GNU-stack
+        result.extend(b"\x00" * sh_padding)  # 对齐填充
+        result.extend(shdr_null)
+        result.extend(shdr_text)
+        result.extend(shdr_data)
+        result.extend(shdr_rela_text)
+        result.extend(shdr_symtab)
+        result.extend(shdr_strtab)
+        result.extend(shdr_shstrtab)
+        result.extend(shdr_note)
+
+        return bytes(result)
+
     def _make_elf_header(self, entry, phoff, phnum, shoff=0):
         """生成 ELF64 头"""
         e_ident = bytearray(16)
@@ -1615,10 +1984,103 @@ class NativeCodeGen:
         ph.extend(struct.pack("<Q", p_align))
         return bytes(ph)
 
-    def compile_and_write(self, lir_module: LIRModule, output_path: str):
-        """编译并写入 ELF 文件"""
-        elf = self.compile(lir_module)
+    def compile_and_write(
+        self,
+        lir_module: LIRModule,
+        output_path: str,
+        use_gcc_link: bool = False,
+        runtime_lib_path: str = None,
+    ):
+        """编译并写入可执行文件。
+
+        参数:
+            lir_module: LIR 模块
+            output_path: 输出文件路径
+            use_gcc_link: 若为 True，生成 .o 文件后用 gcc 链接运行时库。
+                链接顺序：nova 生成的 .o + libnova_runtime.a + -lm -lc -ldl
+            runtime_lib_path: 运行时静态库路径。若为 None 则在
+                runtime/ 目录下自动查找 libnova_runtime.a。
+        """
+        if use_gcc_link:
+            return self._compile_via_gcc(lir_module, output_path, runtime_lib_path)
+
+        # 独立 ELF 模式（零依赖）
+        elf = self.compile(lir_module, output_format="elf")
         with open(output_path, "wb") as f:
             f.write(elf)
+        os.chmod(output_path, 0o755)
+        return output_path
+
+    def _compile_via_gcc(
+        self,
+        lir_module: LIRModule,
+        output_path: str,
+        runtime_lib_path: str = None,
+    ) -> str:
+        """通过 gcc 链接生成可执行文件。
+
+        流程：
+        1. 生成可重定位 .o 文件（output_format="obj"）
+        2. 查找运行时静态库 libnova_runtime.a
+        3. 调用 gcc 进行链接：gcc nova.o libnova_runtime.a -o output -lm -lc -ldl
+        4. 清理临时文件
+        """
+        # 1. 查找 gcc
+        gcc = shutil.which("gcc") or shutil.which("cc")
+        if not gcc:
+            raise EnvironmentError(
+                "未找到 gcc/cc，无法进行链接。"
+                "请安装 gcc 或使用 compile_and_write(use_gcc_link=False)。"
+            )
+
+        # 2. 查找运行时库
+        if runtime_lib_path is None:
+            # 在 nova 包的 runtime/ 目录下查找
+            nova_pkg_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            candidate = os.path.join(nova_pkg_dir, "runtime", "libnova_runtime.a")
+            if os.path.isfile(candidate):
+                runtime_lib_path = candidate
+            else:
+                raise FileNotFoundError(
+                    f"未找到运行时库: {candidate}\n"
+                    f"请先编译运行时库: cd runtime && make"
+                )
+
+        # 3. 生成 .o 文件（临时目录）
+        obj_bytes = self.compile(lir_module, output_format="obj")
+        with tempfile.TemporaryDirectory(prefix="nova_") as tmpdir:
+            obj_path = os.path.join(tmpdir, "nova_output.o")
+            with open(obj_path, "wb") as f:
+                f.write(obj_bytes)
+
+            # 4. 调用 gcc 链接
+            cmd = [
+                gcc,
+                obj_path,
+                runtime_lib_path,
+                "-o", output_path,
+                "-lm",    # 数学库
+                "-lc",    # C 标准库
+                "-ldl",   # 动态链接
+                "-no-pie",  # 禁用 PIE（与 _start 入口兼容）
+            ]
+            try:
+                result = subprocess.run(
+                    cmd,
+                    capture_output=True,
+                    text=True,
+                    timeout=30,
+                )
+                if result.returncode != 0:
+                    raise RuntimeError(
+                        f"gcc 链接失败（exit code {result.returncode}）:\n"
+                        f"命令: {' '.join(cmd)}\n"
+                        f"stderr: {result.stderr}"
+                    )
+            except FileNotFoundError:
+                raise EnvironmentError(f"gcc 不存在: {gcc}")
+            except subprocess.TimeoutExpired:
+                raise RuntimeError("gcc 链接超时（30 秒）")
+
         os.chmod(output_path, 0o755)
         return output_path
