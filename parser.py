@@ -94,6 +94,7 @@ class Parser:
         self.pos = 0
         self._source = source
         self._errors: List[ParseError] = []  # 收集的所有解析错误
+        self._primary_dispatch = self._build_primary_dispatch()
 
     # ----------------------------------------------------------
     # 工具方法
@@ -977,83 +978,100 @@ class Parser:
     # 基本表达式（字面量、标识符、lambda、列表、元组等）
     # ----------------------------------------------------------
 
+    def _build_primary_dispatch(self):
+        """构建 primary 表达式解析调度表（TokenType -> handler）。"""
+        return {
+            TokenType.INT: self._parse_int_literal,
+            TokenType.FLOAT: self._parse_float_literal,
+            TokenType.STRING: self._parse_string_literal,
+            TokenType.CHAR: self._parse_char_literal,
+            TokenType.BOOL: self._parse_bool_literal,
+            TokenType.UNIT: self._parse_unit_literal,
+            TokenType.IDENT: self._parse_identifier_expr,
+            TokenType.BREAK: self._parse_break_expr,
+            TokenType.CONTINUE: self._parse_continue_expr,
+        }
+
+    def _parse_int_literal(self, tok):
+        """解析整数字面量。"""
+        self._advance()
+        return IntLiteral(value=int(tok.value), span=self._span(tok))
+
+    def _parse_float_literal(self, tok):
+        """解析浮点数字面量。"""
+        self._advance()
+        return FloatLiteral(value=float(tok.value), span=self._span(tok))
+
+    def _parse_string_literal(self, tok):
+        """解析字符串字面量。"""
+        self._advance()
+        return StringLiteral(value=tok.value, span=self._span(tok))
+
+    def _parse_char_literal(self, tok):
+        """解析字符字面量。"""
+        self._advance()
+        return CharLiteral(value=tok.value, span=self._span(tok))
+
+    def _parse_bool_literal(self, tok):
+        """解析布尔字面量。"""
+        self._advance()
+        return BoolLiteral(value=(tok.value == "true"), span=self._span(tok))
+
+    def _parse_unit_literal(self, tok):
+        """解析 Unit 字面量。"""
+        self._advance()
+        return UnitLiteral(span=self._span(tok))
+
+    def _parse_identifier_expr(self, tok):
+        """解析标识符表达式。"""
+        self._advance()
+        return Identifier(name=tok.value, span=self._span(tok))
+
+    def _parse_break_expr(self, tok):
+        """解析 break 表达式。"""
+        self._advance()
+        return BreakExpr(span=self._span(tok))
+
+    def _parse_continue_expr(self, tok):
+        """解析 continue 表达式。"""
+        self._advance()
+        return ContinueExpr(span=self._span(tok))
+
+    def _parse_brace_primary(self):
+        """解析 LBRACE 开头的 primary：代码块或 Map 字面量。"""
+        # 空 {} 是代码块；非空且第一个表达式后是 COLON 则为 Map
+        if self._peek_type() == TokenType.RBRACE:
+            return self._parse_block()
+        saved_pos = self.pos
+        self._advance()  # skip {
+        try:
+            self._parse_expression()
+            if self._peek_type() == TokenType.COLON:
+                self.pos = saved_pos
+                return self._parse_map_expr()
+        except ParseError:
+            pass
+        self.pos = saved_pos
+        return self._parse_block()
+
     def _parse_primary_expr(self):
+        """解析 primary 表达式（字面量、标识符、控制流关键字、复合表达式）。"""
         tok = self._cur()
 
-        # 整数字面量
-        if tok.type == TokenType.INT:
-            self._advance()
-            return IntLiteral(value=int(tok.value), span=self._span(tok))
+        # 调度表处理简单字面量和关键字
+        handler = self._primary_dispatch.get(tok.type)
+        if handler is not None:
+            return handler(tok)
 
-        # 浮点数字面量
-        if tok.type == TokenType.FLOAT:
-            self._advance()
-            return FloatLiteral(value=float(tok.value), span=self._span(tok))
-
-        # 字符串字面量
-        if tok.type == TokenType.STRING:
-            self._advance()
-            return StringLiteral(value=tok.value, span=self._span(tok))
-
-        # 字符字面量
-        if tok.type == TokenType.CHAR:
-            self._advance()
-            return CharLiteral(value=tok.value, span=self._span(tok))
-
-        # 布尔字面量
-        if tok.type == TokenType.BOOL:
-            self._advance()
-            return BoolLiteral(value=(tok.value == "true"), span=self._span(tok))
-
-        # Unit 字面量
-        if tok.type == TokenType.UNIT:
-            self._advance()
-            return UnitLiteral(span=self._span(tok))
-
-        # 标识符
-        if tok.type == TokenType.IDENT:
-            self._advance()
-            return Identifier(name=tok.value, span=self._span(tok))
-
-        # break
-        if tok.type == TokenType.BREAK:
-            self._advance()
-            return BreakExpr(span=self._span(tok))
-
-        # continue
-        if tok.type == TokenType.CONTINUE:
-            self._advance()
-            return ContinueExpr(span=self._span(tok))
-
-        # Lambda: |params| body
+        # 特殊复合表达式
         if tok.type == TokenType.PIPE:
             return self._parse_lambda()
-
-        # 列表: [elem, ...] 或列表推导式 [expr for ...]
         if tok.type == TokenType.LBRACKET:
             return self._parse_list_expr()
-
-        # 元组: (elem, ...)
         if tok.type == TokenType.LPAREN:
             return self._parse_tuple_or_grouped()
-
-        # 代码块或 Map 字面量
         if tok.type == TokenType.LBRACE:
-            # 区分 Map 字面量 {key: value, ...} 和代码块 { ... }
-            # 空 {} 是代码块；非空且第一个表达式后是 COLON 则为 Map
-            if self._peek_type() == TokenType.RBRACE:
-                return self._parse_block()
-            saved_pos = self.pos
-            self._advance()  # skip {
-            try:
-                self._parse_expression()
-                if self._peek_type() == TokenType.COLON:
-                    self.pos = saved_pos
-                    return self._parse_map_expr()
-            except ParseError:
-                pass
-            self.pos = saved_pos
-            return self._parse_block()
+            return self._parse_brace_primary()
 
         raise ParseError(
             f"意外的 token '{tok.value}'", tok.line, tok.column, source=self._source

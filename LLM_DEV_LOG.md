@@ -1,3 +1,103 @@
+## 2026-07-27 06:20 第62轮开发（普通开发轮）
+
+### 开发范围
+- **轮次**: 第 62 轮（普通开发轮）
+- **上轮评审**: 第 60 轮
+- **测试基线**: 500 passed + 20 subtests
+- **测试后**: 520 passed + 20 subtests（全通过）
+- **任务来源**: 审查驱动 67%（2/3）+ 自主规划 33%（1/3）
+
+---
+
+### 审查日志研读摘要
+
+**第1507轮审查（最新）**:
+- 总问题 1192（MEDIUM 78 / LOW 1114）
+- Top10 复杂度函数中 Parser._parse_primary_expr CC=17（#8）、LoopInvariantCodeMotion._licm_loop CC=16（#9）
+- 增量门禁通过，无新增误报
+
+**第1508轮审查**:
+- 总问题 1195（MEDIUM 78 / LOW 1117）
+- cfg_utils.py 新增测试代码引入少量 LOW 级问题（测试函数 docstring 豁免已在增量门禁规则中）
+
+**采纳的审查发现**:
+- LoopInvariantCodeMotion._licm_loop CC=16 → 四阶段分层重构（Top10 #9）
+- Parser._parse_primary_expr CC=17 → 调度表化（Top10 #8）
+
+---
+
+### 本轮任务
+
+| 任务 | 来源 | 状态 | 说明 |
+|------|------|------|------|
+| refactor_licm_loop | 【审查驱动】 | 完成 | LICM 核心函数四阶段分层，CC 16→4 |
+| refactor_parse_primary_expr | 【审查驱动】 | 完成 | Parser primary 表达式调度表化，CC 17→5 |
+| cfg_utils_unit_tests | 【自主规划】 | 完成 | CFG 基础设施 20 个单元测试，测试数 500→520 |
+
+---
+
+### 任务详情
+
+#### 1. refactor_licm_loop
+
+**为什么选这个**：审查日志第1507轮 LoopInvariantCodeMotion._licm_loop CC=16（Top10 #9），循环不变量外提核心函数。61行长，包含 pre-header 查找、SSA 定义收集、不变量识别、pre-header 插入四个独立阶段。
+
+**实现**：
+1. `_collect_loop_defs(loop, block_map)` 提取 SSA 定义收集逻辑（遍历循环体所有指令的 def-use 链）
+2. `_hoist_invariant_instrs(loop, block_map, loop_defs)` 提取循环不变量识别与外提逻辑（检查操作数是否都在循环外定义）
+3. `_insert_into_pre_header(pre_header, hoisted)` 提取 pre-header 指令插入逻辑（保持 SSA 合法性）
+4. `_licm_loop` 主函数从 61 行压缩至约 10 行流程编排（pre-header→收集→外提→插入，CC≈4）
+
+**测试**：520 passed + 20 subtests，零回归。
+
+#### 2. refactor_parse_primary_expr
+
+**为什么选这个**：审查日志第1507轮 Parser._parse_primary_expr CC=17（Top10 #8），Parser 编译器前端核心路径。80行长 if-elif 链处理 9 种 token 类型字面量 + 4 种复合表达式。
+
+**实现**：
+1. `__init__` 中新增 `_build_primary_dispatch()` 构建 TokenType→handler 映射表（9 种 token 类型）
+2. 新增 9 个类型专属解析方法（`_parse_int_literal` 到 `_parse_continue_expr`），每个 2-3 行
+3. 新增 `_parse_brace_primary()` 处理 LBRACE 的 Map/Block 区分逻辑
+4. `_parse_primary_expr` 主函数压缩至约 15 行（查表→特殊分支→错误，CC≈5）
+
+**测试**：520 passed + 20 subtests，零回归。
+
+#### 3. cfg_utils_unit_tests
+
+**为什么选这个**：cfg_utils.py（797行）是循环优化核心基础设施但缺乏直接测试。第61轮评审规划中列为第62轮任务。LICM、循环分析等优化完全依赖 cfg_utils 的正确性。
+
+**实现**：
+创建 tests/test_cfg_utils.py（289行），包含 6 大测试类、20 个测试用例：
+1. TestBuildBlockMap — 验证块映射构建
+2. TestGetSuccessors — 验证 4 种终结指令后继解析
+3. TestBuildPredecessors — 验证线性链和 if-else 汇合点前驱
+4. TestComputeDominators — 验证线性链/菱形/简单循环/不可达块 4 种场景的支配集
+5. TestFindBackEdges — 验证线性链无回边、简单循环有回边、if-else 无回边
+6. TestAnalyzeLoops — 验证循环体收集、LoopInfo 查询接口、循环出口识别
+
+**测试**：全部 20 测试通过，零回归，总测试数 500→520。
+
+---
+
+### 测试前后对比
+
+| 指标 | 开发前 | 开发后 | 变化 |
+|------|--------|--------|------|
+| 通过测试 | 500 | 520 | ↑ +20 |
+| 失败测试 | 0 | 0 | → 零失败 |
+| 新增测试 | 0 | 20 | ↑ +20（cfg_utils 单元测试） |
+
+---
+
+### 下一步计划
+
+第63轮（评审轮，63 % 3 == 0）将进行路线图评审，全面回顾第61-62轮成果，规划第64-66轮方向。
+
+预计评审重点关注：
+- Top10 复杂度函数状态（已完成首轮 10/10 重构）
+- 审查问题趋势（问题数是否继续下降）
+- 下阶段方向：剩余 pending 任务中 Native 后端评估、C 后端统一、LOW 级问题治理的优先级排序
+
 ## 2026-07-27 05:50 第61轮开发（普通开发轮）
 
 ### 开发范围

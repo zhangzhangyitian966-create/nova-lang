@@ -1,6 +1,6 @@
 # Nova LLM 智能开发路线图
 
-**更新时间**: 2026-07-27 04:05:00
+**更新时间**: 2026-07-27 06:25:00
 **上次评审**: 第 60 轮（路线图评审）
 
 本路线图由 LLM 智能开发系统动态维护。
@@ -133,6 +133,8 @@
 | ✅ | 修复增量门禁魔法数字误报 | easy | 50 | 30 分钟 | - |
 | ✅ | 重构 TypeChecker.check_decl 调度表化 | medium | 55 | 2-3 小时 | - |
 | ✅ | 重构 TypeChecker._from_ast_type 调度表化 | medium | 52 | 2-3 小时 | - |
+| ✅ | 重构 LoopInvariantCodeMotion._licm_loop 降低圈复杂度 | medium | 55 | 2-3 小时 | - |
+| ✅ | 重构 Parser._parse_primary_expr 调度表化 | medium | 50 | 2-3 小时 | - |
 
 ---
 
@@ -145,15 +147,15 @@
 | ✅ | 建立后端性能基准测试框架 | medium | 60 | 3-5 小时 | unify_c_backend |
 | ✅ | LICM 优化正确性测试 | medium | 60 | 3-5 小时 | implement_licm_pass, ssa_verifier_tests |
 | ⏳ | 基准测试框架增强（C/Wasm执行时间+优化对比） | medium | 48 | 3-5 小时 | backend_benchmark_framework |
-| ⏳ | CFG 基础设施单元测试 | medium | 50 | 3-5 小时 | mir_cfg_loop_analysis |
+| ✅ | CFG 基础设施单元测试 | medium | 50 | 3-5 小时 | mir_cfg_loop_analysis |
 
 ---
 
-**进度**: 116/118 (98.3%)
-- **已完成**: 116 (+2：refactor_check_decl, refactor_from_ast_type)
+**进度**: 119/121 (98.3%)
+- **已完成**: 119 (+3：refactor_licm_loop, refactor_parse_primary_expr, cfg_utils_unit_tests)
 - **进行中**: 0
 - **待开发**: 2（closure_fn_ptr_backfill P80, unify_c_backend P70）
 - **已废弃**: 1（native_call_abi）
 - **已冻结**: 1（refactor_native_emit_call — Native后端整体deprecated）
 
-> 注：第60轮路线图评审完成。五维评估全部优秀。评审中直接修复2个缺陷：C后端double闭包调用UB、增量门禁误报。25+极复杂函数历史性清零（0个）。下阶段方向：TypeChecker核心路径调度表化+测试docstring补齐+Native后端处置。
+> 注：第62轮开发完成。Top10 复杂度函数首轮重构全部完成（10/10）。新增 CFG 基础设施 20 个单元测试，总测试数 500→520。下阶段（第63轮评审轮）将回顾第61-62轮成果，规划第64-66轮方向。

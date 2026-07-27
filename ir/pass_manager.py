@@ -775,8 +775,21 @@ class LoopInvariantCodeMotion(Pass):
 
         pre_header = block_map[pre_header_label]
 
-        # 2. 收集所有循环内的定义（SSA 名 -> 定义块）
-        loop_defs = {}  # ssa_name -> block_label
+        # 2. 收集循环内的 SSA 定义
+        loop_defs = self._collect_loop_defs(loop, block_map)
+
+        # 3. 识别并外提循环不变指令
+        changed, hoisted = self._hoist_invariant_instrs(loop, block_map, loop_defs)
+
+        # 4. 将外提的指令插入 pre-header
+        if hoisted:
+            self._insert_into_pre_header(pre_header, hoisted)
+
+        return changed
+
+    def _collect_loop_defs(self, loop, block_map):
+        """收集循环内所有 SSA 定义（ssa_name -> block_label）。"""
+        loop_defs = {}
         for block_label in loop.body:
             bb = block_map.get(block_label)
             if bb is None:
@@ -784,13 +797,17 @@ class LoopInvariantCodeMotion(Pass):
             for instr in bb.instructions:
                 if hasattr(instr, "result_name") and instr.result_name:
                     loop_defs[instr.result_name] = block_label
+        return loop_defs
 
-        # 3. 识别循环不变指令并移动
+    def _hoist_invariant_instrs(self, loop, block_map, loop_defs):
+        """遍历循环体，识别循环不变量并外提。
+
+        Returns:
+            (changed, hoisted): changed 为 bool，hoisted 为被外提的指令列表。
+        """
         changed = False
-        hoisted = []  # 被外提的指令
+        hoisted = []
 
-        # 遍历循环体中除 header 外的所有块
-        # header 中的 Phi 不能移动，其他指令也可能有不变量
         for block_label in loop.body:
             bb = block_map.get(block_label)
             if bb is None:
@@ -805,7 +822,6 @@ class LoopInvariantCodeMotion(Pass):
 
                 # 检查是否是循环不变量
                 if self._is_loop_invariant(instr, loop_defs, loop):
-                    # 移动到 pre-header
                     hoisted.append(instr)
                     changed = True
                 else:
@@ -814,20 +830,18 @@ class LoopInvariantCodeMotion(Pass):
             if changed:
                 bb.instructions = new_instrs
 
-        # 将外提的指令添加到 pre-header 末尾（在终结指令之前）
-        if hoisted:
-            # pre-header 的终结指令应该是跳转到 loop header
-            # 把不变指令插入到终结指令之前
-            if pre_header.terminator is not None:
-                # 有终结指令，插入到它前面
-                terminator = pre_header.terminator
-                pre_header.terminator = None
-                pre_header.instructions.extend(hoisted)
-                pre_header.terminator = terminator
-            else:
-                pre_header.instructions.extend(hoisted)
+        return changed, hoisted
 
-        return changed
+    def _insert_into_pre_header(self, pre_header, hoisted):
+        """将外提的指令添加到 pre-header 末尾（在终结指令之前）。"""
+        if pre_header.terminator is not None:
+            # 有终结指令，插入到它前面
+            terminator = pre_header.terminator
+            pre_header.terminator = None
+            pre_header.instructions.extend(hoisted)
+            pre_header.terminator = terminator
+        else:
+            pre_header.instructions.extend(hoisted)
 
     def _is_loop_invariant(self, instr, loop_defs, loop):
         """
