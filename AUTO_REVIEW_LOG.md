@@ -16608,3 +16608,189 @@ type_checker.py:413: in check_program
 ---
 
 *本报告由 Nova Auto Review v2.0 自动生成*
+
+---
+
+# 第 1508 轮 Nova 深度审查报告 (v2.0)
+
+> 生成时间: 2026-07-27 20:11:56
+> 审查版本: v0.3.0
+
+## 1. 审查概览
+
+| 指标 | 数值 |
+|------|------|
+| 扫描文件数 | 42 |
+| 代码行数 | 28,874 |
+| 函数总数 | 1704 |
+| 类总数 | 304 |
+| 发现问题数 | **1261** |
+| CRITICAL | 0 |
+| HIGH | 0 |
+| MEDIUM | 79 |
+| LOW | 1182 |
+
+### 严重程度分布
+
+- 🔴 **CRITICAL**: 0 个
+- 🟠 **HIGH**: 0 个
+- 🟡 **MEDIUM**: 79 个
+- 🟢 **LOW**: 1182 个
+
+## 2. 代码质量审查
+
+### 2.1 问题类型分布
+
+| 问题类型 | 数量 | 严重级别 |
+|----------|------|----------|
+| no_docstring | 588 | LOW |
+| magic_number | 477 | LOW |
+| print_debug | 103 | LOW |
+| unused_import | 36 | MEDIUM |
+| class_too_large | 20 | MEDIUM |
+| inconsistent_naming | 14 | LOW |
+| function_too_long | 9 | MEDIUM |
+| cyclomatic_complexity | 7 | MEDIUM |
+| too_broad_exception | 7 | MEDIUM |
+
+### 2.2 高优先级问题 (CRITICAL + HIGH)
+
+✅ 无高优先级问题
+
+### 2.3 各模块问题统计 (Top 10)
+
+| 模块 | 问题数 |
+|------|--------|
+| tests | 539 |
+| (root) | 364 |
+| backend | 240 |
+| ir | 117 |
+| tree-sitter-nova | 1 |
+
+## 3. 架构审查
+
+### 3.1 模块概览
+
+- 模块总数: **42**
+- 平均依赖数: **1.45**
+- 循环依赖: **0** 个
+- sys.path hack: **0** 处
+
+### 3.2 循环依赖
+
+✅ 未发现循环依赖
+
+### 3.3 耦合度分析
+
+#### 高被依赖模块 (入度 Top 10)
+
+| 模块 | 入度 (被依赖数) |
+|------|----------------|
+| ir.ir_nodes | 9 |
+| errors | 8 |
+| ast_nodes | 7 |
+| lexer | 5 |
+| type_checker | 4 |
+| parser | 4 |
+| environment | 3 |
+| compiler | 3 |
+| ir.cfg_utils | 2 |
+| c_codegen | 2 |
+
+#### 高依赖模块 (出度 Top 10)
+
+| 模块 | 出度 (依赖数) |
+|------|--------------|
+|  | 10 |
+| backend.compiler_pipeline | 10 |
+| cli | 8 |
+| compiler_cli | 6 |
+| parser | 3 |
+| evaluator | 3 |
+| ir.hir_lowering | 2 |
+| ir.mir_lowering | 2 |
+| type_checker | 2 |
+| backend.lir_c_backend | 2 |
+
+### 3.5 代码量分布
+
+| 目录 | 文件数 | 行数 | 占比 |
+|------|--------|------|------|
+| (root) | 14 | 10,027 | 34.7% |
+| ir | 7 | 6,782 | 23.5% |
+| tests | 12 | 6,766 | 23.4% |
+| backend | 8 | 5,220 | 18.1% |
+| tree-sitter-nova | 1 | 79 | 0.3% |
+
+## 4. 测试分析
+
+- 测试总数: **520**
+- 通过数: ✅ 516
+- 失败数: ❌ 0
+- 错误数: ⚠️  0
+- 跳过数: ⏭️  0
+- 通过率: **99.2%**
+- 耗时: 0s
+
+## 5. 复杂度分析
+
+- 函数总数: **1698**
+- 平均圈复杂度: **2.4**
+- 最高复杂度: **29**
+
+### 5.1 复杂度分布
+
+| 复杂度区间 | 函数数 |
+|------------|--------|
+| 1-5 (简单) | 1529 |
+| 6-10 (中等) | 129 |
+| 11-15 (复杂) | 33 |
+| 16-25 (高复杂) | 5 |
+| 25+ (极复杂) | 2 |
+
+### 5.2 Top 10 最复杂函数
+
+| 排名 | 函数 | 文件 | 圈复杂度 |
+|------|------|------|----------|
+| 1 | NativeCodeGen._generate_relocatable_elf | `backend/native_backend.py` | 29 |
+| 2 | NativeCodeGen._emit_runtime_call | `backend/native_backend.py` | 28 |
+| 3 | HIRRewriter.generic_rewrite | `ir/ir_nodes.py` | 23 |
+| 4 | NativeCodeGen._emit_call | `backend/native_backend.py` | 21 |
+| 5 | NativeCodeGen._allocate_registers | `backend/native_backend.py` | 18 |
+| 6 | NativeCodeGen._generate_elf | `backend/native_backend.py` | 17 |
+| 7 | CCodeGen._c_type_from_type_expr | `c_codegen.py` | 17 |
+| 8 | _is_incomplete | `cli.py` | 15 |
+| 9 | main | `cli.py` | 15 |
+| 10 | NativeCodeGen._emit_call_indirect | `backend/native_backend.py` | 14 |
+
+## 7. 增量质量门禁
+
+✅ **门禁通过** — 新增代码未引入质量问题
+
+- 检查文件数（有变更）: 0
+- 门禁问题数: 0
+
+---
+
+## 8. 改进建议
+
+### P0 - 立即修复
+
+✅ 无 P0 级问题
+
+### P1 - 高优先级
+
+✅ 无 P1 级问题
+
+### P2 - 中优先级
+
+- 处理 79 个 MEDIUM 级别问题（函数过长、圈复杂度、未使用导入等）
+
+### P3 - 低优先级 / 优化
+
+- 清理 1182 个 LOW 级别问题（TODO、命名规范、魔法数字等）
+- 重构 Top 10 复杂函数中 7 个 CC>15 的函数
+
+---
+
+*本报告由 Nova Auto Review v2.0 自动生成*
