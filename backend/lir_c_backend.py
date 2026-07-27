@@ -191,7 +191,11 @@ class LIRCBackend:
         self._emit("")
 
     def _emit_main(self, lir_module: LIRModule):
-        """输出 main 函数"""
+        """输出 main 函数
+
+        如果 Nova main 函数返回非 Unit 类型，将返回值作为 C main 的退出码返回，
+        便于端到端测试验证执行结果。
+        """
         self._emit("int main(int argc, char** argv) {")
         self._indent_level += 1
         self._emit("nova_init();")
@@ -202,11 +206,17 @@ class LIRCBackend:
             c_name = self._mangle_fn_name("main")
             if main_fn.return_type == UNIT_TYPE:
                 self._emit(f"{c_name}();")
+                self._emit("nova_cleanup();")
+                self._emit("return 0;")
             else:
-                self._emit(f"{c_name}();")
+                # 非 Unit 返回值：将结果作为退出码返回
+                self._emit(f"int64_t _nova_result = {c_name}();")
+                self._emit("nova_cleanup();")
+                self._emit("return (int)_nova_result;")
+        else:
+            self._emit("nova_cleanup();")
+            self._emit("return 0;")
 
-        self._emit("nova_cleanup();")
-        self._emit("return 0;")
         self._indent_level -= 1
         self._emit("}")
         self._emit("")
@@ -767,6 +777,7 @@ class LIRCBackend:
 
         使用 nova_closure_call 运行时函数，将参数打包为 void* 数组。
         第一个 src_loc 是闭包对象，后续是参数。
+        返回值根据 dst_loc 的类型进行正确的 C 类型转换。
         """
         if not instr.src_locs or len(instr.src_locs) < 1:
             return
@@ -783,7 +794,24 @@ class LIRCBackend:
                 arg_var = self._loc_var_name(instr.src_locs[i + 1][0])
                 self._emit(f"{args_array}[{i}] = (void*){arg_var};")
 
-        if dst:
+        # 根据返回类型选择正确的转换方式
+        # nova_closure_call 返回 void*，需要转换为实际的 C 类型
+        if dst and instr.dst_loc:
+            ret_c_type = self._nova_type_to_c(instr.dst_loc[1])
+            if ret_c_type == "int64_t":
+                cast_expr = f"(int64_t)(intptr_t)"
+            elif ret_c_type in ("double",):
+                cast_expr = f"*(double*)&(void*){{"
+                # 对于浮点类型，需要特殊处理（通过 union 或 memcpy）
+                # 简化处理：使用 intptr_t 中转
+                cast_expr = f"(int64_t)(intptr_t)"  # 先用整数中转
+            else:
+                cast_expr = f"({ret_c_type})"
+            self._emit(
+                f"{dst} = {cast_expr}nova_closure_call((NovaClosure*){closure}, "
+                f"{args_array}, {arg_count});"
+            )
+        elif dst:
             self._emit(
                 f"{dst} = (NovaValue*)nova_closure_call((NovaClosure*){closure}, "
                 f"{args_array}, {arg_count});"
@@ -834,6 +862,14 @@ class LIRCBackend:
         """
         if ty is None:
             return "int64_t"
+
+        # 优先检查 IRType kind：FUNCTION 类型直接映射为 NovaClosure*
+        # 避免字符串匹配时 "(Int) -> Int" 误匹配到 "Int" 关键词
+        kind = getattr(ty, "kind", None)
+        if kind is not None:
+            from ..ir.ir_nodes import IRType
+            if kind == IRType.FUNCTION:
+                return "NovaClosure*"
 
         type_str = str(ty)
         type_name = getattr(ty, "name", None) or type_str

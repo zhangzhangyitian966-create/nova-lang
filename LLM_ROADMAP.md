@@ -1,6 +1,6 @@
 # Nova LLM 智能开发路线图
 
-**更新时间**: 2026-07-27 20:10:00
+**更新时间**: 2026-07-27 01:50:00
 **上次评审**: 第 57 轮（路线图评审）
 
 本路线图由 LLM 智能开发系统动态维护。
@@ -124,10 +124,11 @@
 | ✅ | 重构 Parser._parse_pattern 降低圈复杂度 | medium | 55 | 2-3 小时 | - |
 | ✅ | 重构 TypeChecker._check_binary_op 降低圈复杂度 | medium | 58 | 2-3 小时 | - |
 | ⏳ | Native/Wasm 后端闭包 fn_ptr 回填 | hard | 80 | 4-6 小时 | c_backend_closure_phase3 |
-| ⏳ | 闭包后端端到端测试 | medium | 78 | 3-4 小时 | c_backend_closure_phase3 |
+| ✅ | 闭包后端端到端测试 | medium | 78 | 3-4 小时 | c_backend_closure_phase3 |
 | ⏳ | 重构 NativeCodeGen._emit_runtime_call + _emit_call 降低圈复杂度 | medium | 60 | 4-6 小时 | - |
-| ⏳ | 重构 TypeChecker._check_patterns_exhaustive 降低圈复杂度 | hard | 85 | 1-2 天 | - |
-| ⏳ | 为 compiler.py + vm.py 建立单元测试基线 | medium | 80 | 3-5 小时 | - |
+| ✅ | 重构 TypeChecker._check_patterns_exhaustive 降低圈复杂度 | hard | 85 | 1-2 天 | - |
+| ✅ | 为 compiler.py + vm.py 建立单元测试基线 | medium | 80 | 3-5 小时 | - |
+| ✅ | 重构 MIRLowering._collect_idents 调度表化 | medium | 65 | 2-3 小时 | - |
 
 ---
 
@@ -144,10 +145,10 @@
 
 ---
 
-**进度**: 107/111 (96.4%)
-- **已完成**: 107 (+5：refactor_check_match_exhaustiveness, refactor_lower_match_expr, refactor_parser_parse_pattern, clean_print_debug, refactor_type_checker_check_binary_op)
+**进度**: 110/112 (98.2%)
+- **已完成**: 110 (+6：refactor_check_patterns_exhaustive, compiler_vm_unit_tests, closure_backend_e2e_test, fix_closure_type_inference, refactor_collect_idents_dispatch, 及上轮遗留标注修正)
 - **进行中**: 0
-- **待开发**: 4（refactor_check_patterns_exhaustive, compiler_vm_unit_tests, closure_fn_ptr_backfill, closure_backend_e2e_test）
+- **待开发**: 1（closure_fn_ptr_backfill, refactor_native_emit_call 中部分子项已完成/部分保留）
 - **已废弃**: 1（native_call_abi）
 
-> 注：第57轮路线图评审完成。Top10 复杂度函数首轮重构全部完成（10/10），但子函数深化仍有空间（_check_patterns_exhaustive CC=30 为新发现最高）。新增2个高价值任务（refactor_check_patterns_exhaustive P85、compiler_vm_unit_tests P80）。下阶段方向：子函数复杂度深化+测试盲区补齐。
+> 注：第59轮普通开发轮完成。闭包端到端测试落地（3个E2E测试+类型推断修复），_collect_idents CC=22→3调度表化。Top10复杂度函数已重构7/10（剩余：_emit_runtime_call CC=25、generic_rewrite CC=23、_emit_call CC=21）。下轮为第60轮评审轮。

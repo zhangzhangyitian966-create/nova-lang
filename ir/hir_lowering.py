@@ -391,7 +391,17 @@ class HIRLowering:
             }
             return name_map.get(ta.name, NovaType(IRType.TYPE_VAR))
         if isinstance(ta, TypeFn):
-            return CLOSURE_TYPE
+            # 递归解析函数类型的参数和返回类型
+            # FUNCTION 类型的 params = [param_type...] + [return_type]
+            param_types = [
+                self._resolve_type_annotation(pt) for pt in ta.param_types
+            ]
+            ret_type = self._resolve_type_annotation(ta.return_type)
+            return NovaType(
+                IRType.FUNCTION,
+                params=param_types + [ret_type],
+                name="Closure",
+            )
         return NovaType(IRType.TYPE_VAR)
 
     def _resolve_param_type(self, param) -> NovaType:

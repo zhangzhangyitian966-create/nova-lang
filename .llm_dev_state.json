@@ -1,5 +1,5 @@
 {
-  "cycles": 58,
+  "cycles": 59,
   "completed_tasks": [
     "review_cycle_57",
     "establish_quality_gate",
@@ -122,10 +122,29 @@
     "clean_print_debug",
     "refactor_type_checker_check_binary_op",
     "refactor_check_patterns_exhaustive",
-    "compiler_vm_unit_tests"
+    "compiler_vm_unit_tests",
+    "closure_backend_e2e_test",
+    "fix_closure_type_inference",
+    "refactor_collect_idents_dispatch"
   ],
   "failed_tasks": [],
   "task_history": [
+    {
+      "cycle": 59,
+      "task_id": "closure_backend_e2e_test",
+      "status": "completed",
+      "source": "审查驱动/自主规划",
+      "reason": "第57轮评审将闭包端到端测试列为P78高优先级任务。C后端闭包Phase3已完成但无端到端测试验证。审查日志中多处标记类型推断问题。开发中发现闭包调用结果类型在HIR→MIR→LIR→C管道中丢失（始终为TYPE_VAR），导致C代码生成错误。",
+      "details": "完成闭包端到端测试+类型推断修复：1) HIR lowering: _resolve_type_annotation新增TypeFn递归解析（参数类型+返回类型→FUNCTION类型params=[param_types...]+[ret_type]）；2) MIR lowering: _lower_call_expr根据callee形态推断返回类型（直接调用从self.functions查、闭包调用从callee SSA类型params[-1]取）；3) LIR C backend: _nova_type_to_c优先检查IRType kind（FUNCTION→NovaClosure*），_compile_call_indirect根据返回类型选择正确cast；4) 修复let声明覆盖推断类型问题。新增3个端到端测试：test_closure_e2e_make_adder（单捕获）、test_closure_e2e_double_capture（多捕获）、test_closure_e2e_direct_call（直接调用）。测试480→483 passed + 20 subtests通过。"
+    },
+    {
+      "cycle": 59,
+      "task_id": "refactor_collect_idents_dispatch",
+      "status": "completed",
+      "source": "审查驱动",
+      "reason": "审查日志Top10复杂函数中 MIRLowering._collect_idents CC=22（排名#4）。函数含大量isinstance链处理7种HIR节点类型（Identifier/LetDecl/BlockExpr/Lambda/For/ListComprehension/Match），是典型的调度表化重构目标。",
+      "details": "将 _collect_idents 从 CC=22 重构为调度表模式：1) 新增 _build_collect_dispatch() 方法构建类型→handler映射表（7种HIR节点类型）；2) 提取7个类型专属handler方法：_collect_ident_ref（标识符引用）、_collect_let（let绑定）、_collect_block（块表达式）、_collect_lambda_idents（lambda自由变量）、_collect_for（for循环迭代变量）、_collect_listcomp（列表推导式）、_collect_match（match模式绑定）；3) 主函数通过_dispatch表查找handler并调用，未命中时通过_iter_hir_children通用遍历；4) CC从22降至约3。所有新方法补充完整docstring。测试483 passed + 20 subtests通过，零回归。"
+    },
     {
       "cycle": 58,
       "task_id": "refactor_check_patterns_exhaustive",
@@ -295,9 +314,9 @@
       "details": "将 _lower_if_expr 从 106 行重构为分层结构：1) 新增 _lower_branch_body() 通用分支处理方法，消除 true/false 分支的 30 行镜像重复代码，返回 (result, modified_vars) 元组；2) 新增 _insert_merge_phis() 处理 merge 块 Phi 节点插入（约 35 行独立逻辑）；3) 新增 _insert_result_phi() 处理 if 表达式结果 Phi（约 15 行独立逻辑）；4) _lower_if_expr 主函数从 106 行压缩至约 25 行（CC≈8）。测试 395/395 通过，零回归。"
     }
   ],
-  "current_cycle": 58,
+  "current_cycle": 59,
   "baseline_tests": 396,
-  "current_tests": 480,
+  "current_tests": 483,
   "last_review_cycle": 57,
   "tasks": [
     {
@@ -353,12 +372,12 @@
     {
       "id": "closure_backend_e2e_test",
       "name": "闭包后端端到端测试",
-      "description": "为闭包功能编写后端端到端测试：编译含 lambda 的 Nova 源码 → C/Wasm/Native 后端 → 执行 → 验证输出正确性。覆盖无捕获闭包、有捕获闭包、高阶函数调用等场景。",
+      "description": "为闭包功能编写后端端到端测试：编译含 lambda 的 Nova 源码 → C/Wasm/Native 后端 → 执行 → 验证输出正确性。覆盖无捕获闭包、有捕获闭包、高阶函数调用等场景。已完成：新增3个C后端端到端测试（make_adder单捕获、double_capture多捕获、direct_call直接调用），并修复闭包类型在HIR→MIR→LIR→C管道中的传递问题。",
       "difficulty": "medium",
       "priority": 78,
       "category": "test",
       "estimated": "3-4 小时",
-      "status": "pending",
+      "status": "completed",
       "depends_on": [
         "c_backend_closure_phase3"
       ],
@@ -532,6 +551,18 @@
         "fix_mir_ssa"
       ],
       "reason": "原生后端整体完成度极低（代码生成器骨架、无寄存器分配、无跳转回填），项目已有 C 后端、Cranelift 后端和 Wasm 后端三个更可行路径，自研 x86_64 投入产出比太低。保留任务但标记为 deprecated [deprecated]"
+    },
+    {
+      "id": "refactor_collect_idents_dispatch",
+      "name": "重构 MIRLowering._collect_idents 调度表化",
+      "description": "MIRLowering._collect_idents 圈复杂度 22（审查日志Top4），含大量isinstance链处理7种HIR节点类型。已重构为调度表模式：新增_build_collect_dispatch()方法和7个类型专属handler，CC从22降至约3。",
+      "difficulty": "medium",
+      "priority": 65,
+      "category": "engineering",
+      "estimated": "2-3 小时",
+      "status": "completed",
+      "depends_on": [],
+      "reason": "审查日志Top10复杂函数排名#4，CC=22。是调度表化重构的典型目标。[审查驱动]"
     }
   ]
 }

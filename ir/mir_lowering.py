@@ -100,6 +100,8 @@ class MIRLowering:
         self.lambda_functions = {}  # 收集 lambda 生成的独立 MIRFunction
         # 表达式降级调度表：HIR 节点类型 -> 降级方法
         self._expr_lowerers = self._build_expr_lowerers()
+        # 自由变量收集调度表：HIR 节点类型 -> 收集方法
+        self._collect_dispatch = self._build_collect_dispatch()
 
     def _build_expr_lowerers(self):
         """构建表达式降级调度表
@@ -138,6 +140,22 @@ class MIRLowering:
             HIRUnwrapExpr: self._lower_unwrap_expr,
         }
 
+    def _build_collect_dispatch(self):
+        """构建自由变量收集调度表
+
+        将引入新绑定的 HIR 节点类型映射到专属收集方法，
+        替代 _collect_idents 中的 isinstance 链，降低圈复杂度。
+        """
+        return {
+            HIRIdentifier: self._collect_ident_ref,
+            HIRLetDecl: self._collect_let,
+            HIRBlockExpr: self._collect_block,
+            HIRLambda: self._collect_lambda_idents,
+            HIRForExpr: self._collect_for,
+            HIRListComprehension: self._collect_listcomp,
+            HIRMatchExpr: self._collect_match,
+        }
+
     def lower(self, hir_module):
         """将 HIR 模块降级为 MIR 模块。
 
@@ -155,15 +173,24 @@ class MIRLowering:
         self.type_defs = hir_module.type_defs
         self.lambda_functions = {}  # 重置 lambda 函数收集器
 
+        # 预扫描：收集所有函数的显式返回类型（供调用点类型推断使用）
+        # 对于带显式返回类型注解的函数，此处即可获取到具体类型；
+        # 无注解的函数在 _lower_function 完成后会回填推断结果。
+        self.functions = {}
+        for decl in hir_module.declarations:
+            if isinstance(decl, HIRFnDecl):
+                self.functions[decl.fn_def.name] = decl.fn_def.return_type
+
         for decl in hir_module.declarations:
             if isinstance(decl, HIRLetDecl):
                 mir_module.globals[decl.name] = MIRGlobal(
                     decl.name, decl.ir_type, is_mutable=decl.is_mutable
                 )
             elif isinstance(decl, HIRFnDecl):
-                mir_module.functions[decl.fn_def.name] = self._lower_function(
-                    decl.fn_def
-                )
+                mir_fn = self._lower_function(decl.fn_def)
+                # 回填推断后的返回类型（处理无注解函数）
+                self.functions[decl.fn_def.name] = mir_fn.return_type
+                mir_module.functions[decl.fn_def.name] = mir_fn
 
         # 注册所有 lambda 函数到模块（编译过程中收集的）
         for name, fn in self.lambda_functions.items():
@@ -339,23 +366,50 @@ class MIRLowering:
     # === 函数调用 ===
 
     def _lower_call_expr(self, hir_expr, block):
+        """降级函数调用表达式。
+
+        根据 callee 形态推断调用结果类型：
+        - 直接调用（callee 是函数名字符串）：从 self.functions 查返回类型
+        - 闭包调用（callee 是 SSA 值）：从 callee 的函数类型 params[-1] 取返回类型
+        - 无法确定时回退到 hir_expr.ir_type（可能仍是 TYPE_VAR）
+        """
         arg_ssas = []
         for arg in hir_expr.arguments:
             arg_ssa = self._lower_expr(arg, block)
             arg_ssas.append(arg_ssa or "")
-        instr = MIRCall(hir_expr.ir_type)
+
+        # 推断调用结果类型（替代直接使用 hir_expr.ir_type，后者始终是 TYPE_VAR）
+        result_ty = hir_expr.ir_type
+
         if isinstance(hir_expr.function, HIRIdentifier):
             name = hir_expr.function.name
             # 判断是函数名（直接调用）还是变量（如闭包，间接调用）
             if name in self.env:
                 # 变量（闭包）-> 使用 SSA 值，间接调用
-                instr.callee = self.env[name]
+                callee_ssa = self.env[name]
+                instr_callee = callee_ssa
+                # 从闭包 SSA 的类型信息中提取返回类型
+                callee_ty = self.ssa_types.get(callee_ssa)
+                if callee_ty and callee_ty.kind == IRType.FUNCTION and callee_ty.params:
+                    # 函数类型的 params[-1] 是返回类型
+                    result_ty = callee_ty.params[-1]
             else:
                 # 函数名 -> 使用字符串，直接调用
-                instr.callee = name
+                instr_callee = name
+                # 从函数表查返回类型
+                fn_ret = self.functions.get(name)
+                if fn_ret and fn_ret.kind != IRType.TYPE_VAR:
+                    result_ty = fn_ret
         else:
             func_ssa = self._lower_expr(hir_expr.function, block)
-            instr.callee = func_ssa or ""
+            instr_callee = func_ssa or ""
+            # 从 callee SSA 类型推断返回类型
+            callee_ty = self.ssa_types.get(func_ssa)
+            if callee_ty and callee_ty.kind == IRType.FUNCTION and callee_ty.params:
+                result_ty = callee_ty.params[-1]
+
+        instr = MIRCall(result_ty)
+        instr.callee = instr_callee
         instr.args = arg_ssas
         return self._emit(instr)
 
@@ -380,7 +434,13 @@ class MIRLowering:
                 value_ssa = self._lower_expr(expr.value, current_block)
                 if value_ssa:
                     self.env[expr.name] = value_ssa
-                    self.ssa_types[value_ssa] = expr.ir_type
+                    # 仅当声明有更具体的类型注解时才覆盖
+                    # 避免用 TYPE_VAR 覆盖 _lower_call_expr 已推断的具体类型
+                    existing_ty = self.ssa_types.get(value_ssa)
+                    if (expr.ir_type.kind != IRType.TYPE_VAR and
+                            (existing_ty is None or
+                             existing_ty.kind == IRType.TYPE_VAR)):
+                        self.ssa_types[value_ssa] = expr.ir_type
                 result = None  # 声明不产生值
             else:
                 result = self._lower_expr(expr, current_block)
@@ -496,7 +556,14 @@ class MIRLowering:
         self._restore_context(saved)
 
         # 8. 生成 MIRClosureCreate 指令
-        instr = MIRClosureCreate(CLOSURE_TYPE)
+        # 构造携带返回类型的函数类型（替代裸 CLOSURE_TYPE）
+        # params = [参数类型...] + [返回类型]，使调用点能通过 params[-1] 获取返回类型
+        closure_params = [ty for _, _, ty in captures] + [ty for _, ty in hir_expr.params]
+        closure_params.append(return_type)
+        closure_ty = NovaType(
+            IRType.FUNCTION, params=closure_params, name="Closure"
+        )
+        instr = MIRClosureCreate(closure_ty)
         instr.fn_name = lambda_name
         instr.captures = [enc_ssa for _, enc_ssa, _ in captures]
         return self._emit(instr)
@@ -549,82 +616,76 @@ class MIRLowering:
 
         对引入新绑定的结构（let/lambda/for/match pattern），
         在递归子表达式时将新绑定加入 bound_names。
+
+        通过调度表分发到类型专属 handler，降低圈复杂度。
         """
         if expr is None:
             return
 
-        # 标识符引用：检查是否为自由变量
-        if isinstance(expr, HIRIdentifier):
-            if expr.name not in bound_names:
-                free_vars.add(expr.name)
+        # 调度表分发：查找类型专属 handler
+        handler = self._collect_dispatch.get(type(expr))
+        if handler is not None:
+            handler(expr, bound_names, free_vars)
             return
 
-        # let 声明：value 中引用的是外层变量，name 是新绑定
-        if isinstance(expr, HIRLetDecl):
-            self._collect_idents(expr.value, bound_names, free_vars)
-            return
-
-        # 块表达式：逐个处理，跟踪 let 引入的新绑定
-        if isinstance(expr, HIRBlockExpr):
-            block_bound = set(bound_names)
-            for sub in expr.exprs:
-                if isinstance(sub, HIRLetDecl):
-                    self._collect_idents(sub.value, block_bound, free_vars)
-                    block_bound.add(sub.name)
-                else:
-                    self._collect_idents(sub, block_bound, free_vars)
-            return
-
-        # 嵌套 lambda：其参数在内部是 bound 的
-        if isinstance(expr, HIRLambda):
-            lambda_bound = set(bound_names)
-            for name, _ in expr.params:
-                lambda_bound.add(name)
-            self._collect_idents(expr.body, lambda_bound, free_vars)
-            return
-
-        # for 循环：循环变量在新作用域中绑定
-        if isinstance(expr, HIRForExpr):
-            self._collect_idents(expr.iterable, bound_names, free_vars)
-            for_bound = set(bound_names)
-            for_bound.add(expr.variable)
-            self._collect_idents(expr.body, for_bound, free_vars)
-            if expr.step:
-                self._collect_idents(expr.step, for_bound, free_vars)
-            return
-
-        # 列表推导式：推导变量在新作用域中绑定
-        if isinstance(expr, HIRListComprehension):
-            self._collect_idents(expr.iterable, bound_names, free_vars)
-            lc_bound = set(bound_names)
-            lc_bound.add(expr.variable)
-            self._collect_idents(expr.result_expr, lc_bound, free_vars)
-            if expr.filter:
-                self._collect_idents(expr.filter, lc_bound, free_vars)
-            return
-
-        # match 表达式：模式可能绑定变量
-        if isinstance(expr, HIRMatchExpr):
-            self._collect_idents(expr.value, bound_names, free_vars)
-            for arm in expr.arms:
-                arm_bound = set(bound_names)
-                self._collect_pattern_binds(arm.pattern, arm_bound)
-                if arm.guard:
-                    self._collect_idents(arm.guard, arm_bound, free_vars)
-                self._collect_idents(arm.body, arm_bound, free_vars)
-            return
-
-        # 通用递归：通过数据驱动的子节点遍历处理其余节点类型
+        # 通用兜底：通过 _iter_hir_children 遍历所有子节点
+        # _iter_hir_children 产出元组末元素恒为子表达式，无需 kind 分支
         for item in _iter_hir_children(expr):
-            kind = item[0]
-            if kind in ("single", "optional"):
-                self._collect_idents(item[2], bound_names, free_vars)
-            elif kind == "list_item":
-                self._collect_idents(item[3], bound_names, free_vars)
-            elif kind in ("pair_key", "pair_val"):
-                self._collect_idents(item[3], bound_names, free_vars)
-            elif kind in ("arm_guard", "arm_body"):
-                self._collect_idents(item[3], bound_names, free_vars)
+            self._collect_idents(item[-1], bound_names, free_vars)
+
+    def _collect_ident_ref(self, expr, bound_names, free_vars):
+        """处理标识符引用：检查是否为自由变量"""
+        if expr.name not in bound_names:
+            free_vars.add(expr.name)
+
+    def _collect_let(self, expr, bound_names, free_vars):
+        """处理 let 声明：value 中引用的是外层变量，name 是新绑定"""
+        self._collect_idents(expr.value, bound_names, free_vars)
+
+    def _collect_block(self, expr, bound_names, free_vars):
+        """处理块表达式：逐个处理，跟踪 let 引入的新绑定"""
+        block_bound = set(bound_names)
+        for sub in expr.exprs:
+            if isinstance(sub, HIRLetDecl):
+                self._collect_idents(sub.value, block_bound, free_vars)
+                block_bound.add(sub.name)
+            else:
+                self._collect_idents(sub, block_bound, free_vars)
+
+    def _collect_lambda_idents(self, expr, bound_names, free_vars):
+        """处理嵌套 lambda：其参数在内部是 bound 的"""
+        lambda_bound = set(bound_names)
+        for name, _ in expr.params:
+            lambda_bound.add(name)
+        self._collect_idents(expr.body, lambda_bound, free_vars)
+
+    def _collect_for(self, expr, bound_names, free_vars):
+        """处理 for 循环：循环变量在新作用域中绑定"""
+        self._collect_idents(expr.iterable, bound_names, free_vars)
+        for_bound = set(bound_names)
+        for_bound.add(expr.variable)
+        self._collect_idents(expr.body, for_bound, free_vars)
+        if expr.step:
+            self._collect_idents(expr.step, for_bound, free_vars)
+
+    def _collect_listcomp(self, expr, bound_names, free_vars):
+        """处理列表推导式：推导变量在新作用域中绑定"""
+        self._collect_idents(expr.iterable, bound_names, free_vars)
+        lc_bound = set(bound_names)
+        lc_bound.add(expr.variable)
+        self._collect_idents(expr.result_expr, lc_bound, free_vars)
+        if expr.filter:
+            self._collect_idents(expr.filter, lc_bound, free_vars)
+
+    def _collect_match(self, expr, bound_names, free_vars):
+        """处理 match 表达式：模式可能绑定变量"""
+        self._collect_idents(expr.value, bound_names, free_vars)
+        for arm in expr.arms:
+            arm_bound = set(bound_names)
+            self._collect_pattern_binds(arm.pattern, arm_bound)
+            if arm.guard:
+                self._collect_idents(arm.guard, arm_bound, free_vars)
+            self._collect_idents(arm.body, arm_bound, free_vars)
 
     def _collect_pattern_binds(self, pattern, bound_names):
         """收集模式中绑定的变量名，加入 bound_names 集合。"""

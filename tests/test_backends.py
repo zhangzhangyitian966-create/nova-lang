@@ -898,6 +898,194 @@ class TestCBackendClosure(unittest.TestCase):
                             f"闭包调用的 callee 应该是 SSA 变量，实际是: {instr.callee}"
                         )
 
+    @unittest.skipUnless(
+        __import__("shutil").which("gcc"),
+        "gcc not available"
+    )
+    def test_closure_e2e_make_adder(self):
+        """端到端测试：闭包捕获变量经 C 后端编译执行后返回正确结果
+
+        make_adder(5) 返回闭包 add5，add5(10) 应返回 15。
+        验证整个管道：Nova源码 → HIR → MIR → LIR → C代码 → gcc编译 → 执行。
+        """
+        import subprocess
+        import shutil
+
+        source = """
+            fn make_adder(n: Int) -> (Int) -> Int {
+                |x: Int| -> Int { x + n }
+            }
+            fn main() -> Int {
+                let add5 = make_adder(5)
+                add5(10)
+            }
+        """
+        lir = source_to_lir(source)
+
+        from nova.backend.lir_c_backend import LIRCBackend
+        backend = LIRCBackend()
+        c_code = backend.compile(lir)
+
+        runtime_dir = os.path.join(
+            os.path.dirname(__file__), "..", "runtime"
+        )
+        runtime_c = os.path.join(runtime_dir, "nova_runtime.c")
+
+        with tempfile.NamedTemporaryFile(
+            suffix=".c", mode="w", delete=False
+        ) as f:
+            f.write(c_code)
+            f.flush()
+            c_file = f.name
+            exe_file = c_file.replace(".c", "")
+            try:
+                # 编译（含运行时库）
+                result = subprocess.run(
+                    ["gcc", "-o", exe_file, "-I", runtime_dir,
+                     c_file, runtime_c, "-lm"],
+                    capture_output=True, text=True, timeout=10
+                )
+                self.assertEqual(
+                    result.returncode, 0,
+                    f"GCC 编译失败: {result.stderr}"
+                )
+                # 执行并验证退出码
+                run_result = subprocess.run(
+                    [exe_file], capture_output=True, text=True, timeout=5
+                )
+                self.assertEqual(
+                    run_result.returncode, 15,
+                    f"闭包执行结果应为 15 (5+10)，实际退出码: {run_result.returncode}"
+                )
+            finally:
+                if os.path.exists(c_file):
+                    os.unlink(c_file)
+                if os.path.exists(exe_file):
+                    os.unlink(exe_file)
+
+    @unittest.skipUnless(
+        __import__("shutil").which("gcc"),
+        "gcc not available"
+    )
+    def test_closure_e2e_multiple_captures(self):
+        """端到端测试：多变量捕获的闭包
+
+        闭包捕获两个变量并返回它们的加和。
+        """
+        import subprocess
+        import shutil
+
+        source = """
+            fn make_combined(a: Int, b: Int) -> (Int) -> Int {
+                |x: Int| -> Int { x + a + b }
+            }
+            fn main() -> Int {
+                let f = make_combined(10, 20)
+                f(5)
+            }
+        """
+        lir = source_to_lir(source)
+
+        from nova.backend.lir_c_backend import LIRCBackend
+        backend = LIRCBackend()
+        c_code = backend.compile(lir)
+
+        runtime_dir = os.path.join(
+            os.path.dirname(__file__), "..", "runtime"
+        )
+        runtime_c = os.path.join(runtime_dir, "nova_runtime.c")
+
+        with tempfile.NamedTemporaryFile(
+            suffix=".c", mode="w", delete=False
+        ) as f:
+            f.write(c_code)
+            f.flush()
+            c_file = f.name
+            exe_file = c_file.replace(".c", "")
+            try:
+                result = subprocess.run(
+                    ["gcc", "-o", exe_file, "-I", runtime_dir,
+                     c_file, runtime_c, "-lm"],
+                    capture_output=True, text=True, timeout=10
+                )
+                self.assertEqual(
+                    result.returncode, 0,
+                    f"GCC 编译失败: {result.stderr}"
+                )
+                run_result = subprocess.run(
+                    [exe_file], capture_output=True, text=True, timeout=5
+                )
+                self.assertEqual(
+                    run_result.returncode, 35,
+                    f"闭包执行结果应为 35 (5+10+20)，实际退出码: {run_result.returncode}"
+                )
+            finally:
+                if os.path.exists(c_file):
+                    os.unlink(c_file)
+                if os.path.exists(exe_file):
+                    os.unlink(exe_file)
+
+    @unittest.skipUnless(
+        __import__("shutil").which("gcc"),
+        "gcc not available"
+    )
+    def test_direct_call_type_inference(self):
+        """端到端测试：直接函数调用的类型推断
+
+        验证 _lower_call_expr 从函数表查返回类型的修复，
+        确保直接调用结果在 C 后端有正确的类型。
+        """
+        import subprocess
+
+        source = """
+            fn double(x: Int) -> Int {
+                x * 2
+            }
+            fn main() -> Int {
+                double(21)
+            }
+        """
+        lir = source_to_lir(source)
+
+        from nova.backend.lir_c_backend import LIRCBackend
+        backend = LIRCBackend()
+        c_code = backend.compile(lir)
+
+        runtime_dir = os.path.join(
+            os.path.dirname(__file__), "..", "runtime"
+        )
+        runtime_c = os.path.join(runtime_dir, "nova_runtime.c")
+
+        with tempfile.NamedTemporaryFile(
+            suffix=".c", mode="w", delete=False
+        ) as f:
+            f.write(c_code)
+            f.flush()
+            c_file = f.name
+            exe_file = c_file.replace(".c", "")
+            try:
+                result = subprocess.run(
+                    ["gcc", "-o", exe_file, "-I", runtime_dir,
+                     c_file, runtime_c, "-lm"],
+                    capture_output=True, text=True, timeout=10
+                )
+                self.assertEqual(
+                    result.returncode, 0,
+                    f"GCC 编译失败: {result.stderr}"
+                )
+                run_result = subprocess.run(
+                    [exe_file], capture_output=True, text=True, timeout=5
+                )
+                self.assertEqual(
+                    run_result.returncode, 42,
+                    f"直接调用结果应为 42 (21*2)，实际退出码: {run_result.returncode}"
+                )
+            finally:
+                if os.path.exists(c_file):
+                    os.unlink(c_file)
+                if os.path.exists(exe_file):
+                    os.unlink(exe_file)
+
 
 if __name__ == "__main__":
     unittest.main()

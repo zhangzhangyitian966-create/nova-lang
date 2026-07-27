@@ -1,3 +1,110 @@
+## 2026-07-27 01:50 第59轮开发（普通开发轮）
+
+### 开发范围
+- **轮次**: 第 59 轮（普通开发轮）
+- **上轮评审**: 第 57 轮
+- **测试基线**: 480 passed + 20 subtests
+- **测试后**: 483 passed + 20 subtests（全通过）
+- **任务来源**: 审查驱动 100%（2/2）
+
+---
+
+### 一、本轮任务
+
+| 任务 | 来源 | 状态 | 说明 |
+|------|------|------|------|
+| closure_backend_e2e_test + fix_closure_type_inference | 【审查驱动】 | ✅ 成功 | 闭包类型推断修复 + 3个C后端端到端测试 |
+| refactor_collect_idents_dispatch | 【审查驱动】 | ✅ 成功 | MIRLowering._collect_idents CC 22→3 |
+
+**审查对齐**: 本轮 2 个任务全部来自审查发现，审查对齐率 100%。
+
+---
+
+### 二、审查日志研读摘要
+
+**最新审查数据（第261轮深度审查）**:
+- 总问题 1131 个（CRITICAL 0 / HIGH 0 / MEDIUM 72 / LOW 1059）
+- Top4 复杂函数 _collect_idents CC=22（本轮重构目标）
+- Top1 _check_patterns_exhaustive CC=30（第58轮已重构，审查日志待更新）
+- 25+ 极复杂函数从 1 降至 0（全项目已无 CC>25 的函数）
+- 0 循环依赖、0 sys.path hack、增量门禁通过
+
+**趋势分析**:
+- MEDIUM 问题持续下降（78→75→72）
+- Top10 复杂度函数首轮重构基本完成，子函数深化推进中
+- 闭包类型推断问题是闭包端到端测试的核心障碍
+
+**本轮采纳**: 
+1. closure_backend_e2e_test（审查日志多处标记类型推断问题 + 第57轮评审P78任务）
+2. _collect_idents CC=22（审查日志Top4复杂函数）
+
+---
+
+### 三、任务详情
+
+#### 任务 1: closure_backend_e2e_test + fix_closure_type_inference（审查驱动）
+
+**目标**: 为闭包功能编写C后端端到端测试，验证经编译管道后运行结果正确
+
+**核心问题**: C后端闭包Phase3已完成，但无端到端测试验证。开发中发现闭包调用结果类型在HIR→MIR→LIR→C管道中始终为TYPE_VAR，导致C代码生成错误（int64_t与NovaClosure*混用）。
+
+**修复方案**（4层管道类型传递修复）:
+1. **HIR lowering** (`hir_lowering.py`): `_resolve_type_annotation` 新增 TypeFn 递归解析，将函数类型注解 `(Int) -> Int` 解析为 FUNCTION 类型（params=[param_types...]+[ret_type]），而非默认 TYPE_VAR
+2. **MIR lowering** (`mir_lowering.py`): `_lower_call_expr` 根据 callee 形态推断返回类型——直接调用从 self.functions 查、闭包调用从 callee SSA 类型 params[-1] 取
+3. **LIR C backend** (`lir_c_backend.py`): `_nova_type_to_c` 优先检查 IRType kind（FUNCTION→NovaClosure*），避免字符串匹配误判；`_compile_call_indirect` 根据返回类型选择正确 cast
+4. **let 声明修复**: 仅在声明有更具体类型时更新 SSA 类型，避免覆盖推断类型
+
+**新增端到端测试** (`tests/test_backends.py`):
+- `test_closure_e2e_make_adder`: make_adder(5)→add5(10)=15，单变量捕获
+- `test_closure_e2e_double_capture`: 双变量捕获闭包
+- `test_closure_e2e_direct_call`: 直接函数调用（非闭包路径）
+
+#### 任务 2: refactor_collect_idents_dispatch（审查驱动）
+
+**目标**: MIRLowering._collect_idents，CC 22→~3
+
+**核心问题**: 函数含大量 isinstance 链处理 7 种 HIR 节点类型（Identifier/LetDecl/BlockExpr/Lambda/For/ListComprehension/Match），审查日志 Top4 复杂函数。
+
+**重构方案**（调度表模式）:
+1. 新增 `_build_collect_dispatch()` 方法构建类型→handler 映射表
+2. 提取 7 个类型专属 handler 方法：
+   - `_collect_ident_ref` — 标识符引用收集
+   - `_collect_let` — let 绑定新变量
+   - `_collect_block` — 块表达式递归
+   - `_collect_lambda_idents` — lambda 自由变量
+   - `_collect_for` — for 循环迭代变量
+   - `_collect_listcomp` — 列表推导式变量
+   - `_collect_match` — match 模式绑定
+3. 主函数通过 dispatch 表查找 handler 并调用，未命中时通过 `_iter_hir_children` 通用遍历
+4. CC 从 22 降至约 3
+
+---
+
+### 四、测试前后对比
+
+| 指标 | 开发前 | 开发后 | 变化 |
+|------|--------|--------|------|
+| 测试通过数 | 480 + 20 subtests | 483 + 20 subtests | **+3** |
+| 回归 | - | 0 | ✅ 零回归 |
+| _collect_idents CC | 22 | ~3 | **-86%** |
+| 闭包端到端测试 | 0 | 3 | **从无到有** |
+| 闭包类型传递 | TYPE_VAR 丢失 | 4层管道正确传递 | **核心修复** |
+
+---
+
+### 五、下一步计划
+
+第 60 轮为**评审轮**（60 % 3 == 0）。
+
+将进行路线图评审，回顾第58-59轮开发成果，评估方向/质量/效率/价值/审查对齐五维表现，规划第61-63轮方向。
+
+重点关注：
+- Top10 剩余未重构函数：_emit_runtime_call CC=25、generic_rewrite CC=23、_emit_call CC=21
+- closure_fn_ptr_backfill（P80）— Native/Wasm 后端闭包 fn_ptr 回填
+- 审查日志更新后的最新问题趋势
+
+---
+
 ## 2026-07-27 00:43 第58轮开发（普通开发轮）
 
 ### 开发范围
