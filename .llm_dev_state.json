@@ -1,5 +1,5 @@
 {
-  "cycles": 63,
+  "cycles": 64,
   "completed_tasks": [
     "review_cycle_57",
     "establish_quality_gate",
@@ -134,10 +134,37 @@
     "refactor_licm_loop",
     "refactor_parse_primary_expr",
     "cfg_utils_unit_tests",
-    "review_cycle_63"
+    "review_cycle_63",
+    "review_data_calibration",
+    "lir_c_backend_unit_tests",
+    "closure_fn_ptr_backfill"
   ],
   "failed_tasks": [],
   "task_history": [
+    {
+      "cycle": 64,
+      "task_id": "review_data_calibration",
+      "status": "completed",
+      "source": "审查驱动",
+      "reason": "第63轮评审深度代码审计发现审查数据僵化：sys.path hack（报告19处）和裸异常捕获（报告11处）在实际代码中已不存在但报告持续显示；REFACTORED_FUNCTIONS字典过时；native_backend.py deprecated但占据Top10复杂度5席。",
+      "details": "修复auto_review.py三处数据问题：1) 更新REFACTORED_FUNCTIONS字典，添加10+个近期重构函数条目（TypeChecker._from_ast_type、Parser._parse_primary_expr等）；2) 增强sys.path hack检测，排除字符串字面量上下文中的误报（re.sub移除'\"...\"'后再匹配）；3) 过滤deprecated模块（native_backend.py）从Top10复杂度列表，避免浪费审查关注。修复后运行auto_review.py验证，虚假问题清零。测试520 passed + 20 subtests通过，零回归。"
+    },
+    {
+      "cycle": 64,
+      "task_id": "lir_c_backend_unit_tests",
+      "status": "completed",
+      "source": "自主规划",
+      "reason": "backend/lir_c_backend.py（931行）是Nova核心C代码生成路径，但当前零专门测试覆盖。C后端是nova build的默认路径，零测试意味着任何变更都可能导致无感知回归。",
+      "details": "创建tests/test_lir_c_backend.py（627行），包含8大测试类、46个测试用例：1) TestTypeMapping验证_nova_type_to_c类型映射（10种类型）；2) TestCompileEntry验证compile入口（空模块/函数/全局变量/字符串常量）；3) TestLoadConst/TestBinOpAndUnaryOp/TestRegAndGlobalOps验证指令编译（常量加载/二元运算/一元运算/寄存器操作/全局变量）；4) TestControlFlow验证控制流（标签/跳转/分支/多路开关）；5) TestFunctionCall验证函数调用（直接调用/返回值）；6) TestDataStructures验证数据结构（列表/元组/Map/ADT/字段访问/索引）；7) TestMiscInstructions验证panic；8) TestEndToEndCompile验证gcc -fsyntax-only语法检查。开发中发现并修复了_nova_type_to_c箭头类型误匹配bug（'Int -> Int'被'int'关键词先匹配为int64_t）。46测试全部通过，总测试数520→566。"
+    },
+    {
+      "cycle": 64,
+      "task_id": "closure_fn_ptr_backfill",
+      "status": "completed",
+      "source": "审查驱动",
+      "reason": "任务池中closure_fn_ptr_backfill状态为pending，但Explore深度代码审计发现Native和Wasm后端实际上已实现fn_ptr回填。需验证并更新任务状态。",
+      "details": "验证确认closure_fn_ptr_backfill已完成：1) Wasm后端：_compile_closure_create中fn_ptr使用lambda函数的funcref table索引（非NULL），_elem_segment和_funcref_table测试验证通过；2) Native后端：_emit_closure_create通过closure_fn_ptr_fixups记录RIP-relative LEA占位位置，在_generate_elf和_generate_macho链接阶段回填对应lambda的trampoline虚拟地址。运行15个闭包相关测试全部通过。任务状态更新为completed。"
+    },
     {
       "cycle": 63,
       "task_id": "review_cycle_63",
@@ -444,7 +471,7 @@
       "priority": 80,
       "category": "backend",
       "estimated": "4-6 小时",
-      "status": "pending",
+      "status": "completed",
       "depends_on": [
         "c_backend_closure_phase3"
       ],
@@ -701,7 +728,7 @@
       "priority": 60,
       "category": "engineering",
       "estimated": "1-2小时",
-      "status": "pending",
+      "status": "completed",
       "depends_on": [],
       "reason": "审查数据僵化导致虚假问题持续报告，误导任务优先级判断。从第91轮起问题数冻结长达170+轮，必须修复。[评审发现]"
     },
@@ -713,7 +740,7 @@
       "priority": 55,
       "category": "test",
       "estimated": "4-6小时",
-      "status": "pending",
+      "status": "completed",
       "depends_on": [],
       "reason": "lir_c_backend.py是C后端核心（931行），当前无任何专门测试。C后端是nova build的默认路径，零测试意味着任何变更都可能导致无感知回归。[自主发现]"
     }

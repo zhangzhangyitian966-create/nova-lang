@@ -1,3 +1,106 @@
+## 2026-07-28 04:48 第64轮开发
+
+### 开发概览
+- **轮次**: 第 64 轮（普通轮，64 % 3 != 0）
+- **测试状态**: 566 passed + 20 subtests（零失败）
+- **基线对比**: 520 → 566（+46，新增 LIR C 后端单元测试）
+- **任务数**: 3 个，全部成功
+
+---
+
+### 一、任务列表
+
+| 任务 | 来源 | 状态 | 价值 |
+|------|------|------|------|
+| review_data_calibration | 【审查驱动】 | 完成 | 恢复审查数据可信度，消除虚假问题 |
+| lir_c_backend_unit_tests | 【自主规划】 | 完成 | 补齐 C 后端最大测试盲区（931行零测试→46测试覆盖） |
+| closure_fn_ptr_backfill | 【审查驱动】 | 完成（验证） | 确认 Native/Wasm 后端闭包 fn_ptr 已实际回填 |
+
+**审查对齐**: 3 个任务中 2 个来自审查发现，审查对齐率 **67%**。
+
+---
+
+### 二、任务详情
+
+#### 1. review_data_calibration — 审查数据校准
+**来源**: 【审查驱动】
+**原因**: 第63轮评审深度代码审计发现审查数据僵化：sys.path hack（报告19处）和裸异常捕获（报告11处）在实际代码中已不存在但报告持续显示；REFACTORED_FUNCTIONS字典过时；native_backend.py deprecated但占据Top10复杂度5席。
+
+**修改内容**:
+- `scripts/auto_review.py`: 更新 REFACTORED_FUNCTIONS 字典，添加 10+ 个近期重构函数条目（TypeChecker._from_ast_type、Parser._parse_primary_expr、LICM._licm_loop 等）
+- `scripts/auto_review.py`: 增强 sys.path hack 检测，使用 `re.sub(r"['\"][^'\"]*['\"]", "''", line)` 排除字符串字面量上下文中的误报
+- `scripts/auto_review.py`: 新增 DEPRECATED_MODULES 集合，在 phase6_complexity() 中过滤 native_backend.py 等废弃模块，避免浪费审查关注
+
+**结果**: 运行 auto_review.py 验证，虚假问题清零。测试 520 passed + 20 subtests，零回归。
+
+---
+
+#### 2. lir_c_backend_unit_tests — LIR C 后端单元测试
+**来源**: 【自主规划】
+**原因**: `backend/lir_c_backend.py`（931行）是 Nova 核心 C 代码生成路径，但当前零专门测试覆盖。C 后端是 `nova build` 的默认路径，零测试意味着任何变更都可能导致无感知回归。
+
+**修改内容**:
+- 新建 `tests/test_lir_c_backend.py`（627行），包含 8 大测试类、46 个测试用例：
+  - `TestTypeMapping`: 验证 `_nova_type_to_c` 类型映射（10 种类型）
+  - `TestCompileEntry`: 验证 `compile` 入口（空模块/函数/全局变量/字符串常量）
+  - `TestLoadConst` / `TestBinOpAndUnaryOp` / `TestRegAndGlobalOps`: 验证指令编译（常量加载/二元运算/一元运算/寄存器操作/全局变量）
+  - `TestControlFlow`: 验证控制流（标签/跳转/分支/多路开关）
+  - `TestFunctionCall`: 验证函数调用（直接调用/返回值）
+  - `TestDataStructures`: 验证数据结构（列表/元组/Map/ADT/字段访问/索引）
+  - `TestMiscInstructions`: 验证 panic
+  - `TestEndToEndCompile`: 验证 gcc `-fsyntax-only` 语法检查（含 `-I/runtime` 头文件路径）
+
+**发现与修复**:
+- 测试开发中发现 `_nova_type_to_c` 箭头类型误匹配 bug：`NovaType(IRType.INT, name="Int -> Int")` 被 `"int"` 关键词先匹配为 `int64_t`，而 `"->"` 检查在循环之后永远不会执行。修复：将 `"->" in type_str` 检查提前到 `_NOVA_TYPE_C_MAP` 关键词循环之前。
+
+**结果**: 46 个测试全部通过，总测试数 520 → 566。
+
+---
+
+#### 3. closure_fn_ptr_backfill — 闭包 fn_ptr 回填验证
+**来源**: 【审查驱动】
+**原因**: 任务池中 `closure_fn_ptr_backfill` 状态为 pending，但 Explore 深度代码审计发现 Native 和 Wasm 后端实际上已实现 fn_ptr 回填。需验证并更新任务状态。
+
+**验证结果**:
+- **Wasm 后端**: `_compile_closure_create` 中 `fn_ptr` 使用 lambda 函数的 funcref table 索引（非 NULL），已有 `_elem_segment` 和 `_funcref_table` 测试验证通过
+- **Native 后端**: `_emit_closure_create` 通过 `closure_fn_ptr_fixups` 记录 RIP-relative LEA 占位位置，在 `_generate_elf` 和 `_generate_macho` 链接阶段回填对应 lambda 的 trampoline 虚拟地址
+- 运行 15 个闭包相关测试（`TestWasmBackendClosure` 6个 + `TestCBackendClosure` 9个）全部通过
+
+**结果**: 任务状态更新为 completed，无需新代码。
+
+---
+
+### 三、审查日志研读摘要
+
+读取 AUTO_REVIEW_LOG.md 最新 3-5 轮审查报告：
+- **当前总问题数**: ~1257（MEDIUM 78，LOW 1180）
+- **问题类型分布**: no_docstring 占 LOW 问题 58%，magic_number 占 28%
+- **高价值问题**: sys.path hack 和裸异常捕获为虚假问题（已修复）；Top10 复杂度函数 10/10 已完成首轮重构
+- **趋势**: 增量质量门禁已落地，新增代码不再引入新的 LOW 问题；审查数据可信度恢复
+
+本轮采纳的审查发现：review_data_calibration（修复过时检测逻辑）、closure_fn_ptr_backfill（验证完成状态）。
+
+---
+
+### 四、测试前后对比
+
+| 指标 | 开发前 | 开发后 | 变化 |
+|------|--------|--------|------|
+| 总测试数 | 520 | 566 | +46 (+8.8%) |
+| 子测试数 | 20 | 20 | 0 |
+| 失败数 | 0 | 0 | 0 |
+| 新增测试文件 | 0 | 1 | test_lir_c_backend.py |
+
+---
+
+### 五、下一步计划
+
+1. **unify_c_backend**（P70）: 统一 C 后端（LIR 路径功能对齐），将 c_codegen.py 中已实现但 lir_c_backend.py 缺失的功能迁移过来
+2. **benchmark_enhance_exec_time**（P48）: 基准测试框架增强，支持 C/Wasm 后端执行时间测量
+3. **low_quality_issues_cleanup**（P45）: LOW 级问题批量治理剩余工作
+
+---
+
 ## 2026-07-27 16:11 第63轮评审（路线图评审）
 
 ### 评审范围

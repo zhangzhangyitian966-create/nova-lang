@@ -887,6 +887,11 @@ class LIRCBackend:
         type_str = str(ty)
         type_name = getattr(ty, "name", None) or type_str
 
+        # 箭头类型（如 "Int -> Int"）优先于关键词匹配，
+        # 避免 "Int -> Int" 被 "int" 关键词误匹配为 int64_t
+        if "->" in type_str:
+            return "NovaClosure*"
+
         # 按关键词优先级匹配基本类型和容器类型（大小写不敏感）
         type_name_lower = type_name.lower()
         type_str_lower = type_str.lower()
@@ -894,10 +899,6 @@ class LIRCBackend:
             kw_lower = keyword.lower()
             if kw_lower in type_name_lower or kw_lower in type_str_lower:
                 return c_type
-
-        # 箭头类型（如 "Int -> Int"）
-        if "->" in type_str:
-            return "NovaClosure*"
 
         # 默认：使用不透明指针
         return "NovaValue*"
