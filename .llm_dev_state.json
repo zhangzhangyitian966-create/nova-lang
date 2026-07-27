@@ -1,5 +1,5 @@
 {
-  "cycles": 57,
+  "cycles": 58,
   "completed_tasks": [
     "review_cycle_57",
     "establish_quality_gate",
@@ -120,10 +120,28 @@
     "refactor_lower_match_expr",
     "refactor_parser_parse_pattern",
     "clean_print_debug",
-    "refactor_type_checker_check_binary_op"
+    "refactor_type_checker_check_binary_op",
+    "refactor_check_patterns_exhaustive",
+    "compiler_vm_unit_tests"
   ],
   "failed_tasks": [],
   "task_history": [
+    {
+      "cycle": 58,
+      "task_id": "refactor_check_patterns_exhaustive",
+      "status": "completed",
+      "source": "审查驱动",
+      "reason": "审查日志第1504轮报告 _check_patterns_exhaustive CC=30 为全项目最高复杂度函数（由第55轮重构 _check_match_exhaustiveness 时提取的子函数）。第57轮评审新增为 P85 高优先级任务。",
+      "details": "将 TypeChecker._check_patterns_exhaustive 从 CC=30 重构为类型分发模式：主函数通过 isinstance 检查分发到 4 个类型专属方法 _check_adt_exhaustive（ADT构造器完备性）、_check_bool_exhaustive（布尔值完备性）、_check_tuple_exhaustive（元组完备性）、_check_list_exhaustive（列表完备性），主函数 CC 降至约 5。通配符/变量绑定作为快速返回路径在分发前处理。测试 480 passed + 20 subtests 通过，零回归。"
+    },
+    {
+      "cycle": 58,
+      "task_id": "compiler_vm_unit_tests",
+      "status": "completed",
+      "source": "自主发现",
+      "reason": "第57轮评审 Explore 深度代码审计发现 compiler.py 和 vm.py 是默认执行路径但测试覆盖率极低，为最大测试盲区。新增为 P80 任务。",
+      "details": "创建 tests/test_compiler_vm.py（698行），包含 3 大测试类：1) TestBytecodeCompilerUnit 验证字节码指令结构（算术/控制流/函数/模式匹配/闭包/管道等编译路径）；2) TestNovaVMUnit 验证 VM 指令执行（栈操作/运算/数据结构/函数调用/错误处理）；3) TestCompilerVMBlindSpots 端到端集成测试覆盖之前缺失路径（for循环break/continue、while循环、嵌套循环、闭包捕获、模式匹配等）。开发过程中发现并修复了编译器栈管理 bug（_compile_block 未弹出中间语句结果）、for 循环 break/continue 跳转回填 bug（新增 _loop_stack 循环上下文栈）、逻辑运算符短路求值 bug（DUP/POP 指令保留左操作数）。测试从 400 增至 480 passed + 20 subtests。"
+    },
     {
       "cycle": 57,
       "task_id": "review_cycle_57",
@@ -277,32 +295,32 @@
       "details": "将 _lower_if_expr 从 106 行重构为分层结构：1) 新增 _lower_branch_body() 通用分支处理方法，消除 true/false 分支的 30 行镜像重复代码，返回 (result, modified_vars) 元组；2) 新增 _insert_merge_phis() 处理 merge 块 Phi 节点插入（约 35 行独立逻辑）；3) 新增 _insert_result_phi() 处理 if 表达式结果 Phi（约 15 行独立逻辑）；4) _lower_if_expr 主函数从 106 行压缩至约 25 行（CC≈8）。测试 395/395 通过，零回归。"
     }
   ],
-  "current_cycle": 57,
+  "current_cycle": 58,
   "baseline_tests": 396,
-  "current_tests": 400,
+  "current_tests": 480,
   "last_review_cycle": 57,
   "tasks": [
     {
       "id": "refactor_check_patterns_exhaustive",
       "name": "重构 TypeChecker._check_patterns_exhaustive 降低圈复杂度",
-      "description": "TypeChecker._check_patterns_exhaustive 圈复杂度 30（全项目最高），约130行，负责递归检查一组模式是否集体完备地覆盖给定类型的所有值。处理 ADT/Bool/Tuple/List/无限值域 五类类型的分支逻辑。是第55轮重构 _check_match_exhaustiveness 时提取出的子函数，其内部仍需进一步拆分。",
+      "description": "TypeChecker._check_patterns_exhaustive 圈复杂度 30（全项目最高），约130行。已通过类型分发模式重构为 4 个类型专属子方法：_check_adt_exhaustive、_check_bool_exhaustive、_check_tuple_exhaustive、_check_list_exhaustive，主函数 CC 降至约 5。",
       "difficulty": "hard",
       "priority": 85,
       "category": "engineering",
       "estimated": "1-2 天",
-      "status": "pending",
+      "status": "completed",
       "depends_on": [],
       "reason": "全项目当前最高复杂度函数 CC=30，由 _check_match_exhaustiveness 重构后提取。ADT/List 分支逻辑复杂，需拆分为 _check_adt_patterns_exhaustive、_check_bool_patterns_exhaustive、_check_tuple_patterns_exhaustive、_check_list_patterns_exhaustive 四个独立方法。[审查驱动]"
     },
     {
       "id": "compiler_vm_unit_tests",
       "name": "为 compiler.py + vm.py 建立单元测试基线",
-      "description": "BytecodeCompiler 和 NovaVM 是 Nova 核心执行路径，但当前测试覆盖率极低。compiler.py 仅在 test_nova.py 尾部有一次简单调用，vm.py 仅在 benchmarks 中运行。需编写最小单元测试覆盖 BytecodeCompiler.compile() 和 NovaVM.run() 的基本路径（算术运算、变量绑定、函数调用、控制流）。",
+      "description": "BytecodeCompiler 和 NovaVM 是 Nova 核心执行路径。已创建 tests/test_compiler_vm.py（698行），包含 TestBytecodeCompilerUnit、TestNovaVMUnit、TestCompilerVMBlindSpots 三大测试类，覆盖字节码结构、VM 指令、端到端集成测试。开发过程中修复了编译器栈管理、for循环break/continue、逻辑运算符短路求值等 bug。",
       "difficulty": "medium",
       "priority": 80,
       "category": "test",
       "estimated": "3-5 小时",
-      "status": "pending",
+      "status": "completed",
       "depends_on": [],
       "reason": " Explore 深度审计确认 compiler.py 和 vm.py 是最大测试盲区。字节码编译器和虚拟机是默认执行路径（nova run），缺乏测试意味着任何变更都可能导致无感知的回归。[自主发现]"
     },
