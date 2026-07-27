@@ -800,17 +800,25 @@ class LIRCBackend:
             ret_c_type = self._nova_type_to_c(instr.dst_loc[1])
             if ret_c_type == "int64_t":
                 cast_expr = f"(int64_t)(intptr_t)"
-            elif ret_c_type in ("double",):
-                cast_expr = f"*(double*)&(void*){{"
-                # 对于浮点类型，需要特殊处理（通过 union 或 memcpy）
-                # 简化处理：使用 intptr_t 中转
-                cast_expr = f"(int64_t)(intptr_t)"  # 先用整数中转
+                self._emit(
+                    f"{dst} = {cast_expr}nova_closure_call((NovaClosure*){closure}, "
+                    f"{args_array}, {arg_count});"
+                )
+            elif ret_c_type == "double":
+                # double 不能通过 intptr_t 强转（UB：浮点截断）
+                # 使用临时指针解引用进行安全的类型双关
+                tmp_ptr = f"_nova_double_ptr_{self._tmp_counter()}"
+                self._emit(
+                    f"double* {tmp_ptr} = (double*)nova_closure_call((NovaClosure*){closure}, "
+                    f"{args_array}, {arg_count});"
+                )
+                self._emit(f"{dst} = *{tmp_ptr};")
             else:
                 cast_expr = f"({ret_c_type})"
-            self._emit(
-                f"{dst} = {cast_expr}nova_closure_call((NovaClosure*){closure}, "
-                f"{args_array}, {arg_count});"
-            )
+                self._emit(
+                    f"{dst} = {cast_expr}nova_closure_call((NovaClosure*){closure}, "
+                    f"{args_array}, {arg_count});"
+                )
         elif dst:
             self._emit(
                 f"{dst} = (NovaValue*)nova_closure_call((NovaClosure*){closure}, "

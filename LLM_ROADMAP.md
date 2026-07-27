@@ -1,7 +1,7 @@
 # Nova LLM 智能开发路线图
 
-**更新时间**: 2026-07-27 01:50:00
-**上次评审**: 第 57 轮（路线图评审）
+**更新时间**: 2026-07-27 04:05:00
+**上次评审**: 第 60 轮（路线图评审）
 
 本路线图由 LLM 智能开发系统动态维护。
 
@@ -61,7 +61,7 @@
 | ✅ | C 后端 LIR 路径列表推导式支持 | medium | 72 | 3-5 小时 | c_backend_adt_match, unify_c_backend |
 | ✅ | C 后端数据结构构建正确性验证 | medium | 80 | 3-5 小时 | c_backend_listcomp_verify, c_backend_adt_match |
 | ✅ | C 后端闭包功能对齐（Phase1+2 完成，环境填充已落地） | hard | 78 | 1-2 天 | c_backend_data_verify |
-| ⏳ | C 后端闭包 Phase3（lambda 函数体编译） | hard | 80 | 3-5 天 | c_backend_closure_support |
+| ✅ | C 后端闭包 Phase3（lambda 函数体编译） | hard | 80 | 3-5 天 | c_backend_closure_support |
 | ✅ | 修复 Wasm 后端全局变量声明缺失 | easy | 62 | 1-2 小时 | wasm_control_flow_rewrite |
 | ✅ | 重构 Wasm 后端指令编译调度表化 | medium | 72 | 3-5 小时 | wasm_control_flow_rewrite |
 | ⏳ | 实现原生后端函数调用 ABI | hard | 20 | 3-5 天 | fix_mir_ssa |
@@ -129,6 +129,10 @@
 | ✅ | 重构 TypeChecker._check_patterns_exhaustive 降低圈复杂度 | hard | 85 | 1-2 天 | - |
 | ✅ | 为 compiler.py + vm.py 建立单元测试基线 | medium | 80 | 3-5 小时 | - |
 | ✅ | 重构 MIRLowering._collect_idents 调度表化 | medium | 65 | 2-3 小时 | - |
+| ✅ | 修复 C 后端 double 闭包调用返回路径 | easy | 50 | 30 分钟 | - |
+| ✅ | 修复增量门禁魔法数字误报 | easy | 50 | 30 分钟 | - |
+| ⏳ | 重构 TypeChecker.check_decl 调度表化 | medium | 55 | 2-3 小时 | - |
+| ⏳ | 重构 TypeChecker._from_ast_type 调度表化 | medium | 52 | 2-3 小时 | - |
 
 ---
 
@@ -145,10 +149,11 @@
 
 ---
 
-**进度**: 110/112 (98.2%)
-- **已完成**: 110 (+6：refactor_check_patterns_exhaustive, compiler_vm_unit_tests, closure_backend_e2e_test, fix_closure_type_inference, refactor_collect_idents_dispatch, 及上轮遗留标注修正)
+**进度**: 114/116 (98.3%)
+- **已完成**: 114 (+4：c_backend_closure_phase3, fix_closure_double_return, fix_incremental_gate_false_positives, 及本轮评审标注修正)
 - **进行中**: 0
-- **待开发**: 1（closure_fn_ptr_backfill, refactor_native_emit_call 中部分子项已完成/部分保留）
+- **待开发**: 4（closure_fn_ptr_backfill P80, unify_c_backend P70, refactor_check_decl P55, refactor_from_ast_type P52）
 - **已废弃**: 1（native_call_abi）
+- **已冻结**: 1（refactor_native_emit_call — Native后端整体deprecated）
 
-> 注：第59轮普通开发轮完成。闭包端到端测试落地（3个E2E测试+类型推断修复），_collect_idents CC=22→3调度表化。Top10复杂度函数已重构7/10（剩余：_emit_runtime_call CC=25、generic_rewrite CC=23、_emit_call CC=21）。下轮为第60轮评审轮。
+> 注：第60轮路线图评审完成。五维评估全部优秀。评审中直接修复2个缺陷：C后端double闭包调用UB、增量门禁误报。25+极复杂函数历史性清零（0个）。下阶段方向：TypeChecker核心路径调度表化+测试docstring补齐+Native后端处置。

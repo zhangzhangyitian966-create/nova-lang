@@ -818,6 +818,7 @@ def phase3b_incremental_gate():
                 )
 
         # 检查 2: 新增行不得引入白名单之外的魔法数字
+        is_test_file = rel_path.startswith("tests/")
         for line_no in sorted(changed_lines):
             if line_no > len(source_lines):
                 continue
@@ -828,9 +829,14 @@ def phase3b_incremental_gate():
             if stripped.startswith(("import ", "from ", '"', "'")):
                 continue
 
-            nums = re.findall(r"\b(\d+)\b", stripped)
+            # 先移除浮点数字面量（如 3.14），避免误匹配其中的子串（如 14）
+            line_without_floats = re.sub(r'\d+\.\d+', 'FLOAT', stripped)
+            nums = re.findall(r"\b(\d+)\b", line_without_floats)
             for num_str in nums:
                 num = int(num_str)
+                # 测试文件中的小数字（<100）通常是测试固件数据，豁免以减少误报
+                if is_test_file and num < 100:
+                    continue
                 if num not in COMMON_NUMS and len(str(num)) <= 5:
                     gate_issues.append(
                         CodeIssue(

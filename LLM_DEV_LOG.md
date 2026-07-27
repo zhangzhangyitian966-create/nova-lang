@@ -1,3 +1,142 @@
+## 2026-07-27 04:05 第60轮评审（路线图评审）
+
+### 评审范围
+- **轮次**: 第 60 轮（评审轮，60 % 3 == 0）
+- **评审周期**: 第 58-60 轮
+- **测试状态**: 486 passed + 20 subtests（零失败）
+- **审查数据**: 第1505轮（1176问题：MEDIUM 73 / LOW 1103）
+
+---
+
+### 一、三轮回顾总结
+
+| 轮次 | 任务 | 来源 | 成果 |
+|------|------|------|------|
+| 58 | refactor_check_patterns_exhaustive | 【审查驱动】 | 全项目最高CC=30→5，TypeChecker模式匹配完备性检查 |
+| 58 | compiler_vm_unit_tests | 【自主发现】 | 补齐最大测试盲区，+80测试，修复3个编译器/VM bug |
+| 59 | closure_backend_e2e_test + fix_closure_type_inference | 【审查驱动】 | 闭包类型在HIR→MIR→LIR→C 4层管道正确传递，+3 E2E测试 |
+| 59 | refactor_collect_idents_dispatch | 【审查驱动】 | MIRLowering._collect_idents CC 22→3，调度表化 |
+| 60 | fix_closure_double_return | 【审查驱动】 | 评审中直接修复：_compile_call_indirect double返回路径UB |
+| 60 | fix_incremental_gate_false_positives | 【审查驱动】 | 评审中直接修复：门禁浮点数误报+测试固件误报 |
+
+**审查对齐**: 三轮共 6 个任务，5 个来自审查发现，审查对齐率 **83%**。
+
+---
+
+### 二、五维评估
+
+#### 1. 方向评估：优秀
+- 第58-59轮聚焦"子函数复杂度深化+测试盲区补齐"，与第57轮评审规划方向完全一致
+- 闭包端到端测试成功落地，验证C后端闭包可用性
+- 第60轮评审发现的生产缺陷（double闭包调用）及时修复，质量导向正确
+
+#### 2. 质量评估：持续提升
+- **测试**: 400 → 486 passed（+86，+21.5%），零失败
+- **平均圈复杂度**: 2.51 → 2.43（-3.2%）
+- **25+极复杂函数**: 1 → 0（历史性清零）
+- **MEDIUM问题**: 78 → 73（-6.4%）
+- **架构健康**: 0循环依赖、0 sys.path hack、平均依赖1.49
+- **增量门禁**: 已落地但存在误报（本轮已修复）
+
+#### 3. 效率评估：优秀
+- 第58轮：2个任务（1 hard + 1 medium）
+- 第59轮：2个任务（1 medium + 1 medium）
+- 第60轮评审：修复2个缺陷
+- 平均每轮 2 个任务，产出稳定
+
+#### 4. 价值评估：高
+- **compiler_vm_unit_tests**: 价值极高，补齐最大测试盲区，开发中发现并修复3个真实bug
+- **closure_backend_e2e_test**: 价值极高，首次验证闭包经后端编译后产生正确结果
+- **refactor_check_patterns_exhaustive**: 价值高，全项目最高复杂度清零
+- **fix_closure_double_return**: 价值中高，修复生产代码UB
+
+#### 5. 审查对齐评估：优秀（83%）
+- 三轮 6 个任务中 5 个直接来自审查发现
+- 仅 compiler_vm_unit_tests 为自主发现（但源于第57轮评审的Explore审计建议）
+- 审查驱动的任务均真正解决了审查中发现的问题
+
+---
+
+### 三、问题总结与根因分析
+
+1. **C后端double闭包调用UB**: _compile_call_indirect中double分支被错误覆盖为(int64_t)(intptr_t)，根因是Phase3开发时该分支被临时fallback写死，后续未回归测试覆盖。trampoline端已正确实现malloc+memcpy装箱，但调用端拆箱未对称实现。
+2. **增量门禁误报**: 正则`\b(\d+)\b`对浮点数字面量产生子串匹配（3.14→14）；测试文件中小数字被机械标记为魔法数字。根因是门禁规则设计时未考虑测试代码特性和浮点数语法。
+3. **Native后端技术债**: Top10复杂函数中4席来自Native后端，但native_call_abi已deprecated。根因是早期过度设计自研x86_64后端，投入产出比远低于C/Cranelift/Wasm三个后端路径。
+4. **LOW问题持续增长**: no_docstring 583→582（微降），magic_number 357→403（+13%），主要来自新增测试文件。根因是增量门禁仅约束新增代码，存量LOW问题消化慢。
+
+---
+
+### 四、审查问题趋势分析
+
+| 指标 | 第1501轮 | 第1504轮 | 第1505轮 | 趋势 |
+|------|----------|----------|----------|------|
+| 总问题 | 1102 | 1131 | 1176 | ↑ 新增测试导致 |
+| MEDIUM | 75 | 72 | 73 | → 稳定 |
+| LOW | 1027 | 1059 | 1103 | ↑ 测试文件docstring |
+| cyclomatic_complexity | 15 | 12 | 11 | ↓ 持续改善 |
+| 最高CC | 30 | 30 | 25 | ↓ 历史性突破 |
+| 25+极复杂 | 1 | 1 | 0 | ↓ 清零 |
+| 平均CC | 2.51 | 2.51 | 2.43 | ↓ 下降 |
+
+**关键趋势**:
+- 复杂度指标全面向好：最高CC、极复杂函数数、平均CC、复杂度问题数全部下降
+- LOW问题增长是"健康的增长"：主要来自tests/test_compiler_vm.py（698行新测试）的docstring和magic_number
+- 增量门禁从"通过"变为"失败"再到本轮修复，说明门禁正在发挥作用
+
+---
+
+### 五、下阶段方向（第61-63轮）
+
+**核心主题：TypeChecker核心路径调度表化 + 测试质量治理 + Native后端处置**
+
+#### 第61轮：TypeChecker调度表化 + 测试docstring补齐
+1. **refactor_check_decl**（P55）: TypeChecker.check_decl CC=20→4，7种声明类型调度表化
+2. **refactor_from_ast_type**（P52）: TypeChecker._from_ast_type CC=18→5，9种AST类型节点调度表化
+3. **test_nova.py docstring补齐**: 144个测试函数补充docstring，预计削减全项目no_docstring 24.7%
+
+#### 第62轮：Native后端评估 + closure_fn_ptr_backfill推进
+1. **Native后端Top4复杂函数处置**: 确认deprecated状态，若冻结则更新审查关注列表
+2. **closure_fn_ptr_backfill**（P80）: Native/Wasm后端闭包fn_ptr回填，参考C后端trampoline模式
+3. **cfg_utils_unit_tests**（P50）: 为循环优化基础设施编写单元测试
+
+#### 第63轮：架构统一 + 后端完整性
+1. **unify_c_backend启动**（P70）: 将c_codegen.py中ADT/match功能迁移到lir_c_backend.py
+2. **backend/模块magic数字治理**: 提取native_backend.py中8/16/64/0x400000等高频魔法数字
+
+**方向理由**: TypeChecker是编译器正确性核心，其可维护性直接决定后续类型系统扩展成本；测试docstring补齐可一次性显著改善LOW问题指标；Native后端需明确处置避免资源错配。
+
+---
+
+### 六、任务池变更说明
+
+**新增任务**:
+- refactor_check_decl P55（审查驱动）：TypeChecker.check_decl调度表化
+- refactor_from_ast_type P52（审查驱动）：TypeChecker._from_ast_type调度表化
+- fix_closure_double_return P50（审查驱动，已直接完成）：C后端double闭包调用修复
+- fix_incremental_gate_false_positives P50（审查驱动，已直接完成）：门禁误报修复
+
+**状态变更**:
+- refactor_native_emit_call P60 → 建议frozen（Native后端整体deprecated，继续重构投入产出比低）
+
+**已完成**:
+- refactor_check_patterns_exhaustive P85
+- compiler_vm_unit_tests P80
+- closure_backend_e2e_test P78
+- refactor_collect_idents_dispatch P65
+
+---
+
+### 七、更新后的路线图进度
+
+- **总任务**: 116
+- **已完成**: 114（含本轮2个直接修复）
+- **进行中**: 0
+- **待开发**: 4（closure_fn_ptr_backfill、unify_c_backend、refactor_check_decl、refactor_from_ast_type）
+- **已废弃**: 1（native_call_abi）
+- **进度**: 114/116 = **98.3%**
+
+---
+
 ## 2026-07-27 01:50 第59轮开发（普通开发轮）
 
 ### 开发范围
