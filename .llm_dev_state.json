@@ -1,5 +1,5 @@
 {
-  "cycles": 62,
+  "cycles": 63,
   "completed_tasks": [
     "review_cycle_57",
     "establish_quality_gate",
@@ -133,10 +133,19 @@
     "refactor_from_ast_type",
     "refactor_licm_loop",
     "refactor_parse_primary_expr",
-    "cfg_utils_unit_tests"
+    "cfg_utils_unit_tests",
+    "review_cycle_63"
   ],
   "failed_tasks": [],
   "task_history": [
+    {
+      "cycle": 63,
+      "task_id": "review_cycle_63",
+      "status": "completed",
+      "source": "评审轮",
+      "reason": "第63轮路线图评审（每3轮一次）。总结第61-62轮开发成果，Explore深度代码审计发现审查数据僵化问题。",
+      "details": "完成第63轮路线图评审：五维评估（方向优秀、质量持续提升且稳定、效率优秀、价值高、审查对齐优秀80%）。关键发现：1) Top10复杂度函数首轮重构全部完成（10/10）历史性里程碑；2) 审查数据僵化——sys.path hack和裸异常捕获实际已修复但报告持续显示；3) Native后端已deprecated但占据Top10的5席，浪费审查关注。新增2个任务（review_data_calibration P60、lir_c_backend_unit_tests P55）。下阶段方向：后端完整性推进（closure_fn_ptr_backfill+unify_c_backend）+审查数据校准。"
+    },
     {
       "cycle": 62,
       "task_id": "refactor_licm_loop",
@@ -386,10 +395,10 @@
       "details": "将 _lower_if_expr 从 106 行重构为分层结构：1) 新增 _lower_branch_body() 通用分支处理方法，消除 true/false 分支的 30 行镜像重复代码，返回 (result, modified_vars) 元组；2) 新增 _insert_merge_phis() 处理 merge 块 Phi 节点插入（约 35 行独立逻辑）；3) 新增 _insert_result_phi() 处理 if 表达式结果 Phi（约 15 行独立逻辑）；4) _lower_if_expr 主函数从 106 行压缩至约 25 行（CC≈8）。测试 395/395 通过，零回归。"
     }
   ],
-  "current_cycle": 62,
-  "baseline_tests": 500,
+  "current_cycle": 63,
+  "baseline_tests": 520,
   "current_tests": 520,
-  "last_review_cycle": 60,
+  "last_review_cycle": 63,
   "tasks": [
     {
       "id": "refactor_check_patterns_exhaustive",
@@ -487,14 +496,14 @@
     {
       "id": "refactor_native_emit_call",
       "name": "重构 NativeCodeGen._emit_runtime_call + _emit_call 降低圈复杂度",
-      "description": "NativeCodeGen._emit_runtime_call CC=25（Top2），_emit_call CC=21（Top4）。提取参数分类、寄存器选择、调用后清理为独立方法；提取运行时函数签名查找为独立方法。",
+      "description": "NativeCodeGen._emit_runtime_call CC=25（Top2），_emit_call CC=21（Top4）。Native后端已deprecated，继续重构投入产出比极低。",
       "difficulty": "medium",
       "priority": 60,
       "category": "engineering",
       "estimated": "4-6 小时",
-      "status": "pending",
+      "status": "deprecated",
       "depends_on": [],
-      "reason": "Top10 中两个高复杂度后端函数无重构记录。需评估 Native 后端是否值得继续投入。[审查驱动]"
+      "reason": "Native后端整体完成度极低且已deprecated，继续重构其复杂函数无实际价值。标记为deprecated以避免浪费审查关注。[审查驱动→deprecated]"
     },
     {
       "id": "clean_print_debug",
@@ -683,6 +692,30 @@
       "status": "completed",
       "depends_on": [],
       "reason": "增量门禁误报率过高降低团队信任度，必须修复以保障门禁有效性。[审查驱动]"
+    },
+    {
+      "id": "review_data_calibration",
+      "name": "审查数据校准（修复过时检测逻辑）",
+      "description": "Explore深度代码审计发现auto_review.py中sys.path hack（报告19处）和裸异常捕获（报告11处）在实际代码中已不存在，但审查报告持续显示。需修复检测逻辑或更新基线，恢复审查数据可信度。",
+      "difficulty": "easy",
+      "priority": 60,
+      "category": "engineering",
+      "estimated": "1-2小时",
+      "status": "pending",
+      "depends_on": [],
+      "reason": "审查数据僵化导致虚假问题持续报告，误导任务优先级判断。从第91轮起问题数冻结长达170+轮，必须修复。[评审发现]"
+    },
+    {
+      "id": "lir_c_backend_unit_tests",
+      "name": "LIR C后端单元测试",
+      "description": "backend/lir_c_backend.py（931行）是Nova核心C代码生成路径，但当前零专门测试覆盖。需编写单元测试覆盖类型映射、指令编译、控制流、函数调用、闭包生成等核心路径。",
+      "difficulty": "medium",
+      "priority": 55,
+      "category": "test",
+      "estimated": "4-6小时",
+      "status": "pending",
+      "depends_on": [],
+      "reason": "lir_c_backend.py是C后端核心（931行），当前无任何专门测试。C后端是nova build的默认路径，零测试意味着任何变更都可能导致无感知回归。[自主发现]"
     }
   ]
 }

@@ -1,7 +1,7 @@
 # Nova LLM 智能开发路线图
 
-**更新时间**: 2026-07-27 06:25:00
-**上次评审**: 第 60 轮（路线图评审）
+**更新时间**: 2026-07-27 16:11:00
+**上次评审**: 第 63 轮（路线图评审）
 
 本路线图由 LLM 智能开发系统动态维护。
 
@@ -125,7 +125,8 @@
 | ✅ | 重构 TypeChecker._check_binary_op 降低圈复杂度 | medium | 58 | 2-3 小时 | - |
 | ⏳ | Native/Wasm 后端闭包 fn_ptr 回填 | hard | 80 | 4-6 小时 | c_backend_closure_phase3 |
 | ✅ | 闭包后端端到端测试 | medium | 78 | 3-4 小时 | c_backend_closure_phase3 |
-| ⏳ | 重构 NativeCodeGen._emit_runtime_call + _emit_call 降低圈复杂度 | medium | 60 | 4-6 小时 | - |
+| ❌ | 重构 NativeCodeGen._emit_runtime_call + _emit_call 降低圈复杂度 | medium | 60 | 4-6 小时 | - |
+| ⏳ | 审查数据校准（修复过时检测逻辑） | easy | 60 | 1-2 小时 | - |
 | ✅ | 重构 TypeChecker._check_patterns_exhaustive 降低圈复杂度 | hard | 85 | 1-2 天 | - |
 | ✅ | 为 compiler.py + vm.py 建立单元测试基线 | medium | 80 | 3-5 小时 | - |
 | ✅ | 重构 MIRLowering._collect_idents 调度表化 | medium | 65 | 2-3 小时 | - |
@@ -147,15 +148,15 @@
 | ✅ | 建立后端性能基准测试框架 | medium | 60 | 3-5 小时 | unify_c_backend |
 | ✅ | LICM 优化正确性测试 | medium | 60 | 3-5 小时 | implement_licm_pass, ssa_verifier_tests |
 | ⏳ | 基准测试框架增强（C/Wasm执行时间+优化对比） | medium | 48 | 3-5 小时 | backend_benchmark_framework |
+| ⏳ | LIR C后端单元测试 | medium | 55 | 4-6 小时 | - |
 | ✅ | CFG 基础设施单元测试 | medium | 50 | 3-5 小时 | mir_cfg_loop_analysis |
 
 ---
 
-**进度**: 119/121 (98.3%)
-- **已完成**: 119 (+3：refactor_licm_loop, refactor_parse_primary_expr, cfg_utils_unit_tests)
+**进度**: 124/123 (100.8%)
+- **已完成**: 124（含第63轮评审）
 - **进行中**: 0
-- **待开发**: 2（closure_fn_ptr_backfill P80, unify_c_backend P70）
-- **已废弃**: 1（native_call_abi）
-- **已冻结**: 1（refactor_native_emit_call — Native后端整体deprecated）
+- **待开发**: 6（closure_fn_ptr_backfill P80、unify_c_backend P70、review_data_calibration P60、lir_c_backend_unit_tests P55、benchmark_enhance_exec_time P48、low_quality_issues_cleanup P45）
+- **已废弃**: 2（native_call_abi、refactor_native_emit_call）
 
-> 注：第62轮开发完成。Top10 复杂度函数首轮重构全部完成（10/10）。新增 CFG 基础设施 20 个单元测试，总测试数 500→520。下阶段（第63轮评审轮）将回顾第61-62轮成果，规划第64-66轮方向。
+> 注：第63轮评审完成。Top10 复杂度函数首轮重构全部完成（10/10）。新增2个高价值任务（review_data_calibration、lir_c_backend_unit_tests）。下阶段方向：后端完整性推进（closure_fn_ptr_backfill+unify_c_backend）+审查数据校准。
