@@ -130,6 +130,36 @@ REFACTORED_FUNCTIONS = {
     "ir/lir_lowering.py::LIRLowering._lower_function": {
         "old_cc": 20, "cycle": 53, "note": "分层拆分重构 CC≈8（6个子方法）"
     },
+    "type_checker.py::TypeChecker.check_decl": {
+        "old_cc": 20, "cycle": 61, "note": "调度表化重构 CC≈3（_build_decl_checkers）"
+    },
+    "type_checker.py::TypeChecker._from_ast_type": {
+        "old_cc": 18, "cycle": 61, "note": "调度表化重构 CC≈3（_BASIC_TYPE_MAP）"
+    },
+    "ir/pass_manager.py::LoopInvariantCodeMotion._licm_loop": {
+        "old_cc": 16, "cycle": 62, "note": "四阶段分层重构 CC≈4"
+    },
+    "parser.py::Parser._parse_primary_expr": {
+        "old_cc": 17, "cycle": 62, "note": "调度表化重构 CC≈5（_build_primary_dispatch）"
+    },
+    "type_checker.py::TypeChecker._check_patterns_exhaustive": {
+        "old_cc": 30, "cycle": 58, "note": "类型分发重构 CC≈5（4个类型专属方法）"
+    },
+    "ir/mir_lowering.py::MIRLowering._lower_match_expr": {
+        "old_cc": 20, "cycle": 55, "note": "分层拆分重构 CC≈8（_collect_arm_modifications + _build_merge_phis）"
+    },
+    "type_checker.py::TypeChecker._check_match_exhaustiveness": {
+        "old_cc": 39, "cycle": 55, "note": "分层重构 CC≈4（_classify_arm_pattern + _detect_redundant_arms + _generate_missing_message）"
+    },
+    "parser.py::Parser._parse_pattern": {
+        "old_cc": 20, "cycle": 56, "note": "分层重构 CC≈4（6个类型专属方法）"
+    },
+    "type_checker.py::TypeChecker._check_binary_op": {
+        "old_cc": 20, "cycle": 56, "note": "分发表重构 CC≈3（_BINARY_OP_HANDLERS）"
+    },
+    "ir/mir_lowering.py::MIRLowering._collect_idents": {
+        "old_cc": 22, "cycle": 59, "note": "调度表化重构 CC≈3（_build_collect_dispatch）"
+    },
 }
 
 
@@ -674,18 +704,22 @@ def line_level_analysis(filepath, source_lines):
                         )
                         break
 
-        # sys.path hack
+        # sys.path hack（排除字符串上下文和检测代码自身）
         if re.search(r"sys\.path\.(append|insert)", line):
-            issues.append(
-                CodeIssue(
-                    SEV_HIGH,
-                    "sys_path_hack",
-                    rel_path,
-                    i,
-                    "sys.path 修改，非标准导入方式",
-                    stripped,
+            # 排除字符串字面量中的匹配（如 "sys.path.insert" in line）
+            # 简单策略：移除单引号和双引号字符串后再匹配
+            line_no_strings = re.sub(r"['\"][^'\"]*['\"]", "''", line)
+            if re.search(r"sys\.path\.(append|insert)", line_no_strings):
+                issues.append(
+                    CodeIssue(
+                        SEV_HIGH,
+                        "sys_path_hack",
+                        rel_path,
+                        i,
+                        "sys.path 修改，非标准导入方式",
+                        stripped,
+                    )
                 )
-            )
 
     return issues
 
@@ -1441,7 +1475,15 @@ def phase6_complexity(ast_result):
     # 按复杂度排序
     all_funcs.sort(key=lambda x: -x[2])
 
-    top10 = all_funcs[:10]
+    # 排除已废弃模块的函数（避免浪费 Top10 审查关注）
+    DEPRECATED_MODULES = {"backend/native_backend.py"}
+    filtered_funcs = [
+        (fpath, fname, cc)
+        for fpath, fname, cc in all_funcs
+        if fpath not in DEPRECATED_MODULES
+    ]
+
+    top10 = filtered_funcs[:10]
 
     # 统计分布
     cc_distribution = defaultdict(int)
