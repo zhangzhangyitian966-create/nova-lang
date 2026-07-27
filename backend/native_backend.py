@@ -804,7 +804,7 @@ class NativeCodeGen:
                     e.mov_mem_reg(RSP, 64, RAX)
             else:
                 # 目标在栈或 callee-saved 中，直接存储
-                ctx.store_from_reg(dst_name, RAX, is_float=False)
+                ctx.store_from_reg(dst_name, RAX if not dst_is_float else XMM0, is_float=dst_is_float)
 
         # 9. 恢复 caller-saved GPR
         for reg in reversed(CALLER_GPRS):
@@ -958,8 +958,33 @@ class NativeCodeGen:
             if isinstance(arg_spec, tuple) and arg_spec[0] == "imm":
                 imm_val = arg_spec[1]
                 if is_float:
-                    # 浮点立即数暂不支持（需要加载到临时内存再 movsd）
-                    raise NotImplementedError("浮点立即数参数暂不支持")
+                    # 浮点立即数：写入数据段，通过 movsd 从 RIP 相对地址加载
+                    key = str(float(imm_val))
+                    if key not in self._float_const_map:
+                        value_bytes = struct.pack("<d", float(imm_val))
+                        # 计算偏移量（基于当前浮点常量区已有大小）
+                        offset = sum(len(v) for v, _ in self.float_constants)
+                        # 对齐到 8 字节
+                        while offset % 8 != 0:
+                            offset += 1
+                        self.float_constants.append((value_bytes, offset))
+                        self._float_const_map[key] = offset
+                    data_off = self._float_const_map[key]
+                    if float_idx < len(FLOAT_ARG_REGS):
+                        fixup_offset = e.movsd_reg_imm(FLOAT_ARG_REGS[float_idx], 0)
+                        self.data_fixups.append(
+                            (ctx.func_name, fixup_offset, data_off, "float")
+                        )
+                        float_idx += 1
+                    else:
+                        # 溢出到栈：先加载到 XMM0 再 movq 到 RAX 压栈
+                        fixup_offset = e.movsd_reg_imm(XMM0, 0)
+                        self.data_fixups.append(
+                            (ctx.func_name, fixup_offset, data_off, "float")
+                        )
+                        e.movq_gpr_xmm(RAX, XMM0)
+                        e.push_reg(RAX)
+                        stack_arg_count += 1
                 if int_idx < len(INT_ARG_REGS):
                     e.mov_reg_imm64(INT_ARG_REGS[int_idx], imm_val)
                     int_idx += 1
@@ -1013,7 +1038,11 @@ class NativeCodeGen:
                 else:
                     e.mov_mem_reg(RSP, 64, RAX)
             else:
-                ctx.store_from_reg(dst_name, RAX, is_float=False)
+                ctx.store_from_reg(
+                    dst_name,
+                    RAX if not dst_is_float else XMM0,
+                    is_float=dst_is_float,
+                )
 
         # 9. 恢复 caller-saved GPR
         for reg in reversed(CALLER_GPRS):

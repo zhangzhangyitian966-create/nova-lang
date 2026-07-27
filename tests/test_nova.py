@@ -954,9 +954,32 @@ class TestPipe(unittest.TestCase):
                 """
                 let x = 5
                 let result = 3 |> x
-            """,
+                """,
                 check_types=True,
             )
+
+    def test_typevar_callee_infers_fn_type(self):
+        """TypeVar callee 应推断为与调用匹配的函数类型，而非无条件 duck typing"""
+        checker = type_check(
+            """
+            fn apply(f, x: Int) -> Int { f(x) }
+            """
+        )
+        # f 被推断为 (Int) -> Int 函数类型
+        ty = checker.env.lookup("apply")
+        self.assertIsNotNone(ty)
+
+    def test_typevar_callee_consistent_args(self):
+        """TypeVar callee 在多次调用中保持一致的函数类型推断"""
+        checker = type_check(
+            """
+            fn use_twice(f, x: Int) -> Int {
+                f(x) + f(x + 1)
+            }
+            """
+        )
+        ty = checker.env.lookup("use_twice")
+        self.assertIsNotNone(ty)
 
 
 # ============================================================

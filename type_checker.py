@@ -888,7 +888,7 @@ class TypeChecker:
     # ------------------------------------------------------------------
 
     def _check_fn_call(self, expr) -> NovaType:
-        callee_ty = self.check_expr(expr.callee)
+        callee_ty = self._apply_subst(self.check_expr(expr.callee))
         arg_types = [self.check_expr(a) for a in expr.args]
 
         if isinstance(callee_ty, FnType):
@@ -920,9 +920,16 @@ class TypeChecker:
                 ret_ty = self._apply_subst(callee_ty.return_type)
                 return FnType(remaining_params, ret_ty)
         elif isinstance(callee_ty, TypeVar):
-            # 未类型化的参数（duck typing）：允许任意调用
-            # 返回一个 TypeVar 表示结果类型
-            return TypeVar(f"ret_{callee_ty.name}")
+            # TypeVar callee：将其合一为与调用匹配的函数类型
+            # 而非无条件 duck typing（类型安全漏洞）
+            ret_tv = TypeVar(f"ret_{callee_ty.name}")
+            inferred_fn = FnType(arg_types, ret_tv)
+            if not self._unify(callee_ty, inferred_fn):
+                raise TypeCheckError(
+                    f"无法将类型变量 {callee_ty.name} 推断为接受 "
+                    f"{len(arg_types)} 个参数的函数类型"
+                )
+            return ret_tv
         else:
             raise TypeCheckError(f"无法对非函数类型 {callee_ty} 进行调用")
 

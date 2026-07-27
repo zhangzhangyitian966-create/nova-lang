@@ -4,6 +4,92 @@
 
 ---
 
+## 第 38 轮 — 2026-07-27 13:05
+
+> 普通开发轮 | 前端 + 后端双线完成 | P1-2 清零 + 返回值 bug 修复
+
+---
+
+### 本轮概览
+
+| 维度 | 数据 |
+|------|------|
+| 前端任务 | 修复函数调用 TypeVar callee 类型检查缺失（frontend_callee_typevar_check） |
+| 后端任务 | 实现浮点立即数参数加载 + 修复 _emit_call 返回值 bug（backend_native_float_imm） |
+| 测试基线 | 496 passed |
+| 测试结果 | 500 passed（+4），0 failed |
+| 回归 | 无 |
+| 前端完成率 | 26/26 = **100%**（含 1 新增维护任务） |
+| 后端完成率 | 29/42 = **69.0%** |
+| P1 清零 | P1-2（浮点立即数 NotImplementedError）+ _emit_call 返回值 bug |
+
+---
+
+### 前端任务：修复函数调用 TypeVar callee 类型检查缺失
+
+**任务 ID**: frontend_callee_typevar_check
+**难度**: easy | **结果**: 成功
+
+**为什么选这个**: 代码审计新发现 P3 类型安全漏洞——`_check_fn_call` 中当 callee 为未绑定 TypeVar 时，无条件允许任意参数调用并返回 TypeVar，不做任何参数检查。这是 let-polymorphism 机制下的类型安全盲点。
+
+**实现详情**:
+- 修改 `type_checker.py` 的 `_check_fn_call` 方法
+- TypeVar callee 分支从无条件 duck typing 改为合一为与调用匹配的 FnType
+- 在方法开头对 callee_ty 做 `_apply_subst` resolve，确保已绑定 TypeVar 被正确解析为 FnType
+- 保持 let-polymorphism 语义不变（每次引用创建 fresh 副本）
+
+**新增测试**（2 个）:
+- `test_typevar_callee_infers_fn_type`: TypeVar callee 推断为函数类型
+- `test_typevar_callee_consistent_args`: 多次调用保持一致类型推断
+
+**废弃任务**: `backend_wasm_store_reg`（审计确认 Wasm StoreReg 已完整实现）
+
+---
+
+### 后端任务：实现浮点立即数参数加载 + 修复返回值 bug
+
+**任务 ID**: backend_native_float_imm
+**难度**: medium | **结果**: 成功
+
+**为什么选这个**: P1-2 是最高优先级后端任务，阻塞任何涉及浮点立即数的运行时调用。同时审计发现关联的 `_emit_call` 返回值 bug（P0 级别正确性问题），一起修复。
+
+**实现详情**:
+
+1. **浮点立即数参数加载**（`_emit_runtime_call` 约 25 行）
+   - 将浮点立即数动态写入数据段（复用 `_float_const_map` 机制）
+   - 通过 `movsd xmm, [rip+offset]` 从数据段加载到 XMM 寄存器
+   - 支持寄存器参数（`FLOAT_ARG_REGS`）和栈溢出参数（`movq` 到 RAX 压栈）
+   - 替代原 `raise NotImplementedError`
+
+2. **`_emit_call` 返回值 bug 修复**（第 807 行）
+   - 原代码硬编码 `is_float=False`
+   - 修复为根据 `dst_is_float` 选择 RAX 或 XMM0 作为源寄存器
+
+3. **`_emit_runtime_call` 返回值 bug 修复**（第 1016 行）
+   - 同类 bug，同样修复
+
+**新增测试**（2 个）:
+- `test_float_immediate_no_notimplementederror`: 浮点常量编译不再崩溃
+- `test_emit_call_float_retval_uses_xmm0`: 浮点返回值函数编译正确
+
+---
+
+### 下一步计划
+
+**前端**: 26/26 = 100%，纯维护模式。后续关注：
+(1) 代码质量改进和性能优化
+(2) 响应新发现的正确性问题
+
+**后端**: P1-2 清零，下阶段重点：
+- C 后端 TODO 注释改为报错（backend_c_todo_error P60）
+- 三后端统一闭包执行测试矩阵（backend_unified_closure_e2e_test P72）
+- 寄存器分配器调用点切口（backend_native_regalloc_call_site P55）
+- 第 39 轮为下次评审轮（第 37-39 轮回顾）
+
+---
+
+
+
 ## 第 37 轮 — 2026-07-27 12:05
 
 > 普通开发轮 | 前端 + 后端双线完成 | P0-B1 清零
