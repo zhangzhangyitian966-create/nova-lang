@@ -958,8 +958,10 @@ class Parser:
                     field_tok = self._advance()
                     field_name = field_tok.value
                 else:
-                    raise self._error(
-                        f"点号后期望字段名或数字索引，实际得到 {self._peek_type().name}"
+                    tok = self._cur()
+                    raise ParseError(
+                        f"点号后期望字段名或数字索引，实际得到 {tok.type.name} ('{tok.value}')",
+                        tok.line, tok.column, source=self._source
                     )
                 expr = FieldAccess(
                     target=expr, field=field_name, span=self._span(field_tok)

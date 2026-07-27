@@ -420,13 +420,16 @@ class LIRCBackend:
 
         使用类型 → 方法 的调度表模式替代长 if-isinstance 链，
         圈复杂度从 ~25 降至 ~3，提升可维护性和可扩展性。
+
+        未实现的 LIR 指令会抛出 NotImplementedError，
+        防止静默生成 TODO 注释导致编译成功但生成错误代码的正确性风险。
         """
         handler = self._instr_dispatch.get(type(instr))
         if handler:
             handler(instr)
         else:
-            self._emit(
-                f"/* TODO: LIR instruction {type(instr).__name__} not implemented */"
+            raise NotImplementedError(
+                f"C backend: unhandled LIR instruction: {type(instr).__name__}"
             )
 
     # ---- 各指令类型的独立编译方法 ----

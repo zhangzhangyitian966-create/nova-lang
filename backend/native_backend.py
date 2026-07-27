@@ -537,12 +537,20 @@ class NativeCodeGen:
     # ============================================================
 
     def _emit_instructions(self, func: LIRFunction, ctx: "_EmitContext"):
-        """发射所有指令，使用调度表按指令类型分发到具体编译方法。"""
+        """发射所有指令，使用调度表按指令类型分发到具体编译方法。
+
+        未实现的 LIR 指令会抛出 NotImplementedError，
+        防止静默跳过导致编译成功但生成错误代码的正确性风险。
+        """
         dispatch = self._build_native_instr_dispatch()
         for idx, instr in enumerate(func.body):
             handler = dispatch.get(type(instr))
             if handler:
                 handler(instr, ctx)
+            else:
+                raise NotImplementedError(
+                    f"Native backend: unhandled LIR instruction: {type(instr).__name__}"
+                )
 
     def _build_native_instr_dispatch(self):
         """构建指令编译调度表：LIR 指令类型 -> 编译方法。"""

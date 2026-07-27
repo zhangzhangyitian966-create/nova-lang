@@ -1,7 +1,7 @@
 {
-  "cycles": 39,
-  "frontend_completed": 26,
-  "backend_completed": 29,
+  "cycles": 40,
+  "frontend_completed": 27,
+  "backend_completed": 30,
   "last_review_cycle": 39,
   "current_review_cycle": 39,
   "completed_tasks": [
@@ -68,7 +68,9 @@
     "backend_native_linker_strategy",
     "frontend_callee_typevar_check",
     "backend_native_float_imm",
-    "review_cycle_39"
+    "review_cycle_39",
+    "frontend_parser_error_method_fix",
+    "backend_unified_silent_skip_fix"
   ],
   "failed_tasks": [],
   "deprecated_tasks": [
@@ -77,9 +79,32 @@
     "backend_wasm_gc_types",
     "backend_native_fn_ptr",
     "backend_wasm_store_reg",
-    "backend_native_instr_selection"
+    "backend_native_instr_selection",
+    "backend_c_todo_error"
   ],
   "task_history": [
+    {
+      "cycle": 40,
+      "task_id": "frontend_parser_error_method_fix",
+      "name": "修复 parser.py _error 方法未定义 bug",
+      "track": "frontend",
+      "difficulty": "easy",
+      "priority": 65,
+      "result": "success",
+      "details": "修复 parser.py 第 961 行 self._error() 调用但方法未定义的 AttributeError bug。改为直接抛出 ParseError，与项目错误处理风格一致。测试 432 passed，无回归。前端 27/27 完成。",
+      "timestamp": "2026-07-27 16:08"
+    },
+    {
+      "cycle": 40,
+      "task_id": "backend_unified_silent_skip_fix",
+      "name": "修复三后端未实现指令静默跳过问题",
+      "track": "backend",
+      "difficulty": "easy",
+      "priority": 90,
+      "result": "success",
+      "details": "P0-新1清零。三后端统一改为抛出 NotImplementedError：native_backend.py（原完全静默跳过）、wasm_backend.py（原生 WAT TODO 注释）、lir_c_backend.py（原生 C TODO 注释）。消除编译正确性系统性风险——编译器不再静默生成错误代码。测试 432 passed，无回归。后端 30/43 完成。",
+      "timestamp": "2026-07-27 16:09"
+    },
     {
       "cycle": 39,
       "task_id": "review_cycle_39",
@@ -138,18 +163,6 @@
   ],
   "tasks": [
     {
-      "task_id": "backend_unified_silent_skip_fix",
-      "name": "修复三后端未实现指令静默跳过问题",
-      "description": "P0-新发现：native_backend.py 调度表 else 分支无 else 逻辑，未识别 LIR 指令被静默跳过；wasm_backend.py 和 lir_c_backend.py 生成 /* TODO */ 注释而非报错。编译可能成功但生成错误代码。修复：三后端统一改为 raise NotImplementedError(f'Unhandled LIR instruction: {type(instr).__name__}')。极低成本（每个后端约 3 行），极高收益。",
-      "track": "backend",
-      "difficulty": "easy",
-      "priority": 90,
-      "estimated_effort": "1-2小时",
-      "status": "pending",
-      "source": "review_39_audit",
-      "depends_on": []
-    },
-    {
       "task_id": "backend_native_global_var_support",
       "name": "Native 后端实现全局变量加载/存储指令",
       "description": "P1-新发现：LIRLowering 为全局变量生成 LIRLoadGlobal/LIRStoreGlobal，但 native_backend.py 调度表和 x86_64 发射器均无对应处理，全局变量访问在 native 后端被静默丢弃。需添加 _emit_load_global 和 _emit_store_global 方法，通过 RIP-relative 寻址访问数据段中的全局变量。",
@@ -171,18 +184,6 @@
       "estimated_effort": "4-6小时",
       "status": "pending",
       "source": "review_33_audit",
-      "depends_on": []
-    },
-    {
-      "task_id": "backend_c_todo_error",
-      "name": "修复 C 后端未实现指令静默生成注释问题",
-      "description": "lir_c_backend.py 调度表 else 分支对未实现指令生成 /* TODO: ... */ 注释而非报错。应改为抛出 NotImplementedError。注意：此任务已被 backend_unified_silent_skip_fix 覆盖，两者可合并实施。",
-      "track": "backend",
-      "difficulty": "easy",
-      "priority": 60,
-      "estimated_effort": "1小时",
-      "status": "pending",
-      "source": "review_36_audit",
       "depends_on": []
     },
     {
