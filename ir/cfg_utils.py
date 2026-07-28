@@ -480,6 +480,200 @@ def analyze_loops(fn: MIRFunction) -> LoopInfo:
 # ============================================================
 
 
+# ---------- 模块级操作数提取辅助函数 ----------
+def _extract_store(i):
+    """提取 Store 指令使用的 SSA 操作数"""
+    return [i.value] if i.value else []
+
+
+def _replace_store(i, r):
+    """替换 Store 指令中的 SSA 操作数"""
+    if i.value in r:
+        i.value = r[i.value]
+
+
+def _extract_binop(i):
+    """提取二元运算指令使用的 SSA 操作数"""
+    return [n for n in (i.left, i.right) if n]
+
+
+def _replace_binop(i, r):
+    """替换二元运算指令中的 SSA 操作数"""
+    if i.left in r:
+        i.left = r[i.left]
+    if i.right in r:
+        i.right = r[i.right]
+
+
+def _extract_unaryop(i):
+    """提取一元运算指令使用的 SSA 操作数"""
+    return [i.operand] if i.operand else []
+
+
+def _replace_unaryop(i, r):
+    """替换一元运算指令中的 SSA 操作数"""
+    if i.operand in r:
+        i.operand = r[i.operand]
+
+
+def _extract_call(i):
+    """提取函数调用指令使用的 SSA 操作数"""
+    return [a for a in i.args if a]
+
+
+def _replace_call(i, r):
+    """替换函数调用指令中的 SSA 操作数"""
+    i.args = [r[a] if a in r else a for a in i.args]
+    if i.callee in r:
+        i.callee = r[i.callee]
+
+
+def _extract_closure_create(i):
+    """提取闭包创建指令使用的 SSA 操作数"""
+    return [c for c in i.captures if c]
+
+
+def _replace_closure_create(i, r):
+    """替换闭包创建指令中的 SSA 操作数"""
+    i.captures = [r[c] if c in r else c for c in i.captures]
+
+
+def _extract_list_build(i):
+    """提取列表构建指令使用的 SSA 操作数"""
+    return [e for e in i.elements if e]
+
+
+def _replace_list_build(i, r):
+    """替换列表构建指令中的 SSA 操作数"""
+    i.elements = [r[e] if e in r else e for e in i.elements]
+
+
+def _extract_list_append(i):
+    """提取列表追加指令使用的 SSA 操作数"""
+    return [n for n in (i.list_ssa, i.element_ssa) if n]
+
+
+def _replace_list_append(i, r):
+    """替换列表追加指令中的 SSA 操作数"""
+    if i.list_ssa in r:
+        i.list_ssa = r[i.list_ssa]
+    if i.element_ssa in r:
+        i.element_ssa = r[i.element_ssa]
+
+
+def _extract_tuple_build(i):
+    """提取元组构建指令使用的 SSA 操作数"""
+    return [e for e in i.elements if e]
+
+
+def _replace_tuple_build(i, r):
+    """替换元组构建指令中的 SSA 操作数"""
+    i.elements = [r[e] if e in r else e for e in i.elements]
+
+
+def _extract_map_build(i):
+    """提取 Map 构建指令使用的 SSA 操作数"""
+    used = []
+    for key_ssa, val_ssa in i.entries:
+        if key_ssa:
+            used.append(key_ssa)
+        if val_ssa:
+            used.append(val_ssa)
+    return used
+
+
+def _replace_map_build(i, r):
+    """替换 Map 构建指令中的 SSA 操作数"""
+    i.entries = [
+        (r[k] if k in r else k, r[v] if v in r else v)
+        for k, v in i.entries
+    ]
+
+
+def _extract_adt_build(i):
+    """提取 ADT 构建指令使用的 SSA 操作数"""
+    return [f for f in i.fields if f]
+
+
+def _replace_adt_build(i, r):
+    """替换 ADT 构建指令中的 SSA 操作数"""
+    i.fields = [r[f] if f in r else f for f in i.fields]
+
+
+def _extract_field_access(i):
+    """提取字段访问指令使用的 SSA 操作数"""
+    return [i.object] if i.object else []
+
+
+def _replace_field_access(i, r):
+    """替换字段访问指令中的 SSA 操作数"""
+    if i.object in r:
+        i.object = r[i.object]
+
+
+def _extract_index_access(i):
+    """提取索引访问指令使用的 SSA 操作数"""
+    return [n for n in (i.object, i.index) if n]
+
+
+def _replace_index_access(i, r):
+    """替换索引访问指令中的 SSA 操作数"""
+    if i.object in r:
+        i.object = r[i.object]
+    if i.index in r:
+        i.index = r[i.index]
+
+
+def _extract_phi(i):
+    """提取 Phi 指令使用的 SSA 操作数"""
+    return [ssa for _, ssa in i.sources if ssa]
+
+
+def _replace_phi(i, r):
+    """替换 Phi 指令中的 SSA 操作数"""
+    i.sources = [
+        (label, r[ssa] if ssa in r else ssa)
+        for label, ssa in i.sources
+    ]
+
+
+# 操作数提取调度表：按 MIR 指令类型分派
+_INSTR_EXTRACTORS = {
+    MIRConst: lambda i: [],
+    MIRLoad: lambda i: [],
+    MIRStore: _extract_store,
+    MIRBinOp: _extract_binop,
+    MIRUnaryOp: _extract_unaryop,
+    MIRCall: _extract_call,
+    MIRClosureCreate: _extract_closure_create,
+    MIRListBuild: _extract_list_build,
+    MIRListAppend: _extract_list_append,
+    MIRTupleBuild: _extract_tuple_build,
+    MIRMapBuild: _extract_map_build,
+    MIRADTBuild: _extract_adt_build,
+    MIRFieldAccess: _extract_field_access,
+    MIRIndexAccess: _extract_index_access,
+    MIRPhi: _extract_phi,
+}
+
+# 操作数替换调度表：按 MIR 指令类型分派
+_INSTR_REPLACERS = {
+    MIRBinOp: _replace_binop,
+    MIRUnaryOp: _replace_unaryop,
+    MIRCall: _replace_call,
+    MIRClosureCreate: _replace_closure_create,
+    MIRListBuild: _replace_list_build,
+    MIRListAppend: _replace_list_append,
+    MIRTupleBuild: _replace_tuple_build,
+    MIRMapBuild: _replace_map_build,
+    MIRADTBuild: _replace_adt_build,
+    MIRFieldAccess: _replace_field_access,
+    MIRIndexAccess: _replace_index_access,
+    MIRStore: _replace_store,
+    MIRPhi: _replace_phi,
+}
+
+
 def _build_operand_dispatch_tables():
     """构建指令操作数提取与替换的调度表。
 
@@ -489,150 +683,11 @@ def _build_operand_dispatch_tables():
 
     调度表模式消除了 get_instr_operands 和 replace_instr_operands
     中的长 if-isinstance 链，与项目中其他模块的调度表化实践一致。
+
+    辅助函数已提取为模块级私有函数，本函数仅负责返回预构建的
+    调度表常量。
     """
-
-    def _extract_store(i):
-        return [i.value] if i.value else []
-
-    def _replace_store(i, r):
-        if i.value in r:
-            i.value = r[i.value]
-
-    def _extract_binop(i):
-        return [n for n in (i.left, i.right) if n]
-
-    def _replace_binop(i, r):
-        if i.left in r:
-            i.left = r[i.left]
-        if i.right in r:
-            i.right = r[i.right]
-
-    def _extract_unaryop(i):
-        return [i.operand] if i.operand else []
-
-    def _replace_unaryop(i, r):
-        if i.operand in r:
-            i.operand = r[i.operand]
-
-    def _extract_call(i):
-        return [a for a in i.args if a]
-
-    def _replace_call(i, r):
-        i.args = [r[a] if a in r else a for a in i.args]
-        if i.callee in r:
-            i.callee = r[i.callee]
-
-    def _extract_closure_create(i):
-        return [c for c in i.captures if c]
-
-    def _replace_closure_create(i, r):
-        i.captures = [r[c] if c in r else c for c in i.captures]
-
-    def _extract_list_build(i):
-        return [e for e in i.elements if e]
-
-    def _replace_list_build(i, r):
-        i.elements = [r[e] if e in r else e for e in i.elements]
-
-    def _extract_list_append(i):
-        return [n for n in (i.list_ssa, i.element_ssa) if n]
-
-    def _replace_list_append(i, r):
-        if i.list_ssa in r:
-            i.list_ssa = r[i.list_ssa]
-        if i.element_ssa in r:
-            i.element_ssa = r[i.element_ssa]
-
-    def _extract_tuple_build(i):
-        return [e for e in i.elements if e]
-
-    def _replace_tuple_build(i, r):
-        i.elements = [r[e] if e in r else e for e in i.elements]
-
-    def _extract_map_build(i):
-        used = []
-        for key_ssa, val_ssa in i.entries:
-            if key_ssa:
-                used.append(key_ssa)
-            if val_ssa:
-                used.append(val_ssa)
-        return used
-
-    def _replace_map_build(i, r):
-        i.entries = [
-            (
-                r[k] if k in r else k,
-                r[v] if v in r else v,
-            )
-            for k, v in i.entries
-        ]
-
-    def _extract_adt_build(i):
-        return [f for f in i.fields if f]
-
-    def _replace_adt_build(i, r):
-        i.fields = [r[f] if f in r else f for f in i.fields]
-
-    def _extract_field_access(i):
-        return [i.object] if i.object else []
-
-    def _replace_field_access(i, r):
-        if i.object in r:
-            i.object = r[i.object]
-
-    def _extract_index_access(i):
-        return [n for n in (i.object, i.index) if n]
-
-    def _replace_index_access(i, r):
-        if i.object in r:
-            i.object = r[i.object]
-        if i.index in r:
-            i.index = r[i.index]
-
-    def _extract_phi(i):
-        return [ssa for _, ssa in i.sources if ssa]
-
-    def _replace_phi(i, r):
-        i.sources = [
-            (label, r[ssa] if ssa in r else ssa)
-            for label, ssa in i.sources
-        ]
-
-    extractors = {
-        MIRConst: lambda i: [],
-        MIRLoad: lambda i: [],
-        MIRStore: _extract_store,
-        MIRBinOp: _extract_binop,
-        MIRUnaryOp: _extract_unaryop,
-        MIRCall: _extract_call,
-        MIRClosureCreate: _extract_closure_create,
-        MIRListBuild: _extract_list_build,
-        MIRListAppend: _extract_list_append,
-        MIRTupleBuild: _extract_tuple_build,
-        MIRMapBuild: _extract_map_build,
-        MIRADTBuild: _extract_adt_build,
-        MIRFieldAccess: _extract_field_access,
-        MIRIndexAccess: _extract_index_access,
-        MIRPhi: _extract_phi,
-    }
-
-    replacers = {
-        MIRBinOp: _replace_binop,
-        MIRUnaryOp: _replace_unaryop,
-        MIRCall: _replace_call,
-        MIRClosureCreate: _replace_closure_create,
-        MIRListBuild: _replace_list_build,
-        MIRListAppend: _replace_list_append,
-        MIRTupleBuild: _replace_tuple_build,
-        MIRMapBuild: _replace_map_build,
-        MIRADTBuild: _replace_adt_build,
-        MIRFieldAccess: _replace_field_access,
-        MIRIndexAccess: _replace_index_access,
-        MIRStore: _replace_store,
-        MIRPhi: _replace_phi,
-    }
-
-    return extractors, replacers
+    return _INSTR_EXTRACTORS.copy(), _INSTR_REPLACERS.copy()
 
 
 # 模块级调度表：避免每次调用时重建

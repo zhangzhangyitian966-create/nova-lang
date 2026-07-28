@@ -1,5 +1,5 @@
 {
-  "cycles": 67,
+  "cycles": 68,
   "completed_tasks": [
     "review_cycle_66",
     "refactor_cli_main",
@@ -144,10 +144,36 @@
     "review_cycle_63",
     "review_data_calibration",
     "lir_c_backend_unit_tests",
-    "closure_fn_ptr_backfill"
+    "closure_fn_ptr_backfill",
+    "refactor_compiler_cli_main",
+    "refactor_c_codegen_pattern"
   ],
   "failed_tasks": [],
   "task_history": [
+    {
+      "cycle": 68,
+      "task_id": "refactor_compiler_cli_main",
+      "status": "completed",
+      "source": "审查驱动",
+      "reason": "审查日志第1511轮 function_too_long 9个 MEDIUM 问题中 compiler_cli.py main 函数129行（>100行阈值），且CC≈12。命令分发采用11分支if-elif链，与已重构的cli.py架构不一致。",
+      "details": "1) 提取 _build_argparser() 独立函数（~80行argparse配置集中管理）；2) 新增10个 _cmd_*() 命令处理函数（build/run/check/emit-c/emit-wasm/emit-ir/init/new/version/help），每个职责单一；3) 引入 _COMMAND_HANDLERS 命令分发表字典；4) main函数从129行压缩至约15行（解析→查表→分派），CC从约12降至约4；5) 新增未知命令兜底处理（sys.exit(1)）。测试621 passed零回归。"
+    },
+    {
+      "cycle": 68,
+      "task_id": "refactor_cfg_utils_dispatch",
+      "status": "completed",
+      "source": "审查驱动",
+      "reason": "审查日志第1511轮 function_too_long 9个 MEDIUM 问题中 _build_operand_dispatch_tables 152行（>100行阈值），内部嵌套定义15对extract/replace函数，虽逻辑清晰但函数体过长。",
+      "details": "1) 将15对内部函数提取为模块级私有函数（_extract_store/_replace_store ... _extract_phi/_replace_phi），每个补充单行docstring；2) 预构建模块级常量 _INSTR_EXTRACTORS 和 _INSTR_REPLACERS 调度表字典；3) _build_operand_dispatch_tables 从152行压缩至约15行（仅返回调度表副本），消除 function_too_long 警告。测试621 passed零回归。"
+    },
+    {
+      "cycle": 68,
+      "task_id": "refactor_c_codegen_pattern",
+      "status": "completed",
+      "source": "自主规划",
+      "reason": "c_codegen.py _compile_pattern 为9分支if-elif isinstance链（PatternWildcard~PatternList），与项目其他pattern匹配函数（evaluator.py _match_pattern 已调度表化、type_checker.py _check_pattern 已调度表化）架构不一致。新增模式类型时需修改主函数，扩展成本高。",
+      "details": "1) 新增类级常量 _PATTERN_COMPILERS 调度表（9种PatternType→方法名字符串映射）；2) 重写 _compile_pattern 主函数为查表分派（method_name = 调度表.get(type(pattern)) → getattr(self, method_name)(...)），从77行压缩至约8行；3) 新增9个 _compile_pattern_*() 类型专属处理方法，每个职责单一、docstring完整；4) 递归调用（Constructor/Tuple/List内的子模式）仍通过 _compile_pattern 分派，保持一致性。测试621 passed零回归。"
+    },
     {
       "cycle": 67,
       "task_id": "refactor_cli_main",
@@ -878,6 +904,42 @@
       "status": "completed",
       "depends_on": [],
       "reason": "cli.py 两个函数占据 Top10 复杂度前两名（CC=15），是当前非deprecated代码中最高复杂度的函数。argparse+栈模式重构难度低、收益快，可直接将Top10最高CC从15压至13以下。[审查驱动]"
+    },
+    {
+      "id": "refactor_compiler_cli_main",
+      "name": "重构 compiler_cli.py main 函数调度表化",
+      "description": "1) 提取 _build_argparser() 独立函数（~80行argparse配置集中管理）；2) 新增10个 _cmd_*() 命令处理函数（build/run/check/emit-c/emit-wasm/emit-ir/init/new/version/help），每个职责单一；3) 引入 _COMMAND_HANDLERS 命令分发表字典；4) main函数从129行压缩至约15行（解析→查表→分派），CC从约12降至约4；5) 新增未知命令兜底处理（sys.exit(1)）。测试621 passed零回归。",
+      "difficulty": "easy",
+      "priority": 60,
+      "category": "engineering",
+      "estimated": "2-3小时",
+      "status": "completed",
+      "depends_on": [],
+      "reason": "审查日志第1511轮 function_too_long 9个 MEDIUM 问题中 compiler_cli.py main 函数129行（>100行阈值），且CC≈12。命令分发采用11分支if-elif链，与已重构的cli.py架构不一致。 [审查驱动]"
+    },
+    {
+      "id": "refactor_cfg_utils_dispatch",
+      "name": "拆分 cfg_utils.py _build_operand_dispatch_tables 过长函数",
+      "description": "1) 将15对内部函数提取为模块级私有函数（_extract_store/_replace_store ... _extract_phi/_replace_phi），每个补充单行docstring；2) 预构建模块级常量 _INSTR_EXTRACTORS 和 _INSTR_REPLACERS 调度表字典；3) _build_operand_dispatch_tables 从152行压缩至约15行（仅返回调度表副本），消除 function_too_long 警告。测试621 passed零回归。",
+      "difficulty": "easy",
+      "priority": 55,
+      "category": "engineering",
+      "estimated": "2-3小时",
+      "status": "completed",
+      "depends_on": [],
+      "reason": "审查日志第1511轮 function_too_long 9个 MEDIUM 问题中 _build_operand_dispatch_tables 152行（>100行阈值），内部嵌套定义15对extract/replace函数，虽逻辑清晰但函数体过长。 [审查驱动]"
+    },
+    {
+      "id": "refactor_c_codegen_pattern",
+      "name": "重构 c_codegen.py _compile_pattern 调度表化",
+      "description": "1) 新增类级常量 _PATTERN_COMPILERS 调度表（9种PatternType→方法名字符串映射）；2) 重写 _compile_pattern 主函数为查表分派（method_name = 调度表.get(type(pattern)) → getattr(self, method_name)(...)），从77行压缩至约8行；3) 新增9个 _compile_pattern_*() 类型专属处理方法，每个职责单一、docstring完整；4) 递归调用（Constructor/Tuple/List内的子模式）仍通过 _compile_pattern 分派，保持一致性。测试621 passed零回归。",
+      "difficulty": "medium",
+      "priority": 52,
+      "category": "engineering",
+      "estimated": "3-5小时",
+      "status": "completed",
+      "depends_on": [],
+      "reason": "c_codegen.py _compile_pattern 为9分支if-elif isinstance链（PatternWildcard~PatternList），与项目其他pattern匹配函数（evaluator.py _match_pattern 已调度表化、type_checker.py _check_pattern 已调度表化）架构不一致。新增模式类型时需修改主函数，扩展成本高。 [自主规划]"
     }
   ]
 }

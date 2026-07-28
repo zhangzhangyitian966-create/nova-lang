@@ -665,84 +665,107 @@ class CCodeGen:
 
         return "\n".join(lines)
 
+    # 模式类型 -> 编译方法名 调度表
+    _PATTERN_COMPILERS = {
+        PatternWildcard: "_compile_pattern_wildcard",
+        PatternInt: "_compile_pattern_int",
+        PatternFloat: "_compile_pattern_float",
+        PatternString: "_compile_pattern_string",
+        PatternBool: "_compile_pattern_bool",
+        PatternIdentifier: "_compile_pattern_identifier",
+        PatternConstructor: "_compile_pattern_constructor",
+        PatternTuple: "_compile_pattern_tuple",
+        PatternList: "_compile_pattern_list",
+    }
+
     def _compile_pattern(
         self, pattern, subject_var: str, match_expr: MatchExpr
     ) -> Tuple[str, List[Tuple[str, str]]]:
-        """编译模式，返回 (条件字符串, 绑定列表 [(name, c_expr)])"""
+        """编译模式，返回 (条件字符串, 绑定列表 [(name, c_expr)])
+
+        使用调度表模式按模式类型分派到对应的编译方法，
+        与 evaluator.py/_match_pattern 的调度表化实践保持一致。
+        """
+        method_name = self._PATTERN_COMPILERS.get(type(pattern))
+        if method_name:
+            return getattr(self, method_name)(pattern, subject_var, match_expr)
+        return ("1", [])
+
+    def _compile_pattern_wildcard(self, _pattern, _subject_var, _match_expr):
+        """编译通配符模式：总是匹配"""
+        return ("1", [])
+
+    def _compile_pattern_int(self, pattern, subject_var, _match_expr):
+        """编译整数字面量模式"""
+        return (f"{subject_var} == ((int64_t){pattern.value})", [])
+
+    def _compile_pattern_float(self, pattern, subject_var, _match_expr):
+        """编译浮点数字面量模式"""
+        return (f"{subject_var} == ((double){repr(pattern.value)})", [])
+
+    def _compile_pattern_string(self, pattern, subject_var, _match_expr):
+        """编译字符串字面量模式"""
+        escaped = self._escape_c_string(pattern.value)
+        return (
+            f'nova_string_eq({subject_var}, nova_string_new("{escaped}"))',
+            [],
+        )
+
+    def _compile_pattern_bool(self, pattern, subject_var, _match_expr):
+        """编译布尔字面量模式"""
+        return (
+            f"{subject_var} == ({'true' if pattern.value else 'false'})",
+            [],
+        )
+
+    def _compile_pattern_identifier(self, pattern, subject_var, _match_expr):
+        """编译变量绑定模式"""
+        return ("1", [(pattern.name, subject_var)])
+
+    def _compile_pattern_constructor(self, pattern, subject_var, match_expr):
+        """编译 ADT 构造器模式"""
+        conds = []
         bindings = []
-
-        if isinstance(pattern, PatternWildcard):
-            return ("1", bindings)  # 总是匹配
-
-        elif isinstance(pattern, PatternInt):
-            return (f"{subject_var} == ((int64_t){pattern.value})", bindings)
-
-        elif isinstance(pattern, PatternFloat):
-            return (f"{subject_var} == ((double){repr(pattern.value)})", bindings)
-
-        elif isinstance(pattern, PatternString):
-            escaped = self._escape_c_string(pattern.value)
-            return (
-                f'nova_string_eq({subject_var}, nova_string_new("{escaped}"))',
-                bindings,
+        conds.append(
+            f"{subject_var}.tag == NOVA_ADT_{self._find_adt_name(pattern.name)}_{pattern.name}"
+        )
+        for i, field_pat in enumerate(pattern.fields):
+            field_accessor = f"{subject_var}.{pattern.name}__field{i}"
+            field_conds, field_bindings = self._compile_pattern(
+                field_pat, field_accessor, match_expr
             )
+            conds.append(field_conds)
+            bindings.extend(field_bindings)
+        return (" && ".join(conds), bindings)
 
-        elif isinstance(pattern, PatternBool):
-            return (
-                f"{subject_var} == ({'true' if pattern.value else 'false'})",
-                bindings,
+    def _compile_pattern_tuple(self, pattern, subject_var, match_expr):
+        """编译元组模式"""
+        conditions = []
+        bindings = []
+        for i, elem_pat in enumerate(pattern.elements):
+            elem_accessor = f"nova_tuple_get({subject_var}, {i})"
+            elem_conds, elem_bindings = self._compile_pattern(
+                elem_pat, elem_accessor, match_expr
             )
+            conditions.append(elem_conds)
+            bindings.extend(elem_bindings)
+        return (" && ".join(conditions) if conditions else "1", bindings)
 
-        elif isinstance(pattern, PatternIdentifier):
-            # 变量绑定模式
-            bindings.append((pattern.name, subject_var))
-            return ("1", bindings)
-
-        elif isinstance(pattern, PatternConstructor):
-            # ADT 构造器模式
-            conds = []
-            # 判断 tag
-            conds.append(
-                f"{subject_var}.tag == NOVA_ADT_{self._find_adt_name(pattern.name)}_{pattern.name}"
+    def _compile_pattern_list(self, pattern, subject_var, match_expr):
+        """编译列表模式"""
+        conditions = []
+        conditions.append(
+            f"nova_list_length({subject_var}) == {len(pattern.elements)}"
+        )
+        bindings = []
+        for i, elem_pat in enumerate(pattern.elements):
+            elem_accessor = f"nova_list_get({subject_var}, {i})"
+            elem_conds, elem_bindings = self._compile_pattern(
+                elem_pat, elem_accessor, match_expr
             )
-            # 绑定字段
-            for i, field_pat in enumerate(pattern.fields):
-                field_accessor = f"{subject_var}.{pattern.name}__field{i}"
-                field_conds, field_bindings = self._compile_pattern(
-                    field_pat, field_accessor, match_expr
-                )
-                conds.append(field_conds)
-                bindings.extend(field_bindings)
-
-            return (" && ".join(conds), bindings)
-
-        elif isinstance(pattern, PatternTuple):
-            conditions = []
-            for i, elem_pat in enumerate(pattern.elements):
-                elem_accessor = f"nova_tuple_get({subject_var}, {i})"
-                elem_conds, elem_bindings = self._compile_pattern(
-                    elem_pat, elem_accessor, match_expr
-                )
-                conditions.append(elem_conds)
-                bindings.extend(elem_bindings)
-            return (" && ".join(conditions) if conditions else "1", bindings)
-
-        elif isinstance(pattern, PatternList):
-            conditions = []
-            conditions.append(
-                f"nova_list_length({subject_var}) == {len(pattern.elements)}"
-            )
-            for i, elem_pat in enumerate(pattern.elements):
-                elem_accessor = f"nova_list_get({subject_var}, {i})"
-                elem_conds, elem_bindings = self._compile_pattern(
-                    elem_pat, elem_accessor, match_expr
-                )
-                conditions.append(elem_conds)
-                bindings.extend(elem_bindings)
-            return (" && ".join(conditions), bindings)
-
-        else:
-            return ("1", bindings)
+            conditions.append(elem_conds)
+            bindings.extend(elem_bindings)
+        return (" && ".join(conditions), bindings)
 
     def _find_adt_name(self, constructor_name: str) -> str:
         """根据构造器名称查找对应的 ADT 名称"""

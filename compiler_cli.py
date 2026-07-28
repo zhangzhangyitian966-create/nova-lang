@@ -436,14 +436,16 @@ def print_help():
 """)
 
 
-def main():
-    """CLI 主入口"""
+def _build_argparser():
+    """构建并返回 argparse.ArgumentParser 实例
+
+    集中管理所有子命令的配置，与主逻辑分离。
+    """
     parser = argparse.ArgumentParser(
         prog="nova",
         description="Nova 编程语言编译器 CLI",
         add_help=False,
     )
-
     subparsers = parser.add_subparsers(dest="command")
 
     # build 命令
@@ -517,55 +519,102 @@ def main():
     )
     new_parser.add_argument("-o", "--output", help="输出文件路径")
 
-    # version
+    # version / help
     subparsers.add_parser("version", help="显示版本")
     subparsers.add_parser("help", help="显示帮助")
 
+    return parser
+
+
+def _cmd_build(args, compiler):
+    """处理 build 命令"""
+    compiler.verbose = args.verbose
+    output = compiler.build(
+        args.file, output_name=args.output, optimize=args.optimize
+    )
+    print(f"编译成功: {output}")
+
+
+def _cmd_run(args, compiler):
+    """处理 run 命令"""
+    compiler.verbose = args.verbose
+    compiler.run(args.file, args=args.run_args)
+
+
+def _cmd_check(args, compiler):
+    """处理 check 命令"""
+    compiler.check(args.file)
+
+
+def _cmd_emit_c(args, compiler):
+    """处理 emit-c 命令"""
+    compiler.emit_c(args.file, output_path=args.output)
+
+
+def _cmd_emit_wasm(args, compiler):
+    """处理 emit-wasm 命令"""
+    compiler.optimize = args.optimize
+    compiler.compile_wasm(args.file, output_name=args.output)
+
+
+def _cmd_emit_ir(args, compiler):
+    """处理 emit-ir 命令"""
+    ir_text = compiler.emit_ir(args.file, level=args.level)
+    if ir_text:
+        print(ir_text)
+
+
+def _cmd_init(args, compiler):
+    """处理 init 命令"""
+    compiler.init_project(args.name, template=args.template)
+
+
+def _cmd_new(args, compiler):
+    """处理 new 命令"""
+    compiler.new_file(template=args.template, output_path=args.output)
+
+
+def _cmd_version(_args, _compiler):
+    """处理 version 命令"""
+    print_version()
+
+
+def _cmd_help(_args, _compiler):
+    """处理 help 命令"""
+    print_help()
+
+
+# 命令 -> 处理函数映射表
+_COMMAND_HANDLERS = {
+    "build": _cmd_build,
+    "run": _cmd_run,
+    "check": _cmd_check,
+    "emit-c": _cmd_emit_c,
+    "emit-wasm": _cmd_emit_wasm,
+    "emit-ir": _cmd_emit_ir,
+    "init": _cmd_init,
+    "new": _cmd_new,
+    "version": _cmd_version,
+    "help": _cmd_help,
+}
+
+
+def main():
+    """CLI 主入口：解析参数并分发到对应命令处理函数"""
+    parser = _build_argparser()
     args = parser.parse_args()
 
     if not args.command:
         print_help()
         return
 
-    compiler = NovaCompiler()
-
-    if args.command == "build":
-        compiler.verbose = args.verbose
-        output = compiler.build(
-            args.file, output_name=args.output, optimize=args.optimize
-        )
-        print(f"编译成功: {output}")
-
-    elif args.command == "run":
-        compiler.verbose = args.verbose
-        compiler.run(args.file, args=args.run_args)
-
-    elif args.command == "check":
-        compiler.check(args.file)
-
-    elif args.command == "emit-c":
-        compiler.emit_c(args.file, output_path=args.output)
-
-    elif args.command == "emit-wasm":
-        compiler.optimize = args.optimize
-        compiler.compile_wasm(args.file, output_name=args.output)
-
-    elif args.command == "emit-ir":
-        ir_text = compiler.emit_ir(args.file, level=args.level)
-        if ir_text:
-            print(ir_text)
-
-    elif args.command == "init":
-        compiler.init_project(args.name, template=args.template)
-
-    elif args.command == "new":
-        compiler.new_file(template=args.template, output_path=args.output)
-
-    elif args.command == "version":
-        print_version()
-
-    elif args.command == "help":
-        print_help()
+    handler = _COMMAND_HANDLERS.get(args.command)
+    if handler:
+        compiler = NovaCompiler()
+        handler(args, compiler)
+    else:
+        print(f"未知命令: {args.command}", file=sys.stderr)
+        sys.exit(1)
 
 
 if __name__ == "__main__":

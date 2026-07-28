@@ -104,6 +104,9 @@
 | ✅ | 批量清理未使用导入 v3 | easy | 58 | 1-2 小时 | - |
 | ✅ | 重构 CCodeGen._infer_c_type_from_expr 降低圈复杂度 | medium | 48 | 3-5 小时 | - |
 | ✅ | 重构 NativeCodeGen._compile_body 降低圈复杂度 | medium | 40 | 4-6 小时 | - |
+| ✅ | 重构 compiler_cli.py main 函数调度表化 | easy | 60 | 2-3 小时 | - |
+| ✅ | 拆分 cfg_utils.py _build_operand_dispatch_tables 过长函数 | easy | 55 | 2-3 小时 | - |
+| ✅ | 重构 c_codegen.py _compile_pattern 调度表化 | medium | 52 | 3-5 小时 | - |
 | ⏳ | LOW 级问题批量治理（docstring + 魔法数字） | easy | 45 | 2-4 小时 | - |
 | ✅ | 高复杂度函数补全 docstring | easy | 55 | 2-3 小时 | - |
 | ✅ | 重构 cfg_utils 操作数访问调度表化 | medium | 55 | 3-5 小时 | - |
@@ -141,6 +144,9 @@
 | ✅ | 批量清理未使用导入 v4 | easy | 55 | 1-2 小时 | - |
 | ✅ | 统一治理过宽异常捕获 | easy | 70 | 2-3 小时 | - |
 | ✅ | 重构 cli.py 主函数降低复杂度 | easy | 60 | 2-3 小时 | - |
+| ✅ | 重构 compiler_cli.py main 函数调度表化 | easy | 60 | 2-3 小时 | - |
+| ✅ | 拆分 cfg_utils.py _build_operand_dispatch_tables 过长函数 | easy | 55 | 2-3 小时 | - |
+| ✅ | 重构 c_codegen.py _compile_pattern 调度表化 | medium | 52 | 3-5 小时 | - |
 | ⏳ | LOW 级问题批量治理（docstring + 魔法数字） | easy | 42 | 2-4 小时 | - |
 
 ---
