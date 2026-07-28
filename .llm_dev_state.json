@@ -1,6 +1,7 @@
 {
-  "cycles": 65,
+  "cycles": 66,
   "completed_tasks": [
+    "review_cycle_66",
     "refactor_hir_rewriter_generic_rewrite",
     "refactor_c_type_from_type_expr",
     "clean_unused_imports_v4",
@@ -144,6 +145,14 @@
   ],
   "failed_tasks": [],
   "task_history": [
+    {
+      "cycle": 66,
+      "task_id": "review_cycle_66",
+      "status": "completed",
+      "source": "评审轮",
+      "reason": "第66轮路线图评审（每3轮一次）。总结第64-65轮开发成果，五维评估（方向优秀、质量持续提升且稳定、效率优秀、价值极高、审查对齐优秀83%）。关键里程碑：Top10复杂度函数首轮重构全面完成（CC>15的Top10函数从7个降至0个）、审查数据可信度恢复、测试覆盖+8.8%。新增3个任务（type_checker_unit_tests P75、fix_too_broad_exceptions P70、refactor_cli_main P60），调整3个任务优先级。下阶段方向：测试盲区补齐+架构债务偿还+顽固问题治理三线并行。",
+      "details": "完成第66轮路线图评审：五维评估（方向优秀、质量持续提升且稳定、效率优秀、价值极高、审查对齐优秀83%）。关键里程碑：1) Top10复杂度函数首轮重构全面完成（CC>15的Top10函数从第1507轮的7个降至第1511轮的0个，排除deprecated的native_backend）；2) 审查数据可信度恢复（第64轮校准后虚假问题清零，MEDIUM问题从79降至66，-16%）；3) 测试覆盖大幅提升（520→566，+8.8%）。新增3个高价值任务（type_checker_unit_tests P75、fix_too_broad_exceptions P70、refactor_cli_main P60）。调整3个任务优先级（unify_c_backend 70→72，benchmark_enhance_exec_time 48→42，low_quality_issues_cleanup 45→42）。下阶段方向：测试盲区补齐+架构债务偿还+顽固问题治理三线并行。测试566 passed + 20 subtests，零失败。"
+    },
     {
       "cycle": 65,
       "task_id": "refactor_hir_rewriter_generic_rewrite",
@@ -449,10 +458,10 @@
       "details": "将 _lower_if_expr 从 106 行重构为分层结构：1) 新增 _lower_branch_body() 通用分支处理方法，消除 true/false 分支的 30 行镜像重复代码，返回 (result, modified_vars) 元组；2) 新增 _insert_merge_phis() 处理 merge 块 Phi 节点插入（约 35 行独立逻辑）；3) 新增 _insert_result_phi() 处理 if 表达式结果 Phi（约 15 行独立逻辑）；4) _lower_if_expr 主函数从 106 行压缩至约 25 行（CC≈8）。测试 395/395 通过，零回归。"
     }
   ],
-  "current_cycle": 65,
+  "current_cycle": 66,
   "baseline_tests": 566,
   "current_tests": 566,
-  "last_review_cycle": 63,
+  "last_review_cycle": 66,
   "tasks": [
     {
       "id": "refactor_check_patterns_exhaustive",
@@ -523,7 +532,7 @@
       "name": "统一 C 后端（LIR 路径功能对齐）",
       "description": "将 c_codegen.py 中已实现但 lir_c_backend.py 缺失的功能迁移过来：ADT 代码生成、match 编译、闭包实现、列表推导式，待功能对齐后废弃旧的 AST→C 路径",
       "difficulty": "hard",
-      "priority": 70,
+      "priority": 72,
       "category": "architecture",
       "estimated": "2-3 天",
       "status": "pending",
@@ -534,7 +543,7 @@
         "lir_switch_match_lowering",
         "c_backend_closure_support"
       ],
-      "reason": "目前有两套 C 代码生成路径（AST 路径功能完整，LIR 路径仅阶段一），功能重叠增加维护成本。SSA 基础打好后，统一到 LIR→C 路径可以让所有后端共享 IR 优化成果。优先级下调 72→70，闭包 fn_ptr 回填优先。[自主规划]"
+      "reason": "目前有两套 C 代码生成路径（AST 路径功能完整，LIR 路径仅阶段一），功能重叠增加维护成本。SSA 基础打好后，统一到 LIR→C 路径可以让所有后端共享 IR 优化成果。优先级从 70 提升至 72，Top10复杂度攻坚完成后转向架构债务治理。[自主规划]"
     },
     {
       "id": "refactor_lower_match_expr",
@@ -590,26 +599,26 @@
       "name": "基准测试框架增强（C/Wasm执行时间+优化对比）",
       "description": "为基准测试框架添加 C 后端和 Wasm 后端的执行时间测量，支持优化前后对比功能（同一用例在不同优化级别下的性能对比），扩充基准用例覆盖 ADT、模式匹配、闭包等场景",
       "difficulty": "medium",
-      "priority": 48,
+      "priority": 42,
       "category": "test",
       "estimated": "3-5 小时",
       "status": "pending",
       "depends_on": [
         "backend_benchmark_framework"
       ],
-      "reason": "基准测试框架目前只支持 VM 后端执行时间测量，C/Wasm 后端只能测编译时间。补齐后可全面评估各后端性能。优先级下调 56→48，让位于功能完整性任务。[自主规划]"
+      "reason": "基准测试框架目前只支持 VM 后端执行时间测量，C/Wasm 后端只能测编译时间。补齐后可全面评估各后端性能。优先级从 48 下调至 42，让位于测试盲区补齐和顽固问题治理。[自主规划]"
     },
     {
       "id": "low_quality_issues_cleanup",
       "name": "LOW 级问题批量治理（docstring + 魔法数字）",
       "description": "批量清理 LOW 级问题：为 ir/ 和 backend/ 模块的公共 API 添加 docstring，将高频魔法数字（如 8 字节大小、默认迭代次数等）提取为命名常量，清理调试打印语句。v1 已完成核心模块的主要部分。v2 已完成 ir/ 模块 docstring 补充。",
       "difficulty": "easy",
-      "priority": 45,
+      "priority": 42,
       "category": "engineering",
       "estimated": "2-4 小时",
       "status": "pending",
       "depends_on": [],
-      "reason": "v1 已完成核心模块的 docstring 和魔法数字，v2 已完成 ir/ 模块 16 处 docstring。剩余 backend/ 模块部分价值递减。增量质量门禁已落地，新增代码不再引入新的 LOW 问题，存量 LOW 问题可逐步消化。优先级下调 46→45。[审查发现]"
+      "reason": "v1 已完成核心模块的 docstring 和魔法数字，v2 已完成 ir/ 模块 16 处 docstring。剩余 backend/ 模块部分价值递减。增量质量门禁已落地，新增代码不再引入新的 LOW 问题，存量 LOW 问题可逐步消化。优先级从 45 下调至 42。[审查发现]"
     },
     {
       "id": "c_backend_closure_phase3",
@@ -806,6 +815,42 @@
       "status": "completed",
       "depends_on": [],
       "reason": "审查日志第1509轮 unused_import 36处为 MEDIUM 最大类别。批量清理降低 MEDIUM 问题数，提升代码整洁度。[审查驱动]"
+    },
+    {
+      "id": "type_checker_unit_tests",
+      "name": "TypeChecker 单元测试基线",
+      "description": "为 type_checker.py（2043行）建立独立单元测试基线，覆盖基本类型推断、泛型函数、ADT 类型检查、模式匹配穷尽性检查、类型错误报告等核心路径。当前零独立测试，仅通过集成测试间接覆盖。",
+      "difficulty": "medium",
+      "priority": 75,
+      "category": "test",
+      "estimated": "4-6小时",
+      "status": "pending",
+      "depends_on": [],
+      "reason": "type_checker.py 2043行无独立测试，是当前最大测试盲区。类型系统是编程语言核心基石，测试不足意味着任何类型系统变更都可能引入无感知的回归。Explore深度代码审计确认其为最高优先级的测试补齐任务。[审查发现/自主发现]"
+    },
+    {
+      "id": "fix_too_broad_exceptions",
+      "name": "统一治理过宽异常捕获",
+      "description": "治理 7 个 too_broad_exception 问题：1) pass_manager.py 的优雅降级模式增加失败计数和告警阈值；2) evaluator.py/vm.py 的静默异常吞噬替换为具体异常类型或增加日志记录；3) 确保确实需要兜底的场景有适当的错误上报机制。",
+      "difficulty": "easy",
+      "priority": 70,
+      "category": "engineering",
+      "estimated": "2-3小时",
+      "status": "pending",
+      "depends_on": [],
+      "reason": "too_broad_exception 7个持续10+轮未解决，是最顽固的MEDIUM级问题。pass_manager优雅降级模式缺乏失败计数，可能导致静默退化而不自知。[审查驱动]"
+    },
+    {
+      "id": "refactor_cli_main",
+      "name": "重构 cli.py 主函数降低复杂度",
+      "description": "cli.py 的 _is_incomplete CC=15、main CC=15，占据 Top10 复杂度前两名。用 argparse 替换手动参数解析，用栈式状态机替换多层嵌套的不完整输入检测逻辑，将 CC 降至约 5-8。",
+      "difficulty": "easy",
+      "priority": 60,
+      "category": "engineering",
+      "estimated": "2-3小时",
+      "status": "pending",
+      "depends_on": [],
+      "reason": "cli.py 两个函数占据 Top10 复杂度前两名（CC=15），是当前非deprecated代码中最高复杂度的函数。argparse+栈模式重构难度低、收益快，可直接将Top10最高CC从15压至13以下。[审查驱动]"
     }
   ]
 }
