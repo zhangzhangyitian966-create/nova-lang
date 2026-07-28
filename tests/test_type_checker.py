@@ -8,19 +8,14 @@ import unittest
 
 from nova.ast_nodes import (
     BinaryOp,
-    Block,
     BoolLiteral,
     CharLiteral,
     FloatLiteral,
-    FnDef,
     Identifier,
     IfExpr,
     IntLiteral,
-    LetBinding,
     ListExpr,
     StringLiteral,
-    TypeInt,
-    TypeBool,
     UnitLiteral,
 )
 from nova.type_checker import (
@@ -32,7 +27,6 @@ from nova.type_checker import (
     INT_T,
     ListType,
     MapType,
-    PrimType,
     STRING_T,
     TupleType,
     TypeChecker,

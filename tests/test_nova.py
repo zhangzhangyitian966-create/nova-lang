@@ -787,7 +787,6 @@ class TestADT(unittest.TestCase):
         """,
             check_types=False,
         )
-        from nova.evaluator import NovaADTValue
 
         c = ev.env.lookup("c")
         self.assertEqual(c.variant_name, "Circle")
@@ -819,7 +818,6 @@ class TestADT(unittest.TestCase):
         """,
             check_types=False,
         )
-        from nova.evaluator import NovaADTValue
 
         x = ev.env.lookup("x")
         self.assertEqual(x.variant_name, "Some")
@@ -1028,7 +1026,6 @@ class TestBuiltins(unittest.TestCase):
 
     def test_head_some(self):
         ev = eval_source("let x = head([1, 2, 3])", check_types=False)
-        from nova.evaluator import NovaADTValue
 
         x = ev.env.lookup("x")
         self.assertEqual(x.variant_name, "Some")
@@ -1036,14 +1033,12 @@ class TestBuiltins(unittest.TestCase):
 
     def test_head_none(self):
         ev = eval_source("let x = head([])", check_types=False)
-        from nova.evaluator import NovaADTValue
 
         x = ev.env.lookup("x")
         self.assertEqual(x.variant_name, "None")
 
     def test_tail_some(self):
         ev = eval_source("let x = tail([1, 2, 3])", check_types=False)
-        from nova.evaluator import NovaADTValue
 
         x = ev.env.lookup("x")
         self.assertEqual(x.variant_name, "Some")
@@ -1051,14 +1046,12 @@ class TestBuiltins(unittest.TestCase):
 
     def test_tail_none(self):
         ev = eval_source("let x = tail([])", check_types=False)
-        from nova.evaluator import NovaADTValue
 
         x = ev.env.lookup("x")
         self.assertEqual(x.variant_name, "None")
 
     def test_str_to_int_success(self):
         ev = eval_source('let x = str_to_int("42")', check_types=False)
-        from nova.evaluator import NovaADTValue
 
         x = ev.env.lookup("x")
         self.assertEqual(x.variant_name, "Some")
@@ -1066,7 +1059,6 @@ class TestBuiltins(unittest.TestCase):
 
     def test_str_to_int_fail(self):
         ev = eval_source('let x = str_to_int("abc")', check_types=False)
-        from nova.evaluator import NovaADTValue
 
         x = ev.env.lookup("x")
         self.assertEqual(x.variant_name, "None")

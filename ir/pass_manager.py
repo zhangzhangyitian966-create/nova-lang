@@ -1247,20 +1247,6 @@ class LIRDeadCodeElimination(Pass):
 
     def run(self, lir_module):
         """对 LIR 模块执行死代码消除"""
-        from .ir_nodes import (
-            LIRStoreGlobal,
-            LIRStoreReg,
-            LIRCall,
-            LIRCallIndirect,
-            LIRJump,
-            LIRBranch,
-            LIRSwitch,
-            LIRReturn,
-            LIRLabel,
-            LIRPanic,
-            LIRListAppend,
-        )
-
         changed = False
         for fn_name, fn in lir_module.functions.items():
             body_changed = self._eliminate_function(fn)

@@ -12,8 +12,6 @@ import unittest
 
 from nova.backend.compiler_pipeline import (
     NovaCompilerPipeline,
-    BACKEND_NATIVE,
-    BACKEND_WASM,
     BACKEND_C,
 )
 

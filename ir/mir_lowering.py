@@ -364,6 +364,25 @@ class MIRLowering:
 
     # === 函数调用 ===
 
+    def _infer_call_return_type(self, callee_ssa, default_ty):
+        """从 callee 的 SSA 类型推断调用返回类型。
+
+        如果 callee 的类型是函数类型（IRType.FUNCTION），
+        则 params[-1] 是返回类型；否则回退到 default_ty。
+
+        参数:
+            callee_ssa: callee 的 SSA 名（用于查 ssa_types）
+            default_ty: 无法推断时的回退类型
+
+        返回:
+            NovaType: 推断出的返回类型
+        """
+        callee_ty = self.ssa_types.get(callee_ssa)
+        if callee_ty and callee_ty.kind == IRType.FUNCTION and callee_ty.params:
+            # 函数类型的 params[-1] 是返回类型
+            return callee_ty.params[-1]
+        return default_ty
+
     def _lower_call_expr(self, hir_expr, block):
         """降级函数调用表达式。
 
@@ -387,11 +406,8 @@ class MIRLowering:
                 # 变量（闭包）-> 使用 SSA 值，间接调用
                 callee_ssa = self.env[name]
                 instr_callee = callee_ssa
-                # 从闭包 SSA 的类型信息中提取返回类型
-                callee_ty = self.ssa_types.get(callee_ssa)
-                if callee_ty and callee_ty.kind == IRType.FUNCTION and callee_ty.params:
-                    # 函数类型的 params[-1] 是返回类型
-                    result_ty = callee_ty.params[-1]
+                # 从闭包 SSA 类型推断返回类型
+                result_ty = self._infer_call_return_type(callee_ssa, result_ty)
             else:
                 # 函数名 -> 使用字符串，直接调用
                 instr_callee = name
@@ -403,9 +419,7 @@ class MIRLowering:
             func_ssa = self._lower_expr(hir_expr.function, block)
             instr_callee = func_ssa or ""
             # 从 callee SSA 类型推断返回类型
-            callee_ty = self.ssa_types.get(func_ssa)
-            if callee_ty and callee_ty.kind == IRType.FUNCTION and callee_ty.params:
-                result_ty = callee_ty.params[-1]
+            result_ty = self._infer_call_return_type(func_ssa, result_ty)
 
         instr = MIRCall(result_ty)
         instr.callee = instr_callee

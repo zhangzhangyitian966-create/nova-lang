@@ -1,7 +1,7 @@
 # Nova LLM 智能开发路线图
 
-**更新时间**: 2026-07-28 04:04:00
-**上次评审**: 第 66 轮（路线图评审）
+**更新时间**: 2026-07-28 12:15:00
+**上次评审**: 第 69 轮（路线图评审）
 
 本路线图由 LLM 智能开发系统动态维护。
 
@@ -148,10 +148,10 @@
 | ✅ | 拆分 cfg_utils.py _build_operand_dispatch_tables 过长函数 | easy | 55 | 2-3 小时 | - |
 | ✅ | 重构 c_codegen.py _compile_pattern 调度表化 | medium | 52 | 3-5 小时 | - |
 | ⏳ | LOW 级问题批量治理（docstring + 魔法数字） | easy | 40 | 2-4 小时 | - |
-| ⏳ | 重构 MIRLowering._lower_call_expr 降低复杂度 | medium | 70 | 3-5 小时 | - |
+| ✅ | 重构 MIRLowering._lower_call_expr 降低复杂度 | medium | 70 | 3-5 小时 | - |
 | ⏳ | 重构 LoopInvariantCodeMotion._redirect_branch 降低复杂度 | medium | 65 | 3-5 小时 | - |
 | ⏳ | 重构 cfg_utils.analyze_loops 降低复杂度 | medium | 65 | 3-5 小时 | - |
-| ⏳ | 批量清理未使用导入 v5 | easy | 50 | 1-2 小时 | - |
+| ✅ | 批量清理未使用导入 v5 | easy | 50 | 1-2 小时 | - |
 
 ---
 
@@ -167,15 +167,15 @@
 | ✅ | LIR C后端单元测试 | medium | 55 | 4-6 小时 | - |
 | ✅ | CFG 基础设施单元测试 | medium | 50 | 3-5 小时 | mir_cfg_loop_analysis |
 | ✅ | TypeChecker 单元测试基线 | medium | 75 | 4-6 小时 | - |
-| ⏳ | MIRLowering 单元测试基线 | medium | 75 | 4-6 小时 | - |
+| ✅ | MIRLowering 单元测试基线 | medium | 75 | 4-6 小时 | - |
 | ⏳ | PassManager 单元测试基线 | medium | 65 | 4-6 小时 | - |
 
 ---
 
-**进度**: 142/151 (94.0%)
-- **已完成**: 142（含第66轮评审 + 第67轮3个任务 + 第68轮3个任务）
+**进度**: 145/151 (96.0%)
+- **已完成**: 145（含第69轮评审 + 第70轮3个任务）
 - **进行中**: 0
-- **待开发**: 9（unify_c_backend P72、benchmark_enhance_exec_time P38、low_quality_issues_cleanup P40、refactor_lower_call_expr P70、refactor_redirect_branch P65、refactor_analyze_loops P65、mir_lowering_unit_tests P75、pass_manager_unit_tests P65、clean_unused_imports_v5 P50）
+- **待开发**: 6（unify_c_backend P72、benchmark_enhance_exec_time P38、low_quality_issues_cleanup P40、refactor_redirect_branch P65、refactor_analyze_loops P65、pass_manager_unit_tests P65）
 - **已废弃**: 2（native_call_abi、refactor_native_emit_call）
 
-> 注：第69轮路线图评审完成。五维评估（方向优秀、质量持续提升且稳定、效率优秀、价值极高、审查对齐良好67%）。关键里程碑：Top10复杂度函数第二轮清零（非deprecated代码CC>13仅剩2个）、测试总数突破600（621 passed）、too_broad_exception顽固问题清零。新增6个任务（3个复杂度治理+2个测试补齐+1个unused_import清理），调整3个任务优先级。下阶段方向：核心模块测试基线+剩余复杂度精细化治理+架构债务启动三线并行。
+> 注：第70轮开发完成3个任务（mir_lowering_unit_tests +50测试、refactor_lower_call_expr消除DRY违反、clean_unused_imports_v5清理33处）。测试总数621→671（+50），零回归。审查对齐率67%。下阶段方向：pass_manager单元测试 + 剩余复杂度治理 + 架构债务启动。

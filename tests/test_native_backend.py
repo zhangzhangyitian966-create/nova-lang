@@ -647,7 +647,6 @@ class TestFloatImmAndRetval(unittest.TestCase):
         """浮点立即数参数不再抛出 NotImplementedError"""
         from nova.ir.ir_nodes import (
             LIRModule, LIRFunction, LIRLoadConst, LIRReturn,
-            FLOAT_TYPE,
         )
         codegen = NativeCodeGen()
         lir = LIRModule(name="test_float_imm")
