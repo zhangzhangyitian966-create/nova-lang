@@ -453,13 +453,24 @@ class LIRLowering:
         result.append(lir)
 
     def _lower_store_global(self, instr, result):
-        """降级全局变量存储"""
+        """降级全局变量存储
+
+        MIRStore 的 result_name 语义上等于存储的值，
+        因此将其 LIR 位置覆盖为 value 的位置，
+        以便 Phi 节点能正确引用。
+        """
         lir = LIRStoreGlobal()
         lir.global_name = instr.name
         if instr.value:
+            value_loc = self.ssa_to_loc.get(instr.value, "")
             lir.src_locs = [
-                (self.ssa_to_loc.get(instr.value, ""), instr.result_type)
+                (value_loc, instr.result_type)
             ]
+            # MIRStore 的 result_name 语义上等于 value，
+            # 覆盖其 LIR 位置为 value 的位置，以便 Phi 引用
+            if instr.result_name and value_loc:
+                self.ssa_to_loc[instr.result_name] = value_loc
+                self.ssa_types[instr.result_name] = instr.result_type
         result.append(lir)
 
     # ---- 运算 ----

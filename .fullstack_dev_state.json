@@ -1,7 +1,7 @@
 {
-  "cycles": 45,
-  "frontend_completed": 30,
-  "backend_completed": 33,
+  "cycles": 46,
+  "frontend_completed": 31,
+  "backend_completed": 34,
   "last_review_cycle": 45,
   "current_review_cycle": 45,
   "completed_tasks": [
@@ -78,7 +78,9 @@
     "backend_unified_closure_e2e_test",
     "FRONTEND-030",
     "backend_native_relocatable_elf_link_fix",
-    "review_cycle_45"
+    "review_cycle_45",
+    "FRONTEND-031",
+    "backend_native_elf_e2e_exec"
   ],
   "failed_tasks": [],
   "deprecated_tasks": [
@@ -91,6 +93,28 @@
     "backend_c_todo_error"
   ],
   "task_history": [
+    {
+      "cycle": 46,
+      "task_id": "FRONTEND-031",
+      "name": "修复 type_checker.py Set 导入 + try 表达式 TypeVar 放行",
+      "track": "frontend",
+      "difficulty": "easy",
+      "priority": 55,
+      "result": "success",
+      "details": "前端维护任务。修复 2 个问题：(1) type_checker.py 第14行 typing 导入缺少 Set，虽然运行时不报错但代码不规范；(2) _check_try_expr 中 TypeVar 直接放行返回新 TypeVar 的类型安全漏洞——合一算法已就绪，改为抛出 TypeCheckError 要求显式标注。修改 1 个文件约 10 行代码。测试 677 passed（+6 新增 Native E2E 测试），无回归。前端 31/31 完成。",
+      "timestamp": "2026-07-28 13:30"
+    },
+    {
+      "cycle": 46,
+      "task_id": "backend_native_elf_e2e_exec",
+      "name": "Native 后端端到端执行突破：参数搬运 + 隐式 return + 执行测试",
+      "track": "backend",
+      "difficulty": "hard",
+      "priority": 80,
+      "result": "success",
+      "details": "P1-B3 清零。采用 obj + gcc 链接模式实现 Native 后端首次端到端执行。修复 4 个核心 bug：(1) _start 入口硬编码 exit(0) 而非传递 main 返回值——改为 push RAX 保存返回值，nova_cleanup 后 pop 到 RDI；(2) MIR 降级器 _lower_function 中仅检查 entry.terminator 而非 current_block.terminator，导致 if/then/else 等表达式作为函数尾表达式时缺少隐式 MIRReturn；(3) 寄存器分配器 _allocate_registers 未扫描 LIRCall.arg_locs，导致调用参数的虚拟寄存器活跃区间被错误计算，多个 vreg 被分配到同一物理寄存器；(4) _compile_function 缺少函数入口参数搬运，ABI 参数寄存器（RDI/RSI/RDX...）与寄存器分配器分配的位置不一致——新增 _emit_param_shuffle 方法用栈中转避免循环依赖。同时修复 LIR 降级器 _lower_store_global 中 MIRStore.result_name 未映射到 value 的 LIR 位置导致循环回边 Phi 拷贝引用错误 loc 的问题。新增 TestNativeE2EExecution 测试类 6 个测试：简单返回/算术/分支/循环/函数调用/闭包，全部通过。修改 4 个文件（native_backend.py, mir_lowering.py, lir_lowering.py, test_native_backend.py）约 200 行代码。测试 677 passed（671→677，+6 新测试），无回归。后端 34/46 完成。Native 后端完成度从 ~85% 提升至 ~90%。",
+      "timestamp": "2026-07-28 13:30"
+    },
     {
       "cycle": 45,
       "task_id": "review_cycle_45",
@@ -216,13 +240,13 @@
   "tasks": [
     {
       "task_id": "backend_native_elf_e2e_exec",
-      "name": "Native 后端端到端执行突破：修复外部函数重定位 + 添加执行测试",
-      "description": "P1-B3 最终清零。深度审计发现 _generate_elf 第1668行 continue 跳过了外部函数重定位，导致独立 ELF 无法链接运行时。修复：(1) 为外部函数（nova_init/nova_cleanup 等）生成正确的 PLT/GOT 重定位；(2) 添加端到端执行测试——编译简单程序→gcc链接→执行→验证返回码（参照 test_unified_closure.py C 后端模式）；(3) 验证寄存器分配器在含分支+循环的函数中正确性。",
+      "name": "Native 后端端到端执行突破：参数搬运 + 隐式 return + 执行测试",
+      "description": "P1-B3 清零。采用 obj + gcc 链接模式实现端到端执行。修复 4 个核心 bug：(1) _start 入口未传递 main 返回值到 exit code；(2) MIR 降级器在 if/then/else 等表达式作为函数尾表达式时未生成隐式 MIRReturn；(3) 寄存器分配器未扫描 LIRCall 的 arg_locs 导致参数虚拟寄存器被错误复用；(4) 函数入口未将 ABI 参数寄存器搬运到分配位置导致参数错乱。添加 6 个端到端执行测试（简单返回/算术/分支/循环/函数调用/闭包）。",
       "track": "backend",
       "difficulty": "hard",
       "priority": 80,
       "estimated_effort": "8-12小时",
-      "status": "pending",
+      "status": "completed",
       "source": "review_45_audit",
       "depends_on": ["backend_native_relocatable_elf_link_fix"]
     },

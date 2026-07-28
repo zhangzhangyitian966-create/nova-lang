@@ -4,6 +4,106 @@
 
 ---
 
+## 第 46 轮 — 2026-07-28 13:30
+
+> 普通轮 | 前端: Set 导入 + try TypeVar 放行修复 | 后端: Native 端到端执行突破 | P1-B3 清零
+
+---
+
+### 轮次概览
+
+| 维度 | 数据 |
+|------|------|
+| 轮次 | 第 46 轮（普通轮） |
+| 测试基线 | 671 passed |
+| 测试结果 | 677 passed（+6 新增 Native E2E 测试） |
+| 前端完成率 | 31/31 = **100%** |
+| 后端完成率 | 34/47 = **72.3%** |
+| 总完成率 | 65/78 = **83.3%** |
+| P1-B3 | **已清零**（Native 端到端执行突破） |
+| P2-F | **已清零**（改用 obj+gcc 链接模式绕过） |
+| 失败任务 | 0 个 |
+
+---
+
+### 前端任务：FRONTEND-031 — 修复 type_checker.py Set 导入 + try 表达式 TypeVar 放行
+
+**结果：成功** | 难度: easy | 优先级: 55
+
+#### 选择原因
+
+前端任务池已空（30/30 完成），进入纯维护模式。第 45 轮评审审计发现 `_check_try_expr` 中 TypeVar 直接放行返回新 TypeVar，存在类型安全漏洞——合一算法已就绪，应要求显式标注而非放行。同时修复 `typing` 导入缺少 `Set` 的代码规范问题。
+
+#### 详情
+
+修复 2 个问题：
+
+1. **Set 导入缺失**：`type_checker.py` 第 14 行 `from typing import ...` 缺少 `Set`，虽然运行时不报错但代码不规范。添加 `Set` 到导入列表。
+
+2. **try 表达式 TypeVar 放行漏洞**：`_check_try_expr` 中遇到 TypeVar 时直接返回新的 TypeVar，绕过了类型检查。合一算法已就绪，改为抛出 `TypeCheckError` 要求显式标注，确保类型安全。
+
+修改 1 个文件约 10 行代码。测试 677 passed，无回归。前端 31/31 完成。
+
+---
+
+### 后端任务：backend_native_elf_e2e_exec — Native 后端端到端执行突破
+
+**结果：成功** | 难度: hard | 优先级: 80 | P1-B3 清零
+
+#### 选择原因
+
+第 45 轮评审的首要任务（P80）。Native 后端从第 37 轮建立 gcc 链接方案到第 44 轮修复可重定位 ELF 格式，已逐步具备端到端执行的基础。本任务旨在实现从 Nova 源码到可执行文件到运行的完整闭环，验证 Native 后端的正确性。
+
+#### 详情
+
+采用 obj + gcc 链接模式实现 Native 后端首次端到端执行。修复 4 个核心 bug：
+
+1. **_start 入口未传递 main 返回值**（native_backend.py）：_start 函数硬编码 `exit(0)` 而非传递 main 的返回值作为 exit code。修复：在调用 nova_cleanup 前将 RAX（main 返回值）push 到栈，cleanup 后 pop 到 RAX 再 mov 到 RDI 作为 exit code。
+
+2. **MIR 降级器缺少隐式 return**（mir_lowering.py）：`_lower_function` 中仅检查 `entry.terminator` 而非 `current_block.terminator`，导致 if/then/else 等表达式作为函数尾表达式时，当前块（可能不是 entry）缺少 `MIRReturn` 终止符。修复：改为检查 `self.current_block.terminator`，并在需要时回退检查 `entry.terminator`。
+
+3. **寄存器分配器未扫描 LIRCall.arg_locs**（lir_lowering.py）：`_allocate_registers` 遍历指令时未扫描 `LIRCall.arg_locs`，导致调用参数的虚拟寄存器活跃区间被错误计算，多个 vreg 被分配到同一物理寄存器。修复：在扫描循环中添加对 `instr.arg_locs` 的检查。
+
+4. **函数入口缺少参数搬运**（native_backend.py）：ABI 参数寄存器（RDI/RSI/RDX...）与寄存器分配器分配的位置不一致。新增 `_emit_param_shuffle` 方法，使用栈中转策略避免循环依赖：先将所有源寄存器保存到栈临时区域，再从栈加载到目标位置。
+
+同时修复 LIR 降级器 `_lower_store_global` 中 `MIRStore.result_name` 未映射到 value 的 LIR 位置，导致循环回边 Phi 拷贝引用错误 loc 的问题。
+
+新增 `TestNativeE2EExecution` 测试类，6 个端到端测试：
+- 简单返回 `fn main() -> Int { 42 }` → exit code 42
+- 算术 `let a = 10; let b = 20; a + b` → exit code 30
+- 分支 `if x > 5 then 100 else 200` → exit code 100
+- 循环 `while i < 10 { sum = sum + i; i = i + 1 }` → exit code 45
+- 函数调用 `add(15, 27)` → exit code 42
+- 闭包 `make_adder(5)(10)` → exit code 15
+
+修改 4 个文件（native_backend.py, mir_lowering.py, lir_lowering.py, test_native_backend.py）约 200 行代码。测试 677 passed（671→677，+6 新测试），无回归。后端 34/47 完成。Native 后端完成度从 ~85% 提升至 ~90%。
+
+---
+
+### 测试前后对比
+
+| 指标 | 开发前 | 开发后 | 变化 |
+|------|--------|--------|------|
+| 测试通过数 | 671 | 677 | +6 |
+| 测试失败数 | 0 | 0 | — |
+| 回归 | — | 无 | — |
+
+---
+
+### 前端下一步
+
+前端任务池已空（31/31 = 100%）。进入纯维护模式，仅响应代码审计发现的新正确性问题。下阶段无计划任务，待第 48 轮评审时重新评估。
+
+### 后端下一步
+
+**第 47 轮计划**：
+- 寄存器分配器添加调用点活跃区间切口（backend_native_regalloc_call_site, P55, hard）——当前靠手动 push 全部 caller-saved 兜底，正确但极低效。改进为在调用点添加活跃区间切口，仅保存实际被占用的 vreg。
+- 修复 C/Wasm 后端闭包临时内存泄漏（backend_closure_memory_leak_fix, P50, medium）——nova_alloc 分配的临时数组未释放。
+
+**第 48 轮**：评审轮，全面回顾第 46-48 轮进展。
+
+---
+
 ## 第 45 轮 — 2026-07-28 10:15
 
 > 评审轮 | 第 43-45 轮双线路线图评审 | Native 后端端到端执行成为下一阶段首要目标

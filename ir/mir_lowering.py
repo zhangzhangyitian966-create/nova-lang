@@ -254,7 +254,13 @@ class MIRLowering:
 
         result_ssa = self._lower_expr(hir_fn.body, entry)
 
-        if entry.terminator is None:
+        # 函数体降级后，当前块（可能不是 entry）如果没有终止符，
+        # 需要添加隐式 return 返回函数体结果值。
+        # 这在 if/then/else、match 等表达式作为函数尾表达式时发生。
+        if self.current_block.terminator is None:
+            self.current_block.terminator = MIRReturn(result_ssa)
+        elif entry.terminator is None:
+            # entry 本身没有终止符（简单表达式函数体）
             entry.terminator = MIRReturn(result_ssa)
 
         # 如果函数返回类型未指定（TYPE_VAR），从函数体结果推断

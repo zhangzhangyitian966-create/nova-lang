@@ -428,16 +428,92 @@ class NativeCodeGen:
 
         三阶段协调器：
         1. 线性扫描寄存器分配
-        2. 发射指令（调度表分发）
-        3. 回填跳转偏移
+        2. 参数入口搬运（ABI 寄存器 → 分配位置）
+        3. 发射指令（调度表分发）
+        4. 回填跳转偏移
         """
         vreg_alloc, label_offsets, jump_fixups = self._allocate_registers(func)
         ctx = _EmitContext(
             e=e, func_name=func_name, vreg_alloc=vreg_alloc,
             label_offsets=label_offsets, jump_fixups=jump_fixups,
         )
+        # 函数入口：将 ABI 参数寄存器搬运到寄存器分配器分配的位置
+        self._emit_param_shuffle(e, func, ctx)
         self._emit_instructions(func, ctx)
         self._fixup_jumps(ctx)
+
+    def _emit_param_shuffle(self, e: X86_64Emitter, func: LIRFunction,
+                            ctx: "_EmitContext"):
+        """在函数入口将 ABI 参数寄存器搬运到分配的虚拟寄存器位置。
+
+        System V ABI 要求整数参数通过 RDI/RSI/RDX/RCX/R8/R9 传递，
+        浮点参数通过 XMM0-XMM7 传递。但寄存器分配器可能将参数
+        虚拟寄存器分配到不同的物理寄存器或栈槽，因此需要搬运。
+
+        处理寄存器间循环依赖（如 RDI→RSI, RSI→RDX）：
+        先将所有源寄存器值保存到栈上，再从栈加载到目标位置。
+        """
+        # 收集所有需要搬运的参数
+        moves = []  # [(src_reg, dst_kind, dst_val, is_float)]
+        int_idx = 0
+        float_idx = 0
+        for param_name, param_type in func.params:
+            is_float = param_type.kind == IRType.FLOAT
+            dst_loc = ctx.get_loc(param_name)
+
+            if is_float:
+                src_reg = FLOAT_ARG_REGS[float_idx] if float_idx < len(FLOAT_ARG_REGS) else None
+                float_idx += 1
+            else:
+                src_reg = INT_ARG_REGS[int_idx] if int_idx < len(INT_ARG_REGS) else None
+                int_idx += 1
+
+            if src_reg is None:
+                continue
+
+            if dst_loc[0] == "reg" and dst_loc[1] == src_reg:
+                continue  # 源和目标相同，无需搬运
+
+            moves.append((src_reg, dst_loc[0], dst_loc[1], is_float))
+
+        if not moves:
+            return
+
+        # 简单但正确的策略：将所有源寄存器先保存到栈临时区域，
+        # 然后从栈加载到目标位置。避免循环依赖问题。
+        # 栈临时区域在当前 RSP 下方分配。
+        num_moves = len(moves)
+        # 对齐到 16 字节
+        temp_size = (num_moves * 8 + 15) & ~15
+        e.sub_rsp_imm(temp_size)
+
+        # 阶段 1: 保存所有源寄存器到栈
+        for i, (src_reg, _, _, is_float) in enumerate(moves):
+            if is_float:
+                e.movsd_mem_reg(RSP, i * 8, src_reg)
+            else:
+                e.mov_mem_reg(RSP, i * 8, src_reg)
+
+        # 阶段 2: 从栈加载到目标位置
+        for i, (_, dst_kind, dst_val, is_float) in enumerate(moves):
+            if dst_kind == "reg":
+                if is_float:
+                    e.movsd_reg_mem(dst_val, RSP, i * 8)
+                else:
+                    e.mov_reg_mem(dst_val, RSP, i * 8)
+            else:
+                # 目标在栈槽（dst_val 是相对于 RSP 的偏移）
+                # 需要调整偏移以反映 temp_size 的 sub_rsp
+                adjusted_offset = dst_val + temp_size
+                if is_float:
+                    e.movsd_reg_mem(XMM0, RSP, i * 8)
+                    e.movsd_mem_reg(RSP, adjusted_offset, XMM0)
+                else:
+                    e.mov_reg_mem(RAX, RSP, i * 8)
+                    e.mov_mem_reg(RSP, adjusted_offset, RAX)
+
+        # 释放临时区域
+        e.add_rsp_imm(temp_size)
 
     # ============================================================
     # 阶段 A: 线性扫描寄存器分配
@@ -477,6 +553,11 @@ class NativeCodeGen:
             for loc_name, loc_type in instr.src_locs:
                 is_float = loc_type.kind == IRType.FLOAT
                 _note_vreg(loc_name, is_float, idx)
+            # LIRCall/LIRCallIndirect 的参数在 arg_locs 中，也需要扫描
+            if hasattr(instr, 'arg_locs'):
+                for loc_name, loc_type in instr.arg_locs:
+                    is_float = loc_type.kind == IRType.FLOAT
+                    _note_vreg(loc_name, is_float, idx)
             if instr.dst_loc:
                 dst_name, dst_type = instr.dst_loc
                 is_float = dst_type.kind == IRType.FLOAT
@@ -1527,13 +1608,17 @@ class NativeCodeGen:
             call_main = e.call_rel32()
             self.link_calls.append(("_start", call_main, "main"))
 
+        # 保存 main 返回值（RAX）到栈上，防止 nova_cleanup 覆盖
+        e.push_reg(RAX)
+
         # 调用 nova_cleanup（外部运行时函数，归入 external_calls）
         call_cleanup = e.call_rel32()
         self.external_calls.append(("_start", call_cleanup, "nova_cleanup"))
 
-        # exit(0)
-        e.mov_reg_imm64(RDI, 0)  # exit code
-        e.mov_reg_imm64(RAX, 60)  # syscall: exit
+        # exit(main_return_value)：从栈恢复返回值到 RDI 作为 exit code
+        e.pop_reg(RAX)           # 恢复 main 返回值到 RAX
+        e.mov_reg_reg64(RDI, RAX)  # RDI = exit code = main 返回值
+        e.mov_reg_imm64(RAX, 60)   # syscall: exit
         e.syscall()
 
         return bytes(e.code)

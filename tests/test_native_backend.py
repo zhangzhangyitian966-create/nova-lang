@@ -688,5 +688,119 @@ class TestFloatImmAndRetval(unittest.TestCase):
         self.assertTrue(len(elf) > 0)
 
 
+class TestNativeE2EExecution(unittest.TestCase):
+    """Native 后端端到端执行测试
+
+    通过 LIR → 可重定位 .o → gcc 链接 → 执行 → 验证返回码，
+    验证 Native 后端从编译到执行的完整闭环。
+    """
+
+    # 测试用 Nova 源码
+    _SIMPLE = "fn main() -> Int { 42 }"
+    _ARITH = "fn main() -> Int { let a = 10\n let b = 20\n a + b }"
+    _BRANCH = "fn main() -> Int { let x = 10\n if x > 5 then 100 else 200 }"
+    _LOOP = (
+        "fn main() -> Int {\n"
+        "    mut sum = 0\n"
+        "    mut i = 0\n"
+        "    while i < 10 {\n"
+        "        sum = sum + i\n"
+        "        i = i + 1\n"
+        "    }\n"
+        "    sum\n"
+        "}"
+    )
+    _CALL = (
+        "fn add(a: Int, b: Int) -> Int { a + b }\n"
+        "fn main() -> Int { add(15, 27) }"
+    )
+    _CLOSURE = (
+        "fn make_adder(n: Int) -> (Int) -> Int {\n"
+        "    |x: Int| -> Int { x + n }\n"
+        "}\n"
+        "fn main() -> Int {\n"
+        "    let add5 = make_adder(5)\n"
+        "    add5(10)\n"
+        "}"
+    )
+
+    def _compile_and_run(self, source):
+        """编译 Nova 源码到 .o，gcc 链接为可执行文件，执行并返回 exit code"""
+        import os
+        import shutil
+        import subprocess
+        import tempfile
+
+        from nova.lexer import Lexer
+        from nova.parser import Parser
+        from nova.type_checker import TypeChecker
+        from nova.ir.hir_lowering import HIRLowering
+        from nova.ir.mir_lowering import MIRLowering
+        from nova.ir.lir_lowering import LIRLowering
+
+        tokens = Lexer(source).tokenize()
+        ast = Parser(tokens).parse()
+        TypeChecker().check_program(ast)
+        hir = HIRLowering().lower(ast)
+        mir = MIRLowering().lower(hir)
+        lir = LIRLowering().lower(mir)
+
+        backend = NativeCodeGen()
+        obj_bytes = backend.compile(lir, output_format="obj")
+
+        # 查找运行时库
+        nova_pkg_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        runtime_lib = os.path.join(nova_pkg_dir, "runtime", "libnova_runtime.a")
+        if not os.path.isfile(runtime_lib):
+            self.skipTest("libnova_runtime.a not found")
+
+        gcc = shutil.which("gcc")
+        if not gcc:
+            self.skipTest("gcc not available")
+
+        with tempfile.TemporaryDirectory(prefix="nova_e2e_") as tmpdir:
+            obj_path = os.path.join(tmpdir, "nova.o")
+            exe_path = os.path.join(tmpdir, "nova_exe")
+            with open(obj_path, "wb") as f:
+                f.write(obj_bytes)
+
+            result = subprocess.run(
+                [gcc, "-nostartfiles", obj_path, runtime_lib,
+                 "-o", exe_path, "-lm", "-lc", "-ldl", "-no-pie"],
+                capture_output=True, text=True, timeout=10
+            )
+            self.assertEqual(result.returncode, 0,
+                             f"gcc 链接失败: {result.stderr}")
+
+            run_result = subprocess.run(
+                [exe_path], capture_output=True, text=True, timeout=5
+            )
+            return run_result.returncode
+
+    def test_e2e_simple_return(self):
+        """端到端：简单返回 42"""
+        self.assertEqual(self._compile_and_run(self._SIMPLE), 42)
+
+    def test_e2e_arithmetic(self):
+        """端到端：算术 10+20=30"""
+        self.assertEqual(self._compile_and_run(self._ARITH), 30)
+
+    def test_e2e_branch(self):
+        """端到端：分支 10>5 → 100"""
+        self.assertEqual(self._compile_and_run(self._BRANCH), 100)
+
+    def test_e2e_loop(self):
+        """端到端：循环 sum(0..9)=45"""
+        self.assertEqual(self._compile_and_run(self._LOOP), 45)
+
+    def test_e2e_function_call(self):
+        """端到端：函数调用 add(15,27)=42"""
+        self.assertEqual(self._compile_and_run(self._CALL), 42)
+
+    def test_e2e_closure(self):
+        """端到端：闭包 make_adder(5)(10)=15"""
+        self.assertEqual(self._compile_and_run(self._CLOSURE), 15)
+
+
 if __name__ == '__main__':
     unittest.main()

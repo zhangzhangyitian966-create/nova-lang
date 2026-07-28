@@ -11,7 +11,7 @@ Nova 编程语言 - 类型检查器
 - 支持类型变量（TypeVar）进行推断
 """
 
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Set
 
 from .ast_nodes import (
     AliasDef,
@@ -1049,9 +1049,16 @@ class TypeChecker:
         """
         inner_ty = self.check_expr(expr.expr)
         
-        # TypeVar 暂时放行（在合一实现前保持兼容）
+        # TypeVar 尝试约束为 Option/Result，若无法推断则报错
         if isinstance(inner_ty, TypeVar):
-            return TypeVar(f"try_{inner_ty.name}")
+            # 合一算法已就绪，但 TypeVar 在此点无法确定是 Option 还是 Result
+            # 返回 error 类型，要求用户显式标注类型
+            raise TypeCheckError(
+                f"无法推断 '{expr.expr}' 的类型为 Option 或 Result，"
+                f"请为变量添加显式类型标注",
+                expr.expr.line if hasattr(expr.expr, 'line') else 0,
+                expr.expr.column if hasattr(expr.expr, 'column') else 0,
+            )
         
         if isinstance(inner_ty, ADTType):
             if inner_ty.name == "Option":
