@@ -1854,7 +1854,8 @@ class NativeCodeGen:
         for name, fc in func_code.items():
             _add_func_symbol(name, func_offsets[name], len(fc))
         # trampoline 函数
-        for tramp_name, tc in self.trampoline_code.items():
+        for lambda_name, tc in self.trampoline_code.items():
+            tramp_name = f"__trampoline_{lambda_name}"
             _add_func_symbol(tramp_name, trampoline_offsets[tramp_name], len(tc))
 
         # 外部运行时函数符号（SHN_UNDEF）
@@ -2019,14 +2020,16 @@ class NativeCodeGen:
         shdr_data = struct.pack(_shdr_fmt,
             idx_rodata, SHT_PROGBITS, SHF_ALLOC | SHF_WRITE,
             0, data_offset, len(data), 0, 0, 8, 0)
+        # section index: 0=NULL, 1=.text, 2=.data, 3=.rela.text,
+        #                 4=.symtab, 5=.strtab, 6=.shstrtab, 7=.note
         shdr_rela_text = struct.pack(_shdr_fmt,
             idx_rela_text, SHT_RELA, 0,
             0, rela_text_offset, len(rela_text),
-            3, 1, 8, 24)
+            4, 1, 8, 24)  # sh_link=4 -> .symtab
         shdr_symtab = struct.pack(_shdr_fmt,
             idx_symtab, SHT_SYMTAB, 0,
             0, symtab_offset, symtab_size,
-            4, len(symbols), 8, ELF64_SYM_SIZE)
+            5, len(symbols), 8, ELF64_SYM_SIZE)  # sh_link=5 -> .strtab
         shdr_strtab = struct.pack(_shdr_fmt,
             idx_strtab, SHT_STRTAB, 0,
             0, strtab_offset, len(strtab), 0, 0, 1, 0)

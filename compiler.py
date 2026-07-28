@@ -905,8 +905,8 @@ class BytecodeCompiler:
         ):
             self._compile_expr(expr.iterable[1])  # start
             self._compile_expr(expr.iterable[2])  # end
-            if len(expr.iterable) > 3 and expr.iterable[3] is not None:
-                self._compile_expr(expr.iterable[3])
+            if expr.step is not None:
+                self._compile_expr(expr.step)
             else:
                 self.bytecode.emit_op(Op.CONST_INT, 1)
             self.bytecode.emit_op(Op.BUILD_RANGE)

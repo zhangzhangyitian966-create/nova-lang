@@ -595,6 +595,7 @@ class Parser:
         tok = self._expect(TokenType.FOR)
         var_tok = self._expect(TokenType.IDENT)
         var_name = var_tok.value
+        step_expr = None
 
         if self._match(TokenType.IN):
             # for x in list_expr { body }
@@ -624,7 +625,7 @@ class Parser:
             var_name=var_name,
             iterable=iterable,
             body=body,
-            step=None,
+            step=step_expr,
             span=self._span(tok),
         )
 

@@ -17,15 +17,17 @@ BACKEND_C = "c"
 class NovaCompilerPipeline:
     """Nova 统一编译管道"""
 
-    def __init__(self, target: str = BACKEND_NATIVE, optimize_level: int = 2):
+    def __init__(self, target: str = BACKEND_NATIVE, optimize_level: int = 2, use_gcc_link: bool = False):
         """初始化统一编译管道
 
         Args:
             target: 目标后端（BACKEND_NATIVE / BACKEND_WASM / BACKEND_C）
             optimize_level: 优化级别（0=不优化，1-2=启用优化）
+            use_gcc_link: 是否使用 gcc 链接运行时库（仅 Native 后端有效）
         """
         self.target = target
         self.optimize_level = optimize_level
+        self.use_gcc_link = use_gcc_link
         self.pass_manager = (
             default_optimization_pipeline() if optimize_level > 0 else None
         )
@@ -80,12 +82,18 @@ class NovaCompilerPipeline:
 
         # 8. 后端代码生成
         if self.target == BACKEND_NATIVE:
-            # 自研原生后端：直接生成 ELF 二进制
-            elf_bytes = self.backend.compile(lir_module)
-            with open(output_path, "wb") as f:
-                f.write(elf_bytes)
-            import os
-            os.chmod(output_path, 0o755)
+            if self.use_gcc_link:
+                # 使用 gcc 链接运行时库生成可执行文件
+                self.backend.compile_and_write(
+                    lir_module, output_path, use_gcc_link=True
+                )
+            else:
+                # 自研原生后端：直接生成 ELF 二进制（零依赖，但无运行时）
+                elf_bytes = self.backend.compile(lir_module)
+                with open(output_path, "wb") as f:
+                    f.write(elf_bytes)
+                import os
+                os.chmod(output_path, 0o755)
         elif self.target == BACKEND_WASM:
             return self.backend.compile_to_wasm(lir_module, output_path)
         elif self.target == BACKEND_C:

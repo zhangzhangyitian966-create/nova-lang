@@ -830,10 +830,9 @@ class Evaluator:
             # 范围循环: ("range", start, end, step)
             start = self.eval_expr(expr.iterable[1])
             end = self.eval_expr(expr.iterable[2])
-            step = self.eval_expr(expr.iterable[3]) if expr.iterable[3] else 1
+            step = self.eval_expr(expr.step) if expr.step else 1
             items = list(range(start, end + 1, step))
         else:
-            # 列表遍历
             items = self.eval_expr(expr.iterable)
 
         results = []

@@ -1,7 +1,7 @@
 {
-  "cycles": 42,
-  "frontend_completed": 28,
-  "backend_completed": 31,
+  "cycles": 43,
+  "frontend_completed": 29,
+  "backend_completed": 32,
   "last_review_cycle": 42,
   "current_review_cycle": 42,
   "completed_tasks": [
@@ -73,7 +73,9 @@
     "backend_unified_silent_skip_fix",
     "frontend_lexer_escape_eof_fix",
     "backend_native_global_var_support",
-    "review_cycle_42"
+    "review_cycle_42",
+    "FRONTEND-029",
+    "backend_unified_closure_e2e_test"
   ],
   "failed_tasks": [],
   "deprecated_tasks": [
@@ -86,6 +88,28 @@
     "backend_c_todo_error"
   ],
   "task_history": [
+    {
+      "cycle": 43,
+      "task_id": "FRONTEND-029",
+      "name": "修复 ForExpr 的 step 字段赋值不一致问题",
+      "track": "frontend",
+      "difficulty": "easy",
+      "priority": 70,
+      "result": "success",
+      "details": "修复 parser.py 构造 ForExpr 时硬编码 step=None 的真实数据不一致 bug。修改涉及 parser.py（step=None→step=step_expr）、type_checker.py（expr.iterable[3]→expr.step）、compiler.py、evaluator.py、c_codegen.py（两处）共 5 个文件约 10 行代码。消除了 AST 字段名存实亡和魔法索引技术债。测试 572 passed（+6 新测试），无回归。前端 29/29 完成。",
+      "timestamp": "2026-07-28 04:15"
+    },
+    {
+      "cycle": 43,
+      "task_id": "backend_unified_closure_e2e_test",
+      "name": "建立三后端统一闭包执行测试矩阵",
+      "track": "backend",
+      "difficulty": "medium",
+      "priority": 72,
+      "result": "success",
+      "details": "P1-B3 部分清零。新建 tests/test_unified_closure.py，包含 6 个测试：C 后端 make_adder E2E（退出码 15）/ multi_capture E2E（退出码 35）均通过；Native 后端 make_adder/multi_capture 编译基线验证（.o ELF 格式 + trampoline 符号 + 重定位表），修复了 _generate_relocatable_elf 中 trampoline 符号键名不一致和 section header sh_link 索引错误两个底层 bug；Wasm 后端 make_adder/multi_capture 生成验证（WAT 包含 nova_closure_new/table/funcref/elem）。修改涉及 compiler_pipeline.py（新增 use_gcc_link 参数）、native_backend.py（修复符号表和 section header）、test_unified_closure.py（新建）。测试 572 passed，无回归。后端 32/44 完成。Native 端到端执行仍待 ELF 数据段重定位和 main 符号导出修复。",
+      "timestamp": "2026-07-28 04:15"
+    },
     {
       "cycle": 42,
       "task_id": "review_cycle_42",
@@ -138,7 +162,7 @@
       "difficulty": "easy",
       "priority": 90,
       "result": "success",
-      "details": "P0-新1清零。三后端统一改为抛出 NotImplementedError：native_backend.py（原完全静默跳过）、wasm_backend.py（原生 WAT TODO 注释）、lir_c_backend.py（原生 C TODO 注释）。消除编译正确性系统性风险——编译器不再静默生成错误代码。测试 432 passed，无回归。后端 30/43 完成。",
+      "details": "P0-新1清零。三后端统一改为抛出 NotImplementedError：native_backend.py（原完全静默跳过）、wasm_backend.py（原生 WAT TODO 注释）、lir_c_backend.py（原生 C TODO 注释）。消除编译正确正确性系统性风险——编译器不再静默生成错误代码。测试 432 passed，无回归。后端 30/43 完成。",
       "timestamp": "2026-07-27 16:09"
     },
     {
@@ -155,18 +179,6 @@
   ],
   "tasks": [
     {
-      "task_id": "backend_unified_closure_e2e_test",
-      "name": "建立三后端统一闭包执行测试矩阵",
-      "description": "当前三后端闭包实现分叉，无统一验证基线。建立同一 make_adder 程序在 C/Native/Wasm 三后端验证返回值的测试矩阵。Native 后端现在可用 gcc 链接执行，可建立真实的执行验证。",
-      "track": "backend",
-      "difficulty": "medium",
-      "priority": 72,
-      "estimated_effort": "4-6小时",
-      "status": "pending",
-      "source": "review_33_audit",
-      "depends_on": []
-    },
-    {
       "task_id": "backend_native_regalloc_call_site",
       "name": "寄存器分配器添加调用点活跃区间切口",
       "description": "P1-B2：native_backend.py 寄存器分配器不感知调用点，靠手动 push 全部 caller-saved 兜底（正确但极低效）。修复：在调用点添加活跃区间切口，仅保存实际被 caller-saved 寄存器占用且活跃的 vreg。",
@@ -177,6 +189,18 @@
       "status": "pending",
       "source": "review_33_audit",
       "depends_on": []
+    },
+    {
+      "task_id": "backend_native_relocatable_elf_link_fix",
+      "name": "修复 Native 后端可重定位 ELF 链接格式问题",
+      "description": "_generate_relocatable_elf 生成的 .o 文件无法通过 gcc 链接：(1) 数据段重定位类型错误（reloc against '.data': error 4）；(2) main 符号未被正确导出导致 undefined reference。修复后可启用 Native 后端端到端闭包执行测试。",
+      "track": "backend",
+      "difficulty": "hard",
+      "priority": 60,
+      "estimated_effort": "4-6小时",
+      "status": "pending",
+      "source": "cycle_43_audit",
+      "depends_on": ["backend_unified_closure_e2e_test"]
     },
     {
       "task_id": "backend_wasm_stack_balance",

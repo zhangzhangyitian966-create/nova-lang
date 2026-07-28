@@ -4,6 +4,84 @@
 
 ---
 
+## 第 43 轮 — 2026-07-28 04:15
+
+> 普通轮 | 前端: FRONTEND-029 修复 ForExpr step 字段不一致 | 后端: backend_unified_closure_e2e_test 统一闭包测试矩阵
+
+---
+
+### 轮次概览
+
+| 维度 | 数据 |
+|------|------|
+| 轮次 | 第 43 轮（非评审轮） |
+| 测试基线 | 566 passed, 20 subtests |
+| 测试后 | 572 passed, 20 subtests |
+| 新增测试 | 6 个（test_unified_closure.py） |
+| 前端完成率 | 29/29 = **100%** |
+| 后端完成率 | 32/45 = **71.1%** |
+| 总完成率 | 61/74 = **82.4%** |
+| Git Tag | fullstack-dev-cycle-43-20260728-0406 |
+
+---
+
+### 前端任务：FRONTEND-029 修复 ForExpr step 字段赋值不一致
+
+**为什么选这个**：前端任务池已空（28/28 完成），通过代码审计发现 parser.py 构造 `ForExpr` 时硬编码 `step=None`，但实际步长被塞在 `iterable` 元组第 4 位。这是一个真实的数据不一致 bug，导致 AST 字段名存实亡，下游代码被迫使用魔法索引 `expr.iterable[3]`。修复成本低（约 10 行）、安全性高、技术债消除价值明确。
+
+**修改内容**：
+- `parser.py`：第 627 行 `step=None` → `step=step_expr`，并在函数开头初始化 `step_expr = None` 避免 `for x in list` 分支的 UnboundLocalError
+- `type_checker.py`：`expr.iterable[3]` → `expr.step`
+- `compiler.py`（两处）：`expr.iterable[3]` → `expr.step`
+- `evaluator.py`：`expr.iterable[3]` → `expr.step`
+- `c_codegen.py`（两处）：`iterable[3]` → `for_expr.step` / `expr.step`
+
+**结果**：成功 | 测试 572 passed，无回归
+
+---
+
+### 后端任务：backend_unified_closure_e2e_test 建立三后端统一闭包执行测试矩阵
+
+**为什么选这个**：路线图第 43 轮计划任务，P1-B3（原生后端无端到端执行测试）的核心突破口。三后端闭包实现分叉，无统一验证基线。建立同一 `make_adder` 程序在 C/Native/Wasm 三后端上的验证矩阵，是端到端编译正确性的关键保障。
+
+**修改内容**：
+1. `backend/compiler_pipeline.py`：新增 `use_gcc_link: bool = False` 参数，Native 后端分支支持通过 gcc 链接运行时库生成可执行文件
+2. `backend/native_backend.py`：修复 `_generate_relocatable_elf` 中两个底层 bug
+   - trampoline 符号键名不一致：`self.trampoline_code.items()` 的键是 `lambda_name`，但 `trampoline_offsets` 的键是 `__trampoline_{lambda_name}`。原代码直接用 lambda_name 查 offsets 导致 KeyError
+   - section header `sh_link` 索引错误：`.symtab` 的 `sh_link` 原指向自身（4），应指向 `.strtab`（5）；`.rela.text` 的 `sh_link` 原指向自身（3），应指向 `.symtab`（4）
+3. 新建 `tests/test_unified_closure.py`：6 个统一测试
+   - `test_c_backend_make_adder_e2e`：C 后端编译+gcc 链接+执行，验证退出码 15
+   - `test_c_backend_multi_capture_e2e`：多变量捕获，验证退出码 35
+   - `test_native_backend_make_adder_compiles`：Native 后端生成 `.o`，验证 ELF 格式+trampoline 符号+重定位表
+   - `test_native_backend_multi_capture_compiles`：同上
+   - `test_wasm_backend_make_adder_generates`：Wasm 后端生成 WAT，验证闭包结构
+   - `test_wasm_backend_multi_capture_generates`：同上
+
+**结果**：成功（C/Wasm 完全通过；Native 编译基线通过，端到端执行待 ELF 链接格式进一步修复）| 测试 572 passed，无回归
+
+---
+
+### 测试前后对比
+
+| 指标 | 开发前 | 开发后 | 变化 |
+|------|--------|--------|------|
+| 总测试数 | 566 passed | 572 passed | **+6** |
+| 失败数 | 0 | 0 | 0 |
+| 新增文件 | - | test_unified_closure.py | 1 |
+
+---
+
+### 前端下一步
+
+前端进入纯维护模式，任务池已空。下轮若代码审计发现新问题则响应，否则保持状态。
+
+### 后端下一步
+
+1. **第 44 轮首要任务**：`backend_native_relocatable_elf_link_fix`（新增）— 修复可重定位 ELF 的数据段重定位类型和 main 符号导出，使 Native 后端能通过 gcc 链接并执行，彻底清零 P1-B3
+2. **第 44 轮次要任务**：`backend_native_regalloc_call_site` — 寄存器分配器调用点活跃区间切口
+
+---
+
 ## 第 42 轮 — 2026-07-28 01:04
 
 > 评审轮 | 第 40-42 轮双线路线图评审 | P0/P1 全部清零

@@ -783,8 +783,8 @@ class TypeChecker:
             # 范围循环：iterable 是 ("range", start, end, step)
             start_ty = self.check_expr(expr.iterable[1])
             end_ty = self.check_expr(expr.iterable[2])
-            if expr.iterable[3]:
-                self.check_expr(expr.iterable[3])  # step
+            if expr.step:
+                self.check_expr(expr.step)  # step
             # range 产生整数序列，循环变量为 Int
             elem_ty = INT_T
         else:

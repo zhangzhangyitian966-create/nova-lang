@@ -477,7 +477,7 @@ class CCodeGen:
             # for i <- start..end
             start_c = self._compile_expr(iterable[1])
             end_c = self._compile_expr(iterable[2])
-            step_c = self._compile_expr(iterable[3]) if iterable[3] else "1"
+            step_c = self._compile_expr(for_expr.step) if for_expr.step else "1"
 
             i_var = self._new_temp()
             self._emit(
@@ -1078,7 +1078,7 @@ class CCodeGen:
         if isinstance(iterable, tuple) and iterable[0] == "range":
             start_c = self._compile_expr(iterable[1])
             end_c = self._compile_expr(iterable[2])
-            step_c = self._compile_expr(iterable[3]) if iterable[3] else "1"
+            step_c = self._compile_expr(expr.step) if expr.step else "1"
             idx_var = self._new_temp()
             lines.append(
                 f"    for (int64_t {idx_var} = {start_c}; {idx_var} < {end_c}; {idx_var} += {step_c}) {{"
