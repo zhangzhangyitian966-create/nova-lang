@@ -4,6 +4,98 @@
 
 ---
 
+## 第 47 轮 — 2026-07-29 16:30
+
+> 普通轮 | 前端: parser 块错误恢复计数器重置 | 后端: 寄存器分配器调用点活跃区间切口 | P1-B2 清零
+
+---
+
+### 轮次概览
+
+| 维度 | 数据 |
+|------|------|
+| 轮次 | 第 47 轮（普通轮） |
+| 测试基线 | 677 passed |
+| 测试结果 | 680 passed（+3 新增寄存器分配测试） |
+| 前端完成率 | 32/32 = **100%** |
+| 后端完成率 | 35/47 = **74.5%** |
+| 总完成率 | 67/79 = **84.8%** |
+| P1-B2 | **已清零**（寄存器分配器精确保存） |
+| 失败任务 | 0 个 |
+
+---
+
+### 前端任务：FRONTEND-032 — 修复 parser.py 块错误恢复计数器未重置
+
+**结果：成功** | 难度: easy | 优先级: 60
+
+#### 选择原因
+
+前端任务池已空（31/31 完成），进入纯维护模式。第 45 轮评审后代码审计发现 parser.py `_parse_block` 中 `block_errors` 计数器在成功解析语句后从不重置，导致"连续错误"计数在正确语句间累积，一旦达到 `_BLOCK_MAX_ERRORS = 3` 就过早跳过块剩余内容。例如：错误→正确→错误→正确→错误→正确→错误 的序列，在第 4 个错误时就会触发放弃，而按设计应在 3 次**连续**错误后才放弃。
+
+#### 详情
+
+修复 `_parse_block` 中 5 个成功解析路径（赋值、let 绑定、mut 绑定、分号分隔表达式、尾表达式）均添加 `block_errors = 0`，确保正确解析后重置连续错误计数。
+
+修改 1 个文件 5 行代码。测试 680 passed，无回归。前端 32/32 完成。
+
+---
+
+### 后端任务：backend_native_regalloc_call_site — 寄存器分配器添加调用点活跃区间切口
+
+**结果：成功** | 难度: hard | 优先级: 55 | P1-B2 清零
+
+#### 选择原因
+
+第 45 轮评审的第二优先任务（P55）。Native 后端从第 46 轮实现端到端执行后，完成度已达 ~90%，但寄存器分配器仍使用保守方案（每次调用保存全部 8 个 caller-saved GPR），效率极低。本任务旨在通过活跃区间分析实现精确保存，是 Native 后端性能优化的关键一步。
+
+#### 详情
+
+实现 4 个核心改动：
+
+1. **IR 节点扩展**（`ir/ir_nodes.py`）：给 `LIRCall` 和 `LIRCallIndirect` 添加 `caller_saved_to_preserve: List[int]` 字段，存储调用点需要保存的 caller-saved 寄存器列表。
+
+2. **寄存器分配器增强**（`native_backend.py _allocate_registers`）：新增步骤 3，遍历函数体中的调用点指令。对每个调用点，找出被分配到 caller-saved 寄存器、且在调用点之后仍然活跃（last > idx）的 vreg，将其物理寄存器写入 `instr.caller_saved_to_preserve`。排除 call 指令的返回值 dst_loc（call 前无意义）。
+
+3. **发射阶段优化**（`native_backend.py _emit_call` / `_emit_call_indirect`）：
+   - 保存阶段：从 `for reg in CALLER_GPRS` 改为 `for reg in instr.caller_saved_to_preserve`
+   - 恢复阶段：同样使用精确保存列表
+   - 栈对齐计算：将保存寄存器数量纳入 16 字节对齐公式 `needs_align = (retval_bit + len(stack_args) + len(caller_saved)) % 2 == 1`
+   - 返回值预留槽偏移：从固定 64 改为动态 `saved_size = len(caller_saved) * 8`
+
+4. **测试验证**：新增 `TestRegAllocCallSite` 测试类，3 个测试全部通过：
+   - `test_no_live_caller_saved_at_call`：调用点后无活跃 caller-saved → 保存列表为空
+   - `test_live_caller_saved_at_call`：调用点后有活跃 caller-saved → 仅保存该寄存器，不全保存 8 个
+   - `test_callee_saved_not_preserved`：callee-saved 寄存器不出现在保存列表中
+
+修改 3 个文件（`native_backend.py`, `ir_nodes.py`, `test_native_backend.py`）约 80 行代码。测试 680 passed（677→680，+3 新测试），无回归。后端 35/47 完成。P1-B2 清零。
+
+---
+
+### 测试前后对比
+
+| 指标 | 开发前 | 开发后 | 变化 |
+|------|--------|--------|------|
+| 测试通过数 | 677 | 680 | +3 |
+| 测试失败数 | 0 | 0 | — |
+| 回归 | — | 无 | — |
+
+---
+
+### 前端下一步
+
+前端任务池仍空（32/32 = 100%）。进入纯维护模式。下阶段无计划任务，待第 48 轮评审时重新评估。
+
+### 后端下一步
+
+**第 48 轮**：评审轮，全面回顾第 46-48 轮进展。
+
+评审轮后计划：
+- 修复 C/Wasm 后端闭包临时内存泄漏（backend_closure_memory_leak_fix, P50, medium）
+- 实现 Wasm 后端栈平衡验证器（backend_wasm_stack_balance, P45, medium）
+
+---
+
 ## 第 46 轮 — 2026-07-28 13:30
 
 > 普通轮 | 前端: Set 导入 + try TypeVar 放行修复 | 后端: Native 端到端执行突破 | P1-B3 清零

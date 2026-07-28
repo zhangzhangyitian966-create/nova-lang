@@ -1241,6 +1241,8 @@ class LIRCall(LIRInstr):
     - func_name / callee: 被调用函数名（callee 为统一命名别名）
     - arg_count / args: 参数数量（args 为统一命名别名，返回 arg_locs 长度）
     - arg_locs: 参数位置列表（每个参数的寄存器/栈位置 + 类型）
+    - caller_saved_to_preserve: 调用点需要保存的 caller-saved 寄存器列表
+      （由寄存器分配器根据活跃区间分析填充，替代保守的全部保存）
     """
 
     func_name: str = ""
@@ -1248,6 +1250,7 @@ class LIRCall(LIRInstr):
     arg_locs: List[Tuple[str, NovaType]] = field(
         default_factory=list
     )  # [(reg/stack, type), ...]
+    caller_saved_to_preserve: List[int] = field(default_factory=list)
 
     @property
     def callee(self) -> str:
@@ -1281,6 +1284,7 @@ class LIRCallIndirect(LIRInstr):
     arg_locs: List[Tuple[str, NovaType]] = field(
         default_factory=list
     )  # [(reg/stack, type), ...]
+    caller_saved_to_preserve: List[int] = field(default_factory=list)
 
     @property
     def args(self) -> List[Tuple[str, NovaType]]:

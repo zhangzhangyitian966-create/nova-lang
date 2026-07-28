@@ -27,6 +27,7 @@ from nova.ir.ir_nodes import (
     LIRFunction,
     LIRLoadConst,
     LIRReturn,
+    LIRCall,
     INT_TYPE,
 )
 
@@ -800,6 +801,78 @@ class TestNativeE2EExecution(unittest.TestCase):
     def test_e2e_closure(self):
         """端到端：闭包 make_adder(5)(10)=15"""
         self.assertEqual(self._compile_and_run(self._CLOSURE), 15)
+
+
+class TestRegAllocCallSite(unittest.TestCase):
+    """寄存器分配器调用点活跃区间切口测试
+
+    验证 _allocate_registers 在调用点处仅保存实际活跃的 caller-saved 寄存器，
+    替代保守的全部保存方案。
+    """
+
+    def test_no_live_caller_saved_at_call(self):
+        """调用点后无活跃 caller-saved 寄存器 → caller_saved_to_preserve 为空"""
+        codegen = NativeCodeGen()
+        fn = LIRFunction("main", [], INT_TYPE)
+        fn.body = [
+            LIRLoadConst(value=10, const_type="int"),   # const_10, 分配到 RCX
+            LIRCall(func_name="foo", arg_count=0, arg_locs=[]),  # idx=1
+            LIRReturn(),  # 不引用 const_10
+        ]
+        codegen._allocate_registers(fn)
+        call_instr = fn.body[1]
+        self.assertEqual(
+            call_instr.caller_saved_to_preserve, [],
+            "调用点后无活跃 caller-saved 寄存器，不应保存任何寄存器"
+        )
+
+    def test_live_caller_saved_at_call(self):
+        """调用点后有活跃 caller-saved 寄存器 → 仅保存该寄存器"""
+        codegen = NativeCodeGen()
+        fn = LIRFunction("main", [], INT_TYPE)
+        fn.body = [
+            LIRLoadConst(value=10, const_type="int"),   # const_10, 分配到 RCX
+            LIRCall(
+                func_name="foo",
+                arg_count=0,
+                arg_locs=[],
+                dst_loc=("v1", INT_TYPE),
+            ),  # idx=1
+            # LIRReturn 引用 const_10，使其在 call 后仍活跃
+            LIRReturn(src_locs=[("const_10", INT_TYPE)]),
+        ]
+        vreg_alloc, _, _ = codegen._allocate_registers(fn)
+        call_instr = fn.body[1]
+        # const_10 被分配到 RCX（caller-saved），且在 call 后仍活跃
+        self.assertIn(
+            RCX, call_instr.caller_saved_to_preserve,
+            "const_10 分配到 RCX 且在 call 后活跃，应保存 RCX"
+        )
+        # 不应保存所有 8 个 caller-saved 寄存器
+        self.assertLess(
+            len(call_instr.caller_saved_to_preserve), 8,
+            "应精确保存而非全部 8 个 caller-saved 寄存器"
+        )
+
+    def test_callee_saved_not_preserved(self):
+        """被分配到 callee-saved 的 vreg 不应出现在 caller_saved_to_preserve"""
+        codegen = NativeCodeGen()
+        fn = LIRFunction("main", [], INT_TYPE)
+        # 填充前 8 个 GPR，迫使 const_10 分配到 callee-saved（RBX）
+        body = []
+        for i in range(8):
+            body.append(LIRLoadConst(value=i, const_type="int"))
+        body.append(LIRCall(func_name="foo", arg_count=0, arg_locs=[]))
+        body.append(LIRReturn(src_locs=[("const_10", INT_TYPE)]))
+        fn.body = body
+        codegen._allocate_registers(fn)
+        call_instr = fn.body[8]
+        # RBX 是 callee-saved，不应出现在保存列表中
+        from nova.backend.x86_64 import RBX
+        self.assertNotIn(
+            RBX, call_instr.caller_saved_to_preserve,
+            "callee-saved 寄存器（RBX）不应在 caller_saved_to_preserve 中"
+        )
 
 
 if __name__ == '__main__':

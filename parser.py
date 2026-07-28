@@ -516,6 +516,7 @@ class Parser:
                 ):
                     stmts.append(self._parse_assignment())
                     self._match(TokenType.SEMICOLON)
+                    block_errors = 0
                     continue
 
                 # 检查 let/mut 绑定
@@ -525,6 +526,7 @@ class Parser:
                     else:
                         stmts.append(self._parse_mut_binding())
                     self._match(TokenType.SEMICOLON)
+                    block_errors = 0
                     continue
 
                 expr = self._parse_expression()
@@ -532,11 +534,14 @@ class Parser:
                 # 用分号分隔语句
                 if self._match(TokenType.SEMICOLON):
                     stmts.append(expr)
+                    block_errors = 0
                 elif self._peek_type() == TokenType.RBRACE:
                     tail = expr
+                    block_errors = 0
                     break
                 else:
                     stmts.append(expr)
+                    block_errors = 0
             except ParseError as e:
                 # 块内语句解析失败：记录错误，同步到下一条语句边界
                 self._errors.append(e)

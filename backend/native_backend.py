@@ -629,6 +629,24 @@ class NativeCodeGen:
         if stack_offset > func.stack_size:
             func.stack_size = stack_offset
 
+        # 步骤 3: 为调用点添加活跃区间切口
+        # 识别所有调用点指令，计算仅需要保存的 caller-saved 寄存器
+        # （替代保守的保存全部 caller-saved）
+        for idx, instr in enumerate(func.body):
+            if isinstance(instr, (LIRCall, LIRCallIndirect)):
+                regs_to_save = set()
+                dst_name = None
+                if instr.dst_loc:
+                    dst_name, _ = instr.dst_loc
+                for vname, info in vreg_info.items():
+                    if vname == dst_name:
+                        continue  # call 的结果寄存器不需要在 call 前保存
+                    alloc = vreg_alloc.get(vname)
+                    if alloc and alloc[0] == "reg" and alloc[1] in CALLER_GPRS:
+                        if info["last"] > idx:
+                            regs_to_save.add(alloc[1])
+                instr.caller_saved_to_preserve = sorted(regs_to_save)
+
         return vreg_alloc, {}, []
 
     # ============================================================
@@ -835,7 +853,7 @@ class NativeCodeGen:
         - 整数参数传递：RDI, RSI, RDX, RCX, R8, R9（前6个），其余栈传
         - 浮点参数传递：XMM0-XMM7（前8个），其余栈传
         - 返回值捕获：RAX（整数）/ XMM0（浮点）
-        - caller-saved GPR 保存/恢复（保守方案）
+        - caller-saved GPR 保存/恢复（基于活跃区间分析的精确保存）
         - 调用前 16 字节栈对齐
         """
         e = ctx.e
@@ -852,13 +870,17 @@ class NativeCodeGen:
             dst_in_caller_saved = dst_loc[0] == "reg" and dst_loc[1] in CALLER_GPRS
             dst_is_float = dst_type.kind == IRType.FLOAT
 
+        # 获取需要保存的 caller-saved 寄存器（由寄存器分配器分析得出）
+        caller_saved = instr.caller_saved_to_preserve
+        saved_size = len(caller_saved) * 8
+
         # 1. 为返回值预留栈槽（如果目标在 caller-saved 中或浮点）
         need_retval_slot = has_return and (dst_in_caller_saved or dst_is_float)
         if need_retval_slot:
             e.sub_rsp_imm(8)
 
-        # 2. 保存 caller-saved GPR（保守方案，确保 call 后活跃值不被破坏）
-        for reg in CALLER_GPRS:
+        # 2. 保存 caller-saved GPR（精确保存，仅保存 call 后仍活跃的）
+        for reg in caller_saved:
             e.push_reg(reg)
 
         # 3. 搬移参数到 ABI 寄存器/栈
@@ -882,10 +904,10 @@ class NativeCodeGen:
                     stack_args.append((arg_vname, False))
 
         # 4. 栈对齐：System V ABI 要求 call 前 RSP ≡ 0 (mod 16)
-        # 当前已调整：retval_slot(8) + caller_saved(64) + stack_args(8*n)
-        # 需要总调整量 ≡ 0 (mod 16)，即 retval? + n ≡ 0 (mod 2)
+        # 已调整：retval_slot(8) + saved_regs(8*k) + stack_args(8*n)
+        # 需要总调整量 ≡ 0 (mod 16)
         retval_bit = 1 if need_retval_slot else 0
-        needs_align = (retval_bit + len(stack_args)) % 2 == 1
+        needs_align = (retval_bit + len(stack_args) + len(caller_saved)) % 2 == 1
         if needs_align:
             e.sub_rsp_imm(8)
 
@@ -908,15 +930,15 @@ class NativeCodeGen:
         if has_return:
             if need_retval_slot:
                 if dst_is_float:
-                    e.movsd_mem_reg(RSP, 64, XMM0)
+                    e.movsd_mem_reg(RSP, saved_size, XMM0)
                 else:
-                    e.mov_mem_reg(RSP, 64, RAX)
+                    e.mov_mem_reg(RSP, saved_size, RAX)
             else:
                 # 目标在栈或 callee-saved 中，直接存储
                 ctx.store_from_reg(dst_name, RAX if not dst_is_float else XMM0, is_float=dst_is_float)
 
         # 9. 恢复 caller-saved GPR
-        for reg in reversed(CALLER_GPRS):
+        for reg in reversed(caller_saved):
             e.pop_reg(reg)
 
         # 10. 从预留槽加载返回值并清理
@@ -1435,8 +1457,12 @@ class NativeCodeGen:
             _, dst_type = dst_info
             dst_is_float = dst_type.kind == IRType.FLOAT
 
-        # 1. 保存 caller-saved GPR
-        for reg in CALLER_GPRS:
+        # 获取需要保存的 caller-saved 寄存器（由寄存器分配器分析得出）
+        caller_saved = instr.caller_saved_to_preserve
+        saved_size = len(caller_saved) * 8
+
+        # 1. 保存 caller-saved GPR（精确保存）
+        for reg in caller_saved:
             e.push_reg(reg)
 
         # 2. 在栈上分配参数临时数组并填充
@@ -1462,7 +1488,7 @@ class NativeCodeGen:
         e.mov_reg_imm64(RDX, arg_count)
 
         # 6. 栈对齐
-        total_sub = 64 + args_size
+        total_sub = saved_size + args_size
         if total_sub % 16 != 0:
             align_padding = 16 - (total_sub % 16)
             e.sub_rsp_imm(align_padding)
@@ -1482,7 +1508,7 @@ class NativeCodeGen:
             e.add_rsp_imm(args_size)
 
         # 9. 恢复 caller-saved GPR
-        for reg in reversed(CALLER_GPRS):
+        for reg in reversed(caller_saved):
             e.pop_reg(reg)
 
         # 10. 保存返回值
