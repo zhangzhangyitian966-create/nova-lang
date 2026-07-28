@@ -1125,44 +1125,53 @@ class CCodeGen:
     # ----------------------------------------------------------
 
     def _c_type_from_type_expr(self, type_node) -> str:
-        """将 AST 类型表达式转换为 C 类型字符串"""
+        """将 AST 类型表达式转换为 C 类型字符串
+
+        使用 _SIMPLE_TYPE_TO_C 调度表处理直接映射的基本类型，
+        TypeIdentifier 和 TypeGeneric 由专用方法处理。
+        """
         if type_node is None:
             return "int64_t"
 
-        if isinstance(type_node, TypeInt):
-            return "int64_t"
-        elif isinstance(type_node, TypeFloat):
-            return "double"
-        elif isinstance(type_node, TypeString):
-            return "NovaString*"
-        elif isinstance(type_node, TypeBool):
-            return "bool"
-        elif isinstance(type_node, TypeChar):
-            return "char"
-        elif isinstance(type_node, TypeUnit):
-            return "void"
-        elif isinstance(type_node, TypeIdentifier):
+        # 基本类型直接查表
+        c_type = _SIMPLE_TYPE_TO_C.get(type(type_node))
+        if c_type is not None:
+            return c_type
+
+        # 标识符类型：检查是否为已知 ADT
+        if isinstance(type_node, TypeIdentifier):
             name = type_node.name
-            # 检查是否是已知 ADT
             if name in self.adt_info:
                 return f"NovaADT_{name}"
-            return "int64_t"  # 默认
-        elif isinstance(type_node, TypeGeneric):
-            base = type_node.base
-            if base == "List":
-                return "NovaList*"
-            elif base == "Map":
-                return "NovaMap*"
-            elif base in ("Option", "Result"):
-                return "NovaADT*"
-            elif base in self.adt_info:
-                return f"NovaADT_{base}"
-            return "NovaADT*"
-        elif isinstance(type_node, TypeTuple):
-            return "NovaTuple*"
-        elif isinstance(type_node, TypeFn):
-            return "NovaClosure*"
+            return "int64_t"
+
+        # 泛型类型：委托给专用方法
+        if isinstance(type_node, TypeGeneric):
+            return self._c_type_from_generic(type_node)
+
         return "int64_t"
+
+    def _c_type_from_generic(self, type_node) -> str:
+        """处理泛型类型的 C 类型映射
+
+        Args:
+            type_node: TypeGeneric AST 节点
+
+        Returns:
+            对应的 C 类型字符串
+        """
+        base = type_node.base
+        # 内置容器类型映射
+        _GENERIC_C_MAP = {"List": "NovaList*", "Map": "NovaMap*"}
+        if base in _GENERIC_C_MAP:
+            return _GENERIC_C_MAP[base]
+        # Option/Result 映射为通用 ADT 指针
+        if base in ("Option", "Result"):
+            return "NovaADT*"
+        # 已知 ADT 泛型实例化
+        if base in self.adt_info:
+            return f"NovaADT_{base}"
+        return "NovaADT*"
 
     def _infer_c_type_from_expr(self, expr) -> str:
         """从表达式推断 C 类型，使用调度表模式分发"""
@@ -1391,6 +1400,22 @@ _EXPR_COMPILE_DISPATCH = {
     TypeDef: lambda self, e: "",
     AliasDef: lambda self, e: "",
     FnDef: CCodeGen._compile_nested_fn_def,
+}
+
+# ============================================================
+# _c_type_from_type_expr 基本类型映射表
+# ============================================================
+
+# AST 类型节点 → C 类型字符串的直接映射（无需额外上下文的基本类型）
+_SIMPLE_TYPE_TO_C = {
+    TypeInt: "int64_t",
+    TypeFloat: "double",
+    TypeString: "NovaString*",
+    TypeBool: "bool",
+    TypeChar: "char",
+    TypeUnit: "void",
+    TypeTuple: "NovaTuple*",
+    TypeFn: "NovaClosure*",
 }
 
 # ============================================================

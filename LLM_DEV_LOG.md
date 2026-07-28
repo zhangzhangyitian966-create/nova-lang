@@ -1,3 +1,108 @@
+## 2026-07-28 00:15 第65轮开发
+
+### 开发概览
+- **轮次**: 第 65 轮（普通轮，65 % 3 != 0）
+- **测试状态**: 566 passed + 20 subtests（零失败）
+- **基线对比**: 566 → 566（无新增测试，纯重构+清理）
+- **任务数**: 3 个，全部成功
+- **审查对齐**: 3/3 任务来自审查发现，审查对齐率 **100%**
+
+---
+
+### 一、任务列表
+
+| 任务 | 来源 | 状态 | 价值 |
+|------|------|------|------|
+| refactor_hir_rewriter_generic_rewrite | 【审查驱动】 | 完成 | Top1 复杂函数 CC=23→6，IR 变换核心基础设施 |
+| refactor_c_type_from_type_expr | 【审查驱动】 | 完成 | Top2 复杂函数 CC=17→4，C 类型映射核心 |
+| clean_unused_imports_v4 | 【审查驱动】 | 完成 | 17 处 MEDIUM 级未使用导入清理 |
+
+---
+
+### 二、任务详情
+
+#### 1. refactor_hir_rewriter_generic_rewrite — HIRRewriter 调度表化
+**来源**: 【审查驱动】
+**原因**: 审查日志第1509轮 Top1 复杂函数 HIRRewriter.generic_rewrite CC=23（全项目最高），ir/ir_nodes.py 核心 IR 变换基础设施。4种字段类型（list/optional/pair_list/arm_list）的处理逻辑全部内联在主函数中，导致圈复杂度过高。docstring 声称"从 ~69 降到 ~8"但实际 CC 仍为 23。
+
+**修改内容**:
+- `ir/ir_nodes.py`: 新增 4 个独立 handler 方法：
+  - `_rewrite_list_field()`: 提取列表字段递归变换逻辑
+  - `_rewrite_optional_field()`: 提取可选字段变换逻辑
+  - `_rewrite_pair_list_field()`: 提取键值对列表变换逻辑
+  - `_rewrite_arm_list_field()`: 提取 match arm 变换逻辑（含 guard/body 递归）
+- 新增类级常量 `_FIELD_REWRITERS` 调度表（kind→方法名映射）
+- `generic_rewrite` 主函数压缩至约 20 行（查表分派→收集替换→重建节点，CC≈6）
+- 修正 docstring 中不准确的复杂度描述
+- 合并 `schema is None` 和 `not schema` 两个守卫为一个
+
+**结果**: 测试 566 passed + 20 subtests 通过，零回归。
+
+---
+
+#### 2. refactor_c_type_from_type_expr — C 类型映射调度表化
+**来源**: 【审查驱动】
+**原因**: 审查日志第1509轮 Top2 复杂函数 CCodeGen._c_type_from_type_expr CC=17，c_codegen.py AST→C 类型映射核心。纯 isinstance 长链（10个分支+4个子分支）。同文件 `_infer_c_type_from_expr` 已使用调度表模式（`_EXPR_TYPE_DISPATCH`），但此函数尚未迁移。
+
+**修改内容**:
+- `c_codegen.py`: 新增模块级常量 `_SIMPLE_TYPE_TO_C`（8个基本类型→C类型字符串直接映射：TypeInt→int64_t、TypeFloat→double、TypeString→NovaString* 等）
+- 新增 `_c_type_from_generic()` 方法提取泛型类型映射逻辑（List/Map/Option/Result/ADT，含 `_GENERIC_C_MAP` 子映射表）
+- `_c_type_from_type_expr` 主函数压缩至约 15 行（None检查→基本类型查表→标识符ADT检查→泛型委托→默认返回，CC≈4）
+
+**结果**: 测试 566 passed + 20 subtests 通过，零回归。
+
+---
+
+#### 3. clean_unused_imports_v4 — 批量清理未使用导入
+**来源**: 【审查驱动】
+**原因**: 审查日志第1509轮报告 unused_import 36处（MEDIUM 最大类别）。Explore 深度扫描确认 17 处可安全清理的未使用导入。
+
+**修改内容**:
+- `ir/hir_lowering.py`: 移除 `CLOSURE_TYPE`（仅出现在导入行）
+- `ir/mir_lowering.py`: 移除 `CLOSURE_TYPE`（仅在注释中提及）
+- `tests/test_backends.py`: 移除 `LIRPanic` 导入和 3 处 `import shutil`（函数内导入但从未调用 `shutil.*`）
+- `tests/test_cfg_utils.py`: 移除 `MIRBinOp`、`MIRConst`、`MIRPhi`（导入但代码中未引用）、`LoopInfo`（仅在 docstring 中出现）
+- `tests/test_lir_c_backend.py`: 移除 `LIRCallIndirect`、`LIRClosureCreate`（导入但未使用）
+- `tests/test_native_backend.py`: 移除 `import os as _os`（从未使用 `_os.*`）、2 处函数内 `LIRCall`/`IRType` 导入（导入但在函数体中未引用）
+
+**结果**: 测试 566 passed + 20 subtests 通过，零回归。
+
+---
+
+### 三、审查日志研读摘要
+
+读取 AUTO_REVIEW_LOG.md 最新审查报告（第1508-1509轮）：
+
+- **当前总问题数**: 1261（CRITICAL 0，HIGH 0，MEDIUM 79，LOW 1182）
+- **问题类型分布**: no_docstring 588（LOW）、magic_number 477（LOW）、unused_import 36（MEDIUM 最大）、class_too_large 20、function_too_long 9、cyclomatic_complexity 7、too_broad_exception 7
+- **Top10 复杂函数**: HIRRewriter.generic_rewrite CC=23（Top1）、CCodeGen._c_type_from_type_expr CC=17（Top2）、_is_incomplete CC=15（Top3）、main CC=15（Top4）
+- **架构健康**: 0 循环依赖、0 sys.path hack、平均依赖 1.45
+- **趋势**: 增量质量门禁持续通过；审查数据可信度已恢复（第64轮校准后）
+
+本轮采纳的审查发现：Top1 复杂函数重构（generic_rewrite）、Top2 复杂函数重构（_c_type_from_type_expr）、MEDIUM 最大类别清理（unused_import）。
+
+---
+
+### 四、测试前后对比
+
+| 指标 | 开发前 | 开发后 | 变化 |
+|------|--------|--------|------|
+| 总测试数 | 566 | 566 | 0（纯重构+清理） |
+| 子测试数 | 20 | 20 | 0 |
+| 失败数 | 0 | 0 | 0 |
+| 修改文件数 | - | 6 | ir/ir_nodes.py, c_codegen.py, ir/hir_lowering.py, ir/mir_lowering.py, tests/test_backends.py, tests/test_cfg_utils.py, tests/test_lir_c_backend.py, tests/test_native_backend.py |
+
+---
+
+### 五、下一步计划
+
+1. **unify_c_backend**（P70）: 统一 C 后端（LIR 路径功能对齐），将 c_codegen.py 中已实现但 lir_c_backend.py 缺失的功能迁移过来
+2. **refactor_cli_main**（自主规划）: cli.py 的 main() CC=15 和 _is_incomplete() CC=15 可用 argparse/栈模式重构
+3. **benchmark_enhance_exec_time**（P48）: 基准测试框架增强，支持 C/Wasm 后端执行时间测量
+4. **low_quality_issues_cleanup**（P45）: LOW 级问题批量治理剩余工作
+
+---
+
 ## 2026-07-28 04:48 第64轮开发
 
 ### 开发概览

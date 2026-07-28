@@ -60,7 +60,6 @@ from ..ast_nodes import (
 )
 from .ir_nodes import (
     BOOL_TYPE,
-    CLOSURE_TYPE,
     FLOAT_TYPE,
     HIRAliasDecl,
     HIRAssignExpr,

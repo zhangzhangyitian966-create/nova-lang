@@ -7,7 +7,6 @@ HIR -> MIR 降级器
 
 from .ir_nodes import (
     BOOL_TYPE,
-    CLOSURE_TYPE,
     INT_TYPE,
     IRType,
     NovaType,

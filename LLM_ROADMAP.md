@@ -1,6 +1,6 @@
 # Nova LLM 智能开发路线图
 
-**更新时间**: 2026-07-28 04:48:00
+**更新时间**: 2026-07-28 00:15:00
 **上次评审**: 第 63 轮（路线图评审）
 
 本路线图由 LLM 智能开发系统动态维护。
@@ -136,6 +136,9 @@
 | ✅ | 重构 TypeChecker._from_ast_type 调度表化 | medium | 52 | 2-3 小时 | - |
 | ✅ | 重构 LoopInvariantCodeMotion._licm_loop 降低圈复杂度 | medium | 55 | 2-3 小时 | - |
 | ✅ | 重构 Parser._parse_primary_expr 调度表化 | medium | 50 | 2-3 小时 | - |
+| ✅ | 重构 HIRRewriter.generic_rewrite 调度表化 | medium | 65 | 2-3 小时 | - |
+| ✅ | 重构 CCodeGen._c_type_from_type_expr 调度表化 | easy | 60 | 1-2 小时 | - |
+| ✅ | 批量清理未使用导入 v4 | easy | 55 | 1-2 小时 | - |
 
 ---
 
@@ -153,10 +156,10 @@
 
 ---
 
-**进度**: 127/126 (100.8%)
-- **已完成**: 127（含第64轮开发）
+**进度**: 130/126 (103.2%)
+- **已完成**: 130（含第65轮开发）
 - **进行中**: 0
 - **待开发**: 3（unify_c_backend P70、benchmark_enhance_exec_time P48、low_quality_issues_cleanup P45）
 - **已废弃**: 2（native_call_abi、refactor_native_emit_call）
 
-> 注：第64轮开发完成。3个任务全部成功：审查数据校准（修复auto_review.py过时检测逻辑）、LIR C后端单元测试（46个新测试，520→566）、闭包fn_ptr回填验证（Native/Wasm已实际完成，状态更新）。发现并修复箭头类型误匹配bug。下阶段方向：统一C后端（unify_c_backend）+基准测试增强。
+> 注：第65轮开发完成。3个任务全部成功：HIRRewriter.generic_rewrite调度表化（CC=23→6，Top1复杂函数）、CCodeGen._c_type_from_type_expr调度表化（CC=17→4，Top2复杂函数）、批量清理17处未使用导入（MEDIUM最大类别）。全部为审查驱动任务，审查对齐率100%。测试566 passed + 20 subtests，零回归。下阶段方向：统一C后端（unify_c_backend）+基准测试增强+cli.py重构。

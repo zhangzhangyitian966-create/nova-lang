@@ -450,7 +450,6 @@ class TestWasmBackendClosure(unittest.TestCase):
 
     def test_wasm_no_lambda_no_table_growth(self):
         """无 lambda 函数时 table 大小为 1（最小值）"""
-        from nova.ir.ir_nodes import LIRPanic
         module = LIRModule(name="test_no_closure")
         main_fn = LIRFunction(name="main", params=[], return_type=UNIT_TYPE)
         main_fn.body = [LIRLabel(name="bb0"), LIRReturn()]
@@ -770,7 +769,6 @@ class TestCBackendClosure(unittest.TestCase):
     def test_closure_c_code_compiles_with_gcc(self):
         """生成的闭包 C 代码应能通过 gcc 编译（语法检查）"""
         import subprocess
-        import shutil
 
         source = """
             fn make_adder(n: Int) -> (Int) -> Int {
@@ -909,7 +907,6 @@ class TestCBackendClosure(unittest.TestCase):
         验证整个管道：Nova源码 → HIR → MIR → LIR → C代码 → gcc编译 → 执行。
         """
         import subprocess
-        import shutil
 
         source = """
             fn make_adder(n: Int) -> (Int) -> Int {
@@ -973,7 +970,6 @@ class TestCBackendClosure(unittest.TestCase):
         闭包捕获两个变量并返回它们的加和。
         """
         import subprocess
-        import shutil
 
         source = """
             fn make_combined(a: Int, b: Int) -> (Int) -> Int {

@@ -13,19 +13,15 @@ import unittest
 from nova.ir.ir_nodes import (
     IRType,
     MIRBasicBlock,
-    MIRBinOp,
     MIRBranch,
-    MIRConst,
     MIRFunction,
     MIRJump,
-    MIRPhi,
     MIRReturn,
     NovaType,
 )
 from nova.ir.cfg_utils import (
     BackEdge,
     Loop,
-    LoopInfo,
     analyze_loops,
     build_block_map,
     build_predecessors,

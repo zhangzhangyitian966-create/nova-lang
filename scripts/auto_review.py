@@ -77,7 +77,7 @@ REFACTORED_FUNCTIONS = {
         "old_cc": 24, "cycle": 43, "note": "调度表化重构 CC≈3"
     },
     "ir/ir_nodes.py::HIRRewriter.generic_rewrite": {
-        "old_cc": 23, "cycle": 37, "note": "重构降低复杂度 CC≈5"
+        "old_cc": 23, "cycle": 65, "note": "调度表化重构 CC≈6（_FIELD_REWRITERS + 4个 _rewrite_*_field 方法）"
     },
     "evaluator.py::Evaluator.eval_expr": {
         "old_cc": 18, "cycle": 38, "note": "分层拆分重构 CC≈5"
@@ -159,6 +159,9 @@ REFACTORED_FUNCTIONS = {
     },
     "ir/mir_lowering.py::MIRLowering._collect_idents": {
         "old_cc": 22, "cycle": 59, "note": "调度表化重构 CC≈3（_build_collect_dispatch）"
+    },
+    "c_codegen.py::CCodeGen._c_type_from_type_expr": {
+        "old_cc": 17, "cycle": 65, "note": "调度表化重构 CC≈4（_SIMPLE_TYPE_TO_C + _c_type_from_generic）"
     },
 }
 

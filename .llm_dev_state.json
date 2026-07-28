@@ -1,6 +1,9 @@
 {
-  "cycles": 64,
+  "cycles": 65,
   "completed_tasks": [
+    "refactor_hir_rewriter_generic_rewrite",
+    "refactor_c_type_from_type_expr",
+    "clean_unused_imports_v4",
     "review_cycle_57",
     "establish_quality_gate",
     "refactor_nova_type_to_c",
@@ -141,6 +144,30 @@
   ],
   "failed_tasks": [],
   "task_history": [
+    {
+      "cycle": 65,
+      "task_id": "refactor_hir_rewriter_generic_rewrite",
+      "status": "completed",
+      "source": "审查驱动",
+      "reason": "审查日志第1509轮 Top1 复杂函数 HIRRewriter.generic_rewrite CC=23（全项目最高），ir/ir_nodes.py 核心 IR 变换基础设施。4种字段类型（list/optional/pair_list/arm_list）的处理逻辑内联在主函数中，导致圈复杂度过高。",
+      "details": "将 generic_rewrite 从 CC=23 重构为调度表模式：1) 新增 _rewrite_list_field() 提取列表字段递归变换逻辑；2) 新增 _rewrite_optional_field() 提取可选字段变换逻辑；3) 新增 _rewrite_pair_list_field() 提取键值对列表变换逻辑；4) 新增 _rewrite_arm_list_field() 提取 match arm 变换逻辑（含 guard/body 递归）；5) 新增类级常量 _FIELD_REWRITERS 调度表（kind→方法名映射）；6) generic_rewrite 主函数压缩至约 20 行（查表分派→收集替换→重建节点，CC≈6）。修正 docstring 中不准确的复杂度描述。所有新方法补充完整 docstring。测试 566 passed + 20 subtests 通过，零回归。"
+    },
+    {
+      "cycle": 65,
+      "task_id": "refactor_c_type_from_type_expr",
+      "status": "completed",
+      "source": "审查驱动",
+      "reason": "审查日志第1509轮 Top2 复杂函数 CCodeGen._c_type_from_type_expr CC=17，c_codegen.py AST→C 类型映射核心。纯 isinstance 长链（10个分支+4个子分支），同文件 _infer_c_type_from_expr 已使用调度表模式但此函数尚未迁移。",
+      "details": "将 _c_type_from_type_expr 从 CC=17 重构为调度表模式：1) 新增模块级常量 _SIMPLE_TYPE_TO_C（8个基本类型→C类型字符串直接映射：TypeInt→int64_t、TypeFloat→double 等）；2) 新增 _c_type_from_generic() 方法提取泛型类型映射逻辑（List/Map/Option/Result/ADT，含 _GENERIC_C_MAP 子映射表）；3) _c_type_from_type_expr 主函数压缩至约 15 行（None检查→基本类型查表→标识符ADT检查→泛型委托→默认返回，CC≈4）。所有新方法补充完整 docstring。测试 566 passed + 20 subtests 通过，零回归。"
+    },
+    {
+      "cycle": 65,
+      "task_id": "clean_unused_imports_v4",
+      "status": "completed",
+      "source": "审查驱动",
+      "reason": "审查日志第1509轮报告 unused_import 36处（MEDIUM 最大类别）。Explore 深度扫描确认 17 处可安全清理的未使用导入，分布在 2 个核心源文件和 4 个测试文件中。",
+      "details": "清理 17 处未使用导入：1) ir/hir_lowering.py: 移除 CLOSURE_TYPE（仅出现在导入行）；2) ir/mir_lowering.py: 移除 CLOSURE_TYPE（仅在注释中提及）；3) tests/test_backends.py: 移除 LIRPanic 导入和 3 处 import shutil（函数内导入但从未调用 shutil.*）；4) tests/test_cfg_utils.py: 移除 MIRBinOp、MIRConst、MIRPhi（导入但代码中未引用）、LoopInfo（仅在 docstring 中出现）；5) tests/test_lir_c_backend.py: 移除 LIRCallIndirect、LIRClosureCreate（导入但未使用）；6) tests/test_native_backend.py: 移除 import os as _os（从未使用 _os.*）、2 处函数内 LIRCall/IRType 导入（导入但在函数体中未引用）。测试 566 passed + 20 subtests 通过，零回归。"
+    },
     {
       "cycle": 64,
       "task_id": "review_data_calibration",
@@ -422,9 +449,9 @@
       "details": "将 _lower_if_expr 从 106 行重构为分层结构：1) 新增 _lower_branch_body() 通用分支处理方法，消除 true/false 分支的 30 行镜像重复代码，返回 (result, modified_vars) 元组；2) 新增 _insert_merge_phis() 处理 merge 块 Phi 节点插入（约 35 行独立逻辑）；3) 新增 _insert_result_phi() 处理 if 表达式结果 Phi（约 15 行独立逻辑）；4) _lower_if_expr 主函数从 106 行压缩至约 25 行（CC≈8）。测试 395/395 通过，零回归。"
     }
   ],
-  "current_cycle": 63,
-  "baseline_tests": 520,
-  "current_tests": 520,
+  "current_cycle": 65,
+  "baseline_tests": 566,
+  "current_tests": 566,
   "last_review_cycle": 63,
   "tasks": [
     {
@@ -743,6 +770,42 @@
       "status": "completed",
       "depends_on": [],
       "reason": "lir_c_backend.py是C后端核心（931行），当前无任何专门测试。C后端是nova build的默认路径，零测试意味着任何变更都可能导致无感知回归。[自主发现]"
+    },
+    {
+      "id": "refactor_hir_rewriter_generic_rewrite",
+      "name": "重构 HIRRewriter.generic_rewrite 调度表化",
+      "description": "HIRRewriter.generic_rewrite 圈复杂度 23（全项目Top1），4种字段类型处理内联在主函数中。已重构为调度表模式：新增4个 _rewrite_*_field 方法和 _FIELD_REWRITERS 调度表，主函数 CC 降至约 6。",
+      "difficulty": "medium",
+      "priority": 65,
+      "category": "engineering",
+      "estimated": "2-3小时",
+      "status": "completed",
+      "depends_on": [],
+      "reason": "审查日志第1509轮 Top1 复杂函数 CC=23（全项目最高），ir/ir_nodes.py 核心 IR 变换基础设施。[审查驱动]"
+    },
+    {
+      "id": "refactor_c_type_from_type_expr",
+      "name": "重构 CCodeGen._c_type_from_type_expr 调度表化",
+      "description": "CCodeGen._c_type_from_type_expr 圈复杂度 17（Top2），纯 isinstance 长链。已重构为调度表模式：新增 _SIMPLE_TYPE_TO_C 映射表和 _c_type_from_generic() 方法，主函数 CC 降至约 4。",
+      "difficulty": "easy",
+      "priority": 60,
+      "category": "engineering",
+      "estimated": "1-2小时",
+      "status": "completed",
+      "depends_on": [],
+      "reason": "审查日志第1509轮 Top2 复杂函数 CC=17，c_codegen.py 类型映射核心。同文件已有调度表模式先例。[审查驱动]"
+    },
+    {
+      "id": "clean_unused_imports_v4",
+      "name": "批量清理未使用导入 v4",
+      "description": "审查日志报告 unused_import 36处（MEDIUM最大类别）。已清理 17 处确认未使用的导入，覆盖 2 个核心源文件（ir/hir_lowering.py、ir/mir_lowering.py）和 4 个测试文件。",
+      "difficulty": "easy",
+      "priority": 55,
+      "category": "engineering",
+      "estimated": "1-2小时",
+      "status": "completed",
+      "depends_on": [],
+      "reason": "审查日志第1509轮 unused_import 36处为 MEDIUM 最大类别。批量清理降低 MEDIUM 问题数，提升代码整洁度。[审查驱动]"
     }
   ]
 }

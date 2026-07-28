@@ -634,7 +634,6 @@ class TestRelocatableELF(unittest.TestCase):
         fn.body = [LIRLoadConst(value=0, const_type="int"), LIRReturn()]
         lir.functions["main"] = fn
 
-        import os as _os
         import unittest.mock as mock
         with mock.patch('shutil.which', return_value=None):
             with self.assertRaises(EnvironmentError):
@@ -648,7 +647,7 @@ class TestFloatImmAndRetval(unittest.TestCase):
         """浮点立即数参数不再抛出 NotImplementedError"""
         from nova.ir.ir_nodes import (
             LIRModule, LIRFunction, LIRLoadConst, LIRReturn,
-            LIRCall, IRType, FLOAT_TYPE,
+            FLOAT_TYPE,
         )
         codegen = NativeCodeGen()
         lir = LIRModule(name="test_float_imm")
@@ -667,7 +666,7 @@ class TestFloatImmAndRetval(unittest.TestCase):
         """验证 _emit_call 的返回值分支使用正确的源寄存器"""
         from nova.ir.ir_nodes import (
             LIRModule, LIRFunction, LIRLoadConst, LIRReturn,
-            LIRCall, IRType, FLOAT_TYPE,
+            FLOAT_TYPE,
         )
         codegen = NativeCodeGen()
         lir = LIRModule(name="test_float_ret")

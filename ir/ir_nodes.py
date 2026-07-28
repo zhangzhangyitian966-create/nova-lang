@@ -741,19 +741,105 @@ class HIRRewriter:
         rewriter = getattr(self, method_name, self.generic_rewrite)
         return rewriter(expr)
 
+    def _rewrite_list_field(self, expr, fname):
+        """处理 list 类型字段：递归变换列表中每个子表达式
+
+        Args:
+            expr: 当前 HIR 节点
+            fname: 列表字段名
+
+        Returns:
+            (new_list, changed) 元组；changed 为 False 时 new_list 为 None
+        """
+        old_list = getattr(expr, fname)
+        new_list = []
+        changed = False
+        for child in old_list:
+            new_child, child_changed = self.rewrite(child)
+            new_list.append(new_child)
+            changed |= child_changed
+        return (new_list, True) if changed else (None, False)
+
+    def _rewrite_optional_field(self, expr, fname):
+        """处理 optional 类型字段：None 时跳过，非 None 时递归变换
+
+        Args:
+            expr: 当前 HIR 节点
+            fname: 可选字段名
+
+        Returns:
+            (new_val, changed) 元组；changed 为 False 时 new_val 为 None
+        """
+        old_val = getattr(expr, fname)
+        if old_val is None:
+            return (None, False)
+        new_val, changed = self.rewrite(old_val)
+        return (new_val, True) if changed else (None, False)
+
+    def _rewrite_pair_list_field(self, expr, fname):
+        """处理 pair_list 类型字段：递归变换每对 (key, value) 的两端
+
+        Args:
+            expr: 当前 HIR 节点
+            fname: 键值对列表字段名
+
+        Returns:
+            (new_pairs, changed) 元组；changed 为 False 时 new_pairs 为 None
+        """
+        old_pairs = getattr(expr, fname)
+        new_pairs = []
+        changed = False
+        for k, v in old_pairs:
+            new_k, k_changed = self.rewrite(k)
+            new_v, v_changed = self.rewrite(v)
+            new_pairs.append((new_k, new_v))
+            changed |= k_changed or v_changed
+        return (new_pairs, True) if changed else (None, False)
+
+    def _rewrite_arm_list_field(self, expr, fname):
+        """处理 arm_list 类型字段：递归变换每个 match arm 的 guard 和 body
+
+        Args:
+            expr: 当前 HIR 节点
+            fname: arm 列表字段名
+
+        Returns:
+            (new_arms, changed) 元组；changed 为 False 时 new_arms 为 None
+        """
+        old_arms = getattr(expr, fname)
+        new_arms = []
+        changed = False
+        for arm in old_arms:
+            new_guard = arm.guard
+            guard_changed = False
+            if arm.guard is not None:
+                new_guard, guard_changed = self.rewrite(arm.guard)
+            new_body, body_changed = self.rewrite(arm.body)
+            if guard_changed or body_changed:
+                new_arms.append(replace(arm, guard=new_guard, body=new_body))
+                changed = True
+            else:
+                new_arms.append(arm)
+        return (new_arms, True) if changed else (None, False)
+
+    # 字段类型 → handler 方法名的调度表
+    _FIELD_REWRITERS = {
+        "list": "_rewrite_list_field",
+        "optional": "_rewrite_optional_field",
+        "pair_list": "_rewrite_pair_list_field",
+        "arm_list": "_rewrite_arm_list_field",
+    }
+
     def generic_rewrite(self, expr):
         """默认变换：递归变换所有子节点，有变化则重建节点（数据驱动实现）
 
-        使用 _HIR_CHILD_FIELDS 表驱动遍历，用 dataclasses.replace 重建节点，
-        大幅降低圈复杂度（从 ~69 降到 ~8）。
+        使用 _HIR_CHILD_FIELDS 表驱动遍历 + _FIELD_REWRITERS 调度表分派，
+        将 4 种字段类型的处理逻辑委托给独立的 _rewrite_*_field 方法，
+        用 dataclasses.replace 重建节点。
         """
         schema = _HIR_CHILD_FIELDS.get(type(expr))
-        if schema is None:
-            # 未知类型：直接返回
-            return expr, False
-
         if not schema:
-            # 叶子节点：无子表达式
+            # 未知类型或叶子节点：直接返回
             return expr, False
 
         changed = False
@@ -763,62 +849,18 @@ class HIRRewriter:
         for field_desc in schema:
             if isinstance(field_desc, tuple):
                 kind, fname = field_desc
-                if kind == "list":
-                    old_list = getattr(expr, fname)
-                    new_list = []
-                    list_changed = False
-                    for child in old_list:
-                        new_child, child_changed = self.rewrite(child)
-                        new_list.append(new_child)
-                        list_changed |= child_changed
-                    if list_changed:
-                        replacements[fname] = new_list
-                        changed = True
-                elif kind == "optional":
-                    old_val = getattr(expr, fname)
-                    if old_val is not None:
-                        new_val, val_changed = self.rewrite(old_val)
-                        if val_changed:
-                            replacements[fname] = new_val
-                            changed = True
-                elif kind == "pair_list":
-                    old_pairs = getattr(expr, fname)
-                    new_pairs = []
-                    pairs_changed = False
-                    for k, v in old_pairs:
-                        new_k, k_changed = self.rewrite(k)
-                        new_v, v_changed = self.rewrite(v)
-                        new_pairs.append((new_k, new_v))
-                        pairs_changed |= k_changed or v_changed
-                    if pairs_changed:
-                        replacements[fname] = new_pairs
-                        changed = True
-                elif kind == "arm_list":
-                    old_arms = getattr(expr, fname)
-                    new_arms = []
-                    arms_changed = False
-                    for arm in old_arms:
-                        new_guard = arm.guard
-                        guard_changed = False
-                        if arm.guard is not None:
-                            new_guard, guard_changed = self.rewrite(arm.guard)
-                        new_body, body_changed = self.rewrite(arm.body)
-                        if guard_changed or body_changed:
-                            new_arm = replace(arm, guard=new_guard, body=new_body)
-                            new_arms.append(new_arm)
-                            arms_changed = True
-                        else:
-                            new_arms.append(arm)
-                    if arms_changed:
-                        replacements[fname] = new_arms
+                handler_name = self._FIELD_REWRITERS.get(kind)
+                if handler_name:
+                    new_val, field_changed = getattr(self, handler_name)(expr, fname)
+                    if field_changed:
+                        replacements[fname] = new_val
                         changed = True
             else:
                 # 单值子表达式
-                fname = field_desc
-                old_val = getattr(expr, fname)
-                new_val, val_changed = self.rewrite(old_val)
-                if val_changed:
-                    replacements[fname] = new_val
+                old_val = getattr(expr, field_desc)
+                new_val, field_changed = self.rewrite(old_val)
+                if field_changed:
+                    replacements[field_desc] = new_val
                     changed = True
 
         if not changed:

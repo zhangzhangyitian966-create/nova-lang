@@ -28,7 +28,6 @@ from nova.ir.ir_nodes import (
     LIRBinOp,
     LIRUnaryOp,
     LIRCall,
-    LIRCallIndirect,
     LIRJump,
     LIRBranch,
     LIRSwitch,
@@ -41,7 +40,6 @@ from nova.ir.ir_nodes import (
     LIRBuildADT,
     LIRFieldAccess,
     LIRIndex,
-    LIRClosureCreate,
     LIRPanic,
 )
 from nova.backend.lir_c_backend import LIRCBackend
