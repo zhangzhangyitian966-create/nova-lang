@@ -1,9 +1,9 @@
 {
-  "cycles": 47,
+  "cycles": 48,
   "frontend_completed": 32,
   "backend_completed": 35,
   "last_review_cycle": 45,
-  "current_review_cycle": 45,
+  "current_review_cycle": 48,
   "completed_tasks": [
     "frontend_try_expr_typecheck",
     "backend_native_label_patch",
@@ -82,7 +82,8 @@
     "FRONTEND-031",
     "backend_native_elf_e2e_exec",
     "FRONTEND-032",
-    "backend_native_regalloc_call_site"
+    "backend_native_regalloc_call_site",
+    "review_cycle_48"
   ],
   "failed_tasks": [],
   "deprecated_tasks": [
@@ -95,6 +96,17 @@
     "backend_c_todo_error"
   ],
   "task_history": [
+    {
+      "cycle": 48,
+      "task_id": "review_cycle_48",
+      "name": "第 48 轮双线路线图评审",
+      "track": "review",
+      "difficulty": "n/a",
+      "priority": 99,
+      "result": "success",
+      "details": "第 46-48 轮评审轮。前端 32/32=100%完成（质量评分8/10），后端 35/48=72.9%完成（质量评分7/10）。深度代码审计发现重大回归：第 47 轮寄存器分配器调用点活跃区间切口改动导致 test_e2e_loop 回归（循环 sum(0..9)=45 返回 10，只循环1次）。已确认通过 git bisect 验证：第 46 轮代码通过，第 47 轮代码失败。新增 P0 级任务 backend_native_regalloc_loop_regression（优先级95）。审计还发现：Native 闭包创建仍全保存 caller-saved（第47轮优化遗漏点）、前端 _check_try_expr 属性名错误。下 3 轮聚焦：修复循环回归(P95) > 闭包内存泄漏(P50) > Wasm栈平衡(P45)。",
+      "timestamp": "2026-07-29 18:00"
+    },
     {
       "cycle": 47,
       "task_id": "FRONTEND-032",
@@ -114,7 +126,7 @@
       "difficulty": "hard",
       "priority": 55,
       "result": "success",
-      "details": "P1-B2 清零。native_backend.py 寄存器分配器从保守保存全部 8 个 caller-saved GPR 改进为基于活跃区间分析的精确保存。实现：(1) _allocate_registers 新增步骤 3，遍历调用点指令（LIRCall/LIRCallIndirect），计算被分配到 caller-saved 寄存器且在调用点之后仍活跃的 vreg，将需保存的物理寄存器列表写入 instr.caller_saved_to_preserve；(2) _emit_call 和 _emit_call_indirect 读取 caller_saved_to_preserve，仅 push/pop 实际需要的寄存器；(3) 调整栈对齐计算，将保存寄存器数量纳入 16 字节对齐公式；(4) 调整返回值预留槽偏移（从固定 64 改为动态 saved_size）。新增 TestRegAllocCallSite 测试类 3 个测试：无活跃 caller-saved/有活跃 caller-saved/callee-saved 不保存，全部通过。修改 3 个文件（native_backend.py, ir_nodes.py, test_native_backend.py）约 80 行代码。测试 680 passed（677→680，+3 新测试），无回归。后端 35/47 完成。Native 后端完成度维持 ~90%，代码生成效率提升。",
+      "details": "P1-B2 清零。native_backend.py 寄存器分配器从保守保存全部 8 个 caller-saved GPR 改进为基于活跃区间分析的精确保存。实现：(1) _allocate_registers 新增步骤 3，遍历调用点指令（LIRCall/LIRCallIndirect），计算被分配到 caller-saved 寄存器且在调用点之后仍活跃的 vreg，将需保存的物理寄存器列表写入 instr.caller_saved_to_preserve；(2) _emit_call 和 _emit_call_indirect 读取 caller_saved_to_preserve，仅 push/pop 实际需要的寄存器；(3) 调整栈对齐计算，将保存寄存器数量纳入 16 字节对齐公式；(4) 调整返回值预留槽偏移（从固定 64 改为动态 saved_size）。新增 TestRegAllocCallSite 测试类 3 个测试：无活跃 caller-saved/有活跃 caller-saved/callee-saved 不保存，全部通过。修改 3 个文件（native_backend.py, ir_nodes.py, test_native_backend.py）约 80 行代码。测试 680 passed（677→680，+3 新测试），无回归。后端 35/47 完成。Native 后端完成度维持 ~90%，代码生成效率提升。注意：第48轮评审发现此改动引入循环回归。",
       "timestamp": "2026-07-29 16:30"
     },
     {
@@ -149,129 +161,19 @@
       "result": "success",
       "details": "第 43-45 轮评审轮。前端 30/30=100%完成，后端 33/45=73.3%完成。深度代码审计结论：前端质量持续优秀（7.5/10），后端质量稳健（6/10）但有明确短板。审计发现新问题：Native 后端独立 ELF 模式跳过外部函数重定位导致无法运行、Wasm 后端闭包临时内存泄漏、Phi 节点类型推断未做合一验证。新增 2 个高价值任务（Native 端到端执行修复、闭包临时内存释放），废弃 1 个低优先级任务（统一 C 后端降为维护）。下 3 轮聚焦：Native 后端端到端执行突破（P80）> 寄存器分配优化（P55）> 栈平衡/内存管理（P50）。",
       "timestamp": "2026-07-28 10:15"
-    },
-    {
-      "cycle": 44,
-      "task_id": "FRONTEND-030",
-      "name": "修复 parser match 表达式字符字面量模式缺失",
-      "track": "frontend",
-      "difficulty": "easy",
-      "priority": 55,
-      "result": "success",
-      "details": "前端维护任务。parser.py 修复 match 表达式字符字面量模式解析缺失：(1) 导入 PatternChar AST 节点；(2) _parse_match_expr 允许 TokenType.CHAR 和 TokenType.MINUS 作为模式起始符；(3) _parse_simple_literal_pattern 添加 CHAR 分支返回 PatternChar。修改 3 个文件共 6 行代码。测试 572 passed，无回归。前端 30/30 完成。",
-      "timestamp": "2026-07-28 08:30"
-    },
-    {
-      "cycle": 44,
-      "task_id": "backend_native_relocatable_elf_link_fix",
-      "name": "修复 Native 后端可重定位 ELF 链接格式问题",
-      "track": "backend",
-      "difficulty": "hard",
-      "priority": 60,
-      "result": "success",
-      "details": "P1-B3 端到端执行的关键修复。native_backend.py 修复 5 个 ELF 格式 bug：(1) st_info 位序错误；(2) r_info 位序错误；(3) sh_info 未正确设置局部符号数量；(4) 移除未使用的 .rela.data section；(5) gcc 链接命令添加 -nostartfiles。x86_64.py 添加 SIB 字节支持。修改 3 个文件共 66 行代码。测试 572 passed，无回归。后端 33/45 完成。Native 端到端执行仍待数据段重定位和 main 符号导出验证。",
-      "timestamp": "2026-07-28 08:30"
-    },
-    {
-      "cycle": 43,
-      "task_id": "FRONTEND-029",
-      "name": "修复 ForExpr 的 step 字段赋值不一致问题",
-      "track": "frontend",
-      "difficulty": "easy",
-      "priority": 70,
-      "result": "success",
-      "details": "修复 parser.py 构造 ForExpr 时硬编码 step=None 的数据不一致 bug。修改涉及 5 个文件约 10 行代码。测试 572 passed，无回归。前端 29/29 完成。",
-      "timestamp": "2026-07-28 04:15"
-    },
-    {
-      "cycle": 43,
-      "task_id": "backend_unified_closure_e2e_test",
-      "name": "建立三后端统一闭包执行测试矩阵",
-      "track": "backend",
-      "difficulty": "medium",
-      "priority": 72,
-      "result": "success",
-      "details": "P1-B3 部分清零。新建 tests/test_unified_closure.py 6 个测试。C 后端 E2E 完全通过；Native 编译基线通过；Wasm 生成验证通过。测试 572 passed，无回归。后端 32/44 完成。",
-      "timestamp": "2026-07-28 04:15"
-    },
-    {
-      "cycle": 42,
-      "task_id": "review_cycle_42",
-      "name": "第 42 轮双线路线图评审",
-      "track": "review",
-      "difficulty": "n/a",
-      "priority": 99,
-      "result": "success",
-      "details": "第 40-42 轮评审轮。前端 28/28=100%完成，后端 31/44=70.5%完成。P0/P1 全部清零。下3轮聚焦：建立三后端统一闭包执行测试矩阵、寄存器分配器优化、Phi降级/Wasm栈平衡验证。",
-      "timestamp": "2026-07-28 01:04"
-    },
-    {
-      "cycle": 41,
-      "task_id": "frontend_lexer_escape_eof_fix",
-      "name": "修复 lexer.py 字符串/字符字面量转义 EOF 越界 IndexError",
-      "track": "frontend",
-      "difficulty": "easy",
-      "priority": 70,
-      "result": "success",
-      "details": "修复 lexer.py 两处 EOF 越界 bug。测试 566 passed，无回归。前端 28/28 完成。",
-      "timestamp": "2026-07-28 06:02"
-    },
-    {
-      "cycle": 41,
-      "task_id": "backend_native_global_var_support",
-      "name": "Native 后端实现全局变量加载/存储指令（P1-新1 清零）",
-      "track": "backend",
-      "difficulty": "medium",
-      "priority": 82,
-      "result": "success",
-      "details": "P1-新1清零。native_backend.py 添加 LIRLoadGlobal/LIRStoreGlobal 支持。测试 566 passed，无回归。后端 31/44 完成。",
-      "timestamp": "2026-07-28 06:02"
-    },
-    {
-      "cycle": 40,
-      "task_id": "frontend_parser_error_method_fix",
-      "name": "修复 parser.py _error 方法未定义 bug",
-      "track": "frontend",
-      "difficulty": "easy",
-      "priority": 65,
-      "result": "success",
-      "details": "修复 parser.py self._error() 调用但方法未定义的 AttributeError。测试 432 passed，无回归。前端 27/27 完成。",
-      "timestamp": "2026-07-27 16:08"
-    },
-    {
-      "cycle": 40,
-      "task_id": "backend_unified_silent_skip_fix",
-      "name": "修复三后端未实现指令静默跳过问题",
-      "track": "backend",
-      "difficulty": "easy",
-      "priority": 90,
-      "result": "success",
-      "details": "P0-新1清零。三后端统一改为抛出 NotImplementedError。测试 432 passed，无回归。后端 30/43 完成。",
-      "timestamp": "2026-07-27 16:09"
-    },
-    {
-      "cycle": 39,
-      "task_id": "review_cycle_39",
-      "name": "第 39 轮双线路线图评审",
-      "track": "review",
-      "difficulty": "n/a",
-      "priority": 99,
-      "result": "success",
-      "details": "第 37-39 轮评审轮。前端 26/26=100%，后端 29/42=69%。新增 3 个高优先级任务，废弃 1 个。",
-      "timestamp": "2026-07-27 13:10"
     }
   ],
   "tasks": [
     {
-      "task_id": "backend_native_regalloc_call_site",
-      "name": "寄存器分配器添加调用点活跃区间切口",
-      "description": "P1-B2 清零。native_backend.py 寄存器分配器从保守保存全部 8 个 caller-saved GPR 改进为基于活跃区间分析的精确保存。_allocate_registers 为 LIRCall/LIRCallIndirect 计算 caller_saved_to_preserve，_emit_call/_emit_call_indirect 仅保存实际需要的寄存器并调整栈对齐。",
+      "task_id": "backend_native_regalloc_loop_regression",
+      "name": "修复寄存器分配器调用点改动引入的循环回归",
+      "description": "P0 级阻塞回归。第 47 轮寄存器分配器调用点活跃区间切口改动导致 test_e2e_loop 回归：循环 sum(0..9)=45 返回 10（只循环1次）。已确认第 46 轮代码通过、第 47 轮代码失败。根因分析：_allocate_registers 步骤 3 计算 caller_saved_to_preserve 时，可能错误地将循环变量（i/sum）所在寄存器判定为'调用点后不活跃'导致值被覆盖。修复方向：检查活跃区间计算是否正确处理回边（loop back-edge），确保循环变量在 call 指令后的活跃区间不会被错误截断。",
       "track": "backend",
       "difficulty": "hard",
-      "priority": 55,
-      "estimated_effort": "6-8小时",
-      "status": "completed",
-      "source": "review_33_audit",
+      "priority": 95,
+      "estimated_effort": "4-6小时",
+      "status": "pending",
+      "source": "review_48_regression",
       "depends_on": []
     },
     {
@@ -308,6 +210,18 @@
       "estimated_effort": "3-5小时",
       "status": "pending",
       "source": "quality_analysis",
+      "depends_on": []
+    },
+    {
+      "task_id": "frontend_try_expr_span_fix",
+      "name": "修复 _check_try_expr 属性名错误",
+      "description": "第 48 轮审计发现 type_checker.py _check_try_expr 中使用 expr.expr.line/column 但 AST 节点使用 span（Span 对象）。当前 hasattr 检查返回 False 传 0，虽不崩溃但位置信息丢失。修复：改为 expr.expr.span.line if expr.expr.span else -1。",
+      "track": "frontend",
+      "difficulty": "easy",
+      "priority": 40,
+      "estimated_effort": "30分钟",
+      "status": "pending",
+      "source": "review_48_audit",
       "depends_on": []
     }
   ]
