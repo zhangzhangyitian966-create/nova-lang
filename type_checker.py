@@ -1053,11 +1053,13 @@ class TypeChecker:
         if isinstance(inner_ty, TypeVar):
             # 合一算法已就绪，但 TypeVar 在此点无法确定是 Option 还是 Result
             # 返回 error 类型，要求用户显式标注类型
+            # 从 AST 节点的 span 获取位置信息（兼容无 span 的情况）
+            span = getattr(expr.expr, 'span', None)
             raise TypeCheckError(
                 f"无法推断 '{expr.expr}' 的类型为 Option 或 Result，"
                 f"请为变量添加显式类型标注",
-                expr.expr.line if hasattr(expr.expr, 'line') else 0,
-                expr.expr.column if hasattr(expr.expr, 'column') else 0,
+                span.line if span else -1,
+                span.column if span else -1,
             )
         
         if isinstance(inner_ty, ADTType):

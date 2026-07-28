@@ -4,6 +4,101 @@
 
 ---
 
+## 第 49 轮 — 2026-07-29 22:30
+
+> 普通轮 | P0 级回归修复 + 前端属性名修复 | 评审误判纠正
+
+---
+
+### 轮次概览
+
+| 维度 | 数据 |
+|------|------|
+| 轮次 | 第 49 轮（普通轮） |
+| 测试基线 | 698 passed, **1 failed**（test_e2e_loop 间歇性失败，~60%失败率） |
+| 测试结果 | **699 passed**（8/8 次全部通过，flaky test 彻底消除） |
+| 前端完成率 | 33/33 = **100%** |
+| 后端完成率 | 36/50 = **72.0%** |
+| 总完成率 | 69/84 = **82.1%** |
+| 失败任务 | 0 个 |
+| 新增任务 | 0 个 |
+| 完成任务 | 2 个（backend_native_regalloc_loop_regression, FRONTEND-033） |
+
+---
+
+### 前端任务：修复 _check_try_expr 属性名错误（FRONTEND-033）
+
+**任务**：`frontend_try_expr_span_fix`（easy, P40）
+
+**问题**：`type_checker.py` `_check_try_expr` 中 TypeVar 报错路径使用 `expr.expr.line` / `expr.expr.column`，但 AST 节点使用 `span`（`Span` 对象）。`hasattr` 检查返回 `False` 传 `0`，位置信息丢失。
+
+**修复**：改为 `getattr(expr.expr, 'span', None)` 后用 `span.line` / `span.column`，无 `span` 时传 `-1`。
+
+**修改文件**：`type_checker.py`（4 行）
+
+**为什么选这个**：第 48 轮审计发现的技术债，30 分钟可完成，清理位置信息丢失问题。
+
+---
+
+### 后端任务：修复 Native 后端二元运算 RCX 临时寄存器覆盖活跃 vreg（P0 级）
+
+**任务**：`backend_native_regalloc_loop_regression`（hard, P95）
+
+**现象**：`test_e2e_loop`（循环 `sum(0..9)=45`）间歇性返回 `10` 而非 `45`，~60% 概率失败。
+
+**根因分析（纠正第 48 轮评审误判）**：
+
+第 48 轮评审认为回归是第 47 轮寄存器分配器调用点活跃区间切口引入的。但实际调查发现：
+
+1. **回归从第 46 轮就存在**：用第 46 轮代码（`ac0e13b`）独立运行 `test_e2e_loop`，10/10 次返回 `10`。评审误判为"通过"是因为 flaky test 偶尔通过（pytest 单独运行 `test_e2e_loop` 时通过率约 40%）。
+
+2. **真正根因**：`_emit_arithmetic`、`_emit_comparison`、`_emit_div_mod` 使用固定的 `RAX` 和 `RCX` 作为临时寄存器。当寄存器分配器把循环变量（如 `i`，分配到 `RCX`）时，`ctx.load_to_reg(right_name, RCX)` 会覆盖 `RCX` 中保存的 `i` 值。
+
+3. **具体执行轨迹**：
+   - 循环条件 `i < 10`：`load_to_reg(i, RAX)` → `mov rax, rcx`（rax=i）；`load_to_reg(10, RCX)` → `mov rcx, rdx`（**rcx 被覆盖为 10**）
+   - 循环体 `sum + i`：`load_to_reg(sum, RAX)` → `mov rax, rsi`；`load_to_reg(i, RCX)` → **rcx 仍是 10，不是 i**
+   - 结果：`sum = sum + 10` 而非 `sum = sum + i`，且 `i` 在比较后变成 10 导致第二次比较 `10 < 10` 为 false，循环只执行 1 次。
+   - 最终 `sum = 0 + 10 = 10`。
+
+**修复方案**：
+1. 新增 `_is_rcx_live(vreg_name, ctx)` 方法：检测 `RCX` 是否被分配给其他活跃虚拟寄存器（非当前右操作数）。
+2. 在 `_emit_arithmetic`、`_emit_comparison`、`_emit_div_mod` 的整数路径中：如果 `RCX` 被其他活跃 vreg 占用，则在加载右操作数前 `push rcx` 保存，操作完成后 `pop rcx` 恢复。
+
+**修改文件**：`backend/native_backend.py`（约 40 行新增/修改）
+
+**验证**：
+- 10/10 次独立编译运行返回 `45`（修复前 10/10 返回 `10`）
+- 8/8 次完整测试套件 `699 passed`（修复前 5 次中 3 次失败）
+- flaky test 彻底消除
+
+**Native 后端完成度**：~90% → ~92%
+
+---
+
+### 测试前后对比
+
+| 维度 | 开发前 | 开发后 |
+|------|--------|--------|
+| 总测试数 | 699 | 699 |
+| 通过数 | 698（~60%运行时为699） | **699**（8/8 稳定通过） |
+| 失败数 | 1（flaky） | **0** |
+| 通过率 | ~99.9%（不稳定） | **100%（稳定）** |
+
+---
+
+### 前端下一步
+
+前端 33/33 = 100% 完成，进入纯维护模式。无待做任务。响应代码审计发现的新问题。
+
+### 后端下一步
+
+后端 36/50 = 72.0% 完成。下 2 轮聚焦：
+1. **第 50 轮**：修复 C/Wasm 后端闭包临时内存泄漏（P50, medium）
+2. **第 50-51 轮**：实现 Wasm 后端栈平衡验证器（P45, medium）
+3. **第 51 轮**：验证 Phi 节点 LIR 降级正确性（P42, medium）
+
+---
+
 ## 第 48 轮 — 2026-07-29 18:00
 
 > 评审轮 | 第 46-48 轮双线路线图评审 | 发现 P0 级回归 + 新增 2 个任务

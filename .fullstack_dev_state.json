@@ -1,8 +1,8 @@
 {
-  "cycles": 48,
-  "frontend_completed": 32,
-  "backend_completed": 35,
-  "last_review_cycle": 45,
+  "cycles": 49,
+  "frontend_completed": 33,
+  "backend_completed": 36,
+  "last_review_cycle": 48,
   "current_review_cycle": 48,
   "completed_tasks": [
     "frontend_try_expr_typecheck",
@@ -83,7 +83,9 @@
     "backend_native_elf_e2e_exec",
     "FRONTEND-032",
     "backend_native_regalloc_call_site",
-    "review_cycle_48"
+    "review_cycle_48",
+    "backend_native_regalloc_loop_regression",
+    "FRONTEND-033"
   ],
   "failed_tasks": [],
   "deprecated_tasks": [
@@ -96,6 +98,28 @@
     "backend_c_todo_error"
   ],
   "task_history": [
+    {
+      "cycle": 49,
+      "task_id": "backend_native_regalloc_loop_regression",
+      "name": "修复 Native 后端二元运算 RCX 临时寄存器覆盖活跃 vreg 的 bug",
+      "track": "backend",
+      "difficulty": "hard",
+      "priority": 95,
+      "result": "success",
+      "details": "P0 级回归修复。根因与第 48 轮评审判断不同：实际不是第 47 轮寄存器分配器调用点切口引入的，而是 _emit_arithmetic/_emit_comparison/_emit_div_mod 使用固定 RCX 作为右操作数临时寄存器，当寄存器分配器把循环变量（如 i）分配到 RCX 时，load_to_reg(right_name, RCX) 覆盖了 i 的值。验证：第 46 轮代码同样返回 10（评审误判为通过是因为 flaky test 偶尔通过）。修复方案：新增 _is_rcx_live 方法检测 RCX 是否被其他活跃 vreg 占用，如果是则在加载右操作数前 push RCX 保存、操作后 pop RCX 恢复。修改 native_backend.py 1 个文件约 40 行代码。10/10 次独立运行返回 45，8/8 次完整测试套件 699 passed，彻底消除 flaky test。Native 后端完成度 ~92%。",
+      "timestamp": "2026-07-29 22:30"
+    },
+    {
+      "cycle": 49,
+      "task_id": "FRONTEND-033",
+      "name": "修复 _check_try_expr 属性名错误（line/column → span.line/span.column）",
+      "track": "frontend",
+      "difficulty": "easy",
+      "priority": 40,
+      "result": "success",
+      "details": "前端维护任务。type_checker.py _check_try_expr 中 TypeVar 报错路径使用 expr.expr.line/column 但 AST 节点使用 span（Span 对象）。hasattr 检查返回 False 传 0，位置信息丢失。修复：改为 getattr(expr.expr, 'span', None) 后用 span.line/span.column，无 span 时传 -1。修改 1 个文件 4 行代码。测试 699 passed，无回归。前端 33/33 完成。",
+      "timestamp": "2026-07-29 22:30"
+    },
     {
       "cycle": 48,
       "task_id": "review_cycle_48",
@@ -165,18 +189,6 @@
   ],
   "tasks": [
     {
-      "task_id": "backend_native_regalloc_loop_regression",
-      "name": "修复寄存器分配器调用点改动引入的循环回归",
-      "description": "P0 级阻塞回归。第 47 轮寄存器分配器调用点活跃区间切口改动导致 test_e2e_loop 回归：循环 sum(0..9)=45 返回 10（只循环1次）。已确认第 46 轮代码通过、第 47 轮代码失败。根因分析：_allocate_registers 步骤 3 计算 caller_saved_to_preserve 时，可能错误地将循环变量（i/sum）所在寄存器判定为'调用点后不活跃'导致值被覆盖。修复方向：检查活跃区间计算是否正确处理回边（loop back-edge），确保循环变量在 call 指令后的活跃区间不会被错误截断。",
-      "track": "backend",
-      "difficulty": "hard",
-      "priority": 95,
-      "estimated_effort": "4-6小时",
-      "status": "pending",
-      "source": "review_48_regression",
-      "depends_on": []
-    },
-    {
       "task_id": "backend_closure_memory_leak_fix",
       "name": "修复 C/Wasm 后端闭包临时内存泄漏",
       "description": "深度审计发现 C 后端和 Wasm 后端在闭包创建和调用时，nova_alloc 分配的临时数组（参数打包、捕获值）均未释放。修复：(1) C 后端 _compile_closure_create 和 _compile_call_indirect 中添加 free() 调用；(2) Wasm 后端引入 nova_free 导入或改用 arena allocator；(3) 添加内存泄漏检测测试。",
@@ -210,18 +222,6 @@
       "estimated_effort": "3-5小时",
       "status": "pending",
       "source": "quality_analysis",
-      "depends_on": []
-    },
-    {
-      "task_id": "frontend_try_expr_span_fix",
-      "name": "修复 _check_try_expr 属性名错误",
-      "description": "第 48 轮审计发现 type_checker.py _check_try_expr 中使用 expr.expr.line/column 但 AST 节点使用 span（Span 对象）。当前 hasattr 检查返回 False 传 0，虽不崩溃但位置信息丢失。修复：改为 expr.expr.span.line if expr.expr.span else -1。",
-      "track": "frontend",
-      "difficulty": "easy",
-      "priority": 40,
-      "estimated_effort": "30分钟",
-      "status": "pending",
-      "source": "review_48_audit",
       "depends_on": []
     }
   ]

@@ -760,6 +760,20 @@ class NativeCodeGen:
         elif op in ("==", "!=", "<", ">", "<=", ">="):
             self._emit_comparison(op, left_name, right_name, is_float, dst_loc, ctx)
 
+    def _is_rcx_live(self, vreg_name, ctx):
+        """检查 RCX 是否被分配给某个活跃虚拟寄存器（且不是当前操作数）。
+
+        二元运算使用 RAX/RCX 作为固定临时寄存器，但如果寄存器分配器
+        把其他活跃 vreg 分配到了 RCX，加载右操作数到 RCX 会覆盖该值。
+        本方法检测这种冲突，供调用方决定是否需要保存/恢复 RCX。
+        """
+        for vname, loc in ctx.vreg_alloc.items():
+            if vname == vreg_name:
+                continue  # 当前操作数自己用 RCX 是正常的
+            if loc[0] == "reg" and loc[1] == RCX:
+                return True
+        return False
+
     def _emit_div_mod(self, op, left_name, right_name, is_float, dst_loc, ctx):
         """编译除法/取模指令。"""
         e = ctx.e
@@ -770,6 +784,10 @@ class NativeCodeGen:
             if dst_loc:
                 ctx.store_from_reg(dst_loc[0], XMM0, is_float=True)
         else:
+            # 检查 RCX 是否被其他活跃 vreg 占用，如果是则先保存
+            need_save_rcx = self._is_rcx_live(right_name, ctx)
+            if need_save_rcx:
+                e.push_reg(RCX)
             ctx.load_to_reg(left_name, RAX)
             ctx.load_to_reg(right_name, RCX)
             e.cqo()
@@ -778,6 +796,8 @@ class NativeCodeGen:
                 e.mov_reg_reg64(RAX, RDX)
             if dst_loc:
                 ctx.store_from_reg(dst_loc[0], RAX)
+            if need_save_rcx:
+                e.pop_reg(RCX)
 
     def _emit_arithmetic(self, op, left_name, right_name, is_float, dst_loc, ctx):
         """编译算术运算（加/减/乘）。"""
@@ -790,12 +810,18 @@ class NativeCodeGen:
             if dst_loc:
                 ctx.store_from_reg(dst_loc[0], XMM0, is_float=True)
         else:
+            # 检查 RCX 是否被其他活跃 vreg 占用，如果是则先保存
+            need_save_rcx = self._is_rcx_live(right_name, ctx)
+            if need_save_rcx:
+                e.push_reg(RCX)
             ctx.load_to_reg(left_name, RAX)
             ctx.load_to_reg(right_name, RCX)
             op_map = {"+": e.add_reg_reg, "-": e.sub_reg_reg, "*": e.imul_reg_reg}
             op_map[op](RAX, RCX)
             if dst_loc:
                 ctx.store_from_reg(dst_loc[0], RAX)
+            if need_save_rcx:
+                e.pop_reg(RCX)
 
     def _emit_comparison(self, op, left_name, right_name, is_float, dst_loc, ctx):
         """编译比较运算（==, !=, <, >, <=, >=）。"""
@@ -805,9 +831,15 @@ class NativeCodeGen:
             ctx.load_to_reg(right_name, XMM1, is_float=True)
             e.ucomisd(XMM0, XMM1)
         else:
+            # 检查 RCX 是否被其他活跃 vreg 占用，如果是则先保存
+            need_save_rcx = self._is_rcx_live(right_name, ctx)
+            if need_save_rcx:
+                e.push_reg(RCX)
             ctx.load_to_reg(left_name, RAX)
             ctx.load_to_reg(right_name, RCX)
             e.cmp_reg_reg(RAX, RCX)
+            if need_save_rcx:
+                e.pop_reg(RCX)
 
         # 比较结果设置
         cc_map = {
