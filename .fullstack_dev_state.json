@@ -1,9 +1,9 @@
 {
-  "cycles": 44,
+  "cycles": 45,
   "frontend_completed": 30,
   "backend_completed": 33,
-  "last_review_cycle": 42,
-  "current_review_cycle": 42,
+  "last_review_cycle": 45,
+  "current_review_cycle": 45,
   "completed_tasks": [
     "frontend_try_expr_typecheck",
     "backend_native_label_patch",
@@ -77,7 +77,8 @@
     "FRONTEND-029",
     "backend_unified_closure_e2e_test",
     "FRONTEND-030",
-    "backend_native_relocatable_elf_link_fix"
+    "backend_native_relocatable_elf_link_fix",
+    "review_cycle_45"
   ],
   "failed_tasks": [],
   "deprecated_tasks": [
@@ -90,6 +91,17 @@
     "backend_c_todo_error"
   ],
   "task_history": [
+    {
+      "cycle": 45,
+      "task_id": "review_cycle_45",
+      "name": "第 45 轮双线路线图评审",
+      "track": "review",
+      "difficulty": "n/a",
+      "priority": 99,
+      "result": "success",
+      "details": "第 43-45 轮评审轮。前端 30/30=100%完成，后端 33/45=73.3%完成。深度代码审计结论：前端质量持续优秀（7.5/10），后端质量稳健（6/10）但有明确短板。审计发现新问题：Native 后端独立 ELF 模式跳过外部函数重定位导致无法运行、Wasm 后端闭包临时内存泄漏、Phi 节点类型推断未做合一验证。新增 2 个高价值任务（Native 端到端执行修复、闭包临时内存释放），废弃 1 个低优先级任务（统一 C 后端降为维护）。下 3 轮聚焦：Native 后端端到端执行突破（P80）> 寄存器分配优化（P55）> 栈平衡/内存管理（P50）。",
+      "timestamp": "2026-07-28 10:15"
+    },
     {
       "cycle": 44,
       "task_id": "FRONTEND-030",
@@ -109,7 +121,7 @@
       "difficulty": "hard",
       "priority": 60,
       "result": "success",
-      "details": "P1-B3 端到端执行的关键修复。native_backend.py 修复 5 个 ELF 格式 bug：(1) st_info 位序错误（bind 和 type 位置交换），导致符号绑定属性错乱；(2) r_info 位序错误（rtype 和 sym_idx 位置交换），导致重定位类型和符号索引解析错误；(3) sh_info 未正确设置局部符号数量，导致链接器报错 local symbol at index 5 (>= sh_info of 3)；(4) 移除未使用的 .rela.data section；(5) gcc 链接命令添加 -nostartfiles 避免 _start 冲突。x86_64.py 添加 SIB 字节支持，修复 RSP 寻址导致的 SIGILL 非法指令。修改 3 个文件共 66 行代码。测试 572 passed，无回归。后端 33/45 完成。Native 端到端执行仍待数据段重定位和 main 符号导出验证。",
+      "details": "P1-B3 端到端执行的关键修复。native_backend.py 修复 5 个 ELF 格式 bug：(1) st_info 位序错误；(2) r_info 位序错误；(3) sh_info 未正确设置局部符号数量；(4) 移除未使用的 .rela.data section；(5) gcc 链接命令添加 -nostartfiles。x86_64.py 添加 SIB 字节支持。修改 3 个文件共 66 行代码。测试 572 passed，无回归。后端 33/45 完成。Native 端到端执行仍待数据段重定位和 main 符号导出验证。",
       "timestamp": "2026-07-28 08:30"
     },
     {
@@ -120,7 +132,7 @@
       "difficulty": "easy",
       "priority": 70,
       "result": "success",
-      "details": "修复 parser.py 构造 ForExpr 时硬编码 step=None 的真实数据不一致 bug。修改涉及 parser.py（step=None→step=step_expr）、type_checker.py（expr.iterable[3]→expr.step）、compiler.py、evaluator.py、c_codegen.py（两处）共 5 个文件约 10 行代码。消除了 AST 字段名存实亡和魔法索引技术债。测试 572 passed（+6 新测试），无回归。前端 29/29 完成。",
+      "details": "修复 parser.py 构造 ForExpr 时硬编码 step=None 的数据不一致 bug。修改涉及 5 个文件约 10 行代码。测试 572 passed，无回归。前端 29/29 完成。",
       "timestamp": "2026-07-28 04:15"
     },
     {
@@ -131,7 +143,7 @@
       "difficulty": "medium",
       "priority": 72,
       "result": "success",
-      "details": "P1-B3 部分清零。新建 tests/test_unified_closure.py，包含 6 个测试：C 后端 make_adder E2E（退出码 15）/ multi_capture E2E（退出码 35）均通过；Native 后端 make_adder/multi_capture 编译基线验证（.o ELF 格式 + trampoline 符号 + 重定位表），修复了 _generate_relocatable_elf 中 trampoline 符号键名不一致和 section header sh_link 索引错误两个底层 bug；Wasm 后端 make_adder/multi_capture 生成验证（WAT 包含 nova_closure_new/table/funcref/elem）。修改涉及 compiler_pipeline.py（新增 use_gcc_link 参数）、native_backend.py（修复符号表和 section header）、test_unified_closure.py（新建）。测试 572 passed，无回归。后端 32/44 完成。Native 端到端执行仍待 ELF 数据段重定位和 main 符号导出修复。",
+      "details": "P1-B3 部分清零。新建 tests/test_unified_closure.py 6 个测试。C 后端 E2E 完全通过；Native 编译基线通过；Wasm 生成验证通过。测试 572 passed，无回归。后端 32/44 完成。",
       "timestamp": "2026-07-28 04:15"
     },
     {
@@ -142,7 +154,7 @@
       "difficulty": "n/a",
       "priority": 99,
       "result": "success",
-      "details": "第 40-42 轮评审轮。前端 28/28=100%完成，后端 31/44=70.5%完成。深度代码审计结论：前端质量持续优秀，零技术债；后端质量显著改善，P0/P1 全部清零。审计发现最大短板是原生后端无端到端执行测试（P1-B3），第41轮新增全局变量功能无法验证实际运行正确性。下3轮聚焦：建立三后端统一闭包执行测试矩阵（第43轮）、寄存器分配器调用点活跃区间切口（第44轮）、Phi降级/Wasm栈平衡验证（第45轮）。任务池无需新增/废弃，仅调整执行顺序。",
+      "details": "第 40-42 轮评审轮。前端 28/28=100%完成，后端 31/44=70.5%完成。P0/P1 全部清零。下3轮聚焦：建立三后端统一闭包执行测试矩阵、寄存器分配器优化、Phi降级/Wasm栈平衡验证。",
       "timestamp": "2026-07-28 01:04"
     },
     {
@@ -153,7 +165,7 @@
       "difficulty": "easy",
       "priority": 70,
       "result": "success",
-      "details": "修复 lexer.py 两处 EOF 越界 bug：(1) _read_string 第 274-276 行，反斜杠后若 EOF，_advance() 访问越界；(2) _read_char 第 307-309 行，相同模式。修复：在读取转义字符前检查 self.pos >= len(self.source)，超限则抛出明确的 LexerError。测试 566 passed，无回归。前端 28/28 完成。",
+      "details": "修复 lexer.py 两处 EOF 越界 bug。测试 566 passed，无回归。前端 28/28 完成。",
       "timestamp": "2026-07-28 06:02"
     },
     {
@@ -164,7 +176,7 @@
       "difficulty": "medium",
       "priority": 82,
       "result": "success",
-      "details": "P1-新1清零。native_backend.py 添加 LIRLoadGlobal/LIRStoreGlobal 支持：(1) 导入两个 LIR 节点类型；(2) _collect_constants 中扫描全局变量并在数据段分配 8 字节空间；(3) 调度表添加两个处理器；(4) _emit_load_global 通过 mov_reg_rip (RIP-relative) 从数据段加载；(5) _emit_store_global 通过 mov_rip_reg (RIP-relative) 存储到数据段；(6) 复用 data_fixups 机制进行 ELF 地址回填。x86_64.py 新增 mov_reg_rip 和 mov_rip_reg 两个发射器方法。测试 566 passed，无回归。后端 31/44 完成。",
+      "details": "P1-新1清零。native_backend.py 添加 LIRLoadGlobal/LIRStoreGlobal 支持。测试 566 passed，无回归。后端 31/44 完成。",
       "timestamp": "2026-07-28 06:02"
     },
     {
@@ -175,7 +187,7 @@
       "difficulty": "easy",
       "priority": 65,
       "result": "success",
-      "details": "修复 parser.py 第 961 行 self._error() 调用但方法未定义的 AttributeError bug。改为直接抛出 ParseError，与项目错误处理风格一致。测试 432 passed，无回归。前端 27/27 完成。",
+      "details": "修复 parser.py self._error() 调用但方法未定义的 AttributeError。测试 432 passed，无回归。前端 27/27 完成。",
       "timestamp": "2026-07-27 16:08"
     },
     {
@@ -186,7 +198,7 @@
       "difficulty": "easy",
       "priority": 90,
       "result": "success",
-      "details": "P0-新1清零。三后端统一改为抛出 NotImplementedError：native_backend.py（原完全静默跳过）、wasm_backend.py（原生 WAT TODO 注释）、lir_c_backend.py（原生 C TODO 注释）。消除编译正确正确性系统性风险——编译器不再静默生成错误代码。测试 432 passed，无回归。后端 30/43 完成。",
+      "details": "P0-新1清零。三后端统一改为抛出 NotImplementedError。测试 432 passed，无回归。后端 30/43 完成。",
       "timestamp": "2026-07-27 16:09"
     },
     {
@@ -197,11 +209,23 @@
       "difficulty": "n/a",
       "priority": 99,
       "result": "success",
-      "details": "第 37-39 轮评审轮。前端 26/26=100%完成，后端 29/42=69%完成。审计发现：三后端均存在静默跳过未实现指令的编译正确性风险；native 后端缺失 LIRLoadGlobal/LIRStoreGlobal 导致全局变量访问被静默丢弃。新增 3 个高优先级任务，废弃 1 个低价值任务。下 3 轮聚焦后端编译正确性加固 + 全局变量支持。",
+      "details": "第 37-39 轮评审轮。前端 26/26=100%，后端 29/42=69%。新增 3 个高优先级任务，废弃 1 个。",
       "timestamp": "2026-07-27 13:10"
     }
   ],
   "tasks": [
+    {
+      "task_id": "backend_native_elf_e2e_exec",
+      "name": "Native 后端端到端执行突破：修复外部函数重定位 + 添加执行测试",
+      "description": "P1-B3 最终清零。深度审计发现 _generate_elf 第1668行 continue 跳过了外部函数重定位，导致独立 ELF 无法链接运行时。修复：(1) 为外部函数（nova_init/nova_cleanup 等）生成正确的 PLT/GOT 重定位；(2) 添加端到端执行测试——编译简单程序→gcc链接→执行→验证返回码（参照 test_unified_closure.py C 后端模式）；(3) 验证寄存器分配器在含分支+循环的函数中正确性。",
+      "track": "backend",
+      "difficulty": "hard",
+      "priority": 80,
+      "estimated_effort": "8-12小时",
+      "status": "pending",
+      "source": "review_45_audit",
+      "depends_on": ["backend_native_relocatable_elf_link_fix"]
+    },
     {
       "task_id": "backend_native_regalloc_call_site",
       "name": "寄存器分配器添加调用点活跃区间切口",
@@ -215,21 +239,21 @@
       "depends_on": []
     },
     {
-      "task_id": "backend_native_relocatable_elf_link_fix",
-      "name": "修复 Native 后端可重定位 ELF 链接格式问题",
-      "description": "_generate_relocatable_elf 生成的 .o 文件无法通过 gcc 链接：(1) 数据段重定位类型错误（reloc against '.data': error 4）；(2) main 符号未被正确导出导致 undefined reference。修复后可启用 Native 后端端到端闭包执行测试。",
+      "task_id": "backend_closure_memory_leak_fix",
+      "name": "修复 C/Wasm 后端闭包临时内存泄漏",
+      "description": "深度审计发现 C 后端和 Wasm 后端在闭包创建和调用时，nova_alloc 分配的临时数组（参数打包、捕获值）均未释放。修复：(1) C 后端 _compile_closure_create 和 _compile_call_indirect 中添加 free() 调用；(2) Wasm 后端引入 nova_free 导入或改用 arena allocator；(3) 添加内存泄漏检测测试。",
       "track": "backend",
-      "difficulty": "hard",
-      "priority": 60,
-      "estimated_effort": "4-6小时",
-      "status": "completed",
-      "source": "cycle_43_audit",
-      "depends_on": ["backend_unified_closure_e2e_test"]
+      "difficulty": "medium",
+      "priority": 50,
+      "estimated_effort": "3-5小时",
+      "status": "pending",
+      "source": "review_45_audit",
+      "depends_on": []
     },
     {
       "task_id": "backend_wasm_stack_balance",
       "name": "实现 Wasm 后端栈平衡验证器",
-      "description": "为 WasmGC 后端添加栈深度跟踪与验证。深度审计发现由于所有值通过 local.get/local.set 中转，实际栈平衡风险低于预期，但仍需验证 block 边界处的栈一致性。",
+      "description": "为 WasmGC 后端添加栈深度跟踪与验证。审计发现：(1) Unit 返回值缺少 drop 处理，可能导致 wat2wasm 验证失败；(2) dispatch loop 的 return 策略不一致（return vs br $exit）。修复并添加验证器。",
       "track": "backend",
       "difficulty": "medium",
       "priority": 45,
@@ -241,23 +265,11 @@
     {
       "task_id": "backend_lir_phi_lowering_verify",
       "name": "验证 Phi 节点 LIR 降级正确性",
-      "description": "系统验证 MIR Phi 节点降级到 LIR 线性指令序列的正确性。Phi 降级已修复 critical edge 和 MIRMatchJump 后继块两个 bug，实际运行良好，但缺少系统性测试验证。",
+      "description": "系统验证 MIR Phi 节点降级到 LIR 线性指令序列的正确性。审计发现 Phi 类型推断取第一个源 SSA 类型未做合一验证（mir_lowering.py 第860行），需增强验证。",
       "track": "backend",
       "difficulty": "medium",
       "priority": 42,
       "estimated_effort": "3-5小时",
-      "status": "pending",
-      "source": "quality_analysis",
-      "depends_on": []
-    },
-    {
-      "task_id": "backend_unify_c_codegen",
-      "name": "统一 C 后端（旧路径迁移到 LIR 路径）",
-      "description": "将旧的 c_codegen.py（AST级C代码生成）功能迁移到 lir_c_backend.py（LIR级C代码生成），淘汰旧路径。LIR C 后端已功能完整（22 种 LIR 指令全覆盖），主要差距在闭包支持。",
-      "track": "backend",
-      "difficulty": "hard",
-      "priority": 40,
-      "estimated_effort": "2-3天",
       "status": "pending",
       "source": "quality_analysis",
       "depends_on": []
