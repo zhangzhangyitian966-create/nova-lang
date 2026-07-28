@@ -1,7 +1,7 @@
 # Nova LLM 智能开发路线图
 
-**更新时间**: 2026-07-28 12:15:00
-**上次评审**: 第 69 轮（路线图评审）
+**更新时间**: 2026-07-28 20:02:00
+**上次评审**: 第 72 轮（路线图评审）
 
 本路线图由 LLM 智能开发系统动态维护。
 
@@ -11,7 +11,7 @@
 |------|------|------|--------|------|------|
 | ✅ | C 后端接入统一 IR 管线 | hard | 95 | 2-3 天 | - |
 | ✅ | C 后端 LIR 代码生成基础框架 | medium | 92 | 1 天 | - |
-| ⏳ | 统一 C 后端（LIR 路径功能对齐） | hard | 72 | 2-3 天 | fix_match_lowering, fix_mir_ssa, refactor_visitor_pattern, lir_switch_match_lowering, c_backend_closure_support |
+| ⏳ | 统一 C 后端（LIR 路径功能对齐） | hard | 70 | 2-3 天 | fix_match_lowering, fix_mir_ssa, refactor_visitor_pattern, lir_switch_match_lowering, c_backend_closure_support |
 
 ## 🔧 IR 降级 / 正确性
 
@@ -149,8 +149,8 @@
 | ✅ | 重构 c_codegen.py _compile_pattern 调度表化 | medium | 52 | 3-5 小时 | - |
 | ⏳ | LOW 级问题批量治理（docstring + 魔法数字） | easy | 40 | 2-4 小时 | - |
 | ✅ | 重构 MIRLowering._lower_call_expr 降低复杂度 | medium | 70 | 3-5 小时 | - |
-| ⏳ | 重构 LoopInvariantCodeMotion._redirect_branch 降低复杂度 | medium | 65 | 3-5 小时 | - |
-| ⏳ | 重构 cfg_utils.analyze_loops 降低复杂度 | medium | 65 | 3-5 小时 | - |
+| ✅ | 重构 LoopInvariantCodeMotion._redirect_branch 降低复杂度 | medium | 65 | 3-5 小时 | - |
+| ⏳ | 重构 cfg_utils.analyze_loops 降低复杂度 | medium | 60 | 3-5 小时 | - |
 | ✅ | 批量清理未使用导入 v5 | easy | 50 | 1-2 小时 | - |
 
 ---
@@ -168,14 +168,17 @@
 | ✅ | CFG 基础设施单元测试 | medium | 50 | 3-5 小时 | mir_cfg_loop_analysis |
 | ✅ | TypeChecker 单元测试基线 | medium | 75 | 4-6 小时 | - |
 | ✅ | MIRLowering 单元测试基线 | medium | 75 | 4-6 小时 | - |
-| ⏳ | PassManager 单元测试基线 | medium | 65 | 4-6 小时 | - |
+| ✅ | PassManager 单元测试基线 | medium | 65 | 4-6 小时 | - |
+| ⏳ | Parser 单元测试基线 | medium | 70 | 4-6 小时 | - |
+| ⏳ | Evaluator 单元测试基线 | medium | 65 | 4-6 小时 | - |
+| ⏳ | VM 单元测试基线 | medium | 60 | 4-6 小时 | - |
 
 ---
 
-**进度**: 145/151 (96.0%)
-- **已完成**: 145（含第69轮评审 + 第70轮3个任务）
+**进度**: 152/163 (93.3%)
+- **已完成**: 152（含第72轮评审 + 第70-71轮6个任务）
 - **进行中**: 0
-- **待开发**: 6（unify_c_backend P72、benchmark_enhance_exec_time P38、low_quality_issues_cleanup P40、refactor_redirect_branch P65、refactor_analyze_loops P65、pass_manager_unit_tests P65）
-- **已废弃**: 2（native_call_abi、refactor_native_emit_call）
+- **待开发**: 8（unify_c_backend P70、benchmark_enhance_exec_time P38、low_quality_issues_cleanup P40、refactor_analyze_loops P60、parser_unit_tests P70、evaluator_unit_tests P65、vm_unit_tests P60、refactor_compile_switch P55）
+- **已废弃**: 3（native_call_abi、refactor_native_emit_call、native_call_abi）
 
-> 注：第70轮开发完成3个任务（mir_lowering_unit_tests +50测试、refactor_lower_call_expr消除DRY违反、clean_unused_imports_v5清理33处）。测试总数621→671（+50），零回归。审查对齐率67%。下阶段方向：pass_manager单元测试 + 剩余复杂度治理 + 架构债务启动。
+> 注：第72轮评审完成。第70-71轮完成6个任务（mir_lowering_unit_tests +50测、pass_manager_unit_tests +18测、refactor_redirect_branch CC=14→~3、refactor_lower_call_expr、clean_unused_imports_v5、test_lir_c_backend_switch）。测试总数621→699（+78），零回归。下阶段方向：前端基础测试补齐 + 架构债务启动 + 审查数据校准。

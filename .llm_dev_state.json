@@ -1,5 +1,5 @@
 {
-  "cycles": 71,
+  "cycles": 72,
   "completed_tasks": [
     "test_lir_c_backend_switch",
     "pass_manager_unit_tests",
@@ -7,6 +7,7 @@
     "mir_lowering_unit_tests",
     "refactor_lower_call_expr",
     "clean_unused_imports_v5",
+    "review_cycle_72",
     "review_cycle_69",
     "review_cycle_66",
     "refactor_cli_main",
@@ -157,6 +158,14 @@
   ],
   "failed_tasks": [],
   "task_history": [
+    {
+      "cycle": 72,
+      "task_id": "review_cycle_72",
+      "status": "completed",
+      "source": "评审轮",
+      "reason": "第72轮路线图评审：回顾第69-71轮（1个评审轮+2个开发轮），完成五维评估（方向/质量/效率/价值/审查对齐），更新任务池（新增4个任务，调整2个优先级），确定下阶段方向。",
+      "details": "评审结论：1)方向优秀——完全遵循三线并进策略；2)质量持续提升——MEDIUM-21%、CC-3%、测试699；3)效率优秀——6/6成功零失败；4)价值极高——无低价值任务；5)审查对齐50%（低于前阶段67%，需提升）。新增任务：parser_unit_tests(P70)、evaluator_unit_tests(P65)、vm_unit_tests(P60)、refactor_compile_switch(P55)。下阶段方向：前端基础测试补齐+架构债务启动+审查数据校准。"
+    },
     {
       "cycle": 71,
       "task_id": "refactor_redirect_branch",
@@ -574,10 +583,10 @@
       "details": "将 _lower_if_expr 从 106 行重构为分层结构：1) 新增 _lower_branch_body() 通用分支处理方法，消除 true/false 分支的 30 行镜像重复代码，返回 (result, modified_vars) 元组；2) 新增 _insert_merge_phis() 处理 merge 块 Phi 节点插入（约 35 行独立逻辑）；3) 新增 _insert_result_phi() 处理 if 表达式结果 Phi（约 15 行独立逻辑）；4) _lower_if_expr 主函数从 106 行压缩至约 25 行（CC≈8）。测试 395/395 通过，零回归。"
     }
   ],
-  "current_cycle": 66,
-  "baseline_tests": 566,
-  "current_tests": 621,
-  "last_review_cycle": 66,
+  "current_cycle": 72,
+  "baseline_tests": 699,
+  "current_tests": 699,
+  "last_review_cycle": 72,
   "tasks": [
     {
       "id": "refactor_check_patterns_exhaustive",
@@ -648,7 +657,7 @@
       "name": "统一 C 后端（LIR 路径功能对齐）",
       "description": "将 c_codegen.py 中已实现但 lir_c_backend.py 缺失的功能迁移过来：ADT 代码生成、match 编译、闭包实现、列表推导式，待功能对齐后废弃旧的 AST→C 路径",
       "difficulty": "hard",
-      "priority": 72,
+      "priority": 70,
       "category": "architecture",
       "estimated": "2-3 天",
       "status": "pending",
@@ -765,7 +774,7 @@
       "name": "重构 cfg_utils.analyze_loops 降低圈复杂度",
       "description": "cfg_utils.analyze_loops 圈复杂度 14，包含回边检测、自然循环收集、循环树构建、出口计算四个阶段。可拆分为 _detect_back_edges、_collect_natural_loops、_build_loop_tree、_compute_loop_exits 四个独立函数。",
       "difficulty": "medium",
-      "priority": 65,
+      "priority": 60,
       "category": "engineering",
       "estimated": "3-5 小时",
       "status": "pending",
@@ -1087,6 +1096,54 @@
       "status": "completed",
       "depends_on": [],
       "reason": "审查报告发现 _compile_switch 的 C switch 路径（>=3整型case）完全无测试，是 LIR C 后端的关键控制流路径。[自主发现]"
+    },
+    {
+      "id": "parser_unit_tests",
+      "name": "Parser单元测试基线",
+      "description": "为 parser.py（1223行）建立独立单元测试基线，覆盖：基本表达式解析（字面量/标识符/二元运算/一元运算）、控制流解析（if/while/for/match）、函数定义解析、ADT定义解析、列表/元组/Map解析、模式匹配解析、错误恢复等核心路径。当前零独立测试，仅通过集成测试间接覆盖。",
+      "difficulty": "medium",
+      "priority": 70,
+      "category": "test",
+      "estimated": "4-6小时",
+      "status": "pending",
+      "depends_on": [],
+      "reason": "1223行零独立测试，前端核心路径无任何直接验证。parser是编译器最前端模块，任何解析变更都可能导致无感知的语法回归。当前最大测试盲区之一。[自主发现]"
+    },
+    {
+      "id": "evaluator_unit_tests",
+      "name": "Evaluator单元测试基线",
+      "description": "为 evaluator.py（1017行）建立独立单元测试基线，覆盖：字面量求值、变量查找、二元运算求值、函数调用、闭包求值、ADT构造与访问、列表/元组/Map操作、模式匹配求值、内置函数等核心路径。当前零独立测试。",
+      "difficulty": "medium",
+      "priority": 65,
+      "category": "test",
+      "estimated": "4-6小时",
+      "status": "pending",
+      "depends_on": [],
+      "reason": "1017行零独立测试，语言求值语义核心。evaluator是Nova解释执行路径的基础，测试不足意味着任何求值逻辑变更都可能引入语义回归。[自主发现]"
+    },
+    {
+      "id": "vm_unit_tests",
+      "name": "VM单元测试基线",
+      "description": "为 vm.py（1109行）建立独立单元测试基线，覆盖：字节码指令执行（栈操作/算术/逻辑/控制流/函数调用/数据结构/内存管理）、VM状态管理、错误处理、边界情况等核心路径。当前无独立测试。",
+      "difficulty": "medium",
+      "priority": 60,
+      "category": "test",
+      "estimated": "4-6小时",
+      "status": "pending",
+      "depends_on": [],
+      "reason": "1109行无独立测试，字节码执行核心。VM是nova run/vm/repl等命令的底层执行引擎，任何指令实现bug都可能导致整个程序崩溃。[自主发现]"
+    },
+    {
+      "id": "refactor_compile_switch",
+      "name": "重构LIRCBackend._compile_switch降低复杂度",
+      "description": "LIRCBackend._compile_switch 圈复杂度 13，负责LIR Switch指令到C switch语句的生成（>=3整型case时生成C switch，否则生成if-else级联）。可重构为调度表模式，将case类型判断和代码生成逻辑分离。",
+      "difficulty": "medium",
+      "priority": 55,
+      "category": "engineering",
+      "estimated": "2-3小时",
+      "status": "pending",
+      "depends_on": [],
+      "reason": "第1511轮Top10复杂函数CC=13，LIR C后端switch生成核心。函数包含case数量判断、整型类型检查、C switch生成、if-else级联生成等多重逻辑，调度表化后CC可降至约5。[审查驱动]"
     }
   ]
 }
