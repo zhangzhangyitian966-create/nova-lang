@@ -1,6 +1,7 @@
 {
-  "cycles": 68,
+  "cycles": 69,
   "completed_tasks": [
+    "review_cycle_69",
     "review_cycle_66",
     "refactor_cli_main",
     "fix_too_broad_exceptions",
@@ -150,6 +151,14 @@
   ],
   "failed_tasks": [],
   "task_history": [
+    {
+      "cycle": 69,
+      "task_id": "review_cycle_69",
+      "status": "completed",
+      "source": "评审轮",
+      "reason": "第69轮路线图评审：回顾第66-68轮（1个评审轮+2个开发轮），完成五维评估（方向/质量/效率/价值/审查对齐），更新任务池（新增6个任务，调整3个优先级），确定下阶段方向。",
+      "details": "评审结论：1)方向优秀——完全遵循三线并进策略；2)质量持续提升——MEDIUM-14%、CC-3%、测试621；3)效率优秀——6/6成功零失败；4)价值极高——无低价值任务；5)审查对齐67%。新增任务：refactor_lower_call_expr(P70)、refactor_redirect_branch(P65)、refactor_analyze_loops(P65)、mir_lowering_unit_tests(P75)、pass_manager_unit_tests(P65)、clean_unused_imports_v5(P50)。下阶段方向：核心模块测试基线+剩余复杂度精细化治理+架构债务启动。"
+    },
     {
       "cycle": 68,
       "task_id": "refactor_compiler_cli_main",
@@ -652,7 +661,7 @@
       "name": "基准测试框架增强（C/Wasm执行时间+优化对比）",
       "description": "为基准测试框架添加 C 后端和 Wasm 后端的执行时间测量，支持优化前后对比功能（同一用例在不同优化级别下的性能对比），扩充基准用例覆盖 ADT、模式匹配、闭包等场景",
       "difficulty": "medium",
-      "priority": 42,
+      "priority": 38,
       "category": "test",
       "estimated": "3-5 小时",
       "status": "pending",
@@ -666,12 +675,84 @@
       "name": "LOW 级问题批量治理（docstring + 魔法数字）",
       "description": "批量清理 LOW 级问题：为 ir/ 和 backend/ 模块的公共 API 添加 docstring，将高频魔法数字（如 8 字节大小、默认迭代次数等）提取为命名常量，清理调试打印语句。v1 已完成核心模块的主要部分。v2 已完成 ir/ 模块 docstring 补充。",
       "difficulty": "easy",
-      "priority": 42,
+      "priority": 40,
       "category": "engineering",
       "estimated": "2-4 小时",
       "status": "pending",
       "depends_on": [],
-      "reason": "v1 已完成核心模块的 docstring 和魔法数字，v2 已完成 ir/ 模块 16 处 docstring。剩余 backend/ 模块部分价值递减。增量质量门禁已落地，新增代码不再引入新的 LOW 问题，存量 LOW 问题可逐步消化。优先级从 45 下调至 42。[审查发现]"
+      "reason": "v1 已完成核心模块的 docstring 和魔法数字，v2 已完成 ir/ 模块 16 处 docstring。剩余 backend/ 模块部分价值递减。增量质量门禁已落地，新增代码不再引入新的 LOW 问题，存量 LOW 问题可逐步消化。优先级从 42 下调至 40。[审查发现]"
+    },
+    {
+      "id": "refactor_lower_call_expr",
+      "name": "重构 MIRLowering._lower_call_expr 降低圈复杂度",
+      "description": "MIRLowering._lower_call_expr 圈复杂度 14，处理函数调用HIR→MIR降级（普通调用/方法调用/闭包调用/内置函数调用）。可通过提取 _lower_normal_call、_lower_method_call、_lower_closure_call、_lower_builtin_call 四个独立方法，将CC降至约4-5。",
+      "difficulty": "medium",
+      "priority": 70,
+      "category": "engineering",
+      "estimated": "3-5 小时",
+      "status": "pending",
+      "depends_on": [],
+      "reason": "第1511轮Top10复杂函数CC=14，非deprecated代码中Top3。函数调用是HIR→MIR最核心路径，涉及普通调用/方法调用/闭包调用/内置函数调用四种模式分发，调度表化或阶段拆分可显著降低复杂度。[审查驱动]"
+    },
+    {
+      "id": "refactor_redirect_branch",
+      "name": "重构 LoopInvariantCodeMotion._redirect_branch 降低圈复杂度",
+      "description": "LoopInvariantCodeMotion._redirect_branch 圈复杂度 14，负责LICM中循环不变量外提后的分支重定向。可拆分为 _collect_redirect_targets、_perform_redirect、_verify_redirect_integrity 三个独立阶段。",
+      "difficulty": "medium",
+      "priority": 65,
+      "category": "engineering",
+      "estimated": "3-5 小时",
+      "status": "pending",
+      "depends_on": [],
+      "reason": "第1511轮Top10复杂函数CC=14，LICM循环优化核心。分支重定向逻辑涉及目标收集、执行、验证三个阶段，阶段拆分后CC可降至约5。[审查驱动]"
+    },
+    {
+      "id": "refactor_analyze_loops",
+      "name": "重构 cfg_utils.analyze_loops 降低圈复杂度",
+      "description": "cfg_utils.analyze_loops 圈复杂度 14，包含回边检测、自然循环收集、循环树构建、出口计算四个阶段。可拆分为 _detect_back_edges、_collect_natural_loops、_build_loop_tree、_compute_loop_exits 四个独立函数。",
+      "difficulty": "medium",
+      "priority": 65,
+      "category": "engineering",
+      "estimated": "3-5 小时",
+      "status": "pending",
+      "depends_on": [],
+      "reason": "第1511轮Top10复杂函数CC=14，循环分析基础设施。四阶段（回边检测→自然循环收集→循环树构建→出口计算）可完全拆分为独立函数，analyze_loops本身变为pipeline编排器，CC降至约3。[审查驱动]"
+    },
+    {
+      "id": "mir_lowering_unit_tests",
+      "name": "MIRLowering单元测试基线",
+      "description": "为 ir/mir_lowering.py 编写单元测试，覆盖：基本表达式降级（字面量/标识符/二元运算/一元运算）、控制流降级（if/while/for/match）、函数定义降级、ADT构建降级、列表/元组/Map构建降级、闭包创建降级等核心路径。",
+      "difficulty": "medium",
+      "priority": 75,
+      "category": "test",
+      "estimated": "4-6 小时",
+      "status": "pending",
+      "depends_on": [],
+      "reason": "1736行零独立测试，HIR→MIR是编译器核心路径，任何变更都可能导致无感知回归。当前最大测试盲区，优先级最高。[自主发现]"
+    },
+    {
+      "id": "pass_manager_unit_tests",
+      "name": "PassManager单元测试基线",
+      "description": "为 ir/pass_manager.py 中的优化Pass编写单元测试，覆盖：ConstantFolding（常量折叠）、DeadCodeElimination（死代码消除）、CommonSubexpressionElimination（公共子表达式消除）、Inlining（函数内联）、LoopInvariantCodeMotion（循环不变量外提）的正确性和边界情况。",
+      "difficulty": "medium",
+      "priority": 65,
+      "category": "test",
+      "estimated": "4-6 小时",
+      "status": "pending",
+      "depends_on": [],
+      "reason": "1543行仅SSA验证器有测试（test_ssa_verifier.py），优化Pass（DCE/CSE/LICM/内联）缺乏直接测试。性能优化的正确性需要独立验证，不能仅靠集成测试兜底。[自主发现]"
+    },
+    {
+      "id": "clean_unused_imports_v5",
+      "name": "批量清理未使用导入v5",
+      "description": "清理审查日志中报告的25个unused_import MEDIUM问题。使用自动化工具扫描并移除未使用的import语句，手动验证每个移除不影响代码功能。",
+      "difficulty": "easy",
+      "priority": 50,
+      "category": "engineering",
+      "estimated": "1-2 小时",
+      "status": "pending",
+      "depends_on": [],
+      "reason": "25个unused_import MEDIUM问题，持续多轮未解决。可批量修复，低风险，适合作为 filler 任务在开发轮间隙完成。[审查驱动]"
     },
     {
       "id": "c_backend_closure_phase3",
