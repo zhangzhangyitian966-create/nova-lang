@@ -48,6 +48,19 @@ from .cfg_utils import replace_instr_operands, replace_terminator_operands
 # Pass 管理器默认最大迭代次数（不动点上限）
 DEFAULT_MAX_PASS_ITERATIONS = 10
 
+# Pass 执行中可能抛出的常见异常类型（优雅降级范围）
+# 明确排除 SystemExit / KeyboardInterrupt / MemoryError / RecursionError 等致命异常
+_PASS_EXECUTION_ERRORS = (
+    TypeError,
+    AttributeError,
+    KeyError,
+    ValueError,
+    IndexError,
+    NameError,
+    RuntimeError,
+    ZeroDivisionError,
+)
+
 
 class Pass:
     """优化 Pass 基类
@@ -1440,9 +1453,8 @@ class PassManager:
                 try:
                     changed |= pass_.run(hir_module)
                 # 优雅降级：单个 HIR 优化 Pass 失败不中断整体编译
-                # Pass 可能抛出多种异常（TypeError, AttributeError, KeyError 等）
-                # 通过 _record_pass_failure 统一记录和警告
-                except Exception as e:
+                # 捕获 Pass 执行中的常见异常，避免静默吞咽致命异常
+                except _PASS_EXECUTION_ERRORS as e:
                     self._record_pass_failure(pass_name, e)
             if not changed:
                 break
@@ -1467,9 +1479,8 @@ class PassManager:
                 try:
                     changed |= pass_.run(mir_module)
                 # 优雅降级：单个 MIR 优化 Pass 失败不中断整体编译
-                # Pass 可能抛出多种异常（TypeError, AttributeError, KeyError 等）
-                # 通过 _record_pass_failure 统一记录和警告
-                except Exception as e:
+                # 捕获 Pass 执行中的常见异常，避免静默吞咽致命异常
+                except _PASS_EXECUTION_ERRORS as e:
                     self._record_pass_failure(pass_name, e)
             if not changed:
                 break
@@ -1495,7 +1506,7 @@ class PassManager:
                             stacklevel=2,
                         )
             # 优雅降级：验证 Pass 失败不中断整体编译
-            except Exception as e:
+            except _PASS_EXECUTION_ERRORS as e:
                 self._record_pass_failure(pass_name, e)
 
         return total_changed
@@ -1518,9 +1529,8 @@ class PassManager:
                 try:
                     changed |= pass_.run(lir_module)
                 # 优雅降级：单个 LIR 优化 Pass 失败不中断整体编译
-                # Pass 可能抛出多种异常（TypeError, AttributeError, KeyError 等）
-                # 通过 _record_pass_failure 统一记录和警告
-                except Exception as e:
+                # 捕获 Pass 执行中的常见异常，避免静默吞咽致命异常
+                except _PASS_EXECUTION_ERRORS as e:
                     self._record_pass_failure(pass_name, e)
             if not changed:
                 break

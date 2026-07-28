@@ -139,8 +139,8 @@
 | ✅ | 重构 HIRRewriter.generic_rewrite 调度表化 | medium | 65 | 2-3 小时 | - |
 | ✅ | 重构 CCodeGen._c_type_from_type_expr 调度表化 | easy | 60 | 1-2 小时 | - |
 | ✅ | 批量清理未使用导入 v4 | easy | 55 | 1-2 小时 | - |
-| ⏳ | 统一治理过宽异常捕获 | easy | 70 | 2-3 小时 | - |
-| ⏳ | 重构 cli.py 主函数降低复杂度 | easy | 60 | 2-3 小时 | - |
+| ✅ | 统一治理过宽异常捕获 | easy | 70 | 2-3 小时 | - |
+| ✅ | 重构 cli.py 主函数降低复杂度 | easy | 60 | 2-3 小时 | - |
 | ⏳ | LOW 级问题批量治理（docstring + 魔法数字） | easy | 42 | 2-4 小时 | - |
 
 ---
@@ -156,14 +156,14 @@
 | ⏳ | 基准测试框架增强（C/Wasm执行时间+优化对比） | medium | 42 | 3-5 小时 | backend_benchmark_framework |
 | ✅ | LIR C后端单元测试 | medium | 55 | 4-6 小时 | - |
 | ✅ | CFG 基础设施单元测试 | medium | 50 | 3-5 小时 | mir_cfg_loop_analysis |
-| ⏳ | TypeChecker 单元测试基线 | medium | 75 | 4-6 小时 | - |
+| ✅ | TypeChecker 单元测试基线 | medium | 75 | 4-6 小时 | - |
 
 ---
 
-**进度**: 133/133 (100.0%)
-- **已完成**: 133（含第66轮评审）
+**进度**: 136/139 (97.8%)
+- **已完成**: 136（含第66轮评审 + 第67轮3个任务）
 - **进行中**: 0
-- **待开发**: 6（unify_c_backend P72、type_checker_unit_tests P75、fix_too_broad_exceptions P70、refactor_cli_main P60、benchmark_enhance_exec_time P42、low_quality_issues_cleanup P42）
+- **待开发**: 3（unify_c_backend P72、benchmark_enhance_exec_time P42、low_quality_issues_cleanup P42）
 - **已废弃**: 2（native_call_abi、refactor_native_emit_call）
 
 > 注：第66轮路线图评审完成。五维评估（方向优秀、质量持续提升且稳定、效率优秀、价值极高、审查对齐优秀83%）。关键里程碑：Top10复杂度函数首轮重构全面完成（CC>15的Top10函数从7个降至0个）、审查数据可信度恢复、测试覆盖+8.8%。新增3个任务（type_checker_unit_tests P75、fix_too_broad_exceptions P70、refactor_cli_main P60），调整3个任务优先级。下阶段方向：测试盲区补齐+架构债务偿还+顽固问题治理三线并行。

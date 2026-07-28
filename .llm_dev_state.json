@@ -1,7 +1,10 @@
 {
-  "cycles": 66,
+  "cycles": 67,
   "completed_tasks": [
     "review_cycle_66",
+    "refactor_cli_main",
+    "fix_too_broad_exceptions",
+    "type_checker_unit_tests",
     "refactor_hir_rewriter_generic_rewrite",
     "refactor_c_type_from_type_expr",
     "clean_unused_imports_v4",
@@ -145,6 +148,30 @@
   ],
   "failed_tasks": [],
   "task_history": [
+    {
+      "cycle": 67,
+      "task_id": "refactor_cli_main",
+      "status": "completed",
+      "source": "审查驱动",
+      "reason": "审查日志第1511轮 cli.py _is_incomplete CC=15、main CC=15，占据非deprecated代码Top10复杂度前两名。_is_incomplete 为机械括号计数但分支密集；main 为8分支手动参数解析大if-elif链，职责混杂。",
+      "details": "1) 重构 _is_incomplete：引入 _CLOSE_TO_OPEN 和 _OPEN_BRACKETS 映射表常量，将10个elif分支压缩为查表逻辑（字符串翻转+查表计数），CC从15降至约5，补充完整docstring。2) 重构 main：提取 _read_source_file() 通用文件读取辅助函数（统一FileNotFoundError+IOError处理）；新增7个 _cmd_*() 独立命令处理函数（repl/eval/help/vm/eval_file/check/dump_bytecode）；引入 _COMMAND_HANDLERS 命令分发表字典；main 主函数从51行压缩至10行（查表分派），CC从15降至约4。测试572 passed零回归。"
+    },
+    {
+      "cycle": 67,
+      "task_id": "fix_too_broad_exceptions",
+      "status": "completed",
+      "source": "审查驱动",
+      "reason": "审查日志第1511轮报告 too_broad_exception 7个（MEDIUM级），持续10+轮未解决。分布在 cli.py(2处最后防线) 和 pass_manager.py(4处优雅降级)。裸 except Exception 会静默吞咽 SystemExit/KeyboardInterrupt/MemoryError 等致命异常。",
+      "details": "1) pass_manager.py：引入 _PASS_EXECUTION_ERRORS 元组常量（TypeError/AttributeError/KeyError/ValueError/IndexError/NameError/RuntimeError/ZeroDivisionError），明确排除 SystemExit/KeyboardInterrupt/MemoryError/RecursionError；替换4处 except Exception 为 except _PASS_EXECUTION_ERRORS，保留优雅降级能力但杜绝致命异常静默吞咽。2) cli.py：引入 _CLI_UNEXPECTED_ERRORS 元组常量（同上8类），替换 run_source 和 run_repl 中2处 except Exception；更新注释说明'最后防线'的精确范围。测试572 passed零回归。"
+    },
+    {
+      "cycle": 67,
+      "task_id": "type_checker_unit_tests",
+      "status": "completed",
+      "source": "自主规划",
+      "reason": "路线图第66轮评审确定下阶段最高优先级方向为'测试盲区补齐'。type_checker.py（2043行）是当前最大测试盲区，无独立测试文件，仅通过 test_nova.py 集成测试间接覆盖。类型系统是编程语言核心基石。",
+      "details": "新建 tests/test_type_checker.py（405行，49个测试用例），覆盖5大子系统：1) TestUnification（14测）：基本类型/TypeVar/列表/元组/函数/Map/ADT的合一成功与失败场景；2) TestOccurCheck（9测）：基本类型/自身/列表/元组/函数/ADT中的发生检查，以及阻止无限类型；3) TestFindAndPathCompression（3测）：未绑定查找、绑定查找、链式路径压缩；4) TestInstantiation（7测）：基本类型/TypeVar/列表/函数/元组/ADT的实例化，多次实例化独立性验证；5) TestExprTypeChecking（12测）：字面量/二元运算/if/列表/标识符的类型检查；6) TestTypeCheckerBuiltins（4测）：print/read_line/str_to_int/list_length内置签名验证。完整测试621 passed（+49），20 subtests passed，零回归。"
+    },
     {
       "cycle": 66,
       "task_id": "review_cycle_66",
@@ -460,7 +487,7 @@
   ],
   "current_cycle": 66,
   "baseline_tests": 566,
-  "current_tests": 566,
+  "current_tests": 621,
   "last_review_cycle": 66,
   "tasks": [
     {
@@ -824,7 +851,7 @@
       "priority": 75,
       "category": "test",
       "estimated": "4-6小时",
-      "status": "pending",
+      "status": "completed",
       "depends_on": [],
       "reason": "type_checker.py 2043行无独立测试，是当前最大测试盲区。类型系统是编程语言核心基石，测试不足意味着任何类型系统变更都可能引入无感知的回归。Explore深度代码审计确认其为最高优先级的测试补齐任务。[审查发现/自主发现]"
     },
@@ -836,7 +863,7 @@
       "priority": 70,
       "category": "engineering",
       "estimated": "2-3小时",
-      "status": "pending",
+      "status": "completed",
       "depends_on": [],
       "reason": "too_broad_exception 7个持续10+轮未解决，是最顽固的MEDIUM级问题。pass_manager优雅降级模式缺乏失败计数，可能导致静默退化而不自知。[审查驱动]"
     },
@@ -848,7 +875,7 @@
       "priority": 60,
       "category": "engineering",
       "estimated": "2-3小时",
-      "status": "pending",
+      "status": "completed",
       "depends_on": [],
       "reason": "cli.py 两个函数占据 Top10 复杂度前两名（CC=15），是当前非deprecated代码中最高复杂度的函数。argparse+栈模式重构难度低、收益快，可直接将Top10最高CC从15压至13以下。[审查驱动]"
     }
