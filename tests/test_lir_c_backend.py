@@ -399,7 +399,7 @@ class TestControlFlow(unittest.TestCase):
         self.assertIn("goto bb_false;", c_code)
 
     def test_switch(self):
-        """Switch 多分支"""
+        """Switch 多分支（2 个 case，走 if-else 级联路径）"""
         module = LIRModule(name="test")
         fn = LIRFunction(name="test", params=[], return_type=UNIT_TYPE)
         fn.body = [
@@ -424,6 +424,38 @@ class TestControlFlow(unittest.TestCase):
         self.assertIn("if (r0 == 1)", c_code)
         self.assertIn("goto bb1;", c_code)
         self.assertIn("goto bb_default;", c_code)
+
+    def test_switch_int_three_cases(self):
+        """Switch 3 个整型 case，触发 C switch 语句生成路径"""
+        module = LIRModule(name="test")
+        fn = LIRFunction(name="test", params=[], return_type=UNIT_TYPE)
+        fn.body = [
+            LIRLabel(name="bb0"),
+            LIRLoadConst(value=1, const_type="int"),
+            LIRSwitch(
+                cases=[(1, "bb1"), (2, "bb2"), (3, "bb3")],
+                default_target="bb_default",
+            ),
+            LIRLabel(name="bb1"),
+            LIRReturn(),
+            LIRLabel(name="bb2"),
+            LIRReturn(),
+            LIRLabel(name="bb3"),
+            LIRReturn(),
+            LIRLabel(name="bb_default"),
+            LIRReturn(),
+        ]
+        fn.body[1].dst_loc = ("r0", INT_TYPE)
+        fn.body[2].src_locs = [("r0", INT_TYPE)]
+        module.functions["test"] = fn
+        c_code = LIRCBackend().compile(module)
+
+        # 验证生成 C switch 语句而非 if-else 级联
+        self.assertIn("switch ((int64_t)r0)", c_code)
+        self.assertIn("case 1: goto bb1;", c_code)
+        self.assertIn("case 2: goto bb2;", c_code)
+        self.assertIn("case 3: goto bb3;", c_code)
+        self.assertIn("default: goto bb_default;", c_code)
 
 
 # ============================================================

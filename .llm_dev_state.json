@@ -1,6 +1,9 @@
 {
-  "cycles": 70,
+  "cycles": 71,
   "completed_tasks": [
+    "test_lir_c_backend_switch",
+    "pass_manager_unit_tests",
+    "refactor_redirect_branch",
     "mir_lowering_unit_tests",
     "refactor_lower_call_expr",
     "clean_unused_imports_v5",
@@ -154,6 +157,30 @@
   ],
   "failed_tasks": [],
   "task_history": [
+    {
+      "cycle": 71,
+      "task_id": "refactor_redirect_branch",
+      "status": "completed",
+      "source": "审查驱动",
+      "reason": "第1511轮深度审查报告 Top10 复杂函数中 LoopInvariantCodeMotion._redirect_branch CC=14。将4分支isinstance链重构为调度表模式，新增4个静态方法handler和_REDIRECT_HANDLERS调度表，主函数从32行降至约8行。",
+      "details": "1) 提取 _redir_jump/_redir_branch/_redir_switch/_redir_match_jump 4个静态方法，每个职责单一；2) 新增 _REDIRECT_HANDLERS 类属性调度表；3) _redirect_branch 改为惰性构建+查表调用，CC从约14降至约3；4) 保留原有行为，所有现有调用点无需修改。测试零回归。"
+    },
+    {
+      "cycle": 71,
+      "task_id": "pass_manager_unit_tests",
+      "status": "completed",
+      "source": "自主规划",
+      "reason": "ir/pass_manager.py（1539行）是最大测试盲区之一，DCE/Inlining/CSE/LIR-DCE 四大优化Pass缺乏直接功能验证。第69轮评审确定第71轮最高优先级任务之一。",
+      "details": "新建 tests/test_pass_manager.py（324行，18个测试用例），覆盖4大测试类：1)TestDeadCodeElimination（6测）：未使用let消除/被使用let保留/有副作用let保留/最后表达式保留/纯表达式语句移除/有副作用表达式保留；2)TestInlining（4测）：简单函数内联/递归函数不内联/参数过多不内联/block体函数内联；3)TestCommonSubexprElimination（4测）：重复二元运算消除/可交换规范化/有副作用不做CSE/跨块不消除；4)TestLIRDeadCodeElimination（4测）：未使用LoadConst消除/StoreGlobal保留/使用链保留/未使用BinOp消除。总测试676→695（+18）。"
+    },
+    {
+      "cycle": 71,
+      "task_id": "test_lir_c_backend_switch",
+      "status": "completed",
+      "source": "自主规划",
+      "reason": "backend/lir_c_backend.py _compile_switch 的 >=3 整型 case C switch 生成路径完全无测试覆盖，是审查报告发现的测试盲区补充。",
+      "details": "在 tests/test_lir_c_backend.py 新增 test_switch_int_three_cases 测试方法：构造3个整型case的LIRSwitch，验证后端生成C switch语句（含switch ((int64_t)r0)、case 1/2/3、default: goto bb_default），而非if-else级联。测试47 passed，零回归。"
+    },
     {
       "cycle": 70,
       "task_id": "mir_lowering_unit_tests",
@@ -729,7 +756,7 @@
       "priority": 65,
       "category": "engineering",
       "estimated": "3-5 小时",
-      "status": "pending",
+      "status": "completed",
       "depends_on": [],
       "reason": "第1511轮Top10复杂函数CC=14，LICM循环优化核心。分支重定向逻辑涉及目标收集、执行、验证三个阶段，阶段拆分后CC可降至约5。[审查驱动]"
     },
@@ -765,7 +792,7 @@
       "priority": 65,
       "category": "test",
       "estimated": "4-6 小时",
-      "status": "pending",
+      "status": "completed",
       "depends_on": [],
       "reason": "1543行仅SSA验证器有测试（test_ssa_verifier.py），优化Pass（DCE/CSE/LICM/内联）缺乏直接测试。性能优化的正确性需要独立验证，不能仅靠集成测试兜底。[自主发现]"
     },
@@ -1048,6 +1075,18 @@
       "status": "completed",
       "depends_on": [],
       "reason": "c_codegen.py _compile_pattern 为9分支if-elif isinstance链（PatternWildcard~PatternList），与项目其他pattern匹配函数（evaluator.py _match_pattern 已调度表化、type_checker.py _check_pattern 已调度表化）架构不一致。新增模式类型时需修改主函数，扩展成本高。 [自主规划]"
+    },
+    {
+      "id": "test_lir_c_backend_switch",
+      "name": "LIR C后端 switch 语句测试补充",
+      "description": "为 backend/lir_c_backend.py _compile_switch 的 >=3 整型 case C switch 生成路径补充单元测试，覆盖之前无测试的跳转表优化路径。",
+      "difficulty": "easy",
+      "priority": 45,
+      "category": "test",
+      "estimated": "20分钟",
+      "status": "completed",
+      "depends_on": [],
+      "reason": "审查报告发现 _compile_switch 的 C switch 路径（>=3整型case）完全无测试，是 LIR C 后端的关键控制流路径。[自主发现]"
     }
   ]
 }

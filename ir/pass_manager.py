@@ -970,38 +970,61 @@ class LoopInvariantCodeMotion(Pass):
 
         return new_label
 
-    def _redirect_branch(self, terminator, old_target, new_target):
-        """将终结指令中的 old_target 替换为 new_target"""
-        from .ir_nodes import MIRBranch, MIRJump, MIRMatchJump, MIRSwitch
+    # 分支重定向调度表：终结指令类型 -> 处理函数
+    _REDIRECT_HANDLERS = {}
 
-        if isinstance(terminator, MIRJump):
-            if terminator.target == old_target:
-                terminator.target = new_target
-        elif isinstance(terminator, MIRBranch):
-            if terminator.true_target == old_target:
-                terminator.true_target = new_target
-            if terminator.false_target == old_target:
-                terminator.false_target = new_target
-        elif isinstance(terminator, MIRSwitch):
-            new_cases = []
-            for val, target in terminator.cases:
-                if target == old_target:
-                    new_cases.append((val, new_target))
-                else:
-                    new_cases.append((val, target))
-            terminator.cases = new_cases
-            if terminator.default_target == old_target:
-                terminator.default_target = new_target
-        elif isinstance(terminator, MIRMatchJump):
-            new_tests = []
-            for vname, fields, target in terminator.variant_tests:
-                if target == old_target:
-                    new_tests.append((vname, fields, new_target))
-                else:
-                    new_tests.append((vname, fields, target))
-            terminator.variant_tests = new_tests
-            if terminator.default_target == old_target:
-                terminator.default_target = new_target
+    def _redirect_branch(self, terminator, old_target, new_target):
+        """将终结指令中的 old_target 替换为 new_target
+
+        使用调度表模式按终结指令类型分发到对应的处理函数，
+        新增终结指令类型时只需在 _REDIRECT_HANDLERS 中添加映射。
+        """
+        # 惰性构建调度表（首次使用时填充，避免模块级循环导入问题）
+        if not LoopInvariantCodeMotion._REDIRECT_HANDLERS:
+            from .ir_nodes import MIRBranch, MIRJump, MIRMatchJump, MIRSwitch
+            LoopInvariantCodeMotion._REDIRECT_HANDLERS = {
+                MIRJump: self._redir_jump,
+                MIRBranch: self._redir_branch,
+                MIRSwitch: self._redir_switch,
+                MIRMatchJump: self._redir_match_jump,
+            }
+        handler = LoopInvariantCodeMotion._REDIRECT_HANDLERS.get(type(terminator))
+        if handler is not None:
+            handler(terminator, old_target, new_target)
+
+    @staticmethod
+    def _redir_jump(terminator, old_target, new_target):
+        """重定向 MIRJump 的目标"""
+        if terminator.target == old_target:
+            terminator.target = new_target
+
+    @staticmethod
+    def _redir_branch(terminator, old_target, new_target):
+        """重定向 MIRBranch 的真/假分支目标"""
+        if terminator.true_target == old_target:
+            terminator.true_target = new_target
+        if terminator.false_target == old_target:
+            terminator.false_target = new_target
+
+    @staticmethod
+    def _redir_switch(terminator, old_target, new_target):
+        """重定向 MIRSwitch 的 case 和 default 目标"""
+        new_cases = []
+        for val, target in terminator.cases:
+            new_cases.append((val, new_target if target == old_target else target))
+        terminator.cases = new_cases
+        if terminator.default_target == old_target:
+            terminator.default_target = new_target
+
+    @staticmethod
+    def _redir_match_jump(terminator, old_target, new_target):
+        """重定向 MIRMatchJump 的 variant_tests 和 default 目标"""
+        new_tests = []
+        for vname, fields, target in terminator.variant_tests:
+            new_tests.append((vname, fields, new_target if target == old_target else target))
+        terminator.variant_tests = new_tests
+        if terminator.default_target == old_target:
+            terminator.default_target = new_target
 
 
 class SSAVerifier(Pass):
