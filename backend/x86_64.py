@@ -66,6 +66,10 @@ class X86_64Emitter:
     def _modrm(self, mod, reg, rm):
         return ((mod & 3) << 6) | ((reg & 7) << 3) | (rm & 7)
 
+    def _sib(self, scale, index, base):
+        """SIB 字节: scale(2) | index(3) | base(3)"""
+        return ((scale & 3) << 6) | ((index & 7) << 3) | (base & 7)
+
     def _rex(self, w=0, r=0, x=0, b=0):
         rex = 0x40 | (w << 3) | (r << 2) | (x << 1) | b
         if rex != 0x40:
@@ -102,26 +106,48 @@ class X86_64Emitter:
     def mov_reg_mem(self, reg, base, offset):
         """mov reg, [base + offset] (64-bit)"""
         self._rex_rb(reg, base)
+        needs_sib = (base & 7) == RSP  # RSP/R12 需要 SIB 字节
         if -128 <= offset <= 127:
             self.emit_byte(0x8B)
-            self.emit_byte(self._modrm(0b01, reg & 7, base & 7))
-            self.emit_int8(offset)
+            if needs_sib:
+                self.emit_byte(self._modrm(0b01, reg & 7, 0b100))  # rm=SIB
+                self.emit_byte(self._sib(0, 0b100, base & 7))      # scale=1, no index
+                self.emit_int8(offset)
+            else:
+                self.emit_byte(self._modrm(0b01, reg & 7, base & 7))
+                self.emit_int8(offset)
         else:
             self.emit_byte(0x8B)
-            self.emit_byte(self._modrm(0b10, reg & 7, base & 7))
-            self.emit_int32(offset)
+            if needs_sib:
+                self.emit_byte(self._modrm(0b10, reg & 7, 0b100))  # rm=SIB
+                self.emit_byte(self._sib(0, 0b100, base & 7))      # scale=1, no index
+                self.emit_int32(offset)
+            else:
+                self.emit_byte(self._modrm(0b10, reg & 7, base & 7))
+                self.emit_int32(offset)
 
     def mov_mem_reg(self, base, offset, reg):
         """mov [base + offset], reg (64-bit)"""
         self._rex_rb(reg, base)
+        needs_sib = (base & 7) == RSP  # RSP/R12 需要 SIB 字节
         if -128 <= offset <= 127:
             self.emit_byte(0x89)
-            self.emit_byte(self._modrm(0b01, reg & 7, base & 7))
-            self.emit_int8(offset)
+            if needs_sib:
+                self.emit_byte(self._modrm(0b01, reg & 7, 0b100))  # rm=SIB
+                self.emit_byte(self._sib(0, 0b100, base & 7))      # scale=1, no index
+                self.emit_int8(offset)
+            else:
+                self.emit_byte(self._modrm(0b01, reg & 7, base & 7))
+                self.emit_int8(offset)
         else:
             self.emit_byte(0x89)
-            self.emit_byte(self._modrm(0b10, reg & 7, base & 7))
-            self.emit_int32(offset)
+            if needs_sib:
+                self.emit_byte(self._modrm(0b10, reg & 7, 0b100))  # rm=SIB
+                self.emit_byte(self._sib(0, 0b100, base & 7))      # scale=1, no index
+                self.emit_int32(offset)
+            else:
+                self.emit_byte(self._modrm(0b10, reg & 7, base & 7))
+                self.emit_int32(offset)
 
     def mov_reg_imm32(self, reg, imm):
         """mov reg, imm32 (32-bit, 零扩展到 64)"""

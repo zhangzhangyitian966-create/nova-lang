@@ -1,7 +1,7 @@
 {
-  "cycles": 43,
-  "frontend_completed": 29,
-  "backend_completed": 32,
+  "cycles": 44,
+  "frontend_completed": 30,
+  "backend_completed": 33,
   "last_review_cycle": 42,
   "current_review_cycle": 42,
   "completed_tasks": [
@@ -75,7 +75,9 @@
     "backend_native_global_var_support",
     "review_cycle_42",
     "FRONTEND-029",
-    "backend_unified_closure_e2e_test"
+    "backend_unified_closure_e2e_test",
+    "FRONTEND-030",
+    "backend_native_relocatable_elf_link_fix"
   ],
   "failed_tasks": [],
   "deprecated_tasks": [
@@ -88,6 +90,28 @@
     "backend_c_todo_error"
   ],
   "task_history": [
+    {
+      "cycle": 44,
+      "task_id": "FRONTEND-030",
+      "name": "修复 parser match 表达式字符字面量模式缺失",
+      "track": "frontend",
+      "difficulty": "easy",
+      "priority": 55,
+      "result": "success",
+      "details": "前端维护任务。parser.py 修复 match 表达式字符字面量模式解析缺失：(1) 导入 PatternChar AST 节点；(2) _parse_match_expr 允许 TokenType.CHAR 和 TokenType.MINUS 作为模式起始符；(3) _parse_simple_literal_pattern 添加 CHAR 分支返回 PatternChar。修改 3 个文件共 6 行代码。测试 572 passed，无回归。前端 30/30 完成。",
+      "timestamp": "2026-07-28 08:30"
+    },
+    {
+      "cycle": 44,
+      "task_id": "backend_native_relocatable_elf_link_fix",
+      "name": "修复 Native 后端可重定位 ELF 链接格式问题",
+      "track": "backend",
+      "difficulty": "hard",
+      "priority": 60,
+      "result": "success",
+      "details": "P1-B3 端到端执行的关键修复。native_backend.py 修复 5 个 ELF 格式 bug：(1) st_info 位序错误（bind 和 type 位置交换），导致符号绑定属性错乱；(2) r_info 位序错误（rtype 和 sym_idx 位置交换），导致重定位类型和符号索引解析错误；(3) sh_info 未正确设置局部符号数量，导致链接器报错 local symbol at index 5 (>= sh_info of 3)；(4) 移除未使用的 .rela.data section；(5) gcc 链接命令添加 -nostartfiles 避免 _start 冲突。x86_64.py 添加 SIB 字节支持，修复 RSP 寻址导致的 SIGILL 非法指令。修改 3 个文件共 66 行代码。测试 572 passed，无回归。后端 33/45 完成。Native 端到端执行仍待数据段重定位和 main 符号导出验证。",
+      "timestamp": "2026-07-28 08:30"
+    },
     {
       "cycle": 43,
       "task_id": "FRONTEND-029",
@@ -198,7 +222,7 @@
       "difficulty": "hard",
       "priority": 60,
       "estimated_effort": "4-6小时",
-      "status": "pending",
+      "status": "completed",
       "source": "cycle_43_audit",
       "depends_on": ["backend_unified_closure_e2e_test"]
     },

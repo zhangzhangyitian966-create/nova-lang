@@ -4,6 +4,80 @@
 
 ---
 
+## 第 44 轮 — 2026-07-28 08:30
+
+> 普通轮 | 前端: FRONTEND-030 修复 parser match 字符字面量模式缺失 | 后端: backend_native_relocatable_elf_link_fix 修复 Native ELF 链接格式
+
+---
+
+### 轮次概览
+
+| 维度 | 数据 |
+|------|------|
+| 轮次 | 第 44 轮（非评审轮） |
+| 测试基线 | 572 passed, 20 subtests |
+| 测试后 | 572 passed, 20 subtests |
+| 新增测试 | 0 个 |
+| 前端完成率 | 30/30 = **100%** |
+| 后端完成率 | 33/45 = **73.3%** |
+| 总完成率 | 63/75 = **84.0%** |
+| Git Tag | fullstack-dev-cycle-44-20260728-0830 |
+
+---
+
+### 前端任务：FRONTEND-030 修复 parser match 表达式字符字面量模式缺失
+
+**为什么选这个**：前端任务池已空（29/29 完成），进入纯维护模式。代码审计发现 match 表达式解析不支持字符字面量模式（如 `'a' => ...`），而 AST 已定义 PatternChar 节点。修复成本低（6 行）、无破坏性变更、提升语法完整性。
+
+**修改内容**：
+- `parser.py`：导入 `PatternChar` AST 节点
+- `parser.py`：`_parse_match_expr` 允许 `TokenType.CHAR` 和 `TokenType.MINUS` 作为模式起始符
+- `parser.py`：`_parse_simple_literal_pattern` 添加 `CHAR` 分支，返回 `PatternChar(value=tok.value, ...)`
+
+**结果**：成功 | 测试 572 passed，无回归
+
+---
+
+### 后端任务：backend_native_relocatable_elf_link_fix 修复 Native 后端可重定位 ELF 链接格式
+
+**为什么选这个**：路线图第 44 轮计划任务，P1-B3（原生后端端到端执行）的核心瓶颈。第 43 轮建立的三后端统一闭包测试矩阵中，Native 后端只能验证编译基线（.o 文件格式），无法链接执行。本任务修复 ELF 格式 bug，使 .o 文件能通过 gcc 链接，是端到端执行的最后关卡。
+
+**修改内容**：
+1. `backend/native_backend.py`：修复 5 个 ELF 格式 bug
+   - **st_info 位序修复**：ELF64 符号表 st_info 字段中 bind 在高 4 位、type 在低 4 位。原代码 `(STT_FUNC << 4) | STB_GLOBAL` 把 bind 和 type 位置写反了，导致链接器将符号识别为 STB_SECTION 而非 STB_GLOBAL。修复为 `(STB_GLOBAL << 4) | STT_FUNC`
+   - **r_info 位序修复**：ELF64 重定位 r_info 中高 32 位是 sym_idx、低 32 位是 type。原代码 `(rtype << 32) | sym_idx` 把两者写反，导致链接器报错 "reloc against '.data': error 4"。修复为 `(sym_idx << 32) | rtype`
+   - **sh_info 修复**：.symtab section header 的 sh_info 应等于第一个全局符号的索引（即局部符号数量）。原代码设为 `len(symbols)`（总符号数），导致链接器报错 "local symbol at index 5 (>= sh_info of 3)"。修复为 `local_sym_count = 3`（NULL + .text + .data）
+   - **移除未使用的 .rela.data section**：原代码注册了 `.rela.data` 但没有实际使用，浪费空间且可能误导链接器
+   - **gcc 链接添加 `-nostartfiles`**：避免 C 运行时启动文件（crt1.o 等）与 Nova 的 `_start` 符号冲突
+2. `backend/x86_64.py`：添加 SIB（Scale-Index-Base）字节支持
+   - x86_64 指令编码中，当基址寄存器为 RSP（或 R12）时，ModR/M 的 rm 字段必须为 0b100（SIB 指示），并额外发射 SIB 字节。原代码直接发射 `modrm(..., base & 7)`，当 base=RSP 时 rm=100 被链接器/CPU 解释为需要 SIB，但实际未发射 SIB 字节，导致 SIGILL 非法指令
+   - 新增 `_sib(scale, index, base)` 方法，在 `mov_reg_mem` 和 `mov_mem_reg` 中检测 `(base & 7) == RSP` 时发射 SIB 字节
+
+**结果**：成功（ELF .o 文件可通过 gcc 链接，端到端执行仍待数据段重定位和 main 符号导出最终验证）| 测试 572 passed，无回归
+
+---
+
+### 测试前后对比
+
+| 指标 | 开发前 | 开发后 | 变化 |
+|------|--------|--------|------|
+| 总测试数 | 572 passed | 572 passed | 0 |
+| 失败数 | 0 | 0 | 0 |
+| 修改文件 | - | parser.py, native_backend.py, x86_64.py | 3 |
+
+---
+
+### 前端下一步
+
+前端进入纯维护模式，任务池已空。下轮若代码审计发现新问题则响应，否则保持状态。
+
+### 后端下一步
+
+1. **第 45 轮首要任务**：`backend_native_regalloc_call_site` — 寄存器分配器添加调用点活跃区间切口，优化 caller-saved 寄存器保存策略（当前靠手动 push 全部 caller-saved 兜底，极低效）
+2. **第 45 轮次要任务**：`backend_lir_phi_lowering_verify` 或 `backend_wasm_stack_balance` — 按路线图评审计划推进
+
+---
+
 ## 第 43 轮 — 2026-07-28 04:15
 
 > 普通轮 | 前端: FRONTEND-029 修复 ForExpr step 字段不一致 | 后端: backend_unified_closure_e2e_test 统一闭包测试矩阵

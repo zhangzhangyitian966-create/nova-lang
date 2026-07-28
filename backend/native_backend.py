@@ -1809,7 +1809,6 @@ class NativeCodeGen:
         idx_symtab = _add_shstr(".symtab")
         idx_strtab = _add_shstr(".strtab")
         idx_rela_text = _add_shstr(".rela.text")
-        idx_rela_data = _add_shstr(".rela.data")
         idx_note = _add_shstr(".note.GNU-stack")
         idx_shstrtab = _add_shstr(".shstrtab")
 
@@ -1822,7 +1821,7 @@ class NativeCodeGen:
         def _section_symbol(name_idx, shndx):
             return struct.pack("<IBBHQQ",
                 0,  # st_name（节符号通常无名）
-                (STT_SECTION << 4) | STB_LOCAL,
+                (STB_LOCAL << 4) | STT_SECTION,  # st_info: bind=LOCAL, type=SECTION
                 0,  # st_other
                 shndx,
                 0,  # st_value
@@ -1840,8 +1839,8 @@ class NativeCodeGen:
         def _add_func_symbol(name: str, offset: int, size: int):
             name_idx = _add_str(name)
             sym_idx = len(symbols)
-            # STT_FUNC | STB_GLOBAL, 对齐 16
-            info = (STT_FUNC << 4) | STB_GLOBAL
+            # st_info: bind=GLOBAL, type=FUNC
+            info = (STB_GLOBAL << 4) | STT_FUNC
             symbols.append(struct.pack("<IBBHQQ",
                 name_idx, info, 0, 1,  # shndx=1 -> .text
                 offset, size))
@@ -1871,7 +1870,8 @@ class NativeCodeGen:
         for ext_name in sorted(extern_funcs):
             name_idx = _add_str(ext_name)
             sym_idx = len(symbols)
-            info = (STT_NOTYPE << 4) | STB_GLOBAL
+            # st_info: bind=GLOBAL, type=NOTYPE
+            info = (STB_GLOBAL << 4) | STT_NOTYPE
             symbols.append(struct.pack("<IBBHQQ",
                 name_idx, info, 0,  # st_other
                 SHN_UNDEF, 0, 0))
@@ -1944,7 +1944,8 @@ class NativeCodeGen:
 
         # 序列化 rela_text
         for offset, sym_idx, rtype, addend in rela_text_entries:
-            r_info = (rtype << 32) | sym_idx
+            # ELF64 r_info: 高 32 位=sym_idx, 低 32 位=type
+            r_info = (sym_idx << 32) | rtype
             rela_text.extend(struct.pack("<QQq", offset, r_info, addend))
 
         # ── 阶段 6: 组装 ELF ──
@@ -2026,10 +2027,12 @@ class NativeCodeGen:
             idx_rela_text, SHT_RELA, 0,
             0, rela_text_offset, len(rela_text),
             4, 1, 8, 24)  # sh_link=4 -> .symtab
+        # 局部符号数量：NULL(0) + .text section(1) + .data section(2) = 3
+        local_sym_count = 3
         shdr_symtab = struct.pack(_shdr_fmt,
             idx_symtab, SHT_SYMTAB, 0,
             0, symtab_offset, symtab_size,
-            5, len(symbols), 8, ELF64_SYM_SIZE)  # sh_link=5 -> .strtab
+            5, local_sym_count, 8, ELF64_SYM_SIZE)  # sh_link=5 -> .strtab, sh_info=local_sym_count
         shdr_strtab = struct.pack(_shdr_fmt,
             idx_strtab, SHT_STRTAB, 0,
             0, strtab_offset, len(strtab), 0, 0, 1, 0)
@@ -2175,6 +2178,7 @@ class NativeCodeGen:
             # 4. 调用 gcc 链接
             cmd = [
                 gcc,
+                "-nostartfiles",  # 不链接 C 运行时启动文件，避免 _start 冲突
                 obj_path,
                 runtime_lib_path,
                 "-o", output_path,

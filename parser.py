@@ -39,6 +39,7 @@ from .ast_nodes import (
     MutBinding,
     Param,
     PatternBool,
+    PatternChar,
     PatternConstructor,
     PatternFloat,
     PatternIdentifier,
@@ -677,6 +678,8 @@ class Parser:
                 TokenType.FLOAT,
                 TokenType.STRING,
                 TokenType.BOOL,
+                TokenType.CHAR,
+                TokenType.MINUS,
                 TokenType.LPAREN,
                 TokenType.LBRACKET,
             ):
@@ -761,6 +764,9 @@ class Parser:
         if tok.type == TokenType.STRING:
             self._advance()
             return PatternString(value=tok.value, span=self._span(tok))
+        if tok.type == TokenType.CHAR:
+            self._advance()
+            return PatternChar(value=tok.value, span=self._span(tok))
         return None
 
     def _parse_negative_pattern(self, tok: Token):
