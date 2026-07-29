@@ -846,5 +846,222 @@ class TestMatchExhaustiveIntegration(unittest.TestCase):
         self.assertIn("长度", msg)
 
 
+class TestTypeCheckErrorLocation(unittest.TestCase):
+    """TypeCheckError 位置信息（line/column/source）统一补全验证。
+
+    覆盖高频报错场景：未定义标识符、函数调用参数不匹配、
+    二元/一元操作符类型错误、if/while 条件非 Bool、管道类型不匹配、
+    字段访问错误、列表/Map 元素不一致、Try 操作符类型错误。
+    """
+
+    def _compile_and_catch(self, source: str):
+        """通过 Lexer→Parser→TypeChecker 完整管道，捕获第一个 TypeCheckError。"""
+        from nova.lexer import Lexer
+        from nova.parser import Parser
+        lex = Lexer(source)
+        toks = lex.tokenize()
+        parser = Parser(toks, source=source)
+        prog = parser.parse()
+        tc = TypeChecker(source=source)
+        try:
+            tc.check_program(prog)
+        except Exception as e:
+            return e
+        return None
+
+    # ---------- 位置信息基础：line/column 均 > 0 ----------
+
+    def test_undefined_identifier_has_location(self):
+        """未定义标识符：报错必须包含 line >= 1, column >= 1"""
+        src = "fn main() { let x = undefined_var + 1; 0 }"
+        err = self._compile_and_catch(src)
+        self.assertIsNotNone(err, "期望抛出未定义标识符错误")
+        self.assertIn("未定义", str(err))
+        self.assertGreaterEqual(err.line, 1, f"line={err.line} 未设置")
+        self.assertGreaterEqual(err.column, 1, f"column={err.column} 未设置")
+
+    def test_fn_call_arg_type_mismatch_has_location(self):
+        """函数参数类型不匹配：报错必须包含位置，且位置落在出错参数上"""
+        src = "fn add(a: Int, b: Int) -> Int { a + b }\nfn main() { add(1, true) }"
+        err = self._compile_and_catch(src)
+        self.assertIsNotNone(err)
+        self.assertIn("参数", str(err))
+        self.assertIn("不匹配", str(err))
+        self.assertGreaterEqual(err.line, 1)
+        self.assertGreaterEqual(err.column, 1)
+
+    def test_fn_call_too_many_args_has_location(self):
+        """函数参数过多：报错必须有位置"""
+        src = "fn f(x: Int) -> Int { x }\nfn main() { f(1, 2, 3) }"
+        err = self._compile_and_catch(src)
+        self.assertIsNotNone(err)
+        self.assertIn("至多", str(err))
+        self.assertGreaterEqual(err.line, 2, f"期望报错在第2行，实际 line={err.line}")
+
+    def test_non_function_call_has_location(self):
+        """非函数类型调用：报错必须有位置"""
+        src = "fn main() { let x = 42; x(1) }"
+        err = self._compile_and_catch(src)
+        self.assertIsNotNone(err)
+        self.assertIn("非函数类型", str(err))
+        self.assertGreaterEqual(err.line, 1)
+
+    # ---------- 操作符（通过 _check_binary_op try/except 补 span）----------
+
+    def test_arithmetic_op_incompatible_has_location(self):
+        """算术操作符类型不兼容（Int + Bool）：报错有位置"""
+        src = "fn main() { let x = 1 + true; 0 }"
+        err = self._compile_and_catch(src)
+        self.assertIsNotNone(err)
+        self.assertIn("操作符", str(err))
+        self.assertIn("不兼容", str(err))
+        self.assertGreaterEqual(err.line, 1)
+        self.assertGreaterEqual(err.column, 1)
+
+    def test_comparison_op_incompatible_has_location(self):
+        """比较操作符类型不兼容（Int == Bool）：报错有位置"""
+        src = "fn main() { let x = 1 == true; 0 }"
+        err = self._compile_and_catch(src)
+        self.assertIsNotNone(err)
+        self.assertIn("不兼容", str(err))
+        self.assertGreaterEqual(err.line, 1)
+
+    def test_logical_op_non_bool_has_location(self):
+        """逻辑操作符非 Bool（1 && true）：报错有位置，指向左侧操作数"""
+        src = "fn main() { let x = 1 && true; 0 }"
+        err = self._compile_and_catch(src)
+        self.assertIsNotNone(err)
+        self.assertIn("&&", str(err))
+        self.assertGreaterEqual(err.line, 1)
+
+    def test_unary_minus_non_numeric_has_location(self):
+        """一元 '-' 应用于 Bool：报错有位置"""
+        src = "fn main() { let x = -true; 0 }"
+        err = self._compile_and_catch(src)
+        self.assertIsNotNone(err)
+        self.assertIn("一元", str(err))
+        self.assertIn("'-'", str(err))
+        self.assertGreaterEqual(err.line, 1)
+
+    def test_unary_not_non_bool_has_location(self):
+        """一元 '!' 应用于 Int：报错有位置"""
+        src = "fn main() { let x = !42; 0 }"
+        err = self._compile_and_catch(src)
+        self.assertIsNotNone(err)
+        self.assertIn("一元", str(err))
+        self.assertIn("'!'", str(err))
+        self.assertGreaterEqual(err.line, 1)
+
+    # ---------- 控制流 ----------
+
+    def test_if_condition_non_bool_has_location(self):
+        """if 条件非 Bool：报错有位置"""
+        src = "fn main() { if 42 then 1 else 0 }"
+        err = self._compile_and_catch(src)
+        self.assertIsNotNone(err)
+        self.assertIn("if 条件", str(err))
+        self.assertGreaterEqual(err.line, 1)
+
+    def test_if_branch_inconsistent_has_location(self):
+        """if 分支类型不一致（then Int else Bool）：报错有位置"""
+        src = "fn main() { if true then 1 else false }"
+        err = self._compile_and_catch(src)
+        self.assertIsNotNone(err)
+        self.assertIn("分支", str(err))
+        self.assertIn("不一致", str(err))
+        self.assertGreaterEqual(err.line, 1)
+
+    def test_while_condition_non_bool_has_location(self):
+        """while 条件非 Bool：报错有位置"""
+        src = "fn main() { while 1 { break }; 0 }"
+        err = self._compile_and_catch(src)
+        self.assertIsNotNone(err)
+        self.assertIn("while 条件", str(err))
+        self.assertGreaterEqual(err.line, 1)
+
+    # ---------- 管道操作符 ----------
+
+    def test_pipe_right_not_function_has_location(self):
+        """管道右侧非函数：报错有位置"""
+        src = "fn main() { 42 |> 100 }"
+        err = self._compile_and_catch(src)
+        self.assertIsNotNone(err)
+        self.assertIn("管道", str(err))
+        self.assertIn("函数类型", str(err))
+        self.assertGreaterEqual(err.line, 1)
+
+    def test_pipe_type_mismatch_has_location(self):
+        """管道 Int |> fn(String) -> x：类型不匹配报错有位置"""
+        src = "fn len(s: String) -> Int { str_len(s) }\nfn main() { 42 |> len }"
+        err = self._compile_and_catch(src)
+        self.assertIsNotNone(err)
+        self.assertIn("管道", str(err))
+        self.assertIn("不匹配", str(err))
+        self.assertGreaterEqual(err.line, 2)
+
+    # ---------- 数据结构 ----------
+
+    def test_list_element_inconsistent_has_location(self):
+        """列表 [1, true] 元素不一致：报错有位置"""
+        src = "fn main() { let xs = [1, true]; 0 }"
+        err = self._compile_and_catch(src)
+        self.assertIsNotNone(err)
+        self.assertIn("列表", str(err))
+        self.assertIn("不一致", str(err))
+        self.assertGreaterEqual(err.line, 1)
+
+    def test_map_key_inconsistent_has_location(self):
+        """Map 键类型不一致 {"a": 1, 1: "b"}：报错有位置"""
+        src = 'fn main() { let m = {"a": 1, 1: "b"}; 0 }'
+        err = self._compile_and_catch(src)
+        self.assertIsNotNone(err)
+        self.assertIn("Map", str(err))
+        self.assertIn("不一致", str(err))
+        self.assertGreaterEqual(err.line, 1)
+
+    # ---------- 字段访问 ----------
+
+    def test_field_access_non_tuple_adt_has_location(self):
+        """Int.foo 字段访问（非元组非 ADT）：报错有位置"""
+        src = "fn main() { let x = 42.foo; 0 }"
+        err = self._compile_and_catch(src)
+        self.assertIsNotNone(err)
+        self.assertIn("不支持字段访问", str(err))
+        self.assertGreaterEqual(err.line, 1)
+
+    def test_tuple_index_out_of_range_has_location(self):
+        """(1,2).5 索引越界：报错有位置"""
+        src = "fn main() { let t = (1, 2); t.5 }"
+        err = self._compile_and_catch(src)
+        self.assertIsNotNone(err)
+        self.assertIn("越界", str(err))
+        self.assertGreaterEqual(err.line, 1)
+
+    # ---------- Try 操作符 ----------
+
+    def test_try_on_non_option_result_has_location(self):
+        """对 Int 使用 ? 操作符：报错有位置"""
+        src = "fn main() -> Int { let x = 42; x? }"
+        err = self._compile_and_catch(src)
+        self.assertIsNotNone(err)
+        self.assertIn("?", str(err))
+        self.assertIn("Option", str(err))
+        self.assertGreaterEqual(err.line, 1)
+
+    # ---------- Source code 上下文显示 ----------
+
+    def test_error_includes_source_code(self):
+        """TypeChecker 传入 source 后，错误应携带 source_code 支持上下文显示"""
+        src = "fn main() { let x = undefined; 0 }"
+        err = self._compile_and_catch(src)
+        self.assertIsNotNone(err)
+        self.assertEqual(err.source_code, src,
+                         "source_code 应等于传入的完整源码")
+        # 带源码的错误输出应包含行号前缀格式（如 " 1 |"、"  -->"）
+        formatted = str(err)
+        self.assertIn("-->", formatted,
+                        f"带源码的错误格式应包含 '-->' 标记，实际: {formatted}")
+
+
 if __name__ == "__main__":
     unittest.main()

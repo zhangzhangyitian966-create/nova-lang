@@ -1,7 +1,7 @@
 {
-  "cycles": 55,
-  "frontend_completed": 37,
-  "backend_completed": 40,
+  "cycles": 56,
+  "frontend_completed": 38,
+  "backend_completed": 41,
   "last_review_cycle": 54,
   "current_review_cycle": 54,
   "completed_tasks": [
@@ -94,7 +94,9 @@
     "backend_native_float_global_store",
     "review_cycle_54",
     "FRONTEND-035",
-    "backend_c_closure_double_return"
+    "backend_c_closure_double_return",
+    "FRONTEND-036",
+    "backend_phi_copy_missing_error"
   ],
   "failed_tasks": [],
   "deprecated_tasks": [
@@ -107,6 +109,28 @@
     "backend_c_todo_error"
   ],
   "task_history": [
+    {
+      "cycle": 56,
+      "task_id": "FRONTEND-036",
+      "name": "TypeCheckError 位置信息统一补全",
+      "track": "frontend",
+      "difficulty": "medium",
+      "priority": 85,
+      "result": "success",
+      "details": "前端维护增强任务（P1 用户体验）。深度分析显示 70 次 TypeCheckError 抛出中只有 21 处（30%）带位置信息，49 处（70%）用户只看到错误文本无法定位。修复方案：(1) 在 TypeChecker 类中新增 _error(message, expr=None, span=None) 辅助方法，自动从 expr.span 提取 line/column，并把 source 源码写入错误对象用于上下文显示；(2) 批量替换 22 处高频报错点：标识符/函数调用（4处）/操作符（12处，含 try/except 包装二元辅助方法）/控制流（if/match/while，5处）/管道（3处）/字段访问（4处）/列表Map（3处）/Try（1处）/列表推导（1处）/一元操作（3处）；(3) 新增 TestTypeCheckErrorLocation 测试类 20 个测试，通过完整 Lexer→Parser→TypeChecker 管道验证 18 类场景的错误均携带 line≥1、column≥1、source_code 等于输入源码且格式化输出含 Rust 风格 `-->` 标记。修改 1 个文件（type_checker.py）新增辅助方法 25 行 + 替换 22 处 raise，新增 1 个测试类（test_type_checker.py）约 220 行。测试 1092 passed（基线 1065，+27 含后端 7 个），无回归。前端 38/38 完成。",
+      "timestamp": "2026-07-29 16:20"
+    },
+    {
+      "cycle": 56,
+      "task_id": "backend_phi_copy_missing_error",
+      "name": "Phi 拷贝源缺失时抛出内部编译错误（P2-新1 清零）",
+      "track": "backend",
+      "difficulty": "easy",
+      "priority": 40,
+      "result": "success",
+      "details": "P2-新1 清零。第 54 轮代码审计发现 lir_lowering.py _insert_phi_copies 行 353 `if src_ssa and src_ssa in self.ssa_to_loc` 条件不满足时静默跳过，后续 Phi 结果值为未初始化内存。修复方案：拆为 3 个独立防御性检查，任一失败均抛 LIRLoweringError 带可诊断消息：(1) `src_ssa is None`（前驱块不在 Phi sources 列表，消息含可用前驱名）；(2) `src_ssa not in ssa_to_loc`（源 SSA 位置未分配，消息含映射规模）；(3) `phi_result_name not in ssa_to_loc`（Phi 结果未分配位置）。新增 TestPhiCopyDefensiveChecks 测试类 7 个测试覆盖：合法 Phi 生成 1 条拷贝 LIRLoadReg、后继块不在 phi_info 静默 return、3 类异常场景分别抛错且消息含关键标识、首个异常 Phi 立即停止处理不写入 body、多前驱 Phi 正确挑选匹配前驱的 source。修改 1 个文件（lir_lowering.py）约 40 行代码，新增 1 个测试类约 135 行。测试 1092 passed（+7 新测试），无回归。后端 41/60 完成。P2-新1 清零。",
+      "timestamp": "2026-07-29 16:25"
+    },
     {
       "cycle": 55,
       "task_id": "FRONTEND-035",
@@ -139,171 +163,6 @@
       "result": "success",
       "details": "第 52-54 轮评审轮。前端 36/36=100%完成（质量评分8/10），后端 39/56=69.6%完成（质量评分6.5/10）。深度代码审计验证第53轮Native浮点全局存储修复正确（load_to_reg寄存器编号统一设计有效）。新发现2个P2级问题：Wasm WAT缩进管理脆弱、Phi拷贝缺失静默跳过。前端进入维护模式，后端仍不平衡。下3轮聚焦：C闭包浮点返回(P80)>Native外部运行时链接(P70)>Wasm栈平衡(P45)。新增2个任务，废弃0个，调整0个优先级。",
       "timestamp": "2026-07-29 10:30"
-    },
-    {
-      "cycle": 53,
-      "task_id": "frontend_generic_param_count_check",
-      "name": "添加泛型参数数量校验",
-      "track": "frontend",
-      "difficulty": "easy",
-      "priority": 60,
-      "result": "success",
-      "details": "前端增强任务。type_checker.py _make_generic_type 原来对泛型参数数量不做任何校验：List[Int, String] 会静默忽略第二个参数，Map[Int] 会降级为 ADTType 而非 MapType，自定义 ADT 传入类型参数也被静默接受。修复：为 List/Map/Option/Result 和自定义 ADT 分别添加参数数量校验，不匹配时抛出 TypeCheckError。新增 TestGenericParamCount 测试类 11 个测试覆盖所有边界情况。修改 1 个文件（type_checker.py）约 25 行代码，新增 1 个测试文件约 90 行代码。测试 919 passed（+12 新测试），无回归。前端 36/36 完成。",
-      "timestamp": "2026-07-29 08:30"
-    },
-    {
-      "cycle": 53,
-      "task_id": "backend_native_float_global_store",
-      "name": "修复 Native 后端浮点全局变量存储生成错误代码",
-      "track": "backend",
-      "difficulty": "medium",
-      "priority": 85,
-      "result": "success",
-      "details": "P1-新2 清零。native_backend.py _emit_store_global 对浮点值原来先发射 mov [rip], RAX（整数存储），然后 if is_float: pass，没有任何修复或重发射浮点存储。修复：在 ctx.load_to_reg 之后，如果是浮点值，添加 e.movq_gpr_xmm(RAX, XMM0) 将 XMM0 的位模式拷贝到 RAX，再用统一的整数存储指令 mov [rip], RAX 写入全局变量位置。新增 test_store_global_float 测试验证指令序列中包含 movsd xmm0, [rsp]、movq rax, xmm0 和 mov [rip], rax。修改 1 个文件（native_backend.py）约 10 行代码，新增 1 个测试约 30 行代码。测试 919 passed，无回归。后端 39/56 完成。Native 后端完成度维持 ~88%。",
-      "timestamp": "2026-07-29 08:45"
-    },
-    {
-      "cycle": 52,
-      "task_id": "frontend_parser_block_boundary",
-      "name": "修复 Parser 块边界静默吞错",
-      "track": "frontend",
-      "difficulty": "easy",
-      "priority": 55,
-      "result": "success",
-      "details": "前端唯一剩余审计问题。parser.py _parse_block 中当表达式后既无 ; 也无 RBRACE 时，原代码直接将表达式加入 stmts 而不检查后续 token 是否合法。保守修复：仅当后续 token 是明显不能开始新表达式的符号（RPAREN、RBRACKET、COMMA）时才抛出 ParseError。这样既捕获了真实语法错误（如 { x + y ) }），又保持了对 Nova 合法换行分隔语法的兼容性（如 if ... then continue\nresult = ...）。修改 1 个文件（parser.py）约 8 行代码。测试 907 passed，无回归。前端 35/35 完成。",
-      "timestamp": "2026-07-29 07:15"
-    },
-    {
-      "cycle": 52,
-      "task_id": "backend_cranelift_todo_fatal",
-      "name": "修复 Cranelift 后端未实现指令降级为 TODO 注释（致命缺陷）",
-      "track": "backend",
-      "difficulty": "easy",
-      "priority": 98,
-      "result": "success",
-      "details": "P0 级致命缺陷清零。cranelift_backend.py _compile_instr 对未处理指令原来发射 ;; TODO 注释而非抛异常，导致编译'成功'但生成的 Cranelift IR 缺少关键指令，执行结果不可预测。修复：将 ;; TODO 改为 raise NotImplementedError，与所有后端统一行为。修改 1 个文件（cranelift_backend.py）2 行代码。测试 907 passed，无回归。后端 38/56 完成。Cranelift 后端完成度从 ~30% 提升至安全基线。",
-      "timestamp": "2026-07-29 07:20"
-    },
-    {
-      "cycle": 51,
-      "task_id": "review_cycle_51",
-      "name": "第 51 轮双线路线图评审",
-      "track": "review",
-      "difficulty": "n/a",
-      "priority": 99,
-      "result": "success",
-      "details": "第 49-51 轮评审轮。前端 34/34=100%完成（质量评分7.5/10），后端 37/51=72.5%完成（质量评分6.5/10）。深度代码审计发现多个隐藏缺陷：Cranelift 后端未实现指令降级为 TODO 注释（致命，静默生成错误代码）、Native 后端浮点全局变量存储完全错误、C 后端闭包浮点返回丢失、Parser 块边界静默吞错。新增 5 个高价值任务，废弃 0 个。下 3 轮聚焦：Cranelift 安全修复(P0) > Native 浮点全局存储(P1) > C 闭包浮点返回(P1)。",
-      "timestamp": "2026-07-29 03:30"
-    },
-    {
-      "cycle": 50,
-      "task_id": "FRONTEND-034",
-      "name": "添加 parser block 错误恢复计数器重置测试",
-      "track": "frontend",
-      "difficulty": "easy",
-      "priority": 45,
-      "result": "success",
-      "details": "前端维护任务。第 49 轮修复了 parser.py _parse_block 中 block_errors 计数器未重置的问题，但缺少回归测试。新增 test_block_error_recovery_counter_reset 测试：构造包含错误语句和正确语句交替的 block，验证正确语句能重置错误计数器，不会过早触发 _BLOCK_MAX_ERRORS 限制。测试通过 Lexer+Parser 直接调用 _parse_block，验证解析结果包含 1 个正确语句和 1 个尾部表达式，且 parser._errors 收集到 2 个错误。修改 1 个文件（tests/test_parser.py）约 20 行代码。测试 781 passed（+1 新测试），无回归。前端 34/34 完成。",
-      "timestamp": "2026-07-29 01:40"
-    },
-    {
-      "cycle": 50,
-      "task_id": "backend_closure_memory_leak_fix",
-      "name": "修复 C/Wasm 后端闭包临时内存泄漏",
-      "track": "backend",
-      "difficulty": "medium",
-      "priority": 50,
-      "result": "success",
-      "details": "P2-D 清零。深度审计发现的内存泄漏修复：(1) C 后端 lir_c_backend.py _compile_closure_create 中 nova_alloc 分配的 env_var 临时捕获数组在 nova_closure_new 调用后未释放——新增 nova_free(env_var) 释放（runtime 中 nova_closure_new 内部已复制该数组）；(2) Wasm 后端 wasm_backend.py _compile_closure_create 中同样通过 nova_alloc 分配 tmp_ptr 临时捕获数组未释放——在保存闭包指针到 dst_loc 后添加 local.get $tmp_ptr + call $nova_free；(3) Wasm 后端 _compile_call_indirect 中 nova_alloc 分配的临时参数数组同样未释放——在保存返回值后添加释放逻辑。修改 2 个文件（lir_c_backend.py, wasm_backend.py）约 10 行代码。测试 781 passed，无回归。后端 37/50 完成。",
-      "timestamp": "2026-07-29 01:40"
-    },
-    {
-      "cycle": 49,
-      "task_id": "backend_native_regalloc_loop_regression",
-      "name": "修复 Native 后端二元运算 RCX 临时寄存器覆盖活跃 vreg 的 bug",
-      "track": "backend",
-      "difficulty": "hard",
-      "priority": 95,
-      "result": "success",
-      "details": "P0 级回归修复。根因与第 48 轮评审判断不同：实际不是第 47 轮寄存器分配器调用点切口引入的，而是 _emit_arithmetic/_emit_comparison/_emit_div_mod 使用固定 RCX 作为右操作数临时寄存器，当寄存器分配器把循环变量（如 i）分配到 RCX 时，load_to_reg(right_name, RCX) 覆盖了 i 的值。验证：第 46 轮代码同样返回 10（评审误判为通过是因为 flaky test 偶尔通过）。修复方案：新增 _is_rcx_live 方法检测 RCX 是否被其他活跃 vreg 占用，如果是则在加载右操作数前 push RCX 保存、操作后 pop RCX 恢复。修改 native_backend.py 1 个文件约 40 行代码。10/10 次独立运行返回 45，8/8 次完整测试套件 699 passed，彻底消除 flaky test。Native 后端完成度 ~92%。",
-      "timestamp": "2026-07-29 22:30"
-    },
-    {
-      "cycle": 49,
-      "task_id": "FRONTEND-033",
-      "name": "修复 _check_try_expr 属性名错误（line/column → span.line/span.column）",
-      "track": "frontend",
-      "difficulty": "easy",
-      "priority": 40,
-      "result": "success",
-      "details": "前端维护任务。type_checker.py _check_try_expr 中 TypeVar 报错路径使用 expr.expr.line/column 但 AST 节点使用 span（Span 对象）。hasattr 检查返回 False 传 0，位置信息丢失。修复：改为 getattr(expr.expr, 'span', None) 后用 span.line/span.column，无 span 时传 -1。修改 1 个文件 4 行代码。测试 699 passed，无回归。前端 33/33 完成。",
-      "timestamp": "2026-07-29 22:30"
-    },
-    {
-      "cycle": 48,
-      "task_id": "review_cycle_48",
-      "name": "第 48 轮双线路线图评审",
-      "track": "review",
-      "difficulty": "n/a",
-      "priority": 99,
-      "result": "success",
-      "details": "第 46-48 轮评审轮。前端 32/32=100%完成（质量评分8/10），后端 35/48=72.9%完成（质量评分7/10）。深度代码审计发现重大回归：第 47 轮寄存器分配器调用点活跃区间切口改动导致 test_e2e_loop 回归（循环 sum(0..9)=45 返回 10，只循环1次）。已确认通过 git bisect 验证：第 46 轮代码通过，第 47 轮代码失败。新增 P0 级任务 backend_native_regalloc_loop_regression（优先级95）。审计还发现：Native 闭包创建仍全保存 caller-saved（第47轮优化遗漏点）、前端 _check_try_expr 属性名错误。下 3 轮聚焦：修复循环回归(P95) > 闭包内存泄漏(P50) > Wasm栈平衡(P45)。",
-      "timestamp": "2026-07-29 18:00"
-    },
-    {
-      "cycle": 47,
-      "task_id": "FRONTEND-032",
-      "name": "修复 parser.py 块错误恢复计数器未重置",
-      "track": "frontend",
-      "difficulty": "easy",
-      "priority": 60,
-      "result": "success",
-      "details": "前端维护任务。parser.py _parse_block 中 block_errors 计数器在成功解析语句后从未重置，导致错误计数在正确语句间累积，过早触发块放弃（3 次连续错误限制）。修复：在赋值、let/mut 绑定、表达式等所有成功解析路径末尾添加 block_errors = 0。修改 1 个文件 5 行代码。测试 680 passed（+3 新增寄存器分配测试），无回归。前端 32/32 完成。",
-      "timestamp": "2026-07-29 16:30"
-    },
-    {
-      "cycle": 47,
-      "task_id": "backend_native_regalloc_call_site",
-      "name": "寄存器分配器添加调用点活跃区间切口",
-      "track": "backend",
-      "difficulty": "hard",
-      "priority": 55,
-      "result": "success",
-      "details": "P1-B2 清零。native_backend.py 寄存器分配器从保守保存全部 8 个 caller-saved GPR 改进为基于活跃区间分析的精确保存。实现：(1) _allocate_registers 新增步骤 3，遍历调用点指令（LIRCall/LIRCallIndirect），计算被分配到 caller-saved 寄存器且在调用点之后仍活跃的 vreg，将需保存的物理寄存器列表写入 instr.caller_saved_to_preserve；(2) _emit_call 和 _emit_call_indirect 读取 caller_saved_to_preserve，仅 push/pop 实际需要的寄存器；(3) 调整栈对齐计算，将保存寄存器数量纳入 16 字节对齐公式；(4) 调整返回值预留槽偏移（从固定 64 改为动态 saved_size）。新增 TestRegAllocCallSite 测试类 3 个测试：无活跃 caller-saved/有活跃 caller-saved/callee-saved 不保存，全部通过。修改 3 个文件（native_backend.py, ir_nodes.py, test_native_backend.py）约 80 行代码。测试 680 passed（677→680，+3 新测试），无回归。后端 35/47 完成。Native 后端完成度维持 ~90%，代码生成效率提升。注意：第48轮评审发现此改动引入循环回归。",
-      "timestamp": "2026-07-29 16:30"
-    },
-    {
-      "cycle": 46,
-      "task_id": "FRONTEND-031",
-      "name": "修复 type_checker.py Set 导入 + try 表达式 TypeVar 放行",
-      "track": "frontend",
-      "difficulty": "easy",
-      "priority": 55,
-      "result": "success",
-      "details": "前端维护任务。修复 2 个问题：(1) type_checker.py 第14行 typing 导入缺少 Set，虽然运行时不报错但代码不规范；(2) _check_try_expr 中 TypeVar 直接放行返回新 TypeVar 的类型安全漏洞——合一算法已就绪，改为抛出 TypeCheckError 要求显式标注。修改 1 个文件约 10 行代码。测试 677 passed（+6 新增 Native E2E 测试），无回归。前端 31/31 完成。",
-      "timestamp": "2026-07-28 13:30"
-    },
-    {
-      "cycle": 46,
-      "task_id": "backend_native_elf_e2e_exec",
-      "name": "Native 后端端到端执行突破：参数搬运 + 隐式 return + 执行测试",
-      "track": "backend",
-      "difficulty": "hard",
-      "priority": 80,
-      "result": "success",
-      "details": "P1-B3 清零。采用 obj + gcc 链接模式实现 Native 后端首次端到端执行。修复 4 个核心 bug：(1) _start 入口硬编码 exit(0) 而非传递 main 返回值——改为 push RAX 保存返回值，nova_cleanup 后 pop 到 RDI；(2) MIR 降级器 _lower_function 中仅检查 entry.terminator 而非 current_block.terminator，导致 if/then/else 等表达式作为函数尾表达式时缺少隐式 MIRReturn；(3) 寄存器分配器 _allocate_registers 未扫描 LIRCall.arg_locs，导致调用参数的虚拟寄存器活跃区间被错误计算，多个 vreg 被分配到同一物理寄存器；(4) _compile_function 缺少函数入口参数搬运，ABI 参数寄存器（RDI/RSI/RDX...）与寄存器分配器分配的位置不一致——新增 _emit_param_shuffle 方法用栈中转避免循环依赖。同时修复 LIR 降级器 _lower_store_global 中 MIRStore.result_name 未映射到 value 的 LIR 位置导致循环回边 Phi 拷贝引用错误 loc 的问题。新增 TestNativeE2EExecution 测试类 6 个测试：简单返回/算术/分支/循环/函数调用/闭包，全部通过。修改 4 个文件（native_backend.py, mir_lowering.py, lir_lowering.py, test_native_backend.py）约 200 行代码。测试 677 passed（671→677，+6 新测试），无回归。后端 34/46 完成。Native 后端完成度从 ~85% 提升至 ~90%。",
-      "timestamp": "2026-07-28 13:30"
-    },
-    {
-      "cycle": 45,
-      "task_id": "review_cycle_45",
-      "name": "第 45 轮双线路线图评审",
-      "track": "review",
-      "difficulty": "n/a",
-      "priority": 99,
-      "result": "success",
-      "details": "第 43-45 轮评审轮。前端 30/30=100%完成，后端 33/45=73.3%完成。深度代码审计结论：前端质量持续优秀（7.5/10），后端质量稳健（6/10）但有明确短板。审计发现新问题：Native 后端独立 ELF 模式跳过外部函数重定位导致无法运行、Wasm 后端闭包临时内存泄漏、Phi 节点类型推断未做合一验证。新增 2 个高价值任务（Native 端到端执行修复、闭包临时内存释放），废弃 1 个低优先级任务（统一 C 后端降为维护）。下 3 轮聚焦：Native 后端端到端执行突破（P80）> 寄存器分配优化（P55）> 栈平衡/内存管理（P50）。",
-      "timestamp": "2026-07-28 10:15"
     }
   ],
   "tasks": [
@@ -406,12 +265,12 @@
     {
       "task_id": "backend_phi_copy_missing_error",
       "name": "Phi 拷贝源缺失时抛出内部编译错误",
-      "description": "ir/lir_lowering.py _insert_phi_copies 中如果 src_ssa 找不到或不在 ssa_to_loc 中，Phi 拷贝被静默跳过，可能导致使用未初始化的寄存器值。需添加 else 分支抛出 LoweringError，增强编译器防御性。",
+      "description": "ir/lir_lowering.py _insert_phi_copies 中如果 src_ssa 找不到或不在 ssa_to_loc 中，Phi 拷贝被静默跳过，可能导致使用未初始化的寄存器值。已修复：拆为 3 个防御性检查（前驱未声明、源 SSA 无位置映射、结果 SSA 无位置映射），任一失败均抛 LIRLoweringError 带诊断消息。",
       "track": "backend",
       "difficulty": "easy",
       "priority": 40,
       "estimated_effort": "30分钟",
-      "status": "pending",
+      "status": "completed",
       "source": "code_audit_54",
       "depends_on": []
     }

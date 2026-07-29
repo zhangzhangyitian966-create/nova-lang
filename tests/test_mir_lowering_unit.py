@@ -636,5 +636,144 @@ class TestListExprLowering(unittest.TestCase):
         self.assertGreaterEqual(len(lowerer.current_block.instructions), 4)
 
 
+# ============================================================
+# 测试类 10: Phi 拷贝降级的防御性检查
+# ============================================================
+
+
+class TestPhiCopyDefensiveChecks(unittest.TestCase):
+    """LIRLowering._insert_phi_copies 防御性错误检查验证。
+
+    原实现对 src_ssa 缺失/不在映射中的情况静默跳过，
+    可能导致 Phi 结果值未初始化被使用。新实现对 3 种异常场景
+    抛出 LIRLoweringError，包含可诊断的错误消息。
+    """
+
+    def _make_lowerer(self, ssa_mapping):
+        """构造带预填充 ssa_to_loc 的 LIRLowering 实例。"""
+        from nova.ir.lir_lowering import LIRLowering
+        lowerer = LIRLowering()
+        lowerer.ssa_to_loc = dict(ssa_mapping)
+        return lowerer
+
+    # ---------- 正常路径回归：合法 Phi 拷贝正常生成 ----------
+
+    def test_valid_phi_copy_generates_instr(self):
+        """合法 Phi（源/结果均在映射中）：生成 1 条 LIRLoadReg 拷贝"""
+        from nova.ir.lir_lowering import LIRLoadReg
+        lowerer = self._make_lowerer({"ssa_src": "loc_src", "ssa_dst": "loc_dst"})
+        phi_info = {
+            "bb_succ": [("ssa_dst", INT_TYPE, [("bb_pred", "ssa_src")])]
+        }
+        body = []
+        lowerer._insert_phi_copies(body, "bb_pred", "bb_succ", phi_info)
+        self.assertEqual(len(body), 1, "应生成 1 条拷贝指令")
+        self.assertIsInstance(body[0], LIRLoadReg)
+        self.assertEqual(body[0].src_locs[0][0], "loc_src")
+        self.assertEqual(body[0].dst_loc[0], "loc_dst")
+
+    def test_succ_not_in_phi_info_returns_silently(self):
+        """后继块不在 phi_info 中：直接 return，不抛错，不加指令（回归）"""
+        lowerer = self._make_lowerer({})
+        body = []
+        lowerer._insert_phi_copies(body, "bb_pred", "bb_not_exists", {})
+        self.assertEqual(len(body), 0)
+
+    # ---------- 防御检查 1：前驱块未在 Phi sources 中声明 ----------
+
+    def test_pred_not_in_phi_sources_raises(self):
+        """前驱 pred_label 不在 Phi 的 sources 列表：抛 LIRLoweringError，消息含块名"""
+        from nova.ir.lir_lowering import LIRLoweringError
+        lowerer = self._make_lowerer({"ssa_src": "L0", "ssa_dst": "L1"})
+        phi_info = {
+            "bb_succ": [("ssa_dst", INT_TYPE, [("bb_other_pred", "ssa_src")])]
+        }
+        body = []
+        with self.assertRaises(LIRLoweringError) as ctx:
+            lowerer._insert_phi_copies(body, "bb_pred", "bb_succ", phi_info)
+        msg = str(ctx.exception)
+        self.assertIn("前驱块", msg)
+        self.assertIn("bb_pred", msg)
+        self.assertIn("可用前驱", msg)
+        self.assertEqual(len(body), 0, "抛错前不得写入 body")
+
+    # ---------- 防御检查 2：源 SSA 名不在 ssa_to_loc ----------
+
+    def test_src_ssa_not_in_mapping_raises(self):
+        """源 SSA 在 sources 中声明但不在 ssa_to_loc：抛 LIRLoweringError"""
+        from nova.ir.lir_lowering import LIRLoweringError
+        lowerer = self._make_lowerer({"ssa_dst": "L1"})  # ssa_src 缺失
+        phi_info = {
+            "bb_succ": [("ssa_dst", INT_TYPE, [("bb_pred", "ssa_src")])]
+        }
+        body = []
+        with self.assertRaises(LIRLoweringError) as ctx:
+            lowerer._insert_phi_copies(body, "bb_pred", "bb_succ", phi_info)
+        msg = str(ctx.exception)
+        self.assertIn("源 SSA", msg)
+        self.assertIn("ssa_src", msg)
+        self.assertIn("ssa_to_loc", msg)
+        self.assertEqual(len(body), 0)
+
+    # ---------- 防御检查 3：Phi 结果 SSA 名不在 ssa_to_loc ----------
+
+    def test_result_ssa_not_in_mapping_raises(self):
+        """Phi 结果 SSA 不在 ssa_to_loc：抛 LIRLoweringError，消息含结果名"""
+        from nova.ir.lir_lowering import LIRLoweringError
+        lowerer = self._make_lowerer({"ssa_src": "L0"})  # ssa_dst 缺失
+        phi_info = {
+            "bb_succ": [("ssa_dst", INT_TYPE, [("bb_pred", "ssa_src")])]
+        }
+        body = []
+        with self.assertRaises(LIRLoweringError) as ctx:
+            lowerer._insert_phi_copies(body, "bb_pred", "bb_succ", phi_info)
+        msg = str(ctx.exception)
+        self.assertIn("Phi 结果 SSA", msg)
+        self.assertIn("ssa_dst", msg)
+        self.assertIn("未在 ssa_to_loc 中找到", msg)
+        self.assertEqual(len(body), 0)
+
+    # ---------- 多 Phi 节点：第一个异常立即抛，后续不处理 ----------
+
+    def test_first_invalid_phi_stops_processing(self):
+        """多个 Phi 节点中第一个源缺失：立即抛错，第一个合法 Phi 不得写入"""
+        from nova.ir.lir_lowering import LIRLoweringError
+        lowerer = self._make_lowerer({"good_src": "LS", "good_dst": "LD"})
+        phi_info = {
+            "bb_succ": [
+                # 第一个 Phi：源缺失
+                ("bad_dst", INT_TYPE, [("bb_pred", "missing_src")]),
+                # 第二个 Phi：合法（但不应被处理）
+                ("good_dst", INT_TYPE, [("bb_pred", "good_src")]),
+            ]
+        }
+        body = []
+        with self.assertRaises(LIRLoweringError):
+            lowerer._insert_phi_copies(body, "bb_pred", "bb_succ", phi_info)
+        self.assertEqual(len(body), 0, "第一个 Phi 抛错后不得写入任何指令")
+
+    # ---------- 多前驱正确场景：只选匹配前驱的 source ----------
+
+    def test_multi_pred_phi_picks_correct_source(self):
+        """Phi 有多个前驱 sources：只挑选匹配 pred_label 的那个生成拷贝"""
+        from nova.ir.lir_lowering import LIRLoadReg
+        lowerer = self._make_lowerer({
+            "src_a": "LA", "src_b": "LB", "dst": "LD"
+        })
+        phi_info = {
+            "bb_succ": [(
+                "dst", INT_TYPE,
+                [("bb_a", "src_a"), ("bb_b", "src_b"), ("bb_c", "should_not_pick")]
+            )]
+        }
+        body = []
+        lowerer._insert_phi_copies(body, "bb_b", "bb_succ", phi_info)
+        self.assertEqual(len(body), 1)
+        instr = body[0]
+        self.assertIsInstance(instr, LIRLoadReg)
+        self.assertEqual(instr.src_locs[0][0], "LB",  # 对应 bb_b → src_b → LB
+                         "应选中前驱 bb_b 对应的 source，而非第一个/任意一个")
+
+
 if __name__ == "__main__":
     unittest.main()

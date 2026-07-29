@@ -290,6 +290,31 @@ class TypeChecker:
         self._subst: Dict[int, "NovaType"] = {}
         self._setup_builtins()
 
+    def _error(self, message: str, expr=None, span=None):
+        """统一的 TypeCheckError 抛出方法，自动从 expr/span 提取位置信息。
+
+        优先级：显式 span 参数 > AST 节点的 span 属性 > 无位置。
+        位置信息包含源码（self._source）时支持带上下文的错误显示。
+        """
+        line = -1
+        column = -1
+        # 1. 优先使用显式 span 参数
+        if span is not None:
+            line = getattr(span, "line", -1)
+            column = getattr(span, "column", -1)
+        # 2. 其次从 expr.span 提取
+        elif expr is not None:
+            expr_span = getattr(expr, "span", None)
+            if expr_span is not None:
+                line = getattr(expr_span, "line", -1)
+                column = getattr(expr_span, "column", -1)
+        # 3. 尝试从 expr 直接拿 line/column（兼容旧节点）
+        if line == -1 and expr is not None:
+            line = getattr(expr, "line", -1)
+            column = getattr(expr, "column", -1)
+        source = self._source if self._source else None
+        raise TypeCheckError(message, line=line, column=column, source=source)
+
     def _setup_builtins(self):
         """注册内置函数和类型的类型签名"""
         # 注册基本类型到环境中（供 _from_ast_type 查找）
@@ -537,7 +562,7 @@ class TypeChecker:
         checker = self._expr_checkers.get(type(expr))
         if checker is not None:
             return checker(expr)
-        raise TypeCheckError(f"未知的表达式类型: {type(expr).__name__}")
+        self._error(f"未知的表达式类型: {type(expr).__name__}", expr=expr)
 
     def _build_expr_checkers(self):
         """构建表达式类型检查调度表"""
@@ -646,7 +671,7 @@ class TypeChecker:
         """
         ty = self.env.lookup(expr.name)
         if ty is None:
-            raise TypeCheckError(f"未定义的标识符 '{expr.name}'")
+            self._error(f"未定义的标识符 '{expr.name}'", expr=expr)
         # 泛型实例化（let-polymorphism）：
         # 如果类型包含 TypeVar（即泛型），每次引用时创建 fresh 副本
         # 这样不同调用点可以独立实例化出不同的类型
@@ -690,8 +715,9 @@ class TypeChecker:
         first = elem_types[0]
         for i, et in enumerate(elem_types[1:], 1):
             if not self._unify_types(et, first):
-                raise TypeCheckError(
-                    f"列表元素类型不一致：元素 0 为 {first}，元素 {i} 为 {et}"
+                self._error(
+                    f"列表元素类型不一致：元素 0 为 {first}，元素 {i} 为 {et}",
+                    expr=expr
                 )
         return ListType(self._unify_and_resolve(first))
 
@@ -714,13 +740,15 @@ class TypeChecker:
         first_value = value_types[0]
         for i, kt in enumerate(key_types[1:], 1):
             if not self._unify_types(kt, first_key):
-                raise TypeCheckError(
-                    f"Map 键类型不一致：键 0 为 {first_key}，键 {i} 为 {kt}"
+                self._error(
+                    f"Map 键类型不一致：键 0 为 {first_key}，键 {i} 为 {kt}",
+                    expr=expr
                 )
         for i, vt in enumerate(value_types[1:], 1):
             if not self._unify_types(vt, first_value):
-                raise TypeCheckError(
-                    f"Map 值类型不一致：值 0 为 {first_value}，值 {i} 为 {vt}"
+                self._error(
+                    f"Map 值类型不一致：值 0 为 {first_value}，值 {i} 为 {vt}",
+                    expr=expr
                 )
         return MapType(self._unify_and_resolve(first_key), self._unify_and_resolve(first_value))
 
@@ -735,13 +763,14 @@ class TypeChecker:
         """
         cond_ty = self.check_expr(expr.condition)
         if not self._unify_types(cond_ty, BOOL_T):
-            raise TypeCheckError(f"if 条件必须是 Bool 类型，得到 {cond_ty}")
+            self._error(f"if 条件必须是 Bool 类型，得到 {cond_ty}", expr=expr)
         then_ty = self.check_expr(expr.then_branch)
         if expr.else_branch:
             else_ty = self.check_expr(expr.else_branch)
             if not self._unify_types(then_ty, else_ty):
-                raise TypeCheckError(
-                    f"if 分支类型不一致：then 为 {then_ty}，else 为 {else_ty}"
+                self._error(
+                    f"if 分支类型不一致：then 为 {then_ty}，else 为 {else_ty}",
+                    expr=expr
                 )
             return self._unify_and_resolve(then_ty)
         return UNIT_T
@@ -758,8 +787,9 @@ class TypeChecker:
             if result_type is None:
                 result_type = arm_ty
             elif not self._unify_types(arm_ty, result_type):
-                raise TypeCheckError(
-                    f"match 分支 {i} 类型 {arm_ty} 与第一个分支 {result_type} 不一致"
+                self._error(
+                    f"match 分支 {i} 类型 {arm_ty} 与第一个分支 {result_type} 不一致",
+                    expr=expr
                 )
         # 检查模式匹配完备性
         self._check_match_exhaustiveness(subject_ty, expr.arms, expr)
@@ -807,7 +837,7 @@ class TypeChecker:
     def _check_while_expr(self, expr) -> NovaType:
         cond_ty = self.check_expr(expr.condition)
         if not self._unify_types(cond_ty, BOOL_T):
-            raise TypeCheckError(f"while 条件必须是 Bool 类型，得到 {cond_ty}")
+            self._error(f"while 条件必须是 Bool 类型，得到 {cond_ty}", expr=expr)
         return self.check_expr(expr.body)
 
     def _check_break_expr(self, expr) -> NovaType:
@@ -894,8 +924,9 @@ class TypeChecker:
         if isinstance(callee_ty, FnType):
             # 支持部分应用（参数数量少于声明的参数数量）
             if len(arg_types) > len(callee_ty.param_types):
-                raise TypeCheckError(
-                    f"函数期望至多 {len(callee_ty.param_types)} 个参数，但传入了 {len(arg_types)} 个"
+                self._error(
+                    f"函数期望至多 {len(callee_ty.param_types)} 个参数，但传入了 {len(arg_types)} 个",
+                    expr=expr
                 )
             # 使用合一算法进行参数类型匹配
             for i, (arg_t, param_t) in enumerate(
@@ -905,8 +936,9 @@ class TypeChecker:
                     # 合一失败，应用替换后给出更精确的错误信息
                     expected = self._apply_subst(param_t)
                     actual = self._apply_subst(arg_t)
-                    raise TypeCheckError(
-                        f"参数 {i} 类型不匹配：期望 {expected}，得到 {actual}"
+                    self._error(
+                        f"参数 {i} 类型不匹配：期望 {expected}，得到 {actual}",
+                        expr=expr.args[i] if i < len(expr.args) else expr
                     )
             if len(arg_types) == len(callee_ty.param_types):
                 # 完全应用：返回应用替换后的返回类型
@@ -925,13 +957,14 @@ class TypeChecker:
             ret_tv = TypeVar(f"ret_{callee_ty.name}")
             inferred_fn = FnType(arg_types, ret_tv)
             if not self._unify(callee_ty, inferred_fn):
-                raise TypeCheckError(
+                self._error(
                     f"无法将类型变量 {callee_ty.name} 推断为接受 "
-                    f"{len(arg_types)} 个参数的函数类型"
+                    f"{len(arg_types)} 个参数的函数类型",
+                    expr=expr
                 )
             return ret_tv
         else:
-            raise TypeCheckError(f"无法对非函数类型 {callee_ty} 进行调用")
+            self._error(f"无法对非函数类型 {callee_ty} 进行调用", expr=expr)
 
     def _check_lambda(self, expr) -> NovaType:
         """检查 lambda 表达式，在子作用域中解析参数类型，返回 FnType。
@@ -970,12 +1003,13 @@ class TypeChecker:
 
         if not isinstance(right_ty, FnType):
             # 右侧不是函数，无法管道
-            raise TypeCheckError(
-                f"管道操作符右侧必须是函数类型，得到 {right_ty}"
+            self._error(
+                f"管道操作符右侧必须是函数类型，得到 {right_ty}",
+                expr=expr
             )
 
         if len(right_ty.param_types) < 1:
-            raise TypeCheckError("管道操作符右侧函数不接受任何参数")
+            self._error("管道操作符右侧函数不接受任何参数", expr=expr)
 
         # 语义：expr |> f ≡ f(expr)，左侧值匹配函数第一个参数。
         # 使用快照回滚机制避免 unify 失败时污染替换表：
@@ -990,8 +1024,9 @@ class TypeChecker:
         self._subst = saved_subst
         expected = self._apply_subst(first_param)
         actual = self._apply_subst(left_ty)
-        raise TypeCheckError(
-            f"管道操作符类型不匹配：左侧 {actual} 无法匹配函数第一个参数 {expected}"
+        self._error(
+            f"管道操作符类型不匹配：左侧 {actual} 无法匹配函数第一个参数 {expected}",
+            expr=expr
         )
 
     def _check_field_access(self, expr) -> NovaType:
@@ -1010,31 +1045,35 @@ class TypeChecker:
             try:
                 idx = int(field_name)
             except ValueError:
-                raise TypeCheckError(
+                self._error(
                     f"元组访问需要数字索引，收到 '{field_name}'\n"
-                    f"  提示：元组字段使用 .0, .1, .2 ... 形式访问"
+                    f"  提示：元组字段使用 .0, .1, .2 ... 形式访问",
+                    expr=expr
                 )
 
             # 检查索引越界
             tuple_len = len(target_ty.elements)
             if idx < 0 or idx >= tuple_len:
-                raise TypeCheckError(
-                    f"元组索引 {idx} 越界：元组有 {tuple_len} 个元素（索引范围 0~{tuple_len - 1}）"
+                self._error(
+                    f"元组索引 {idx} 越界：元组有 {tuple_len} 个元素（索引范围 0~{tuple_len - 1}）",
+                    expr=expr
                 )
 
             return target_ty.elements[idx]
 
         # --- ADT 类型：静态阶段无法直接字段访问 ---
         if isinstance(target_ty, ADTType):
-            raise TypeCheckError(
+            self._error(
                 f"无法直接访问 ADT 类型 {target_ty} 的字段 '{field_name}'\n"
-                f"  提示：请使用 match 表达式进行模式匹配来访问 ADT 字段"
+                f"  提示：请使用 match 表达式进行模式匹配来访问 ADT 字段",
+                expr=expr
             )
 
         # --- 其他类型：不支持字段访问 ---
-        raise TypeCheckError(
+        self._error(
             f"类型 {target_ty} 不支持字段访问\n"
-            f"  提示：只有元组类型支持 .N 形式的索引访问"
+            f"  提示：只有元组类型支持 .N 形式的索引访问",
+            expr=expr
         )
 
     def _check_try_expr(self, expr) -> NovaType:
@@ -1075,8 +1114,9 @@ class TypeChecker:
                     return inner_ty.type_params[0]
                 return TypeVar("result_value")
         
-        raise TypeCheckError(
-            f"? 操作符只能用于 Option 或 Result 类型，当前类型为 {inner_ty}"
+        raise self._error(
+            f"? 操作符只能用于 Option 或 Result 类型，当前类型为 {inner_ty}",
+            expr=expr
         )
 
     def _check_list_comprehension(self, expr) -> NovaType:
@@ -1105,7 +1145,7 @@ class TypeChecker:
             self.env = child_env
             cond_ty = self.check_expr(expr.filter_cond)
             if not self._unify_types(cond_ty, BOOL_T):
-                raise TypeCheckError(f"列表推导式过滤条件必须是 Bool 类型")
+                self._error(f"列表推导式过滤条件必须是 Bool 类型", expr=expr)
             self.env = old_env
 
         old_env = self.env
@@ -1649,16 +1689,27 @@ class TypeChecker:
 
         使用分发表将不同操作符路由到对应的辅助检查方法，
         避免在主方法中堆积大量 if-elif 分支。
+
+        对辅助方法抛出的 TypeCheckError 统一补充 span 位置信息。
         """
         left_ty = self.check_expr(expr.left)
         right_ty = self.check_expr(expr.right)
 
         handler_name = self._BINARY_OP_HANDLERS.get(expr.op)
         if handler_name is None:
-            raise TypeCheckError(f"未知的操作符 '{expr.op}'")
+            self._error(f"未知的操作符 '{expr.op}'", expr=expr)
 
         handler = getattr(self, handler_name)
-        return handler(expr.op, left_ty, right_ty)
+        try:
+            return handler(expr.op, left_ty, right_ty)
+        except TypeCheckError as e:
+            # 辅助方法没有位置信息，在此统一补全
+            if e.line < 0 and expr.span:
+                e.line = expr.span.line
+                e.column = expr.span.column
+            if self._source and e.source_code is None:
+                e.source_code = self._source
+            raise
 
     def _check_arithmetic_op(self, op: str, left_ty: NovaType, right_ty: NovaType) -> NovaType:
         """检查算术操作 (+, -, *, /)：要求两侧同为 Int 或同为 Float"""
@@ -1716,12 +1767,12 @@ class TypeChecker:
                 return INT_T
             if self._unify_types(operand_ty, FLOAT_T):
                 return FLOAT_T
-            raise TypeCheckError(f"一元 '-' 需要 Int 或 Float，得到 {operand_ty}")
+            self._error(f"一元 '-' 需要 Int 或 Float，得到 {operand_ty}", expr=expr)
         if expr.op == "!":
             if self._unify_types(operand_ty, BOOL_T):
                 return BOOL_T
-            raise TypeCheckError(f"一元 '!' 需要 Bool，得到 {operand_ty}")
-        raise TypeCheckError(f"未知的一元操作符 '{expr.op}'")
+            self._error(f"一元 '!' 需要 Bool，得到 {operand_ty}", expr=expr)
+        self._error(f"未知的一元操作符 '{expr.op}'", expr=expr)
 
     def _infer_fn_type(self, fn: FnDef) -> FnType:
         """推断函数类型"""

@@ -340,7 +340,12 @@ class LIRLowering:
         return edge_counter
 
     def _insert_phi_copies(self, body, pred_label, succ_label, phi_info):
-        """在 body 末尾插入从前驱 pred_label 到后继 succ_label 的所有 Phi 拷贝指令。"""
+        """在 body 末尾插入从前驱 pred_label 到后继 succ_label 的所有 Phi 拷贝指令。
+
+        防御性编程：若 Phi 源 SSA 或结果 SSA 不在 ssa_to_loc 映射中，
+        不再静默跳过，而是抛出 LIRLoweringError，以便尽早发现
+        SSA 构建错误或 Phi 信息与降级顺序不同步的问题。
+        """
         if succ_label not in phi_info:
             return
         for phi_result_name, phi_result_type, sources in phi_info[succ_label]:
@@ -350,14 +355,35 @@ class LIRLowering:
                 if src_pred_label == pred_label:
                     src_ssa = ssa_name
                     break
-            if src_ssa and src_ssa in self.ssa_to_loc:
-                src_loc = self.ssa_to_loc[src_ssa]
-                dst_loc = self.ssa_to_loc[phi_result_name]
-                # 生成 LIRLoadReg 实现寄存器到寄存器的拷贝
-                copy_instr = LIRLoadReg()
-                copy_instr.src_locs = [(src_loc, phi_result_type)]
-                copy_instr.dst_loc = (dst_loc, phi_result_type)
-                body.append(copy_instr)
+            # --- 防御性检查 1：前驱块必须在 Phi sources 中声明 ---
+            if src_ssa is None:
+                raise LIRLoweringError(
+                    f"Phi 降级错误：前驱块 '{pred_label}' 不在后继块 '{succ_label}' "
+                    f"的 Phi 节点 {phi_result_name} 的 sources 列表中。"
+                    f"可用前驱: {[s[0] for s in sources]}"
+                )
+            # --- 防御性检查 2：源 SSA 名必须在位置映射中 ---
+            if src_ssa not in self.ssa_to_loc:
+                raise LIRLoweringError(
+                    f"Phi 降级错误：Phi 源 SSA '{src_ssa}'（从前驱 '{pred_label}' 到后继 '{succ_label}'）"
+                    f"未在 ssa_to_loc 中找到。这通常意味着该 SSA 值的定义指令未被降级，"
+                    f"或 Phi 信息与降级顺序不同步。Phi 结果: {phi_result_name}，"
+                    f"当前 ssa_to_loc 键数: {len(self.ssa_to_loc)}"
+                )
+            # --- 防御性检查 3：Phi 结果 SSA 名必须在位置映射中 ---
+            if phi_result_name not in self.ssa_to_loc:
+                raise LIRLoweringError(
+                    f"Phi 降级错误：Phi 结果 SSA '{phi_result_name}'（块 '{succ_label}'）"
+                    f"未在 ssa_to_loc 中找到。这通常意味着该 Phi 节点的结果未被正确注册，"
+                    f"或降级顺序先于 Phi 结果的位置分配。"
+                )
+            # --- 生成拷贝指令 ---
+            src_loc = self.ssa_to_loc[src_ssa]
+            dst_loc = self.ssa_to_loc[phi_result_name]
+            copy_instr = LIRLoadReg()
+            copy_instr.src_locs = [(src_loc, phi_result_type)]
+            copy_instr.dst_loc = (dst_loc, phi_result_type)
+            body.append(copy_instr)
 
     def _lower_terminator_with_targets(self, term, target_map):
         """降低终结指令，但将目标标签替换为 target_map 中的映射（用于边缘块）。"""
