@@ -808,6 +808,12 @@ class LIRCBackend:
         使用 nova_closure_call 运行时函数，将参数打包为 void* 数组。
         第一个 src_loc 是闭包对象，后续是参数。
         返回值根据 dst_loc 的类型进行正确的 C 类型转换。
+
+        修复说明：
+        1. double 返回值使用 malloc+memcpy 装箱，有 dst 时需在 memcpy 前做 NULL 检查（
+           防止 nova_closure_call 返回 NULL 导致段错误），无 dst 时仍需 free 避免泄漏。
+        2. bool 返回值在 trampoline 端以 (void*)(intptr_t) 装箱，调用端需先转
+           (intptr_t) 再转 (bool)，避免 (bool)void* 把高位非零指针误判为真。
         """
         if not instr.src_locs or len(instr.src_locs) < 1:
             return
@@ -824,27 +830,48 @@ class LIRCBackend:
                 arg_var = self._loc_var_name(instr.src_locs[i + 1][0])
                 self._emit(f"{args_array}[{i}] = (void*){arg_var};")
 
-        # 根据返回类型选择正确的转换方式
+        # 计算返回的 C 类型（即使 dst 为空也需要知道，因为 double 返回涉及 malloc/free 配对）
+        ret_c_type = None
+        if instr.dst_loc:
+            ret_c_type = self._nova_type_to_c(instr.dst_loc[1])
+
+        # 根据返回类型和是否有接收值，选择转换方式
         # nova_closure_call 返回 void*，需要转换为实际的 C 类型
         if dst and instr.dst_loc:
-            ret_c_type = self._nova_type_to_c(instr.dst_loc[1])
             if ret_c_type == "int64_t":
                 cast_expr = f"(int64_t)(intptr_t)"
                 self._emit(
                     f"{dst} = {cast_expr}nova_closure_call((NovaClosure*){closure}, "
                     f"{args_array}, {arg_count});"
                 )
-            elif ret_c_type in ("double",):
-                # 对于浮点类型，不能通过 intptr_t 强转（UB：浮点截断）。
-                # trampoline 内部使用 malloc+memcpy 将 double 打包为 void*，
-                # 调用点使用临时指针 + memcpy 解包，并 free 避免内存泄漏。
+            elif ret_c_type == "double":
+                # 浮点类型：trampoline 端 malloc+memcpy 装箱为 void*，
+                # 调用端临时指针 + memcpy 解包，并 free。
+                # 做 NULL 检查：nova_closure_call 在闭包为空/异常时可能返回 NULL，
+                # 直接 memcpy 会段错误，此时置默认 0.0 并跳过 free。
                 tmp_ptr = f"_nova_ret_ptr_{self._tmp_counter()}"
                 self._emit(
                     f"void* {tmp_ptr} = nova_closure_call((NovaClosure*){closure}, "
                     f"{args_array}, {arg_count});"
                 )
+                self._emit(f"if ({tmp_ptr} != NULL) {{")
+                self._indent_level += 1
                 self._emit(f"memcpy(&{dst}, {tmp_ptr}, sizeof(double));")
                 self._emit(f"free({tmp_ptr});")
+                self._indent_level -= 1
+                self._emit("} else {")
+                self._indent_level += 1
+                self._emit(f"{dst} = 0.0;")
+                self._indent_level -= 1
+                self._emit("}")
+            elif ret_c_type == "bool":
+                # 严谨：先 (intptr_t) 再 (bool)，与 trampoline 端
+                # (void*)(intptr_t)bool_val 的装箱方式语义匹配。
+                cast_expr = f"(bool)(intptr_t)"
+                self._emit(
+                    f"{dst} = {cast_expr}nova_closure_call((NovaClosure*){closure}, "
+                    f"{args_array}, {arg_count});"
+                )
             else:
                 cast_expr = f"({ret_c_type})"
                 self._emit(
@@ -857,10 +884,21 @@ class LIRCBackend:
                 f"{args_array}, {arg_count});"
             )
         else:
-            self._emit(
-                f"nova_closure_call((NovaClosure*){closure}, "
-                f"{args_array}, {arg_count});"
-            )
+            # 无接收值（dst 为 None）：仍需关心 double 返回的 free 配对，
+            # 因为 trampoline 端只要是 double 返回就会 malloc，即使调用端忽略结果。
+            if ret_c_type == "double":
+                tmp_ptr = f"_nova_ret_ptr_{self._tmp_counter()}"
+                self._emit(
+                    f"void* {tmp_ptr} = nova_closure_call((NovaClosure*){closure}, "
+                    f"{args_array}, {arg_count});"
+                )
+                # free(NULL) 在 C 标准中是安全的 no-op，因此无需 NULL 分支。
+                self._emit(f"free({tmp_ptr});")
+            else:
+                self._emit(
+                    f"nova_closure_call((NovaClosure*){closure}, "
+                    f"{args_array}, {arg_count});"
+                )
 
     # ------------------------------------------------------------------
     # 辅助方法

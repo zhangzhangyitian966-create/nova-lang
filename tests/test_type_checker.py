@@ -15,6 +15,18 @@ from nova.ast_nodes import (
     IfExpr,
     IntLiteral,
     ListExpr,
+    MatchArm,
+    MatchExpr,
+    PatternBool,
+    PatternConstructor,
+    PatternFloat,
+    PatternIdentifier,
+    PatternInt,
+    PatternList,
+    PatternString,
+    PatternTuple,
+    PatternWildcard,
+    Span,
     StringLiteral,
     UnitLiteral,
 )
@@ -478,6 +490,362 @@ class TestGenericParamCount(unittest.TestCase):
         ty = self.tc._make_generic_type("Color", [])
         self.assertIsInstance(ty, ADTType)
         self.assertEqual(ty.name, "Color")
+
+
+# ============================================================
+# match 完备性与冗余检测单元测试
+# 覆盖 _detect_redundant_arms / _check_patterns_exhaustive 等模块
+# ============================================================
+
+
+class TestMatchRedundantArms(unittest.TestCase):
+    """冗余分支检测 (_detect_redundant_arms) 测试"""
+
+    def setUp(self):
+        self.tc = TypeChecker()
+
+    def _make_match_expr(self, arms):
+        """构造一个带 span 的 MatchExpr 供入口函数使用"""
+        return MatchExpr(
+            subject=IntLiteral(value=0, span=Span(line=1, column=1)),
+            arms=arms,
+            span=Span(line=1, column=1),
+        )
+
+    # ---- 通配符/变量绑定冗余 ----
+
+    def test_redundant_duplicate_wildcard(self):
+        """两个无 guard 通配符 _：第二个及之后冗余"""
+        arms = [
+            MatchArm(pattern=PatternWildcard()),
+            MatchArm(pattern=PatternWildcard()),
+        ]
+        redundant, has_wild = self.tc._detect_redundant_arms(arms)
+        self.assertEqual(redundant, [1])
+        self.assertTrue(has_wild)
+
+    def test_redundant_identifier_after_wildcard(self):
+        """_ 之后的变量绑定 x 冗余（均视为 wildcard-like）"""
+        arms = [
+            MatchArm(pattern=PatternWildcard()),
+            MatchArm(pattern=PatternIdentifier(name="x")),
+        ]
+        redundant, _ = self.tc._detect_redundant_arms(arms)
+        self.assertEqual(redundant, [1])
+
+    def test_guarded_wildcard_not_counted(self):
+        """有 guard 的通配符不计入 wildcard 完备，也不触发冗余"""
+        arms = [
+            MatchArm(pattern=PatternWildcard(), guard=BoolLiteral(value=True)),
+            MatchArm(pattern=PatternWildcard()),
+        ]
+        redundant, has_wild = self.tc._detect_redundant_arms(arms)
+        # guarded 的不参与 has_wildcard_or_var 判定
+        self.assertEqual(redundant, [])
+        self.assertTrue(has_wild)  # 第 2 个无 guard 使 has_wild=True
+
+    # ---- 字面量冗余 ----
+
+    def test_redundant_duplicate_int_literal(self):
+        """相同 int 字面量后出现的冗余"""
+        arms = [
+            MatchArm(pattern=PatternInt(value=42)),
+            MatchArm(pattern=PatternInt(value=42)),
+        ]
+        redundant, _ = self.tc._detect_redundant_arms(arms)
+        self.assertEqual(redundant, [1])
+
+    def test_redundant_duplicate_string_literal(self):
+        """相同字符串字面量后出现的冗余"""
+        arms = [
+            MatchArm(pattern=PatternString(value="hello")),
+            MatchArm(pattern=PatternString(value="world")),
+            MatchArm(pattern=PatternString(value="hello")),
+        ]
+        redundant, _ = self.tc._detect_redundant_arms(arms)
+        self.assertEqual(redundant, [2])
+
+    def test_redundant_duplicate_bool_literal(self):
+        """相同 bool 字面量后出现的冗余"""
+        arms = [
+            MatchArm(pattern=PatternBool(value=True)),
+            MatchArm(pattern=PatternBool(value=False)),
+            MatchArm(pattern=PatternBool(value=True)),
+        ]
+        redundant, _ = self.tc._detect_redundant_arms(arms)
+        self.assertEqual(redundant, [2])
+
+    def test_different_literal_types_not_redundant(self):
+        """不同类型的字面量不互相视为冗余（int 42 vs string "42"）"""
+        arms = [
+            MatchArm(pattern=PatternInt(value=42)),
+            MatchArm(pattern=PatternString(value="42")),
+        ]
+        redundant, _ = self.tc._detect_redundant_arms(arms)
+        self.assertEqual(redundant, [])
+
+    def test_nan_float_not_redundant(self):
+        """NaN（val is None）不参与字面量冗余比较"""
+        import math
+
+        nan = float("nan")
+        arms = [
+            MatchArm(pattern=PatternFloat(value=nan)),
+            MatchArm(pattern=PatternFloat(value=nan)),
+        ]
+        redundant, _ = self.tc._detect_redundant_arms(arms)
+        # NaN 不参与冗余检测，两个 NaN 模式均不视为冗余
+        self.assertEqual(redundant, [])
+
+    # ---- 入口抛错验证 ----
+
+    def test_check_exhaustiveness_raises_on_redundant(self):
+        """_check_match_exhaustiveness 入口检测到冗余分支时先抛错（不等到完备性阶段）"""
+        # 使用两个相同的 int 字面量触发冗余（第二个 42 冗余）
+        arms = [
+            MatchArm(pattern=PatternInt(value=42)),
+            MatchArm(pattern=PatternInt(value=42)),
+            MatchArm(pattern=PatternWildcard()),
+        ]
+        match_expr = self._make_match_expr(arms)
+        with self.assertRaises(Exception) as ctx:
+            self.tc._check_match_exhaustiveness(INT_T, arms, match_expr)
+        self.assertIn("冗余", str(ctx.exception))
+
+    def test_empty_arms_raises(self):
+        """空 match 表达式应抛 '必须至少有一个分支'"""
+        match_expr = self._make_match_expr([])
+        with self.assertRaises(Exception) as ctx:
+            self.tc._check_match_exhaustiveness(INT_T, [], match_expr)
+        self.assertIn("至少有一个分支", str(ctx.exception))
+
+
+class TestMatchPatternsExhaustive(unittest.TestCase):
+    """模式完备性 (_check_patterns_exhaustive 及其子方法) 测试"""
+
+    def setUp(self):
+        self.tc = TypeChecker()
+
+    # ---- Bool 类型完备性 ----
+
+    def test_bool_exhaustive_true_and_false(self):
+        """PatternBool(true) + PatternBool(false) → 完备"""
+        pats = [PatternBool(value=True), PatternBool(value=False)]
+        self.assertTrue(self.tc._check_patterns_exhaustive(pats, BOOL_T))
+
+    def test_bool_not_exhaustive_only_true(self):
+        """只有 true → 不完备"""
+        pats = [PatternBool(value=True)]
+        self.assertFalse(self.tc._check_bool_exhaustive(pats))
+
+    def test_bool_wildcard_exhaustive(self):
+        """Bool + 通配符 _ → 直接完备（不走 _check_bool_exhaustive）"""
+        pats = [PatternBool(value=True), PatternWildcard()]
+        self.assertTrue(self.tc._check_patterns_exhaustive(pats, BOOL_T))
+
+    # ---- ADT Option 完备性 ----
+
+    def test_option_exhaustive_some_wildcard_and_none(self):
+        """Some(_) + None → Option[Int] 完备"""
+        option_int = ADTType("Option", [INT_T])
+        pats = [
+            PatternConstructor(name="Some", fields=[PatternWildcard()]),
+            PatternConstructor(name="None", fields=[]),
+        ]
+        self.assertTrue(self.tc._check_patterns_exhaustive(pats, option_int))
+
+    def test_option_exhaustive_some_identifier_and_none(self):
+        """Some(x) + None → 变量绑定也视为子模式完备"""
+        option_int = ADTType("Option", [INT_T])
+        pats = [
+            PatternConstructor(name="Some", fields=[PatternIdentifier(name="n")]),
+            PatternConstructor(name="None", fields=[]),
+        ]
+        self.assertTrue(self.tc._check_patterns_exhaustive(pats, option_int))
+
+    def test_option_missing_none_not_exhaustive(self):
+        """只有 Some(x) 缺少 None → 不完备，缺失构造器"""
+        option_int = ADTType("Option", [INT_T])
+        pats = [
+            PatternConstructor(name="Some", fields=[PatternWildcard()]),
+        ]
+        self.assertFalse(self.tc._check_patterns_exhaustive(pats, option_int))
+
+    def test_option_subpattern_not_exhaustive(self):
+        """Some(1) + Some(2) + None → 构造器都覆盖了但 Some 的子模式（Int 字面量）不完备"""
+        option_int = ADTType("Option", [INT_T])
+        pats = [
+            PatternConstructor(name="Some", fields=[PatternInt(value=1)]),
+            PatternConstructor(name="Some", fields=[PatternInt(value=2)]),
+            PatternConstructor(name="None", fields=[]),
+        ]
+        self.assertFalse(self.tc._check_patterns_exhaustive(pats, option_int))
+
+    # ---- 元组类型完备性 ----
+
+    def test_tuple_exhaustive_bool_wildcard_combination(self):
+        """(true, _) + (false, _) → (Bool, Int) 完备"""
+        ty = TupleType([BOOL_T, INT_T])
+        pats = [
+            PatternTuple(elements=[PatternBool(value=True), PatternWildcard()]),
+            PatternTuple(elements=[PatternBool(value=False), PatternWildcard()]),
+        ]
+        self.assertTrue(self.tc._check_patterns_exhaustive(pats, ty))
+
+    def test_tuple_not_exhaustive_missing_first_elem(self):
+        """只有 (true, _) 缺少 false 分支 → 不完备"""
+        ty = TupleType([BOOL_T, INT_T])
+        pats = [
+            PatternTuple(elements=[PatternBool(value=True), PatternWildcard()]),
+        ]
+        self.assertFalse(self.tc._check_patterns_exhaustive(pats, ty))
+
+    def test_tuple_not_exhaustive_second_elem_literal(self):
+        """(true, 0) + (false, 1)：两位置都是字面量不完备"""
+        ty = TupleType([BOOL_T, INT_T])
+        pats = [
+            PatternTuple(elements=[PatternBool(value=True), PatternInt(value=0)]),
+            PatternTuple(elements=[PatternBool(value=False), PatternInt(value=1)]),
+        ]
+        self.assertFalse(self.tc._check_patterns_exhaustive(pats, ty))
+
+    def test_tuple_three_elem_exhaustive(self):
+        """三元素 (_, _, true) + (_, _, false) → 仅最后一位 Bool 完备，前两位 _"""
+        ty = TupleType([INT_T, STRING_T, BOOL_T])
+        pats = [
+            PatternTuple(
+                elements=[
+                    PatternWildcard(),
+                    PatternWildcard(),
+                    PatternBool(value=True),
+                ]
+            ),
+            PatternTuple(
+                elements=[
+                    PatternWildcard(),
+                    PatternWildcard(),
+                    PatternBool(value=False),
+                ]
+            ),
+        ]
+        self.assertTrue(self.tc._check_patterns_exhaustive(pats, ty))
+
+    # ---- 无限域类型 (Int/String/Float) ----
+
+    def test_int_literal_not_exhaustive_no_wildcard(self):
+        """Int 字面量 1 + 2 → 无限域，无通配符不完备"""
+        pats = [PatternInt(value=1), PatternInt(value=2)]
+        self.assertFalse(self.tc._check_patterns_exhaustive(pats, INT_T))
+
+    def test_string_literal_not_exhaustive(self):
+        """固定字符串字面量不完备（字符串域无限）"""
+        pats = [PatternString(value="a"), PatternString(value="b")]
+        self.assertFalse(self.tc._check_patterns_exhaustive(pats, STRING_T))
+
+    # ---- 列表类型（长度无限，恒返回 False）----
+
+    def test_list_always_not_exhaustive(self):
+        """空列表 [] + [_] + [_, _] 覆盖了 0-2 长度但整体仍不完备（长度无限）"""
+        list_int = ListType(INT_T)
+        pats = [
+            PatternList(elements=[]),
+            PatternList(elements=[PatternWildcard()]),
+            PatternList(elements=[PatternWildcard(), PatternWildcard()]),
+        ]
+        self.assertFalse(self.tc._check_patterns_exhaustive(pats, list_int))
+
+    def test_list_empty_pattern_not_exhaustive(self):
+        """只有 [] 不完备"""
+        list_int = ListType(INT_T)
+        pats = [PatternList(elements=[])]
+        self.assertFalse(self.tc._check_patterns_exhaustive(pats, list_int))
+
+    # ---- 通配符直接完备 ----
+
+    def test_wildcard_always_exhaustive_for_any_type(self):
+        """单个 _ 对任何类型都完备（Int/Bool/ADT/List 全部）"""
+        types = [
+            INT_T,
+            BOOL_T,
+            ADTType("Option", [INT_T]),
+            ListType(STRING_T),
+            TupleType([INT_T, BOOL_T]),
+        ]
+        for t in types:
+            with self.subTest(ty=str(t)):
+                self.assertTrue(
+                    self.tc._check_patterns_exhaustive([PatternWildcard()], t)
+                )
+
+
+class TestMatchExhaustiveIntegration(unittest.TestCase):
+    """_check_match_exhaustiveness 完整入口 + 错误消息测试"""
+
+    def setUp(self):
+        self.tc = TypeChecker()
+
+    def _make_match_expr(self, arms):
+        return MatchExpr(
+            subject=IntLiteral(value=0, span=Span(line=10, column=5)),
+            arms=arms,
+            span=Span(line=10, column=5),
+        )
+
+    def test_adt_missing_variant_message(self):
+        """ADT 缺少构造器时错误消息包含缺失构造器名"""
+        option_int = ADTType("Option", [INT_T])
+        arms = [
+            MatchArm(pattern=PatternConstructor(name="Some", fields=[PatternWildcard()])),
+        ]
+        match_expr = self._make_match_expr(arms)
+        with self.assertRaises(Exception) as ctx:
+            self.tc._check_match_exhaustiveness(option_int, arms, match_expr)
+        self.assertIn("缺失构造器 None", str(ctx.exception))
+
+    def test_adt_subpattern_message(self):
+        """Some(1) + Some(2) + None → 消息提示子模式未完全覆盖"""
+        option_int = ADTType("Option", [INT_T])
+        arms = [
+            MatchArm(pattern=PatternConstructor(name="Some", fields=[PatternInt(value=1)])),
+            MatchArm(pattern=PatternConstructor(name="Some", fields=[PatternInt(value=2)])),
+            MatchArm(pattern=PatternConstructor(name="None", fields=[])),
+        ]
+        match_expr = self._make_match_expr(arms)
+        with self.assertRaises(Exception) as ctx:
+            self.tc._check_match_exhaustiveness(option_int, arms, match_expr)
+        self.assertIn("子模式未完全覆盖", str(ctx.exception))
+
+    def test_bool_missing_branch_message(self):
+        """Bool 缺分支消息包含 '缺失 true 或 false'"""
+        arms = [MatchArm(pattern=PatternBool(value=True))]
+        match_expr = self._make_match_expr(arms)
+        with self.assertRaises(Exception) as ctx:
+            self.tc._check_match_exhaustiveness(BOOL_T, arms, match_expr)
+        self.assertIn("缺失 true 或 false", str(ctx.exception))
+
+    def test_tuple_missing_message(self):
+        """(Bool, Int) 只用 (true, 0) 匹配：消息提示元组元素位置未覆盖"""
+        ty = TupleType([BOOL_T, INT_T])
+        arms = [MatchArm(pattern=PatternTuple(elements=[PatternBool(value=True), PatternInt(value=0)]))]
+        match_expr = self._make_match_expr(arms)
+        with self.assertRaises(Exception) as ctx:
+            self.tc._check_match_exhaustiveness(ty, arms, match_expr)
+        msg = str(ctx.exception).lower()
+        self.assertTrue("元组" in msg or "tuple" in msg or "元素" in msg)
+
+    def test_list_length_message(self):
+        """List[Int] 只用 [] 和 [_]：消息提示仅覆盖了长度 0,1"""
+        list_int = ListType(INT_T)
+        arms = [
+            MatchArm(pattern=PatternList(elements=[])),
+            MatchArm(pattern=PatternList(elements=[PatternWildcard()])),
+        ]
+        match_expr = self._make_match_expr(arms)
+        with self.assertRaises(Exception) as ctx:
+            self.tc._check_match_exhaustiveness(list_int, arms, match_expr)
+        msg = str(ctx.exception)
+        # 消息中应出现长度提示
+        self.assertIn("长度", msg)
 
 
 if __name__ == "__main__":

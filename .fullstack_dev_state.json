@@ -1,7 +1,7 @@
 {
-  "cycles": 54,
-  "frontend_completed": 36,
-  "backend_completed": 39,
+  "cycles": 55,
+  "frontend_completed": 37,
+  "backend_completed": 40,
   "last_review_cycle": 54,
   "current_review_cycle": 54,
   "completed_tasks": [
@@ -92,7 +92,9 @@
     "backend_cranelift_todo_fatal",
     "frontend_generic_param_count_check",
     "backend_native_float_global_store",
-    "review_cycle_54"
+    "review_cycle_54",
+    "FRONTEND-035",
+    "backend_c_closure_double_return"
   ],
   "failed_tasks": [],
   "deprecated_tasks": [
@@ -105,6 +107,28 @@
     "backend_c_todo_error"
   ],
   "task_history": [
+    {
+      "cycle": 55,
+      "task_id": "FRONTEND-035",
+      "name": "match 完备性与冗余检测单元测试补齐",
+      "track": "frontend",
+      "difficulty": "easy",
+      "priority": 55,
+      "result": "success",
+      "details": "前端维护任务。深度审计发现 _detect_redundant_arms、_check_patterns_exhaustive、_check_match_exhaustiveness 等模块约 400 行逻辑复杂，仅通过集成测试覆盖，无显式单元测试，重构时易回归。新增 3 个测试类共 31 个测试（+5 subtests）：TestMatchRedundantArms 11 个（通配符/变量/字面量/NaN/入口抛错等冗余检测边界）、TestMatchPatternsExhaustive 15 个（Bool/ADT Option/元组/无限域 Int/列表/通配符等完备性递归分析 + subTest 多类型覆盖）、TestMatchExhaustiveIntegration 5 个（入口错误消息含缺失构造器名/子模式未覆盖提示/Bool缺分支/元组元素位置未覆盖/列表长度提示）。修改 1 个文件（test_type_checker.py）约 350 行。测试 759 passed（基线 725，+34 含后端 3 个），无回归。前端 37/37 完成。",
+      "timestamp": "2026-07-29 13:10"
+    },
+    {
+      "cycle": 55,
+      "task_id": "backend_c_closure_double_return",
+      "name": "修复 C 后端闭包间接调用浮点返回丢失 + 内存泄漏 + Bool Cast 不严谨",
+      "track": "backend",
+      "difficulty": "medium",
+      "priority": 80,
+      "result": "success",
+      "details": "P1-新3 清零。lir_c_backend.py _compile_call_indirect 修复 3 个缺陷：(1) double 返回+忽略返回值场景：trampoline 端 malloc 的返回值未 free 造成确定内存泄漏——修复：即使 dst=None 也保存 void* 临时指针并 free（free(NULL) 安全）；(2) double 返回+有 dst：memcpy 前未 NULL 检查，闭包为空/异常时返回 NULL 直接 memcpy 段错误——修复：if (tmp!=NULL) memcpy+free else dst=0.0 分支；(3) bool 返回走 else 分支的 (bool)void*：语义不严谨（应与 trampoline 的 (void*)(intptr_t) 装箱配对）——修复：单独处理 ret_c_type==\"bool\"，使用 (bool)(intptr_t) 两步强转。新增 TestClosureCallIndirectFixes 测试类 3 个测试（NULL检查+free+默认0.0、无dst的free防泄漏、bool严谨cast）。修改 1 个文件（lir_c_backend.py）约 50 行代码，新增 1 个测试类约 190 行代码。测试 759 passed（+3 新测试），无回归。后端 40/59 完成。C 后端完成度从 ~85% 提升至 ~88%。",
+      "timestamp": "2026-07-29 13:15"
+    },
     {
       "cycle": 54,
       "task_id": "review_cycle_54",
@@ -309,13 +333,13 @@
     },
     {
       "task_id": "backend_c_closure_double_return",
-      "name": "修复 C 后端闭包间接调用浮点返回丢失",
-      "description": "lir_c_backend.py _compile_call_indirect 将 nova_closure_call 返回值统一当作 int64_t/void* 处理，未对 double 返回做 memcpy 解包。与 trampoline 中 double 返回的 malloc+memcpy 逻辑不匹配，闭包返回浮点数时产生错误结果。",
+      "name": "修复 C 后端闭包间接调用浮点返回丢失 + 内存泄漏 + Bool Cast 不严谨",
+      "description": "已修复 3 个缺陷：(1) double 返回+忽略返回值的 trampoline malloc 内存泄漏；(2) 有 dst 的 double 返回 memcpy 前未 NULL 检查；(3) bool 返回 (bool)void* 不严谨 Cast。修复方案：无 dst 场景临时指针保存后 free；有 dst 场景 NULL 分支保护+默认 0.0；bool 单独处理先 intptr_t 再 bool。",
       "track": "backend",
       "difficulty": "medium",
       "priority": 80,
       "estimated_effort": "2-3小时",
-      "status": "pending",
+      "status": "completed",
       "source": "code_audit_51",
       "depends_on": []
     },

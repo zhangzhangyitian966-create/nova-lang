@@ -4,6 +4,105 @@
 
 ---
 
+## 第 55 轮 — 2026-07-29 13:20
+
+> 开发轮 | 前端：match 完备性/冗余检测单元测试补齐 + 后端：P1-新3 C 后端闭包浮点返回清零 | 测试 759 passed（基线 725，+34 无回归）
+
+---
+
+### 轮次概览
+
+| 维度 | 数据 |
+|------|------|
+| 轮次 | 第 55 轮（普通轮） |
+| 测试基线 | 725 passed（13 个核心测试文件） |
+| 测试最终 | 759 passed（+34 新增测试，无回归） |
+| 前端完成率 | 37/37 = **100%** |
+| 后端完成率 | 40/59 = **67.8%** |
+| 总完成率 | 77/96 = **80.2%** |
+| 完成的 P1 问题 | **P1-新3 清零**（C 后端闭包浮点返回） |
+
+---
+
+### 前端任务：FRONTEND-035 — match 完备性与冗余检测单元测试补齐
+
+**任务**：`FRONTEND-035` | easy | P55
+
+**为什么选这个**：前端 36/36 完成进入维护模式。Explore 深度代码审计发现 `_detect_redundant_arms`、`_check_patterns_exhaustive`、`_check_match_exhaustiveness` 三个核心模块合计约 400 行复杂递归逻辑（ADT 嵌套子模式递归、元组逐位置递归、列表长度分组、Bool 字面量集合、无限域类型判定、NaN 安全、guard 通配符不计入完备等），但仅通过集成测试 `test_nova.py` 覆盖，无独立单元测试。重构该模块时易产生静默回归。
+
+**预期价值**：为 ~400 行复杂递归逻辑建立白盒测试基线，防止未来重构破坏完备性/冗余分析。
+
+**实现详情**（修改 1 个文件，`tests/test_type_checker.py`，约 350 行新增）：
+
+新增 3 个测试类，共 **31 个测试（+5 subtests）**：
+
+| 测试类 | 数量 | 覆盖范围 |
+|--------|------|----------|
+| `TestMatchRedundantArms` | 11 | 通配符冗余、变量绑定在通配符后冗余、guard 通配符不计入 has_wild、重复 int/string/bool 字面量冗余、不同类型字面量不交叉冗余、NaN 不参与冗余比较、入口抛错（冗余先于完备性检测）、空 arms 抛错 |
+| `TestMatchPatternsExhaustive` | 15（+5 subtests） | Bool true+false完备/仅true不完备/通配符直接完备；ADT Some(_)+None完备/变量绑定视为子模式完备/缺None不完备/子模式字面量{1,2}不完备；Tuple 通配符组合/缺第一个元素/两位置均字面量/三元素仅末位Bool完备；Int/String无限域不完备；List固定长度永不完备；_对任意类型完备（5种类型 subTest） |
+| `TestMatchExhaustiveIntegration` | 5 | ADT缺构造器错误消息、ADT子模式未覆盖消息、Bool缺分支消息、Tuple缺元素位置消息、List长度提示消息 |
+
+**结果**：测试 31 passed + 5 subtests，无失败。完整套件 759 passed（基线 725，+34 含后端 3 个），**无回归**。前端 37/37 = 100% 完成。
+
+---
+
+### 后端任务：backend_c_closure_double_return — 修复 C 后端闭包间接调用浮点返回丢失 + 内存泄漏 + Bool Cast 不严谨
+
+**任务**：`backend_c_closure_double_return` | medium | **P80（P1-新3 清零）**
+
+**为什么选这个**：第 54 轮评审明确指定第 55 轮完成 P1-新3（最高优先级未清 P1 问题）。Explore 深度代码审计确认 3 个具体缺陷均有可复现路径：(1) 忽略 double 返回值的间接调用确定内存泄漏（trampoline malloc 不配对 free）；(2) 闭包为 NULL / 异常返回时 double memcpy 确定段错误；(3) bool cast 语义不严谨虽当前平台碰巧正确但属 UB。
+
+**预期价值**：P1-新3 问题清零，C 后端完成度从 ~85% 提升至 ~88%，与 Native 后端持平。
+
+**修复详情**（修改 1 个文件，`backend/lir_c_backend.py`，约 50 行改动）：
+
+`_compile_call_indirect` 函数的三重修复：
+
+| # | 缺陷 | 修复方案 |
+|---|------|----------|
+| 1 | **double 返回+有 dst：memcpy 前未 NULL 检查** | 将原来的 3 行（tmp_ptr赋值 → memcpy → free）改为 if/else 分支：非 NULL → memcpy + free；NULL → `dst = 0.0` 默认值。防止 nova_closure_call 返回 NULL 时段错误。 |
+| 2 | **double 返回+无 dst（忽略返回值）：确定内存泄漏** | trampoline 端只要是 double 返回就 `malloc(sizeof(double))` + memcpy 装箱，与调用端是否忽略结果无关。修复：在 `dst == None` 分支中增加 `ret_c_type == "double"` 判断，保存 void* 临时指针并调用 `free()`（C 标准中 free(NULL) 为安全 no-op，因此无需额外 NULL 分支）。 |
+| 3 | **bool 返回：`(bool)void*` 语义不严谨** | trampoline 端 `(void*)(intptr_t)bool_val` 装箱（true→0x1, false→0x0）。原调用端走 else 分支 `(bool)nova_closure_call(...)` 即 `(bool)void*`——这是把指针值本身当 0/非0判断，虽然当前值 0x1/0x0 碰巧正确，但语义不严谨（高位非零的非法指针值会被误判为 true）。修复：单独处理 bool 类型，改为 `(bool)(intptr_t)nova_closure_call(...)`，与装箱方式语义完全匹配。 |
+
+**测试验证**（新增 `TestClosureCallIndirectFixes` 测试类 3 个测试，约 190 行）：
+
+| 测试 | 断言 |
+|------|------|
+| `test_call_indirect_double_with_dst_has_null_check_and_free` | 生成代码含 `!= NULL`（NULL 检查）、`memcpy(&`（解包）、`free(`（释放）、`= 0.0;`（默认值）—— 4 个关键字全部出现 |
+| `test_call_indirect_double_no_dst_has_free_prevent_leak` | 解耦调用参数（instr.dst_loc=Float类型，dst=None）直接调用 `_compile_call_indirect`；断言出现 `void* _nova_ret_ptr_` + `free(_nova_ret_ptr_`，且**不出现** `memcpy(&`（无接收变量无需解包） |
+| `test_call_indirect_bool_return_uses_precise_bool_cast` | 生成代码含 `(bool)(intptr_t)nova_closure_call` 严谨两步强转 |
+
+**结果**：3/3 测试通过。完整套件 759 passed，**无回归**。后端 40/59 完成，P1-新3 清零。C 后端完成度从 ~85% 提升至 ~88%，与 Native 后端并列第 1。
+
+---
+
+### 测试前后对比
+
+| 指标 | 基线（开发前） | 最终（开发后） | 变化 |
+|------|----------------|----------------|------|
+| 核心 13 文件测试数 | 725 passed | **759 passed** | **+34**（前端 31 + 后端 3） |
+| 前端完成率 | 36/36 = 100% | 37/37 = 100% | 新增 1 个维护任务 |
+| 后端完成率 | 39/58 = 67.2% | 40/59 = 67.8% | +1 任务 + P1-新3清零 |
+| 总完成率 | 75/94 = 79.8% | 77/96 = 80.2% | +0.4pp |
+| P1 未清问题数 | 1 个（P1-新3） | **0 个** | **P1 全清** |
+| C 后端完成度排名 | 第 1（~85%） | 并列第 1（**~88%**） | +3pp |
+
+---
+
+### 前端下一步（第 56 轮）
+
+- 建议继续维护模式：可选轻量任务
+  - (A) **Explore 建议的类型错误位置信息改进**：`_check_binary_op`、`_check_fn_call` 等约 8 处 TypeCheckError 未传入 span 位置和 source，导致用户只能看到错误文本无法定位（P1 价值）。
+  - (B) **Parser 错误恢复的 3 个边界 case 测试补齐**：多错误聚合、单错误不包装 Group、管道/lambda 起始符同步点（P2 价值）。
+  - (C) **无新前端任务**：因前端 100% 完成，本轮可纯推后端（需调整"每轮 1 前端 + 1 后端"的刚性要求——如果允许）。
+
+### 后端下一步（第 56 轮，按第 54 轮评审计划）
+
+- **P70 backend_native_runtime_link**（hard，1-2 天）：修复 Native 后端静态 ELF 模式下 external_calls 完全未处理、link_calls 中 nova_init/nova_list_new 等运行时函数偏移保持 0 的致命缺陷。当前只能通过 .o + gcc 链接运行，独立 ELF 输出无法调用任何运行时函数。
+- 如难度过大可降级为 **P40 backend_phi_copy_missing_error**（easy，30 分钟）：lir_lowering.py _insert_phi_copies 中 src_ssa 找不到时静默跳过改为抛 LoweringError——防御性增强（审计 P2-新1）。
+
+---
+
 ## 第 54 轮 — 2026-07-29 10:30
 
 > 评审轮 | 第 52-54 轮双线路线图评审 | 测试 919 passed

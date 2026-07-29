@@ -28,6 +28,8 @@ from nova.ir.ir_nodes import (
     LIRBinOp,
     LIRUnaryOp,
     LIRCall,
+    LIRCallIndirect,
+    LIRClosureCreate,
     LIRJump,
     LIRBranch,
     LIRSwitch,
@@ -662,6 +664,203 @@ class TestEndToEndCompile(unittest.TestCase):
                 0,
                 f"gcc 语法检查失败:\n{result.stderr}\n生成的 C 代码:\n{c_code}",
             )
+
+
+# ============================================================
+# 闭包间接调用修复测试（backend_c_closure_double_return）
+# 修复：C 后端 _compile_call_indirect
+# 三个缺陷：
+# 1. double 返回 + 无 dst：trampoline malloc 的 double 返回内存泄漏
+# 2. double 返回 + 有 dst：memcpy 前未 NULL 检查
+# 3. bool 返回 cast 不严谨
+# ============================================================
+
+
+class TestClosureCallIndirectFixes(unittest.TestCase):
+    """闭包间接调用（_compile_call_indirect 修复验证
+
+    针对 P1-新3（C 后端闭包浮点返回丢失/内存泄漏/Cast 不严谨）"""
+
+    # --------------------------------------------------------
+    # 辅助：构造含 lambda 返回 Float 的 LIRModule
+    # --------------------------------------------------------
+
+    def _make_module_lambda_double_return(self):
+        """构造含 __lambda_1 返回 Float 的最小 LIR 模块：
+        __lambda_1(r0: Float) -> Float：返回 r0 + 3.14（单函数）
+        main() -> Float：创建闭包（无捕获），间接调用并返回
+        """
+        # lambda 函数：__lambda_1
+        fn_lambda = LIRFunction(
+            name="__lambda_1",
+            params=[("r0", FLOAT_TYPE)],
+            return_type=FLOAT_TYPE,
+        )
+        fn_lambda.body = [
+            LIRLabel(name="bb0"),
+            LIRReturn(),
+        ]
+        # LIRReturn 前一条 LIRUnaryOp Identity 操作返回
+        ret = LIRUnaryOp(op="identity")
+        ret.src_locs = [("r0", FLOAT_TYPE)]
+        ret.dst_loc = ("r1", FLOAT_TYPE)
+        fn_lambda.body.insert(1, ret)
+        fn_lambda.body[-1].src_locs = [("r1", FLOAT_TYPE)]
+
+        # main 函数：创建闭包 -> 间接调用
+        fn_main = LIRFunction(
+            name="main",
+            params=[],
+            return_type=FLOAT_TYPE,
+        )
+        closure_create = LIRClosureCreate(
+            fn_name="__lambda_1",
+            capture_count=0,
+        )
+        closure_create.dst_loc = ("r2", CLOSURE_TYPE)
+        call_indir = LIRCallIndirect(arg_count=1)
+        # src_locs 第一个：闭包对象，第二个参数：2.718
+        call_indir.src_locs = [
+            ("r2", CLOSURE_TYPE),  # 闭包
+            ("r3", FLOAT_TYPE),  # arg 2.718
+        ]
+        call_indir.arg_locs = [("r3", FLOAT_TYPE)]
+        call_indir.dst_loc = ("r4", FLOAT_TYPE)
+        # 加载 2.718
+        load_2718 = LIRLoadConst(value=2.718, const_type="float")
+        load_2718.dst_loc = ("r3", FLOAT_TYPE)
+        ret_instr = LIRReturn()
+        ret_instr.src_locs = [("r4", FLOAT_TYPE)]
+
+        fn_main.body = [
+            LIRLabel(name="bb0"),
+            load_2718,
+            closure_create,
+            call_indir,
+            ret_instr,
+        ]
+
+        module = LIRModule(name="test_double_closure_return")
+        module.functions["__lambda_1"] = fn_lambda
+        module.functions["main"] = fn_main
+        return module
+
+    def _make_module_lambda_bool_return(self):
+        """类似模块，构造 __lambda_2 返回 Bool"""
+        fn_lambda = LIRFunction(
+            name="__lambda_2",
+            params=[("r0", BOOL_TYPE)],
+            return_type=BOOL_TYPE,
+        )
+        fn_lambda.body = [
+            LIRLabel(name="bb0"),
+            LIRReturn(),
+        ]
+        identity = LIRUnaryOp(op="identity")
+        identity.src_locs = [("r0", BOOL_TYPE)]
+        identity.dst_loc = ("r1", BOOL_TYPE)
+        fn_lambda.body.insert(1, identity)
+        fn_lambda.body[-1].src_locs = [("r1", BOOL_TYPE)]
+
+        fn_main = LIRFunction(name="main", params=[], return_type=BOOL_TYPE)
+        cc = LIRClosureCreate(fn_name="__lambda_2", capture_count=0)
+        cc.dst_loc = ("r2", CLOSURE_TYPE)
+        load_true = LIRLoadConst(value=True, const_type="bool")
+        load_true.dst_loc = ("r3", BOOL_TYPE)
+        ci = LIRCallIndirect(arg_count=1)
+        ci.src_locs = [("r2", CLOSURE_TYPE), ("r3", BOOL_TYPE)]
+        ci.arg_locs = [("r3", BOOL_TYPE)]
+        ci.dst_loc = ("r4", BOOL_TYPE)
+        ret = LIRReturn()
+        ret.src_locs = [("r4", BOOL_TYPE)]
+        fn_main.body = [LIRLabel(name="bb0"), load_true, cc, ci, ret]
+
+        module = LIRModule(name="test_bool_closure_return")
+        module.functions["__lambda_2"] = fn_lambda
+        module.functions["main"] = fn_main
+        return module
+
+    # --------------------------------------------------------
+    # 测试 1：double 返回 + 有 dst → 包含 NULL 检查 + memcpy + free + 默认 0.0
+    # --------------------------------------------------------
+
+    def test_call_indirect_double_with_dst_has_null_check_and_free(self):
+        """有 dst 的 double 间接调用：生成的 C 代码包含
+        NULL 检查、memcpy、free 、默认 0.0 初始化"""
+        module = self._make_module_lambda_double_return()
+        backend = LIRCBackend()
+        c_code = backend.compile(module)
+
+        # 检查 NULL 保护分支
+        self.assertIn("!= NULL", c_code,
+            "double 返回有接收到：缺少 NULL 检查")
+        self.assertIn("memcpy(&", c_code,
+            "缺少 memcpy 解包 double")
+        self.assertIn("free(", c_code,
+            "缺少 free 释放 trampoline 端 malloc 的内存")
+        self.assertIn("= 0.0;", c_code,
+            "NULL 分支缺少默认 0.0 初始化")
+
+    # --------------------------------------------------------
+    # 测试 2：double 返回 + 无 dst（忽略返回值）→ 包含 free，
+    # --------------------------------------------------------
+
+    def test_call_indirect_double_no_dst_has_free_prevent_leak(self):
+        """无接收值的 double 间接调用：将返回值赋值给临时指针并 free，
+        防止 trampoline 端 malloc 泄漏（P1-新3 确定内存泄漏清零）
+
+        注意：_compile_call_indirect(instr, dst) 有两个参数：
+          - instr.dst_loc 用于计算返回值类型（决定是否需要 malloc/free 配对）
+          - dst 是实际的 C 变量名，None 表示忽略结果
+        正常调度表入口是同生共死的，但直接调用可以解耦测试边界。
+        """
+        # 构造一个最小 LIRCallIndirect：闭包对象 r2 + 参数 r3（Float）
+        instr = LIRCallIndirect(arg_count=1)
+        instr.src_locs = [
+            ("r2", CLOSURE_TYPE),
+            ("r3", FLOAT_TYPE),
+        ]
+        instr.arg_locs = [("r3", FLOAT_TYPE)]
+        # 关键：设置 dst_loc 以暴露返回类型是 Float（double）
+        # 但调用 _compile_call_indirect 时 dst=None（忽略返回值）
+        instr.dst_loc = ("r4", FLOAT_TYPE)
+
+        backend = LIRCBackend()
+        # 先声明变量，然后直接 dispatch 到 _compile_call_indirect（dst=None）
+        backend._emit("void test_func(void) {")
+        backend._indent_level += 1
+        backend._emit("NovaClosure* _loc_r2 = NULL;")
+        backend._emit("double _loc_r3 = 0.0;")
+        backend._compile_call_indirect(instr, dst=None)  # dst=None 但返回类型已知为 double
+        backend._indent_level -= 1
+        backend._emit("}")
+
+        c_code = "\n".join(backend._output)
+
+        # 验证：生成了临时指针保存 nova_closure_call 返回值，并 free
+        self.assertIn("void* _nova_ret_ptr_", c_code,
+            "double 返回+忽略结果：应保存返回值到临时指针")
+        self.assertIn("free(_nova_ret_ptr_", c_code,
+            "double 返回+忽略结果：缺少 free，造成确定内存泄漏")
+        # 不应有 memcpy（没有接收 dst）
+        self.assertNotIn("memcpy(&", c_code,
+            "无 dst 场景不应有 memcpy（无需解包到接收变量")
+        # free(NULL) 是安全的，因此无需 NULL 分支也没问题
+
+    # --------------------------------------------------------
+    # 测试 3：bool 返回 + 有 dst → 使用严谨 cast
+    # --------------------------------------------------------
+
+    def test_call_indirect_bool_return_uses_precise_bool_cast(self):
+        """bool 间接调用返回使用 (bool)(intptr_t) 严谨两步强转，
+        而非不严谨的 (bool)void*——与 trampoline端装箱方式语义匹配"""
+        module = self._make_module_lambda_bool_return()
+        backend = LIRCBackend()
+        c_code = backend.compile(module)
+
+        # 严谨强转字符串
+        self.assertIn("(bool)(intptr_t)nova_closure_call", c_code,
+            "缺少严谨的 bool 两步强转：先 intptr_t 再 bool")
 
 
 if __name__ == "__main__":
