@@ -22,23 +22,39 @@
       "target_version": "v0.3.x",
       "depends_on": [],
       "status": "in_progress",
-      "sub_tasks": ["split_ir_nodes_a1", "split_ir_nodes_a2", "split_ir_nodes_a3", "unify_c_backend_phase1", "deprecate_cranelift_backend"]
+      "sub_tasks": [
+        "split_ir_nodes_a1",
+        "split_ir_nodes_a2",
+        "split_ir_nodes_a3",
+        "unify_c_backend_phase1",
+        "deprecate_cranelift_backend"
+      ]
     },
     {
       "id": "M-MEM",
       "name": "Allocator API 落地 + 栈/堆语义明确",
       "target_cycles": 87,
       "target_version": "v0.4.0",
-      "depends_on": ["M-ARCH"],
+      "depends_on": [
+        "M-ARCH"
+      ],
       "status": "pending",
-      "sub_tasks": ["allocator_api_step1", "allocator_api_step2", "allocator_api_step3", "allocator_api_step4"]
+      "sub_tasks": [
+        "allocator_api_step1",
+        "allocator_api_step2",
+        "allocator_api_step3",
+        "allocator_api_step4"
+      ]
     },
     {
       "id": "M-SH1",
       "name": "Self-Hosting SH-1: lexer+parser 字节级一致",
       "target_cycles": 96,
       "target_version": "v0.4.0",
-      "depends_on": ["M-ARCH", "M-MEM"],
+      "depends_on": [
+        "M-ARCH",
+        "M-MEM"
+      ],
       "status": "pending",
       "sub_tasks_comment": "细化子任务在 SH-1 启动前一轮补充"
     },
@@ -47,7 +63,10 @@
       "name": "Self-Hosting SH-2: type_checker + 三层 IR lowering 移植",
       "target_cycles": 108,
       "target_version": "v0.5.0",
-      "depends_on": ["M-MEM", "M-SH1"],
+      "depends_on": [
+        "M-MEM",
+        "M-SH1"
+      ],
       "status": "pending"
     },
     {
@@ -55,7 +74,9 @@
       "name": "Self-Hosting SH-3: C后端移植 + stage2==stage3 自举",
       "target_cycles": 120,
       "target_version": "v1.0",
-      "depends_on": ["M-SH2"],
+      "depends_on": [
+        "M-SH2"
+      ],
       "status": "pending"
     },
     {
@@ -65,7 +86,10 @@
       "target_version": "v1.0",
       "depends_on": [],
       "status": "pending",
-      "parallel_with": ["M-SH2", "M-SH3"]
+      "parallel_with": [
+        "M-SH2",
+        "M-SH3"
+      ]
     }
   ],
   "completed_tasks": [
@@ -776,21 +800,8 @@
       "estimated": "1-2 天",
       "status": "pending",
       "depends_on": [],
-      "reason": "[ARCHITECTURE_VISION.md §2.2 强制] self-hosting 前置条件，3轮内必须完成。当前两条C路径并存导致语义维护双倍负担、入口混乱。Phase1风险低、见效快，立即降低维护混淆度。[审查发现→架构战略强制]"
-    },
-    {
-      "id": "unify_c_backend_phase2",
-      "name": "统一C后端Phase2（ADT/match功能迁移 + 删除旧c_codegen.py）",
-      "description": "对比c_codegen.py与lir_c_backend.py的特性矩阵，找出LIR→C路径缺失的最后几个能力（主要是ADT构造/匹配边缘情况），对齐后正式删除c_codegen.py文件。",
-      "difficulty": "hard",
-      "priority": 70,
-      "category": "architecture",
-      "estimated": "2-3 天",
-      "status": "pending",
-      "depends_on": [
-        "unify_c_backend_phase1"
-      ],
-      "reason": "[ARCHITECTURE_VISION.md §2.2 Phase2] 依赖Phase1完成标记弃用和入口清理。对齐功能后永久移除维护双份语义的负担。[自主规划]"
+      "reason": "来自 ARCHITECTURE_VISION.md §2.2 手术 B（三项立即架构手术） [ARCHITECTURE_VISION.md §2.2]",
+      "source": "architecture_mandatory"
     },
     {
       "id": "split_ir_nodes_a1",
@@ -802,7 +813,21 @@
       "estimated": "2-3 小时",
       "status": "pending",
       "depends_on": [],
-      "reason": "[ARCHITECTURE_VISION.md §2.1 强制] self-hosting 前置条件，3轮内必须完成。ir_nodes.py（1413行112类）耦合度过高，零破坏性迁移第一步：抽共享类型常量。[审查发现→架构战略强制]"
+      "reason": "来自 ARCHITECTURE_VISION.md §2.1 手术 A-1（三项立即架构手术） [ARCHITECTURE_VISION.md §2.1]",
+      "source": "architecture_mandatory"
+    },
+    {
+      "id": "low_quality_issues_cleanup",
+      "name": "LOW 级问题批量治理（docstring + 魔法数字）",
+      "description": "批量清理 LOW 级问题：为 ir/ 和 backend/ 模块的公共 API 添加 docstring，将高频魔法数字（如 8 字节大小、默认迭代次数等）提取为命名常量，清理调试打印语句。v1 已完成核心模块的主要部分。v2 已完成 ir/ 模块 docstring 补充。",
+      "difficulty": "easy",
+      "priority": 35,
+      "category": "engineering",
+      "estimated": "2-4 小时",
+      "status": "pending",
+      "depends_on": [],
+      "reason": "来自 AUTO_REVIEW_LOG.md 最新 HIGH 级问题 P1（sys.path hack + 增量门禁）。审查驱动任务 [AUTO_REVIEW_LOG.md HIGH P1]",
+      "source": "review_driven"
     },
     {
       "id": "split_ir_nodes_a2",
@@ -833,18 +858,6 @@
       "reason": "[ARCHITECTURE_VISION.md §2.1 强制] 拆分收尾。完成后单文件耦合风险彻底解除。[架构战略强制]"
     },
     {
-      "id": "deprecate_cranelift_backend",
-      "name": "弃用Cranelift后端 · 架构手术C",
-      "description": "在 backend/cranelift_backend.py 顶部加 DeprecationWarning。从 default_backend_pipeline() 和 compiler_pipeline.py 的后端注册表中移除 Cranelift。保留文件2轮，确认无外部依赖后，下一轮正式删除。从路线图中移除任何与Cranelift相关的任务，标记deprecated。",
-      "difficulty": "easy",
-      "priority": 85,
-      "category": "architecture",
-      "estimated": "1-2 小时",
-      "status": "pending",
-      "depends_on": [],
-      "reason": "[ARCHITECTURE_VISION.md §2.3 强制] 立即瘦身手术。Cranelift后端调度表仅17条指令（Wasm24/Native29），_compile_store_reg是空实现pass，0独立测试，ADT/Map/List构建只调_new不填充元素。价值与Wasm后端高度重叠，但Wasm后端已完整端到端可用。[自主发现→架构战略强制]"
-    },
-    {
       "id": "allocator_api_step1",
       "name": "Allocator API Step1：定义trait + ArenaAllocator/LibcAllocator实现 · 内存模型决策落地",
       "description": "新建 nova/runtime/allocator.py（先Python实现，未来用Nova重写）。定义 Allocator trait/协议：alloc(size: Int, align: Int) -> *u8、free(ptr: *u8, size: Int, align: Int)、realloc(ptr, old_size, new_size, align) -> *u8。实现两种默认分配器：ArenaAllocator（批量分配统一释放，编译器内部用，极快）、LibcAllocator（调libc malloc/free，通用场景）。",
@@ -855,6 +868,18 @@
       "status": "pending",
       "depends_on": [],
       "reason": "[ARCHITECTURE_VISION.md §3.1 Step1 推荐选择A（Zig风格显式分配器API）] 内存模型是self-hosting的地基，最迟v0.5必须定板。Step1先落接口定义+两种默认实现，不侵入现有代码结构，风险可控。[架构战略强制·新增任务]"
+    },
+    {
+      "id": "deprecate_cranelift_backend",
+      "name": "弃用Cranelift后端 · 架构手术C",
+      "description": "在 backend/cranelift_backend.py 顶部加 DeprecationWarning。从 default_backend_pipeline() 和 compiler_pipeline.py 的后端注册表中移除 Cranelift。保留文件2轮，确认无外部依赖后，下一轮正式删除。从路线图中移除任何与Cranelift相关的任务，标记deprecated。",
+      "difficulty": "easy",
+      "priority": 85,
+      "category": "architecture",
+      "estimated": "1-2 小时",
+      "status": "pending",
+      "depends_on": [],
+      "reason": "[ARCHITECTURE_VISION.md §2.3 强制] 立即瘦身手术。Cranelift后端调度表仅17条指令（Wasm24/Native29），_compile_store_reg是空实现pass，0独立测试，ADT/Map/List构建只调_new不填充元素。价值与Wasm后端高度重叠，但Wasm后端已完整端到端可用。[自主发现→架构战略强制]"
     },
     {
       "id": "allocator_api_step2",
@@ -897,6 +922,34 @@
         "allocator_api_step3"
       ],
       "reason": "[ARCHITECTURE_VISION.md §3.1 Step4] 系统级语言的重要语义约束：任何可能失败的操作必须在类型签名中体现，不允许隐式panic/异常。[架构战略·新增任务]"
+    },
+    {
+      "id": "unify_c_backend_phase2",
+      "name": "统一C后端Phase2（ADT/match功能迁移 + 删除旧c_codegen.py）",
+      "description": "对比c_codegen.py与lir_c_backend.py的特性矩阵，找出LIR→C路径缺失的最后几个能力（主要是ADT构造/匹配边缘情况），对齐后正式删除c_codegen.py文件。",
+      "difficulty": "hard",
+      "priority": 70,
+      "category": "architecture",
+      "estimated": "2-3 天",
+      "status": "pending",
+      "depends_on": [
+        "unify_c_backend_phase1"
+      ],
+      "reason": "[ARCHITECTURE_VISION.md §2.2 Phase2] 依赖Phase1完成标记弃用和入口清理。对齐功能后永久移除维护双份语义的负担。[自主规划]"
+    },
+    {
+      "id": "benchmark_enhance_exec_time",
+      "name": "基准测试框架增强（C/Wasm执行时间+优化对比）",
+      "description": "为基准测试框架添加 C 后端和 Wasm 后端的执行时间测量，支持优化前后对比功能（同一用例在不同优化级别下的性能对比），扩充基准用例覆盖 ADT、模式匹配、闭包等场景",
+      "difficulty": "medium",
+      "priority": 30,
+      "category": "test",
+      "estimated": "3-5 小时",
+      "status": "pending",
+      "depends_on": [
+        "backend_benchmark_framework"
+      ],
+      "reason": "[ARCHITECTURE_VISION.md §5.3 下调] nice-to-have，不阻塞架构手术和self-hosting。优先级从 38 下调至 30。[自主规划]"
     },
     {
       "id": "refactor_check_patterns_exhaustive",
@@ -1028,32 +1081,6 @@
         "mir_cfg_loop_analysis"
       ],
       "reason": "cfg_utils.py（799行）是循环优化的核心基础设施，但缺乏直接测试。优先级下调 54→50，让位于功能完整性任务。[自主发现]"
-    },
-    {
-      "id": "benchmark_enhance_exec_time",
-      "name": "基准测试框架增强（C/Wasm执行时间+优化对比）",
-      "description": "为基准测试框架添加 C 后端和 Wasm 后端的执行时间测量，支持优化前后对比功能（同一用例在不同优化级别下的性能对比），扩充基准用例覆盖 ADT、模式匹配、闭包等场景",
-      "difficulty": "medium",
-      "priority": 30,
-      "category": "test",
-      "estimated": "3-5 小时",
-      "status": "pending",
-      "depends_on": [
-        "backend_benchmark_framework"
-      ],
-      "reason": "[ARCHITECTURE_VISION.md §5.3 下调] nice-to-have，不阻塞架构手术和self-hosting。优先级从 38 下调至 30。[自主规划]"
-    },
-    {
-      "id": "low_quality_issues_cleanup",
-      "name": "LOW 级问题批量治理（docstring + 魔法数字）",
-      "description": "批量清理 LOW 级问题：为 ir/ 和 backend/ 模块的公共 API 添加 docstring，将高频魔法数字（如 8 字节大小、默认迭代次数等）提取为命名常量，清理调试打印语句。v1 已完成核心模块的主要部分。v2 已完成 ir/ 模块 docstring 补充。",
-      "difficulty": "easy",
-      "priority": 35,
-      "category": "engineering",
-      "estimated": "2-4 小时",
-      "status": "pending",
-      "depends_on": [],
-      "reason": "[ARCHITECTURE_VISION.md §5.3 下调] LOW 级问题不阻塞 self-hosting 和架构手术，优先级从 40 下调至 35。增量质量门禁已落地，新增代码不再引入新的 LOW 问题，存量可逐步消化。[审查发现]"
     },
     {
       "id": "refactor_lower_call_expr",
