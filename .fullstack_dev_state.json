@@ -1,9 +1,9 @@
 {
-  "cycles": 53,
+  "cycles": 54,
   "frontend_completed": 36,
   "backend_completed": 39,
-  "last_review_cycle": 51,
-  "current_review_cycle": 51,
+  "last_review_cycle": 54,
+  "current_review_cycle": 54,
   "completed_tasks": [
     "frontend_try_expr_typecheck",
     "backend_native_label_patch",
@@ -91,7 +91,8 @@
     "frontend_parser_block_boundary",
     "backend_cranelift_todo_fatal",
     "frontend_generic_param_count_check",
-    "backend_native_float_global_store"
+    "backend_native_float_global_store",
+    "review_cycle_54"
   ],
   "failed_tasks": [],
   "deprecated_tasks": [
@@ -104,6 +105,17 @@
     "backend_c_todo_error"
   ],
   "task_history": [
+    {
+      "cycle": 54,
+      "task_id": "review_cycle_54",
+      "name": "第 54 轮双线路线图评审",
+      "track": "review",
+      "difficulty": "n/a",
+      "priority": 99,
+      "result": "success",
+      "details": "第 52-54 轮评审轮。前端 36/36=100%完成（质量评分8/10），后端 39/56=69.6%完成（质量评分6.5/10）。深度代码审计验证第53轮Native浮点全局存储修复正确（load_to_reg寄存器编号统一设计有效）。新发现2个P2级问题：Wasm WAT缩进管理脆弱、Phi拷贝缺失静默跳过。前端进入维护模式，后端仍不平衡。下3轮聚焦：C闭包浮点返回(P80)>Native外部运行时链接(P70)>Wasm栈平衡(P45)。新增2个任务，废弃0个，调整0个优先级。",
+      "timestamp": "2026-07-29 10:30"
+    },
     {
       "cycle": 53,
       "task_id": "frontend_generic_param_count_check",
@@ -353,6 +365,30 @@
       "estimated_effort": "3-5小时",
       "status": "pending",
       "source": "quality_analysis",
+      "depends_on": []
+    },
+    {
+      "task_id": "backend_wasm_wat_indent_verify",
+      "name": "添加 Wasm 后端 WAT 缩进深度断言",
+      "description": "wasm_backend.py _emit_return_block 和 _emit_label_block 的缩进管理在异常 CFG（不可达代码、panic 后紧跟 return）下可能不匹配，生成无效 WAT。需在 _compile_function_blocks 中添加缩进深度断言，确保每个基本块结束后缩进回到预期层级。",
+      "track": "backend",
+      "difficulty": "easy",
+      "priority": 35,
+      "estimated_effort": "1小时",
+      "status": "pending",
+      "source": "code_audit_54",
+      "depends_on": []
+    },
+    {
+      "task_id": "backend_phi_copy_missing_error",
+      "name": "Phi 拷贝源缺失时抛出内部编译错误",
+      "description": "ir/lir_lowering.py _insert_phi_copies 中如果 src_ssa 找不到或不在 ssa_to_loc 中，Phi 拷贝被静默跳过，可能导致使用未初始化的寄存器值。需添加 else 分支抛出 LoweringError，增强编译器防御性。",
+      "track": "backend",
+      "difficulty": "easy",
+      "priority": 40,
+      "estimated_effort": "30分钟",
+      "status": "pending",
+      "source": "code_audit_54",
       "depends_on": []
     }
   ]
