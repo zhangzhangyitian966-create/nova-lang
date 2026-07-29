@@ -540,6 +540,17 @@ class Parser:
                     block_errors = 0
                     break
                 else:
+                    # 检查下一个 token 是否是明显不能开始新表达式的符号
+                    # 如果是，说明此处缺少语句分隔符或块结束符
+                    next_tok = self.tokens[self.pos] if self.pos < len(self.tokens) else None
+                    if next_tok and next_tok.type in (
+                        TokenType.RPAREN, TokenType.RBRACKET, TokenType.COMMA
+                    ):
+                        raise ParseError(
+                            f"缺少 ';' 或 '}}'，在语句结束后找到 {next_tok.type.name}",
+                            next_tok.line,
+                            next_tok.column,
+                        )
                     stmts.append(expr)
                     block_errors = 0
             except ParseError as e:

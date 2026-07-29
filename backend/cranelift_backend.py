@@ -193,7 +193,9 @@ class CraneliftBackend:
         if handler:
             handler(instr)
         else:
-            self._emit(f";; TODO: {type(instr).__name__}")
+            raise NotImplementedError(
+                f"Cranelift 后端尚未实现指令: {type(instr).__name__}"
+            )
 
     # ---- 各指令类型的独立编译方法 ----
 

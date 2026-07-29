@@ -1,7 +1,7 @@
 {
-  "cycles": 51,
-  "frontend_completed": 34,
-  "backend_completed": 37,
+  "cycles": 52,
+  "frontend_completed": 35,
+  "backend_completed": 38,
   "last_review_cycle": 48,
   "current_review_cycle": 51,
   "completed_tasks": [
@@ -87,7 +87,9 @@
     "backend_native_regalloc_loop_regression",
     "FRONTEND-033",
     "FRONTEND-034",
-    "backend_closure_memory_leak_fix"
+    "backend_closure_memory_leak_fix",
+    "frontend_parser_block_boundary",
+    "backend_cranelift_todo_fatal"
   ],
   "failed_tasks": [],
   "deprecated_tasks": [
@@ -100,6 +102,28 @@
     "backend_c_todo_error"
   ],
   "task_history": [
+    {
+      "cycle": 52,
+      "task_id": "frontend_parser_block_boundary",
+      "name": "修复 Parser 块边界静默吞错",
+      "track": "frontend",
+      "difficulty": "easy",
+      "priority": 55,
+      "result": "success",
+      "details": "前端唯一剩余审计问题。parser.py _parse_block 中当表达式后既无 ; 也无 RBRACE 时，原代码直接将表达式加入 stmts 而不检查后续 token 是否合法。保守修复：仅当后续 token 是明显不能开始新表达式的符号（RPAREN、RBRACKET、COMMA）时才抛出 ParseError。这样既捕获了真实语法错误（如 { x + y ) }），又保持了对 Nova 合法换行分隔语法的兼容性（如 if ... then continue\\nresult = ...）。修改 1 个文件（parser.py）约 8 行代码。测试 907 passed，无回归。前端 35/35 完成。",
+      "timestamp": "2026-07-29 07:15"
+    },
+    {
+      "cycle": 52,
+      "task_id": "backend_cranelift_todo_fatal",
+      "name": "修复 Cranelift 后端未实现指令降级为 TODO 注释（致命缺陷）",
+      "track": "backend",
+      "difficulty": "easy",
+      "priority": 98,
+      "result": "success",
+      "details": "P0 级致命缺陷清零。cranelift_backend.py _compile_instr 对未处理指令原来发射 ;; TODO 注释而非抛异常，导致编译'成功'但生成的 Cranelift IR 缺少关键指令，执行结果不可预测。修复：将 ;; TODO 改为 raise NotImplementedError，与所有后端统一行为。修改 1 个文件（cranelift_backend.py）2 行代码。测试 907 passed，无回归。后端 38/56 完成。Cranelift 后端完成度从 ~30% 提升至安全基线。",
+      "timestamp": "2026-07-29 07:20"
+    },
     {
       "cycle": 51,
       "task_id": "review_cycle_51",
@@ -231,7 +255,7 @@
       "difficulty": "easy",
       "priority": 98,
       "estimated_effort": "30分钟",
-      "status": "pending",
+      "status": "completed",
       "source": "code_audit_51",
       "depends_on": []
     },
@@ -267,7 +291,7 @@
       "difficulty": "easy",
       "priority": 55,
       "estimated_effort": "1小时",
-      "status": "pending",
+      "status": "completed",
       "source": "code_audit_51",
       "depends_on": []
     },
