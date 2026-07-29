@@ -1,12 +1,12 @@
 {
   "completed": [
-    "fix_native_test_import",
-    "dce_pass",
-    "inlining_pass"
+    "low_quality_issues_cleanup",
+    "dce_pass"
   ],
   "failed": [
-    "fix_lir_mapbuild",
-    "wasmgc_storereg"
+    "unify_c_backend_phase1",
+    "split_ir_nodes_a1",
+    "fix_native_test_import"
   ],
-  "last_update": "2026-07-29T17:38:17.411230"
+  "last_update": "2026-07-29T17:53:26.826292"
 }

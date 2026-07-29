@@ -1,0 +1,1006 @@
+"""Nova LIR → C 代码生成统一入口（架构手术 B Phase 1 · §2.2 新路径）。
+
+新路径：nova.backend.c.lir_to_c.LIRCBackend
+旧路径：nova.c_codegen.CCodeGen （已弃用，Phase 2 删除）
+"""
+
+"""
+Nova LIR → C 代码生成后端
+
+将 LIR (Low-level Intermediate Representation) 编译为 C 源代码。
+这是 C 后端接入统一 IR 管线的第一步，使 C 后端能够受益于 IR 层的所有优化 Pass。
+
+当前实现阶段：阶段一（最小可用集合）
+- 支持整数/浮点/布尔常量加载
+- 支持二元/一元运算
+- 支持控制流（label/goto/if-goto/return）
+- 支持函数调用
+- 支持寄存器/栈位之间的数据移动
+"""
+
+from ...ir.ir_nodes import (
+    UNIT_TYPE,
+    LIRBinOp,
+    LIRBranch,
+    LIRBuildADT,
+    LIRBuildList,
+    LIRBuildMap,
+    LIRBuildTuple,
+    LIRClosureCreate,
+    LIRCall,
+    LIRCallIndirect,
+    LIRFieldAccess,
+    LIRFunction,
+    LIRIndex,
+    LIRInstr,
+    LIRJump,
+    LIRLabel,
+    LIRListAppend,
+    LIRLoadConst,
+    LIRLoadGlobal,
+    LIRLoadReg,
+    LIRModule,
+    LIRPanic,
+    LIRReturn,
+    LIRStoreGlobal,
+    LIRStoreReg,
+    LIRSwitch,
+    LIRUnaryOp,
+)
+from ..common import mangle_builtin_name
+
+
+# NovaValue 大小（字节），所有值类型都以 8 字节存储
+NOVA_VALUE_SIZE = 8
+
+
+class LIRCBackend:
+    """LIR → C 代码生成器
+
+    将 LIR 模块编译为 C 源代码。
+    虚拟寄存器直接映射为 C 局部变量，由 C 编译器负责寄存器分配和优化。
+    控制流使用 C 的 goto + label 实现。
+    """
+
+    # Nova 类型 → C 类型映射表（关键词 → C 类型）
+    # 按优先级排列：先匹配先返回
+    _NOVA_TYPE_C_MAP = [
+        ("Int", "int64_t"),
+        ("Float", "double"),
+        ("Bool", "bool"),
+        ("String", "NovaString*"),
+        ("Unit", "void"),
+        ("List", "NovaList*"),
+        ("Map", "NovaMap*"),
+        ("Fn", "NovaClosure*"),
+        ("Closure", "NovaClosure*"),
+    ]
+
+    def __init__(self):
+        """初始化 LIR → C 代码生成器
+
+        初始化输出缓冲区、缩进级别、字符串常量收集器、
+        临时变量计数器和指令调度表。
+        """
+        self._output = []
+        self._indent_level = 0
+        self._string_literals = []  # 收集字符串常量
+        self._string_counter = 0
+        self._tmp_counter_value = 0  # 临时变量计数器
+        self._instr_dispatch = self._build_instr_dispatch_table()
+
+    def compile(self, lir_module: LIRModule) -> str:
+        """编译 LIR 模块为 C 源代码字符串"""
+        self._output = []
+        self._indent_level = 0
+        self._string_literals = []
+        self._string_counter = 0
+        self._tmp_counter_value = 0
+        self._lambda_capture_counts = {}
+
+        # 1. 输出头文件
+        self._emit_header()
+
+        # 2. 收集字符串常量（先扫描所有函数）
+        self._collect_string_literals(lir_module)
+
+        # 3. 扫描 lambda 闭包创建指令，建立 capture_count 映射
+        self._lambda_capture_counts = self._collect_lambda_capture_counts(lir_module)
+
+        # 4. 输出字符串常量声明
+        self._emit_string_literals()
+
+        # 5. 输出全局变量声明
+        self._emit_globals(lir_module)
+
+        # 6. 输出函数前向声明
+        self._emit_fn_declarations(lir_module)
+
+        # 7. 输出函数定义
+        for name, fn in lir_module.functions.items():
+            self._compile_function(fn)
+
+        # 8. 输出 lambda trampoline 函数（闭包调用约定包装器）
+        for name, fn in lir_module.functions.items():
+            if self._is_lambda_name(name) and name in self._lambda_capture_counts:
+                self._emit_lambda_trampoline(fn, self._lambda_capture_counts[name])
+
+        # 9. 输出 main 函数
+        self._emit_main(lir_module)
+
+        return "\n".join(self._output)
+
+    # ------------------------------------------------------------------
+    # 头部与全局
+    # ------------------------------------------------------------------
+
+    def _emit_header(self):
+        """输出头文件包含"""
+        self._emit('#include "nova_runtime.h"')
+        self._emit("#include <stdio.h>")
+        self._emit("#include <stdlib.h>")
+        self._emit("#include <string.h>")
+        self._emit("#include <stdbool.h>")
+        self._emit("#include <stdint.h>")
+        self._emit("")
+
+    def _collect_string_literals(self, lir_module: LIRModule):
+        """收集所有字符串常量"""
+        for name, fn in lir_module.functions.items():
+            for instr in fn.body:
+                if isinstance(instr, LIRLoadConst):
+                    if instr.const_type == "string" and instr.value is not None:
+                        if instr.value not in self._string_literals:
+                            self._string_literals.append(instr.value)
+
+    def _emit_string_literals(self):
+        """输出字符串常量的静态数组声明"""
+        if not self._string_literals:
+            return
+        for i, s in enumerate(self._string_literals):
+            escaped = s.replace("\\", "\\\\").replace('"', '\\"').replace("\n", "\\n")
+            self._emit(f'static const char nova_str_{i}[] = "{escaped}";')
+        self._emit("")
+
+    def _get_string_label(self, value: str) -> str:
+        """获取字符串常量的标签名"""
+        if value in self._string_literals:
+            idx = self._string_literals.index(value)
+            return f"nova_str_{idx}"
+        # 不在预收集列表中（理论上不应该发生）
+        idx = len(self._string_literals)
+        self._string_literals.append(value)
+        return f"nova_str_{idx}"
+
+    def _emit_globals(self, lir_module: LIRModule):
+        """输出全局变量声明"""
+        if not lir_module.globals:
+            return
+        for g in lir_module.globals:
+            c_type = self._nova_type_to_c(g.ir_type)
+            self._emit(f"{c_type} {g.name};")
+        self._emit("")
+
+    def _emit_fn_declarations(self, lir_module: LIRModule):
+        """输出函数前向声明"""
+        for name, fn in lir_module.functions.items():
+            ret_type = self._nova_type_to_c(fn.return_type)
+            params = self._gen_params_str(fn)
+            c_name = self._mangle_fn_name(name)
+            self._emit(f"{ret_type} {c_name}({params});")
+            # 为 lambda 输出 trampoline 前向声明
+            if self._is_lambda_name(name) and name in getattr(self, '_lambda_capture_counts', {}):
+                tramp_name = self._mangle_trampoline_name(name)
+                self._emit(
+                    f"void* {tramp_name}(void** captured, void** args, int32_t arg_count);"
+                )
+        self._emit("")
+
+    def _emit_main(self, lir_module: LIRModule):
+        """输出 main 函数
+
+        如果 Nova main 函数返回非 Unit 类型，将返回值作为 C main 的退出码返回，
+        便于端到端测试验证执行结果。
+        """
+        self._emit("int main(int argc, char** argv) {")
+        self._indent_level += 1
+        self._emit("nova_init();")
+
+        # 如果有 main 函数则调用
+        if "main" in lir_module.functions:
+            main_fn = lir_module.functions["main"]
+            c_name = self._mangle_fn_name("main")
+            if main_fn.return_type == UNIT_TYPE:
+                self._emit(f"{c_name}();")
+                self._emit("nova_cleanup();")
+                self._emit("return 0;")
+            else:
+                # 非 Unit 返回值：将结果作为退出码返回
+                self._emit(f"int64_t _nova_result = {c_name}();")
+                self._emit("nova_cleanup();")
+                self._emit("return (int)_nova_result;")
+        else:
+            self._emit("nova_cleanup();")
+            self._emit("return 0;")
+
+        self._indent_level -= 1
+        self._emit("}")
+        self._emit("")
+
+    # ------------------------------------------------------------------
+    # Lambda 闭包 trampoline 生成
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _is_lambda_name(name: str) -> bool:
+        """判断函数名是否为 lambda 辅助函数"""
+        return name.startswith("__lambda_")
+
+    def _mangle_trampoline_name(self, name: str) -> str:
+        """生成 lambda 包装函数（trampoline）的名字"""
+        return f"nova_trampoline_{name}"
+
+    def _collect_lambda_capture_counts(self, lir_module: LIRModule) -> dict:
+        """扫描所有函数体中的 LIRClosureCreate 指令，建立 lambda_name -> capture_count 映射"""
+        counts = {}
+        for fn in lir_module.functions.values():
+            for instr in fn.body:
+                if isinstance(instr, LIRClosureCreate):
+                    counts[instr.fn_name] = instr.capture_count
+        return counts
+
+    def _emit_lambda_trampoline(self, fn: LIRFunction, capture_count: int):
+        """为 lambda 函数生成闭包调用约定的包装函数（trampoline）
+
+        闭包调用约定：void* fn(void** captured, void** args, int32_t arg_count)
+        Lambda 实际函数：void* nova_fn___lambda_N(cap0_type cap0, ..., arg0_type arg0, ...)
+        Trampoline 负责从 captured/args 数组解包参数并调用实际函数。
+        """
+        if not self._is_lambda_name(fn.name):
+            return
+
+        c_name = self._mangle_fn_name(fn.name)
+        tramp_name = self._mangle_trampoline_name(fn.name)
+        ret_type = self._nova_type_to_c(fn.return_type)
+
+        self._emit(
+            f"void* {tramp_name}(void** captured, void** args, int32_t arg_count) {{"
+        )
+        self._indent_level += 1
+
+        # 解包捕获变量（从 captured 数组）
+        for i in range(capture_count):
+            if i >= len(fn.params):
+                break
+            param_name, param_type = fn.params[i]
+            c_type = self._nova_type_to_c(param_type)
+            var_name = self._loc_var_name(param_name)
+            self._emit(f"{c_type} {var_name} = ({c_type})(uintptr_t)captured[{i}];")
+
+        # 解包用户参数（从 args 数组）
+        user_param_start = capture_count
+        user_param_count = len(fn.params) - capture_count
+        for i in range(user_param_count):
+            idx = user_param_start + i
+            if idx >= len(fn.params):
+                break
+            param_name, param_type = fn.params[idx]
+            c_type = self._nova_type_to_c(param_type)
+            var_name = self._loc_var_name(param_name)
+            self._emit(f"{c_type} {var_name} = ({c_type})(uintptr_t)args[{i}];")
+
+        # 调用实际的 lambda 函数
+        arg_names = [self._loc_var_name(p[0]) for p in fn.params]
+        args_str = ", ".join(arg_names) if arg_names else ""
+        if ret_type == "void":
+            self._emit(f"{c_name}({args_str});")
+        else:
+            # 将返回值装箱为 void*（闭包调用约定）
+            if ret_type == "int64_t":
+                self._emit(f"return (void*)(intptr_t){c_name}({args_str});")
+            elif ret_type == "double":
+                # double 不能通过 intptr_t 强转为 void*（UB：浮点截断）
+                # 使用 malloc + memcpy 进行安全的类型双关
+                self._emit(f"double _nova_ret = {c_name}({args_str});")
+                self._emit("double* _nova_ret_ptr = (double*)malloc(sizeof(double));")
+                self._emit("memcpy(_nova_ret_ptr, &_nova_ret, sizeof(double));")
+                self._emit("return (void*)_nova_ret_ptr;")
+            elif ret_type == "bool":
+                self._emit(f"return (void*)(intptr_t){c_name}({args_str});")
+            else:
+                self._emit(f"return (void*){c_name}({args_str});")
+
+        self._indent_level -= 1
+        self._emit("}")
+        self._emit("")
+
+    # ------------------------------------------------------------------
+    # 函数编译
+    # ------------------------------------------------------------------
+
+    def _compile_function(self, fn: LIRFunction):
+        """编译单个函数"""
+        ret_type = self._nova_type_to_c(fn.return_type)
+        c_name = self._mangle_fn_name(fn.name)
+        params = self._gen_params_str(fn)
+
+        self._emit(f"{ret_type} {c_name}({params}) {{")
+        self._indent_level += 1
+
+        # 收集所有用到的虚拟寄存器（位置）并声明变量
+        locs = self._collect_locations(fn)
+        for loc_name, loc_type in locs.items():
+            # 跳过参数（已在参数列表中声明）
+            param_names = [p[0] for p in fn.params]
+            if loc_name in param_names:
+                continue
+            c_type = self._nova_type_to_c(loc_type)
+            var_name = self._loc_var_name(loc_name)
+            self._emit(f"{c_type} {var_name};")
+
+        if locs:
+            self._emit("")
+
+        # 编译函数体指令
+        for instr in fn.body:
+            self._compile_instr(instr, fn)
+
+        self._indent_level -= 1
+        self._emit("}")
+        self._emit("")
+
+    def _collect_locations(self, fn: LIRFunction) -> dict:
+        """收集函数中所有用到的位置（虚拟寄存器）及其类型"""
+        locs = {}
+        # 参数
+        for name, ty in fn.params:
+            locs[name] = ty
+
+        for instr in fn.body:
+            # 源位置
+            if instr.src_locs:
+                for loc_name, loc_type in instr.src_locs:
+                    if loc_name and loc_name not in locs:
+                        locs[loc_name] = loc_type
+            # 目标位置
+            if instr.dst_loc:
+                loc_name, loc_type = instr.dst_loc
+                if loc_name and loc_name not in locs:
+                    locs[loc_name] = loc_type
+        return locs
+
+    def _gen_params_str(self, fn: LIRFunction) -> str:
+        """生成参数列表字符串"""
+        if not fn.params:
+            return "void"
+        parts = []
+        for name, ty in fn.params:
+            c_type = self._nova_type_to_c(ty)
+            var_name = self._loc_var_name(name)
+            parts.append(f"{c_type} {var_name}")
+        return ", ".join(parts)
+
+    # ------------------------------------------------------------------
+    # 指令编译（调度表模式）
+    # ------------------------------------------------------------------
+
+    def _build_instr_dispatch_table(self) -> dict:
+        """构建 LIR 指令类型 → 编译方法 的调度表"""
+        return {
+            # 标签（特殊处理，不需要 dst）
+            LIRLabel: self._compile_label,
+            # 常量与加载
+            LIRLoadConst: self._compile_load_const_dispatch,
+            LIRLoadReg: self._compile_load_reg,
+            LIRStoreReg: self._compile_store_reg,
+            LIRLoadGlobal: self._compile_load_global,
+            LIRStoreGlobal: self._compile_store_global,
+            # 运算
+            LIRBinOp: self._compile_binop_dispatch,
+            LIRUnaryOp: self._compile_unary_op,
+            # 函数调用
+            LIRCall: self._compile_call_dispatch,
+            LIRCallIndirect: self._compile_call_indirect_dispatch,
+            # 控制流
+            LIRJump: self._compile_jump,
+            LIRBranch: self._compile_branch_dispatch,
+            LIRSwitch: self._compile_switch_dispatch,
+            LIRReturn: self._compile_return,
+            # 数据结构构建
+            LIRBuildList: self._compile_build_list,
+            LIRListAppend: self._compile_list_append,
+            LIRBuildTuple: self._compile_build_tuple,
+            LIRBuildMap: self._compile_build_map,
+            LIRBuildADT: self._compile_build_adt,
+            # 闭包
+            LIRClosureCreate: self._compile_closure_create,
+            # 访问
+            LIRFieldAccess: self._compile_field_access,
+            LIRIndex: self._compile_index_access,
+            # 杂项
+            LIRPanic: self._compile_panic,
+        }
+
+    def _compile_instr(self, instr: LIRInstr, fn: LIRFunction):
+        """编译单条 LIR 指令（调度表分发）
+
+        使用类型 → 方法 的调度表模式替代长 if-isinstance 链，
+        圈复杂度从 ~25 降至 ~3，提升可维护性和可扩展性。
+
+        未实现的 LIR 指令会抛出 NotImplementedError，
+        防止静默生成 TODO 注释导致编译成功但生成错误代码的正确性风险。
+        """
+        handler = self._instr_dispatch.get(type(instr))
+        if handler:
+            handler(instr)
+        else:
+            raise NotImplementedError(
+                f"C backend: unhandled LIR instruction: {type(instr).__name__}"
+            )
+
+    # ---- 各指令类型的独立编译方法 ----
+
+    def _compile_label(self, instr: LIRLabel):
+        """编译标签（不缩进）"""
+        self._indent_level -= 1
+        self._emit(f"{instr.name}:;")
+        self._indent_level += 1
+
+    def _compile_load_const_dispatch(self, instr: LIRLoadConst):
+        """编译常量加载（调度表入口）"""
+        dst = self._dst_var_name(instr) if instr.dst_loc else None
+        self._compile_load_const(instr, dst)
+
+    def _compile_load_reg(self, instr: LIRLoadReg):
+        """编译寄存器加载"""
+        dst = self._dst_var_name(instr) if instr.dst_loc else None
+        if instr.src_locs and dst:
+            src = self._loc_var_name(instr.src_locs[0][0])
+            self._emit(f"{dst} = {src};")
+
+    def _compile_store_reg(self, instr: LIRStoreReg):
+        """编译寄存器存储"""
+        dst = self._dst_var_name(instr) if instr.dst_loc else None
+        if instr.src_locs and dst:
+            src = self._loc_var_name(instr.src_locs[0][0])
+            self._emit(f"{dst} = {src};")
+
+    def _compile_load_global(self, instr: LIRLoadGlobal):
+        """编译全局变量加载"""
+        dst = self._dst_var_name(instr) if instr.dst_loc else None
+        if dst:
+            self._emit(f"{dst} = {instr.global_name};")
+
+    def _compile_store_global(self, instr: LIRStoreGlobal):
+        """编译全局变量存储"""
+        if instr.src_locs:
+            src = self._loc_var_name(instr.src_locs[0][0])
+            self._emit(f"{instr.global_name} = {src};")
+
+    def _compile_binop_dispatch(self, instr: LIRBinOp):
+        """编译二元运算（调度表入口）"""
+        dst = self._dst_var_name(instr) if instr.dst_loc else None
+        self._compile_binop(instr, dst)
+
+    def _compile_unary_op(self, instr: LIRUnaryOp):
+        """编译一元运算"""
+        dst = self._dst_var_name(instr) if instr.dst_loc else None
+        if instr.src_locs and dst:
+            src = self._loc_var_name(instr.src_locs[0][0])
+            op = self._map_unary_op(instr.op)
+            self._emit(f"{dst} = {op}{src};")
+
+    def _compile_call_dispatch(self, instr: LIRCall):
+        """编译函数调用（调度表入口）"""
+        dst = self._dst_var_name(instr) if instr.dst_loc else None
+        self._compile_call(instr, dst)
+
+    def _compile_call_indirect_dispatch(self, instr: LIRCallIndirect):
+        """编译间接调用（调度表入口）"""
+        dst = self._dst_var_name(instr) if instr.dst_loc else None
+        self._compile_call_indirect(instr, dst)
+
+    def _compile_jump(self, instr: LIRJump):
+        """编译无条件跳转"""
+        self._emit(f"goto {instr.target};")
+
+    def _compile_branch_dispatch(self, instr: LIRBranch):
+        """编译条件跳转（调度表入口）"""
+        self._compile_branch(instr)
+
+    def _compile_switch_dispatch(self, instr: LIRSwitch):
+        """编译 switch 多分支（调度表入口）"""
+        self._compile_switch(instr)
+
+    def _compile_return(self, instr: LIRReturn):
+        """编译返回指令"""
+        if instr.src_locs:
+            src = self._loc_var_name(instr.src_locs[0][0])
+            self._emit(f"return {src};")
+        else:
+            self._emit("return;")
+
+    def _compile_build_list(self, instr: LIRBuildList):
+        """编译列表构建
+
+        先分配列表空间，然后循环将 src_locs 中的元素 push 进去。
+        元素值通过 src_locs 传递，顺序与 MIRListBuild.elements 一致。
+        """
+        dst = self._dst_var_name(instr) if instr.dst_loc else None
+        if dst:
+            self._emit(f"{dst} = nova_list_new({instr.count});")
+            # 循环填充元素
+            for i, (elem_loc, _) in enumerate(instr.src_locs):
+                elem_var = self._loc_var_name(elem_loc)
+                self._emit(f"nova_list_push({dst}, {elem_var});")
+
+    def _compile_list_append(self, instr: LIRListAppend):
+        """编译列表追加（原地修改，返回值与输入列表相同）"""
+        if instr.src_locs and len(instr.src_locs) >= 2:
+            lst = self._loc_var_name(instr.src_locs[0][0])
+            elem = self._loc_var_name(instr.src_locs[1][0])
+            self._emit(f"nova_list_push({lst}, {elem});")
+            # SSA 语义：list_append 返回新列表，但 C 运行时是原地修改
+            # 所以 dst 等于 lst（同一个指针）
+            dst = self._dst_var_name(instr) if instr.dst_loc else None
+            if dst and dst != lst:
+                self._emit(f"{dst} = {lst};")
+
+    def _compile_build_tuple(self, instr: LIRBuildTuple):
+        """编译元组构建
+
+        分配内存后零初始化，然后逐个字段填充 src_locs 中的元素值。
+        每个字段 8 字节（NovaValue 大小）。
+        """
+        dst = self._dst_var_name(instr) if instr.dst_loc else None
+        if dst:
+            size = instr.count * NOVA_VALUE_SIZE
+            self._emit(f"{dst} = (NovaValue*)nova_alloc({size});")
+            self._emit(f"memset({dst}, 0, {size});")
+            # 逐个字段填充元素
+            for i, (elem_loc, _) in enumerate(instr.src_locs):
+                elem_var = self._loc_var_name(elem_loc)
+                byte_offset = i * NOVA_VALUE_SIZE
+                self._emit(
+                    f"*(NovaValue*)((char*){dst} + {byte_offset}) = {elem_var};"
+                )
+
+    def _compile_build_map(self, instr: LIRBuildMap):
+        """编译 Map 构建
+
+        先创建空 Map，然后循环插入 src_locs 中的键值对。
+        src_locs 中 key 和 value 交替排列（k0, v0, k1, v1, ...）。
+        """
+        dst = self._dst_var_name(instr) if instr.dst_loc else None
+        if dst:
+            self._emit(f"{dst} = nova_map_new({instr.entry_count});")
+            # 循环插入键值对
+            for i in range(instr.entry_count):
+                key_idx = i * 2
+                val_idx = i * 2 + 1
+                if key_idx < len(instr.src_locs) and val_idx < len(instr.src_locs):
+                    key_var = self._loc_var_name(instr.src_locs[key_idx][0])
+                    val_var = self._loc_var_name(instr.src_locs[val_idx][0])
+                    self._emit(f"nova_map_put({dst}, {key_var}, {val_var});")
+
+    def _compile_build_adt(self, instr: LIRBuildADT):
+        """编译 ADT 构建
+
+        调用 nova_adt_new(type_id, variant_tag, field_count)，
+        然后循环填充 src_locs 中的字段值。
+        type_name 和 variant_name 传递到后端供类型表查询使用。
+        """
+        dst = self._dst_var_name(instr) if instr.dst_loc else None
+        if dst:
+            type_id = instr.type_tag
+            variant_tag = instr.type_tag
+            field_count = instr.field_count
+            self._emit(f"{dst} = nova_adt_new({type_id}, {variant_tag}, {field_count});")
+            # 逐个字段填充
+            for i, (field_loc, _) in enumerate(instr.src_locs):
+                field_var = self._loc_var_name(field_loc)
+                self._emit(f"nova_adt_set_field({dst}, {i}, {field_var});")
+
+    def _compile_closure_create(self, instr: LIRClosureCreate):
+        """编译闭包创建
+
+        调用 nova_closure_new(fn_ptr, captured, capture_count) 创建闭包对象。
+        函数指针指向 lambda 的 trampoline 包装函数，使闭包可通过
+        nova_closure_call 以统一约定调用。
+        """
+        dst = self._dst_var_name(instr) if instr.dst_loc else None
+        if not dst:
+            return
+
+        capture_count = instr.capture_count
+        env_var = None
+
+        # 如果有捕获变量，生成环境数组分配与填充代码
+        if instr.src_locs and capture_count > 0:
+            env_var = f"_nova_env_{self._tmp_counter()}"
+            self._emit(
+                f"void** {env_var} = nova_alloc(sizeof(void*) * {capture_count});"
+            )
+            for i, (loc, _) in enumerate(instr.src_locs[:capture_count]):
+                cap_var = self._loc_var_name(loc)
+                self._emit(f"{env_var}[{i}] = (void*){cap_var};")
+
+        env_arg = env_var if env_var else "NULL"
+        fn_ptr = self._mangle_trampoline_name(instr.fn_name)
+        self._emit(
+            f"{dst} = (NovaClosure*)nova_closure_new((void*){fn_ptr}, {env_arg}, {capture_count});"
+            f" /* closure: {instr.fn_name} */"
+        )
+        # 释放临时捕获数组（nova_closure_new 内部已复制）
+        if env_var:
+            self._emit(f"nova_free({env_var});")
+
+    def _compile_field_access(self, instr: LIRFieldAccess):
+        """编译字段访问"""
+        dst = self._dst_var_name(instr) if instr.dst_loc else None
+        if instr.src_locs and dst:
+            src = self._loc_var_name(instr.src_locs[0][0])
+            # offset 是字段索引，每个字段 8 字节（NovaValue 大小）
+            byte_offset = instr.offset * NOVA_VALUE_SIZE
+            self._emit(f"{dst} = *(NovaValue*)((char*){src} + {byte_offset});")
+
+    def _compile_index_access(self, instr: LIRIndex):
+        """编译索引访问"""
+        dst = self._dst_var_name(instr) if instr.dst_loc else None
+        if instr.src_locs and len(instr.src_locs) >= 2 and dst:
+            lst = self._loc_var_name(instr.src_locs[0][0])
+            idx = self._loc_var_name(instr.src_locs[1][0])
+            self._emit(f"{dst} = nova_list_get({lst}, {idx});")
+
+    def _compile_panic(self, instr: LIRPanic):
+        """编译 Panic 指令"""
+        msg = instr.message or "panic"
+        self._emit(f'nova_panic("{msg}");')
+
+    def _compile_load_const(self, instr: LIRLoadConst, dst: str):
+        """编译常量加载指令"""
+        if not dst:
+            return
+
+        ctype = instr.const_type
+        val = instr.value
+
+        if ctype == "int":
+            self._emit(f"{dst} = (int64_t){val};")
+        elif ctype == "float":
+            self._emit(f"{dst} = (double){val};")
+        elif ctype == "bool":
+            bool_val = "true" if val else "false"
+            self._emit(f"{dst} = {bool_val};")
+        elif ctype == "string":
+            label = self._get_string_label(val if val else "")
+            self._emit(f"{dst} = (NovaString*)nova_string_new((char*){label});")
+        elif ctype == "unit":
+            self._emit(f"{dst} = 0;")
+        else:
+            self._emit(f"{dst} = 0; /* unknown const type: {ctype} */")
+
+    def _compile_binop(self, instr: LIRBinOp, dst: str):
+        """编译二元运算"""
+        if not instr.src_locs or len(instr.src_locs) < 2 or not dst:
+            return
+
+        left = self._loc_var_name(instr.src_locs[0][0])
+        right = self._loc_var_name(instr.src_locs[1][0])
+        op = instr.op
+
+        # 字符串拼接特殊处理
+        if op == "++":
+            self._emit(f"{dst} = nova_string_concat({left}, {right});")
+            return
+
+        # 普通运算
+        c_op = self._map_binop(op)
+        self._emit(f"{dst} = {left} {c_op} {right};")
+
+    def _compile_branch(self, instr: LIRBranch):
+        """编译条件跳转
+
+        LIR 语义：条件为真走 true_target，条件为假走 false_target。
+        生成显式双向跳转，不依赖 fall-through，确保非顺序 CFG 也正确。
+        """
+        if not instr.src_locs:
+            return
+
+        cond = self._loc_var_name(instr.src_locs[0][0])
+        false_target = instr.false_target or "block_false"
+        true_target = instr.true_target or "block_true"
+
+        # 显式双向跳转：条件为真跳 true_target，否则跳 false_target
+        # 不依赖 fall-through 假设，确保任意基本块顺序下都正确
+        self._emit(f"if ({cond}) goto {true_target};")
+        self._emit(f"goto {false_target};")
+
+    def _compile_switch(self, instr: LIRSwitch):
+        """编译 switch 多分支跳转
+
+        策略：
+        - 整型 case 且数量 >= 3：使用 C switch 语句（跳转表优化）
+        - 其他情况（字符串、布尔、浮点等）：使用 if-else if 级联
+        """
+        if not instr.src_locs or not instr.cases:
+            # 没有值或没有 case，直接跳 default
+            if instr.default_target:
+                self._emit(f"goto {instr.default_target};")
+            return
+
+        cond_val = self._loc_var_name(instr.src_locs[0][0])
+
+        # 判断是否所有 case 都是整型（可使用 switch）
+        all_int_cases = all(
+            isinstance(v, int) and not isinstance(v, bool)
+            for v, _ in instr.cases
+        )
+
+        if all_int_cases and len(instr.cases) >= 3:
+            self._emit_switch_int_table(cond_val, instr)
+        else:
+            self._emit_switch_if_cascade(cond_val, instr)
+
+    def _emit_switch_int_table(self, cond_val: str, instr: LIRSwitch):
+        """生成 C switch 语句（整型 case >= 3 时）
+
+        Args:
+            cond_val: 条件变量的 C 表达式
+            instr: LIRSwitch 指令
+        """
+        self._emit(f"switch ((int64_t){cond_val}) {{")
+        self._indent_level += 1
+        for case_val, target in instr.cases:
+            self._emit(f"case {case_val}: goto {target};")
+        if instr.default_target:
+            self._emit(f"default: goto {instr.default_target};")
+        self._indent_level -= 1
+        self._emit("}")
+
+    def _emit_switch_if_cascade(self, cond_val: str, instr: LIRSwitch):
+        """生成 if-else if 级联（非整型或 case 数量 < 3 时）
+
+        Args:
+            cond_val: 条件变量的 C 表达式
+            instr: LIRSwitch 指令
+        """
+        for case_val, target in instr.cases:
+            self._emit_case_comparison(cond_val, case_val, target)
+
+        # default 分支
+        if instr.default_target:
+            self._emit(f"goto {instr.default_target};")
+
+    def _emit_case_comparison(self, cond_val: str, case_val, target: str):
+        """生成单个 case 的比较和跳转代码
+
+        Args:
+            cond_val: 条件变量的 C 表达式
+            case_val: case 值（可为 str/bool/int/float）
+            target: 匹配成功时的跳转目标标签
+        """
+        if isinstance(case_val, str):
+            self._emit(
+                f'if (nova_str_eq({cond_val}, "{case_val}")) goto {target};'
+            )
+        elif isinstance(case_val, bool):
+            self._emit(
+                f"if ({cond_val} == {'1' if case_val else '0'}) goto {target};"
+            )
+        else:
+            # 数值比较（int, float 等）
+            self._emit(f"if ({cond_val} == {case_val}) goto {target};")
+
+    def _compile_call(self, instr: LIRCall, dst: str):
+        """编译函数调用"""
+        c_name = self._mangle_fn_name(instr.func_name)
+        args = []
+
+        if instr.arg_locs:
+            for i in range(min(instr.arg_count, len(instr.arg_locs))):
+                args.append(self._loc_var_name(instr.arg_locs[i][0]))
+
+        args_str = ", ".join(args)
+
+        if dst:
+            self._emit(f"{dst} = {c_name}({args_str});")
+        else:
+            self._emit(f"{c_name}({args_str});")
+
+    def _compile_call_indirect(self, instr: LIRCallIndirect, dst: str):
+        """编译间接调用（闭包/函数指针调用）
+
+        使用 nova_closure_call 运行时函数，将参数打包为 void* 数组。
+        第一个 src_loc 是闭包对象，后续是参数。
+        返回值根据 dst_loc 的类型进行正确的 C 类型转换。
+
+        修复说明：
+        1. double 返回值使用 malloc+memcpy 装箱，有 dst 时需在 memcpy 前做 NULL 检查（
+           防止 nova_closure_call 返回 NULL 导致段错误），无 dst 时仍需 free 避免泄漏。
+        2. bool 返回值在 trampoline 端以 (void*)(intptr_t) 装箱，调用端需先转
+           (intptr_t) 再转 (bool)，避免 (bool)void* 把高位非零指针误判为真。
+        """
+        if not instr.src_locs or len(instr.src_locs) < 1:
+            return
+
+        closure = self._loc_var_name(instr.src_locs[0][0])
+        arg_count = instr.arg_count
+
+        # 构建参数数组
+        args_array = f"nova_args_{self._tmp_counter()}"
+        self._emit(f"void* {args_array}[{max(arg_count, 1)}];")
+
+        for i in range(arg_count):
+            if i + 1 < len(instr.src_locs):
+                arg_var = self._loc_var_name(instr.src_locs[i + 1][0])
+                self._emit(f"{args_array}[{i}] = (void*){arg_var};")
+
+        # 计算返回的 C 类型（即使 dst 为空也需要知道，因为 double 返回涉及 malloc/free 配对）
+        ret_c_type = None
+        if instr.dst_loc:
+            ret_c_type = self._nova_type_to_c(instr.dst_loc[1])
+
+        # 根据返回类型和是否有接收值，选择转换方式
+        # nova_closure_call 返回 void*，需要转换为实际的 C 类型
+        if dst and instr.dst_loc:
+            if ret_c_type == "int64_t":
+                cast_expr = f"(int64_t)(intptr_t)"
+                self._emit(
+                    f"{dst} = {cast_expr}nova_closure_call((NovaClosure*){closure}, "
+                    f"{args_array}, {arg_count});"
+                )
+            elif ret_c_type == "double":
+                # 浮点类型：trampoline 端 malloc+memcpy 装箱为 void*，
+                # 调用端临时指针 + memcpy 解包，并 free。
+                # 做 NULL 检查：nova_closure_call 在闭包为空/异常时可能返回 NULL，
+                # 直接 memcpy 会段错误，此时置默认 0.0 并跳过 free。
+                tmp_ptr = f"_nova_ret_ptr_{self._tmp_counter()}"
+                self._emit(
+                    f"void* {tmp_ptr} = nova_closure_call((NovaClosure*){closure}, "
+                    f"{args_array}, {arg_count});"
+                )
+                self._emit(f"if ({tmp_ptr} != NULL) {{")
+                self._indent_level += 1
+                self._emit(f"memcpy(&{dst}, {tmp_ptr}, sizeof(double));")
+                self._emit(f"free({tmp_ptr});")
+                self._indent_level -= 1
+                self._emit("} else {")
+                self._indent_level += 1
+                self._emit(f"{dst} = 0.0;")
+                self._indent_level -= 1
+                self._emit("}")
+            elif ret_c_type == "bool":
+                # 严谨：先 (intptr_t) 再 (bool)，与 trampoline 端
+                # (void*)(intptr_t)bool_val 的装箱方式语义匹配。
+                cast_expr = f"(bool)(intptr_t)"
+                self._emit(
+                    f"{dst} = {cast_expr}nova_closure_call((NovaClosure*){closure}, "
+                    f"{args_array}, {arg_count});"
+                )
+            else:
+                cast_expr = f"({ret_c_type})"
+                self._emit(
+                    f"{dst} = {cast_expr}nova_closure_call((NovaClosure*){closure}, "
+                    f"{args_array}, {arg_count});"
+                )
+        elif dst:
+            self._emit(
+                f"{dst} = (NovaValue*)nova_closure_call((NovaClosure*){closure}, "
+                f"{args_array}, {arg_count});"
+            )
+        else:
+            # 无接收值（dst 为 None）：仍需关心 double 返回的 free 配对，
+            # 因为 trampoline 端只要是 double 返回就会 malloc，即使调用端忽略结果。
+            if ret_c_type == "double":
+                tmp_ptr = f"_nova_ret_ptr_{self._tmp_counter()}"
+                self._emit(
+                    f"void* {tmp_ptr} = nova_closure_call((NovaClosure*){closure}, "
+                    f"{args_array}, {arg_count});"
+                )
+                # free(NULL) 在 C 标准中是安全的 no-op，因此无需 NULL 分支。
+                self._emit(f"free({tmp_ptr});")
+            else:
+                self._emit(
+                    f"nova_closure_call((NovaClosure*){closure}, "
+                    f"{args_array}, {arg_count});"
+                )
+
+    # ------------------------------------------------------------------
+    # 辅助方法
+    # ------------------------------------------------------------------
+
+    def _tmp_counter(self) -> int:
+        """生成唯一的临时变量序号"""
+        self._tmp_counter_value += 1
+        return self._tmp_counter_value
+
+    def _emit(self, line: str):
+        """输出一行代码"""
+        indent = "    " * self._indent_level
+        self._output.append(f"{indent}{line}")
+
+    def _loc_var_name(self, loc: str) -> str:
+        """虚拟寄存器名 → C 变量名"""
+        # 直接使用位置名作为变量名
+        return loc
+
+    def _dst_var_name(self, instr: LIRInstr) -> str:
+        """获取指令目标位置的 C 变量名"""
+        if instr.dst_loc:
+            return self._loc_var_name(instr.dst_loc[0])
+        return ""
+
+    def _nova_type_to_c(self, ty) -> str:
+        """Nova 类型 → C 类型字符串。
+
+        通过类型名称关键词匹配，将 Nova 类型映射为对应的 C 类型。
+        支持基本类型（Int/Float/Bool/String/Unit）、容器类型（List/Map）、
+        函数类型（Fn/Closure/箭头类型）。
+
+        参数:
+            ty: Nova 类型对象（需有 name 属性或可 str() 化）
+
+        返回:
+            对应的 C 类型字符串
+        """
+        if ty is None:
+            return "int64_t"
+
+        # 优先检查 IRType kind：FUNCTION 类型直接映射为 NovaClosure*
+        # 避免字符串匹配时 "(Int) -> Int" 误匹配到 "Int" 关键词
+        kind = getattr(ty, "kind", None)
+        if kind is not None:
+            from ..ir.ir_nodes import IRType
+            if kind == IRType.FUNCTION:
+                return "NovaClosure*"
+
+        type_str = str(ty)
+        type_name = getattr(ty, "name", None) or type_str
+
+        # 箭头类型（如 "Int -> Int"）优先于关键词匹配，
+        # 避免 "Int -> Int" 被 "int" 关键词误匹配为 int64_t
+        if "->" in type_str:
+            return "NovaClosure*"
+
+        # 按关键词优先级匹配基本类型和容器类型（大小写不敏感）
+        type_name_lower = type_name.lower()
+        type_str_lower = type_str.lower()
+        for keyword, c_type in self._NOVA_TYPE_C_MAP:
+            kw_lower = keyword.lower()
+            if kw_lower in type_name_lower or kw_lower in type_str_lower:
+                return c_type
+
+        # 默认：使用不透明指针
+        return "NovaValue*"
+
+    def _mangle_fn_name(self, name: str) -> str:
+        """函数名修饰（内置函数使用共享映射表，用户函数加 nova_fn_ 前缀）"""
+        return mangle_builtin_name(name)
+
+    def _map_binop(self, op: str) -> str:
+        """二元运算符映射"""
+        op_map = {
+            "+": "+",
+            "-": "-",
+            "*": "*",
+            "/": "/",
+            "%": "%",
+            "==": "==",
+            "!=": "!=",
+            "<": "<",
+            ">": ">",
+            "<=": "<=",
+            ">=": ">=",
+            "&&": "&&",
+            "||": "||",
+        }
+        return op_map.get(op, op)
+
+    def _map_unary_op(self, op: str) -> str:
+        """一元运算符映射"""
+        op_map = {
+            "-": "-",
+            "!": "!",
+        }
+        return op_map.get(op, op)
