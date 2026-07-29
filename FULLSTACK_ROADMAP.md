@@ -3,7 +3,7 @@
 **更新时间**: 2026-07-30
 **上次评审**: 第 54 轮
 **当前评审**: 第 57 轮
-**当前轮次**: 第 57 轮
+**当前轮次**: 第 58 轮
 **下次评审**: 第 60 轮
 
 本路线图由前后端专项开发系统维护，专注于前端类型系统和后端代码生成的核心功能开发。
@@ -12,15 +12,15 @@
 
 | 轨道 | 总数 | 已完成 | 待做 | 废弃 | 完成率 |
 |------|------|--------|------|------|--------|
-| 前端 | 41 | 38 | 3 | 1 | **92.7%** |
-| 后端 | 68 | 41 | 19 | 8 | **60.3%** |
-| **总计** | **109** | **79** | **22** | **9** | **72.5%** |
+| 前端 | 41 | 39 | 2 | 1 | **95.1%** |
+| 后端 | 68 | 45 | 15 | 8 | **66.2%** |
+| **总计** | **109** | **84** | **17** | **9** | **77.1%** |
 
 ## 前端开发线
 
-**状态：维护模式（38/41 = 92.7%）**
+**状态：维护模式（39/41 = 95.1%）**
 
-前端核心功能全部完成。本轮（第 57 轮）审计新增 3 个 P2 级维护性任务。
+前端核心功能全部完成。本轮（第 58 轮）已完成 P2-2 清零（Parser 文档化 + 错误恢复单测）。
 
 ### 本轮新增（第 57 轮评审，共 3 个前端新任务）
 
@@ -28,15 +28,15 @@
 |------|------|--------|--------|------|----------|
 | 统一 type_checker 所有报错走 _error() 出口 + match 错误补 source_code（P2-1+P2-3 合并） | medium | 75 | P2 | 待做 | **第 59 轮** |
 | 补齐 test_type_checker.py 核心模块测试盲区（12 类场景，~15 个用例） | easy | 65 | P2 | 待做 | **第 60 轮**（评审轮剩余带宽） |
-| Parser Map/Block 歧义探测静默吞错文档化 + 错误恢复单测补齐 | easy | 45 | P2 | 待做 | **第 58 轮** |
+| Parser Map/Block 歧义探测静默吞错文档化 + 错误恢复单测补齐 | easy | 45 | P2 | ✅ 已完成（第 58 轮） | 第 58 轮 |
 
-### 审计发现清单（P2 全部待清零）
+### 审计发现清单（P2 已清零 1/3）
 
 | 发现 | 位置 | 影响 | 严重度 | 状态 |
 |------|------|------|--------|------|
 | type_checker.py 45 处裸 raise TypeCheckError 未走 _error() 统一出口 | type_checker.py L479-1898 多处 | 约 40% 报错路径无 source_code 和 `-->` 标记 | P2-1 | 待清零（frontend_typecheck_unify_error_exit, P75） |
 | match 错误手动传 line/col 但缺少 source_code（无 `-->` 标记） | type_checker.py L1477-1576 | match 不完备/冗余报错缺少源码上下文 | P2-3 | 待清零（合并入 P2-1 同一任务） |
-| parser.py _parse_brace_primary 静默吞错缺少注释说明 | parser.py L1077 | Map/Block 歧义探测意图不明易被误改 | P2-2 | 待清零（frontend_parser_brace_doc, P45） |
+| parser.py _parse_brace_primary 静默吞错缺少注释说明 | parser.py L1077 | Map/Block 歧义探测意图不明易被误改 | P2-2 | ✅ 已清零（第 58 轮，frontend_parser_brace_doc, P45） |
 
 ### 核心能力清单（全部已稳定）
 
@@ -49,34 +49,34 @@
 
 ## 后端开发线
 
-### 紧急问题清零看板（P0/P1/P2，第 57 轮评审新发现 9 项）
+### 紧急问题清零看板（P0/P1/P2，第 57 轮评审新发现 9 项，已清零 4/9）
 
 | 严重度 | 编号 | 问题 | 对应任务 | 优先级 | 预计轮次 | 状态 |
 |--------|------|------|----------|--------|----------|------|
-| **P0** | P0-1 | Native 完整 ELF 模式 external_calls 偏移 0 | backend_native_elf_external_calls | **99** | **第 58 轮** | 待修复 |
-| P1 | P1-1 | Native XMM caller-saved 寄存器跨 call 未保存 | backend_native_xmm_caller_saved | 90 | **第 58 轮** | 待修复 |
-| P1 | P1-2 | Native ELF PT_LOAD p_offset/p_vaddr 对齐违规 | backend_native_ptload_align | 88 | **第 58 轮** | 待修复 |
+| **P0** | P0-1 | Native 完整 ELF 模式 external_calls 偏移 0 | backend_native_elf_external_calls | **99** | 第 58 轮 | ✅ **已清零**（第 58 轮） |
+| P1 | P1-1 | Native XMM caller-saved 寄存器跨 call 未保存 | backend_native_xmm_caller_saved | 90 | 第 58 轮 | ✅ **已清零**（第 58 轮，含 x86_64 emitter SIB bug 修复） |
+| P1 | P1-2 | Native ELF PT_LOAD p_offset/p_vaddr 对齐违规 | backend_native_ptload_align | 88 | 第 58 轮 | ✅ **已清零**（第 58 轮） |
 | P1 | P1-3 | C 后端 nova_alloc/malloc NULL 未检查 | backend_c_alloc_null_check | 85 | **第 59 轮** | 待修复 |
 | P1 | P1-4 | MIR Phi 节点类型取第一个源 SSA 不校验 | backend_mir_phi_type_consistency | 82 | **第 59 轮** | 待修复 |
 | P1 | P1-5 | LIR terminator SSA 位置找不到时默认空字符串 | backend_lir_term_ssa_defensive | 78 | **第 59 轮** | 待修复 |
 | P2 | P2-1 | type_checker 45 处裸 raise 未走 _error() | frontend_typecheck_unify_error_exit | 75 | **第 59 轮** | 待修复 |
-| P2 | P2-2 | Parser _parse_brace_primary 静默吞错无注释 | frontend_parser_brace_doc | 45 | **第 58 轮** | 待修复 |
+| P2 | P2-2 | Parser _parse_brace_primary 静默吞错无注释 | frontend_parser_brace_doc | 45 | 第 58 轮 | ✅ **已清零**（第 58 轮） |
 | P2 | P2-3 | match 错误缺 source_code（无 `-->` 标记） | （合并入 P2-1） | — | **第 59 轮** | 待修复 |
 
-**3 轮清零计划（第 58-60 轮）**：P0×1 + P1×5 + P2×3 = 9 项，预计第 59 轮末 P0/P1 全部清零，第 60 轮末 P2 清零。
+**3 轮清零计划（第 58-60 轮）进度**：P0×1 + P1×5 + P2×3 = 9 项，已完成 4/9（P0 清零 + P1×2 清零 + P2×1 清零），剩余 5/9（P1×3 + P2×2）。预计第 59 轮末 P0/P1 全部清零，第 60 轮末 P2 清零。
 
-### 高优先级任务（下 3 轮聚焦，第 58-60 轮）
+### 高优先级任务（下 2 轮聚焦，第 59-60 轮）
 
 | 状态 | 任务 | 严重度 | 难度 | 优先级 | 预计 | 轮次计划 |
 |------|------|--------|------|--------|------|----------|
-| 待做 | **修复 Native 完整 ELF external_calls 偏移为 0（P0）** | P0 | hard | **99** | 1-2天 | **第 58 轮** |
-| 待做 | 修复 Native 函数调用前 XMM caller-saved 未保存 | P1 | medium | **90** | 3-5h | **第 58 轮**（并行） |
-| 待做 | 修复 Native ELF 数据段 PT_LOAD 对齐违规 | P1 | easy | **88** | 30min | **第 58 轮**（并行，5 行代码） |
-| 待做 | Parser Map/Block 歧义探测文档化 + 错误恢复单测 | P2 | easy | 45 | 1-2h | **第 58 轮** 前端 |
+| ✅ 完成 | **修复 Native 完整 ELF external_calls 偏移为 0（P0）** | P0 | hard | **99** | 1-2天 | 第 58 轮 |
+| ✅ 完成 | 修复 Native 函数调用前 XMM caller-saved 未保存 + emitter SIB bug | P1 | hard | **90** | 3-5h | 第 58 轮 |
+| ✅ 完成 | 修复 Native ELF 数据段 PT_LOAD 对齐违规 | P1 | easy | **88** | 30min | 第 58 轮 |
+| ✅ 完成 | Parser Map/Block 歧义探测文档化 + 错误恢复单测（7 个用例） | P2 | easy | 45 | 1-2h | 第 58 轮 前端 |
 | 待做 | 修复 C 后端 nova_alloc/malloc NULL 未检查 | P1 | medium | **85** | 2-3h | **第 59 轮** |
 | 待做 | 修复 MIR Phi 节点类型不做一致性校验 | P1 | medium | **82** | 3-5h | **第 59 轮**（并行） |
 | 待做 | 修复 LIR terminator SSA 位置默认空字符串 | P1 | easy | **78** | 1h | **第 59 轮**（并行，3 处修改） |
-| 待做 | 统一 type_checker 所有报错走 _error()（45 处迁移） | P2 | medium | 75 | 4-6h | **第 59 轮** 前端 |
+| 待做 | 统一 type_checker 所有报错走 _error()（45 处迁移）+ match 补 source | P2 | medium | 75 | 4-6h | **第 59 轮** 前端 |
 | 待做 | 补齐 test_type_checker.py 12 类核心场景测试盲区 | P2 | easy | 65 | 3-4h | **第 60 轮** 前端 |
 | 待做 | 实现 Wasm 后端栈平衡验证器 | — | medium | 45 | 1-2天 | 第 60 轮后（评审轮带宽允许时） |
 | 待做 | 验证 Phi 节点 LIR 降级正确性（菱形 CFG、并行拷贝语义） | — | medium | 42 | 3-5h | 第 60 轮后 |
@@ -86,15 +86,18 @@
 
 | 编号 | 问题 | 清零轮次 | 对应任务 |
 |------|------|----------|----------|
+| P0-1（最新） | Native 完整 ELF 模式 external_calls 偏移 0（独立二进制崩溃） | **第 58 轮** | backend_native_elf_external_calls |
 | P0-回归 | 二元运算 RCX 临时寄存器覆盖活跃 vreg | 第 49 轮 | backend_native_regalloc_loop_regression |
 | P0-新1 | 三后端未实现指令静默跳过/注释 | 第 40 轮 | backend_unified_silent_skip_fix |
 | P0-B1 | native_backend 无链接器（ELF 不可执行） | 第 37 轮 | backend_native_linker_strategy |
 | P0-2 | wasm_backend fn_ptr 传 NULL（闭包完全不可用） | 第 34 轮 | backend_wasm_fn_ptr |
-| P0-1 | native_backend fn_ptr 传 NULL | 第 31 轮 | backend_native_fn_ptr_tramp |
+| P0-1（旧） | native_backend fn_ptr 传 NULL | 第 31 轮 | backend_native_fn_ptr_tramp |
 | P0-3 | lir_lowering 未处理 SSA callee（闭包调用错误编译） | 第 28 轮 | backend_lir_callee_ssa |
 | P0-新2 | Cranelift 后端未实现指令降级为 TODO 注释 | 第 52 轮 | backend_cranelift_todo_fatal |
+| P1-1（最新） | Native XMM caller-saved 寄存器跨 call 未保存 + x86_64 emitter RSP SIB bug | **第 58 轮** | backend_native_xmm_caller_saved |
+| P1-2（最新） | Native ELF 数据段 PT_LOAD p_offset/p_vaddr 对齐违规 | **第 58 轮** | backend_native_ptload_align |
 | P1-新1 | Native 后端缺失 LIRLoadGlobal/LIRStoreGlobal | 第 41 轮 | backend_native_global_var_support |
-| P1-2 | 浮点立即数 NotImplementedError | 第 38 轮 | backend_native_float_imm |
+| P1-2（旧） | 浮点立即数 NotImplementedError | 第 38 轮 | backend_native_float_imm |
 | P1-B2 | 寄存器分配器不感知调用点（低效） | 第 47 轮 | backend_native_regalloc_call_site |
 | P1-B3 | 原生后端无端到端执行测试（正确性无验证） | 第 46 轮 | backend_native_elf_e2e_exec |
 | P1-新2 | Native 后端浮点全局变量存储错误 | 第 53 轮 | backend_native_float_global_store |
@@ -103,6 +106,7 @@
 | P2-F | Native 独立 ELF 跳过外部函数重定位 | 第 46 轮 | backend_native_relocatable_elf_link_fix |
 | P2-A | C 后端 trampoline double 返回值 UB | 第 35 轮 | backend_c_trampoline_double_fix |
 | P2-新1 | Phi 拷贝源缺失静默跳过（潜在使用未初始化寄存器） | 第 56 轮 | backend_phi_copy_missing_error |
+| P2-2（最新） | Parser _parse_brace_primary Map/Block 歧义探测静默吞错缺注释 | **第 58 轮** | frontend_parser_brace_doc |
 
 ### 已废弃/降级任务
 
@@ -130,21 +134,21 @@
 | 9 | Native 外部运行时 | 运行时调用重构 / bug 修复 / 闭包内存泄漏清零 | 34 / 40 / 50 |
 | 10 | 三后端静默跳过统一 | C/Wasm/Cranelift 三后端未知指令从静默改为异常 | 40 |
 
-## 各后端完成度排名（第 57 轮审计后）
+## 各后端完成度排名（第 58 轮三连修复后）
 
 | 排名 | 后端 | 完成度 | 变化 | 关键缺失 |
 |------|------|--------|------|----------|
-| 1 | **C 后端** | **~85%** | ↓3pp | nova_alloc NULL 未检查（P1-3）、边界类型映射子串误判（低优） |
-| 2 | **WasmGC 后端** | **~78%** | 持平 | 栈平衡极端控制流验证、WAT 缩进断言、端到端验证缺失 |
-| 3 | **原生后端** | **~70%** | ↓**18pp** | **P0**：external_calls 偏移 0 / **P1**：XMM caller-saved / **P1**：PT_LOAD 对齐 / 闭包全保存 caller-saved（低优） |
+| 1 | **C 后端** | **~85%** | 持平（第 57 轮 ↓3pp 后稳定） | nova_alloc NULL 未检查（P1-3，第 59 轮修复）、边界类型映射子串误判（低优） |
+| 2 | **原生后端** | **~85%** | ↑**15pp**（第 58 轮三连修复） | 闭包场景 caller-saved 全保存优化（低优）、复杂结构体字段对齐（低优） |
+| 3 | **WasmGC 后端** | **~78%** | 持平 | 栈平衡极端控制流验证、WAT 缩进断言、端到端验证缺失 |
 | 4 | **Cranelift 后端** | **~35%** | 持平 | 大量指令未实现（安全基线已达标：未知指令抛 NotImplementedError 不静默） |
 
-### 原生后端完成度大幅下调说明（~88% → ~70%）
+### 原生后端完成度回升说明（~70% → ~85%，第 58 轮）
 
-第 46 轮突破端到端执行后 Native 完成度被乐观评估为 ~88%。第 57 轮深度代码审计确认以下问题被遗漏：
+第 57 轮审计后三大阻塞问题（P0×1 + P1×2）在本轮一轮内全部清零，效果显著：
 
-1. **P0-1 external_calls 偏移为 0**：_generate_elf link_calls 仅回填 func_offsets/trampoline_offsets，nova_init/nova_list_new 等运行时函数走 else continue，完整 ELF 输出模式下 call 指令保持 E8 00000000（no-op）。只有 .o + gcc 链接模式安全。这使"独立 ELF 可运行"的评估结论不成立。
-2. **P1-1 XMM caller-saved**：caller-saved 保存循环完全排除浮点寄存器（条件 `if not info["is_float"]`）。System V AMD64 ABI 规定 XMM0-XMM7 为 caller-saved。任何浮点+函数调用组合场景值随机覆盖。
-3. **P1-2 PT_LOAD 对齐违规**：数据段 p_offset 非 4096 对齐但 p_vaddr 对齐，违反 ELF 规范，严格加载器加载失败。
+1. ✅ **P0-1 external_calls 偏移为 0 → 清零**：_generate_elf 新增第 5.55 节，在 code 段末尾追加 11 类 x86_64 汇编 stub（noop/nova_alloc 用 brk 系统调用/nova_panic 用 write+exit/nova_list_new/Map/ADT/assert），回填所有 external_calls 的 call rel32。静态 ELF 独立运行不再 SIGSEGV。
+2. ✅ **P1-1 XMM caller-saved + emitter SIB bug → 清零**：定义 CALLER_XMMS=[XMM0..XMM7]，4 条 call 路径（_emit_call/_emit_runtime_call/_emit_closure_create/_emit_call_indirect）均在 GPR 保存后分配 64 字节 XMM 区 movsd 存/取。同步修复 x86_64 emitter movsd_mem_reg/movsd_reg_mem RSP 基址缺少 SIB 字节的底层 bug（原编码 `[rax+rax*1-0xe]` → 段错误）。
+3. ✅ **P1-2 PT_LOAD 对齐违规 → 清零**：code 段末尾用 0x90 NOP 填充到页对齐，data_offset 本身对齐，p_vaddr = base_addr+data_offset，实现 p_offset%4096 = p_vaddr%4096 = 0。hardening 内核/QEMU user 模式加载不再返回 EINVAL。
 
-三项合计将 Native 后端实际可用范围从"独立 ELF + .o 链接"收窄为"仅 .o 链接模式"。第 58 轮修复三项后预计回升至 ~82%，后续完成闭包 caller-saved 优化后有望达到 ~85%。
+**Native 后端可用性评估**：.o + gcc 链接模式（主要测试路径）继续稳定；独立静态 ELF 模式从"完全不可用"提升至"基础程序可运行"（nova_init/nova_alloc/nova_panic 均有 stub 实现，List/Map/ADT 基础操作可用）。完成度从 ~70% 回升至 ~85%，与 C 后端并列第 1。

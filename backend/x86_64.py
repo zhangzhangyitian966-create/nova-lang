@@ -258,11 +258,34 @@ class X86_64Emitter:
         self.emit_byte(0xD3)
         self.emit_byte(self._modrm(0b11, 4, reg & 7))
 
+    def shl_reg_imm(self, reg, imm):
+        """shl reg, imm8 (64-bit)"""
+        self._rex_w(0, (reg >> 3) & 1)
+        if imm == 1:
+            # D3 /4 无 imm8：shl reg, 1（但此形式与 shl reg,cl 共享；另用 C1 /4 ib 统一）
+            pass
+        # C1 /4 ib = shl r/m64, imm8（所有立即数都走该形式，imm=1 也合法）
+        self.emit_byte(0xC1)
+        self.emit_byte(self._modrm(0b11, 4, reg & 7))
+        self.emit_byte(imm & 0xFF)
+
     def shr_reg_cl(self, reg):
         """shr reg, cl"""
         self._rex_w(0, (reg >> 3) & 1)
         self.emit_byte(0xD3)
         self.emit_byte(self._modrm(0b11, 5, reg & 7))
+
+    def and_reg_imm(self, reg, imm):
+        """and reg, imm (64-bit)"""
+        self.emit_byte(0x48)  # REX.W
+        if -128 <= imm <= 127:
+            self.emit_byte(0x83)
+            self.emit_byte(self._modrm(0b11, 4, reg & 7))
+            self.emit_int8(imm)
+        else:
+            self.emit_byte(0x81)
+            self.emit_byte(self._modrm(0b11, 4, reg & 7))
+            self.emit_int32(imm)
 
     # === 比较指令 ===
     def cmp_reg_reg(self, a, b):
@@ -344,11 +367,21 @@ class X86_64Emitter:
             self._rex(0, rex_r, 0, rex_b)
         self.emit_byte(0x0F)
         self.emit_byte(0x10)  # movsd xmm, [mem]  opcode
+        # 修复：RSP/R12（rm 低 3 位 = 4）必须加 SIB 字节
+        needs_sib = (base & 7) == RSP
         if -128 <= offset <= 127:
-            self.emit_byte(self._modrm(0b01, reg & 7, base & 7))
+            if needs_sib:
+                self.emit_byte(self._modrm(0b01, reg & 7, 0b100))  # rm=SIB
+                self.emit_byte(self._sib(0, 0b100, base & 7))
+            else:
+                self.emit_byte(self._modrm(0b01, reg & 7, base & 7))
             self.emit_int8(offset)
         else:
-            self.emit_byte(self._modrm(0b10, reg & 7, base & 7))
+            if needs_sib:
+                self.emit_byte(self._modrm(0b10, reg & 7, 0b100))  # rm=SIB
+                self.emit_byte(self._sib(0, 0b100, base & 7))
+            else:
+                self.emit_byte(self._modrm(0b10, reg & 7, base & 7))
             self.emit_int32(offset)
 
     def movsd_mem_reg(self, base, offset, reg):
@@ -361,11 +394,21 @@ class X86_64Emitter:
             self._rex(0, rex_r, 0, rex_b)
         self.emit_byte(0x0F)
         self.emit_byte(0x11)  # movsd [mem], xmm  opcode
+        # 修复：RSP/R12（rm 低 3 位 = 4）必须加 SIB 字节
+        needs_sib = (base & 7) == RSP
         if -128 <= offset <= 127:
-            self.emit_byte(self._modrm(0b01, reg & 7, base & 7))
+            if needs_sib:
+                self.emit_byte(self._modrm(0b01, reg & 7, 0b100))  # rm=SIB
+                self.emit_byte(self._sib(0, 0b100, base & 7))
+            else:
+                self.emit_byte(self._modrm(0b01, reg & 7, base & 7))
             self.emit_int8(offset)
         else:
-            self.emit_byte(self._modrm(0b10, reg & 7, base & 7))
+            if needs_sib:
+                self.emit_byte(self._modrm(0b10, reg & 7, 0b100))  # rm=SIB
+                self.emit_byte(self._sib(0, 0b100, base & 7))
+            else:
+                self.emit_byte(self._modrm(0b10, reg & 7, base & 7))
             self.emit_int32(offset)
 
     def movq_xmm_gpr(self, xmm_reg, gpr_reg):
@@ -509,6 +552,63 @@ class X86_64Emitter:
         self.emit_byte(0x8D)
         pos = self.current_offset()
         self.emit_int32(0)
+        return pos
+
+    # 短跳（-128..+127，jcc rel8 编码）
+    def je_rel8(self, offset=0):
+        """je rel8"""
+        self.emit_byte(0x74)
+        pos = self.current_offset()
+        self.emit_int8(offset)
+        return pos
+
+    def jne_rel8(self, offset=0):
+        """jne rel8"""
+        self.emit_byte(0x75)
+        pos = self.current_offset()
+        self.emit_int8(offset)
+        return pos
+
+    def jl_rel8(self, offset=0):
+        """jl rel8"""
+        self.emit_byte(0x7C)
+        pos = self.current_offset()
+        self.emit_int8(offset)
+        return pos
+
+    def jle_rel8(self, offset=0):
+        """jle rel8"""
+        self.emit_byte(0x7E)
+        pos = self.current_offset()
+        self.emit_int8(offset)
+        return pos
+
+    def jg_rel8(self, offset=0):
+        """jg rel8"""
+        self.emit_byte(0x7F)
+        pos = self.current_offset()
+        self.emit_int8(offset)
+        return pos
+
+    def jge_rel8(self, offset=0):
+        """jge rel8"""
+        self.emit_byte(0x7D)
+        pos = self.current_offset()
+        self.emit_int8(offset)
+        return pos
+
+    def jb_rel8(self, offset=0):
+        """jb rel8（unsigned <）"""
+        self.emit_byte(0x72)
+        pos = self.current_offset()
+        self.emit_int8(offset)
+        return pos
+
+    def jae_rel8(self, offset=0):
+        """jae rel8（unsigned >=）"""
+        self.emit_byte(0x73)
+        pos = self.current_offset()
+        self.emit_int8(offset)
         return pos
 
     def sete(self, reg):

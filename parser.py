@@ -197,6 +197,9 @@ class Parser:
                 self._errors.append(e)
                 self._synchronize_to_declaration_boundary()
 
+        # 保存部分解析结果（错误恢复场景下已成功解析的声明）
+        # 便于上层通过 parser._partial_decls 获取错误前的解析成果
+        self._partial_decls = decls
         # 如果收集了错误，统一抛出
         # 单个错误保持向后兼容直接抛 ParseError；
         # 多个错误用 ParseErrorGroup 包装，方便调用方获取完整诊断
@@ -1063,7 +1066,31 @@ class Parser:
         return ContinueExpr(span=self._span(tok))
 
     def _parse_brace_primary(self):
-        """解析 LBRACE 开头的 primary：代码块或 Map 字面量。"""
+        """解析 LBRACE 开头的 primary：代码块或 Map 字面量。
+
+        使用**推测解析（speculative parsing）**消除 Map 与 Block 的歧义：
+        Nova 语法中 `{` 开头的字面量可能是 Map `{k: v, ...}` 或代码块
+        `{stmt1; stmt2; ...}`，两者语法在第一个 `}` 之前都以 `{` 开头，无法
+        仅靠 LL(1) 预读一个 token 区分。
+
+        消除算法（LL(*) 回溯）：
+          1. 空 `{}` 特殊处理：直接判定为代码块（空 Map 可用 Map() 构造）。
+          2. 保存解析器位置 saved_pos，消费 `{`，尝试解析一个表达式。
+          3. 如果表达式成功且紧跟 COLON(`:`) → 第一个键值对形态匹配 Map 语法
+             → 回滚到 saved_pos，调用 _parse_map_expr() 走完整 Map 解析路径。
+          4. 如果表达式解析**抛出 ParseError**（例如输入是 `{ let x = 1; ... }`，
+             `let` 不是合法表达式起始 → _parse_expression 抛错），或表达式成功但
+             后续 token 不是 COLON → 推测失败，按代码块处理：
+             → 回滚到 saved_pos，调用 _parse_block()。
+
+        关于 except ParseError 的静默吞错：
+          ⚠️ 此处 `except ParseError: pass` 是**有意设计**而非 bug。
+          推测解析阶段的 ParseError 是歧义探测信号（"当前输入不匹配 Map 的
+          k:v 首项形态"），而非需要向用户报告的真实语法错误。若在此处记录
+          错误或向上抛出，会将所有代码块输入误判为"有语法错误的 Map"。
+          真正的语法错误将在随后的 _parse_block() 路径中被重新检测并正确
+          报告位置，不会因推测阶段的吞错而丢失。
+        """
         # 空 {} 是代码块；非空且第一个表达式后是 COLON 则为 Map
         if self._peek_type() == TokenType.RBRACE:
             return self._parse_block()
@@ -1075,6 +1102,8 @@ class Parser:
                 self.pos = saved_pos
                 return self._parse_map_expr()
         except ParseError:
+            # 静默吞错：推测解析失败 = 不匹配 Map 形态，回退到 Block
+            # 真实错误将在 _parse_block() 中重新检测并报告
             pass
         self.pos = saved_pos
         return self._parse_block()

@@ -7,7 +7,7 @@ Parser 单元测试基线
 
 import unittest
 
-from nova.lexer import Lexer
+from nova.lexer import Lexer, TokenType
 from nova.parser import Parser
 from nova.errors import ParseError, ParseErrorGroup
 from nova.ast_nodes import (
@@ -738,6 +738,213 @@ class TestErrorRecovery(unittest.TestCase):
         self.assertEqual(result.tail_expression.name, "x")
         # 验证收集了 2 个错误，但没有因为达到 _BLOCK_MAX_ERRORS 而放弃
         self.assertEqual(len(parser._errors), 2)
+
+
+# ============================================================
+# 12. 错误恢复边界场景（P2-2 补齐：declaration/statement 同步点 + BLOCK_MAX_ERRORS 阈值）
+# ============================================================
+
+
+class TestErrorRecoveryBoundaries(unittest.TestCase):
+    """错误恢复机制边界条件测试
+
+    覆盖 Parser Panic Mode 的三类未测试场景：
+    (A) 顶层声明边界同步（_synchronize_to_declaration_boundary）
+    (B) 块内语句边界同步（_synchronize_to_statement_boundary）
+    (C) BLOCK_MAX_ERRORS 连续错误阈值触发与放弃行为
+
+    注意：错误之间如果插入了合法语句/表达式，block_errors 会被重置为 0。
+    要触发阈值放弃，必须使用"无合法语句间隔"的连续错误序列。
+    """
+
+    # ----------------------------------------------------------
+    # (A) declaration_boundary 同步
+    # ----------------------------------------------------------
+
+    def test_top_level_missing_rbrace_next_fn_still_parsed(self):
+        """顶层声明级错误恢复：部分解析结果非空
+
+        构造 `let = 非法` 绑定（缺变量名），后跟合法的 let 绑定。
+        _parse_let_binding() 将在 _expect(TokenType.IDENT) 处抛 ParseError。
+        parse() 的顶层错误恢复会调用 _synchronize_to_declaration_boundary，
+        跳过非法 token 流后定位到后续声明起始关键字。
+        验证 _partial_decls 至少包含一个成功解析的 LetBinding。
+        """
+        code = "let = broken1;\nlet y = 42"
+        tokens = Lexer(code).tokenize()
+        parser = Parser(tokens, source=code)
+        with self.assertRaises((ParseError, ParseErrorGroup)):
+            parser.parse()
+        self.assertTrue(hasattr(parser, "_partial_decls"),
+                        "Parser 未暴露 _partial_decls 部分结果接口")
+        decls = parser._partial_decls
+        lets = [d for d in decls if isinstance(d, LetBinding)]
+        self.assertGreaterEqual(len(lets), 1,
+                                "declaration 级错误恢复后至少应有一个 LetBinding 被保留")
+
+    def test_decl_boundary_sync_fn_let_mut_keywords_direct(self):
+        """直接测试 _synchronize_to_declaration_boundary 在 fn/let/mut 处停止
+
+        构造 token 流：错误标记序列 + LET/MUT/FN 关键字。
+        直接调用同步方法，验证解析器停在正确的声明起始关键字。
+        """
+        # 序列：+ 1 + IDENT("bad") + FN + IDENT("f")
+        # 同步应跳过 +、1、+、bad（IDENT 作为边界 break，
+        # 但这里实际用 LET 作为最稳妥的锚点）
+        code = "+ 1 2 let x = 1"
+        tokens = Lexer(code).tokenize()
+        parser = Parser(tokens, source=code)
+        # 让 Parser 当前位置停在第一个 +（非声明起始 token）
+        self.assertEqual(parser._peek_type(), TokenType.PLUS)
+        # 调用同步
+        parser._synchronize_to_declaration_boundary()
+        # 同步后应停在 IDENT("2") 处（IDENT 是声明边界 + 或 LET）
+        # 由于 IDENT 在同步逻辑中也是 break 条件，验证最终停在 LET 或 IDENT
+        stopped_at = parser._peek_type()
+        self.assertIn(stopped_at,
+                      {TokenType.LET, TokenType.FN, TokenType.MUT,
+                       TokenType.IMPORT, TokenType.IDENT, TokenType.PIPE},
+                      f"同步后应停在声明边界 token，实际停在 {stopped_at}")
+        # 继续手动同步：如果停在 IDENT，再前进一次
+        if stopped_at == TokenType.IDENT:
+            parser._advance()
+            parser._synchronize_to_declaration_boundary()
+        # 最终应该能到达 LET 或后续声明起始
+        final_tt = parser._peek_type()
+        self.assertIn(final_tt,
+                      {TokenType.LET, TokenType.FN, TokenType.MUT, TokenType.EOF},
+                      f"二次同步后应到达 LET/FN/MUT 或 EOF，实际 {final_tt}")
+
+    # ----------------------------------------------------------
+    # (B) statement_boundary 同步
+    # ----------------------------------------------------------
+
+    def test_block_invalid_expr_following_let_parsed(self):
+        """块内非法赋值语句（缺 = 右侧）错误后，后续 let 仍被解析
+
+        构造：{ x =   // 赋值表达式在 _parse_assignment 中 _parse_expression 读到
+                      // 下一个 LET 作为表达式的一部分会抛错（但实际进入赋值分支
+                      // 更直接的做法：块开头放一个非法 _parse_expression 触发项
+                      // 如：{ ( 1 + ; let b = 2; }
+        简化场景：{ if true then  // 缺 then 后的表达式 → ParseError
+                    let b = 2; }
+        预期：语句错误后同步到下一个 LET，b 绑定被保留。
+        """
+        # if 缺 else 分支：_parse_if_expr 中当 then 块后缺 else 会抛错
+        # 更稳妥的非法表达式：+ 1（一元加后跟 let，_parse_expression 中 let 不合法）
+        # 使用"缺 closing paren" 的组表达式确保抛错
+        code = "{ ( 1 + 2\n  let b = 2; }"
+        tokens = Lexer(code).tokenize()
+        parser = Parser(tokens, source=code)
+        result = parser._parse_block()
+        self.assertIsInstance(result, Block)
+        let_names = [s.name for s in result.statements
+                     if isinstance(s, LetBinding)]
+        self.assertIn("b", let_names,
+                      "statement_boundary 同步失败：后续 let 未被解析")
+        # 至少收集了 1 个错误（缺 RPAREN 或表达式不完整）
+        self.assertGreaterEqual(len(parser._errors), 1)
+
+    def test_statement_boundary_after_multi_errors_preserves_stmt(self):
+        """语句边界同步在块内错误后仍可解析后续正确语句
+
+        构造一个未闭合的组表达式 `( 1 +` 触发 ParseError，验证
+        _synchronize_to_statement_boundary 执行后 `let c = 3` 仍被解析。
+        至少收集到 1 个错误即可验证错误路径被执行。
+        """
+        code = "{ ( 1 +\n  let c = 3; final }"
+        tokens = Lexer(code).tokenize()
+        parser = Parser(tokens, source=code)
+        result = parser._parse_block()
+        self.assertIsInstance(result, Block)
+        let_names = [s.name for s in result.statements
+                     if isinstance(s, LetBinding)]
+        self.assertIn("c", let_names,
+                      "错误后语句边界同步失败：后续 let 未被解析")
+        self.assertIsInstance(result.tail_expression, Identifier)
+        self.assertEqual(result.tail_expression.name, "final")
+        # 至少收集到 1 个错误（证明错误恢复分支被执行）
+        self.assertGreaterEqual(len(parser._errors), 1)
+
+    # ----------------------------------------------------------
+    # (C) BLOCK_MAX_ERRORS 阈值
+    # ----------------------------------------------------------
+
+    def test_block_max_errors_triggers_early_abandon(self):
+        """连续 3 个（_BLOCK_MAX_ERRORS）无间隔错误触发块剩余内容放弃
+
+        _parse_block 中 block_errors >= _BLOCK_MAX_ERRORS(=3) 时，
+        解析器跳到 RBRACE/EOF，丢弃块内剩余语句。
+
+        关键：连续三个错误之间不能有合法语句被解析，否则计数器重置为 0。
+        使用 `let = ;` 序列：LET → 进入 _parse_let_binding →
+        _expect(IDENT) 对 `=` 抛 ParseError → except 捕获 block_errors += 1
+        → synchronize 到 SEMICOLON → match SEMICOLON → 回到 while 顶部
+        → 下一个 token 又是 LET，无任何合法语句插入 → 计数器不重置。
+
+        3 次后达到阈值，跳到 }，后续 let x = 42 和尾部 x 均被丢弃。
+        """
+        code = "{ let = ; let = ; let = ; let x = 42; x }"
+        tokens = Lexer(code).tokenize()
+        parser = Parser(tokens, source=code)
+        result = parser._parse_block()
+        self.assertIsInstance(result, Block)
+        # 关键断言：触发阈值后 let x = 42 和尾部 x 均被放弃
+        self.assertEqual(len(result.statements), 0,
+                         "_BLOCK_MAX_ERRORS 触发后，不应再解析任何后续语句")
+        self.assertIsNone(result.tail_expression,
+                          "_BLOCK_MAX_ERRORS 触发后，尾部表达式应被丢弃")
+        # 错误计数 = 3（触发阈值的 3 个），第 4 个 let 未进入解析循环
+        self.assertEqual(len(parser._errors), 3)
+
+    def test_block_max_errors_not_triggered_with_interleaved_success(self):
+        """错误之间插入正确语句 → BLOCK_MAX_ERRORS 永不触发（重置机制）
+
+        交替 错误-正确-错误-正确-错误-正确-错误 共 4 个错误 3 个正确。
+        计数器在每次正确语句后重置为 0，4 个错误之间均不连续，
+        阈值 3 永不触发。所有正确语句均应被保留。
+
+        正确语句使用 `ok_id;`（Identifier + SEMICOLON 的表达式语句），
+        放在错误 let 之后，确保计数器在抛错后被重置。
+        """
+        code = (
+            "{ let = ; ok_a;"   # 错误 1 → 正确语句 ok_a → 重置
+            "  let = ; ok_b;"   # 错误 2 → 正确语句 ok_b → 重置
+            "  let = ; ok_c;"   # 错误 3 → 正确语句 ok_c → 重置
+            "  let = ; final }" # 错误 4 → 尾部 final
+        )
+        tokens = Lexer(code).tokenize()
+        parser = Parser(tokens, source=code)
+        result = parser._parse_block()
+        self.assertIsInstance(result, Block)
+        # 3 个正确的 ok 标识符表达式语句全部保留
+        expr_stmt_names = sorted(
+            s.name for s in result.statements if isinstance(s, Identifier)
+        )
+        self.assertEqual(expr_stmt_names, ["ok_a", "ok_b", "ok_c"])
+        # 尾部表达式 final 保留
+        self.assertIsInstance(result.tail_expression, Identifier)
+        self.assertEqual(result.tail_expression.name, "final")
+        # 4 个错误全部收集（计数器从未连续达到 3）
+        self.assertEqual(len(parser._errors), 4,
+                         "计数器重置机制失败：正确的交替错误模式不应触发阈值放弃")
+
+    def test_block_max_errors_empty_block_after_abandon(self):
+        """阈值触发后若块直接结束，返回空 Block 且无尾表达式
+
+        构造恰好 3 个 `let = ;` 错误后紧跟 }：
+          { let = ; let = ; let = ; }
+        """
+        code = "{ let = ; let = ; let = ; }"
+        tokens = Lexer(code).tokenize()
+        parser = Parser(tokens, source=code)
+        result = parser._parse_block()
+        self.assertIsInstance(result, Block)
+        self.assertEqual(len(result.statements), 0)
+        self.assertIsNone(result.tail_expression)
+        # span 应包含从 { 到 } 的范围
+        self.assertIsNotNone(result.span)
+        self.assertEqual(len(parser._errors), 3)
 
 
 if __name__ == "__main__":

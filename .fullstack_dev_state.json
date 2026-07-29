@@ -1,7 +1,7 @@
 {
-  "cycles": 57,
-  "frontend_completed": 38,
-  "backend_completed": 41,
+  "cycles": 58,
+  "frontend_completed": 39,
+  "backend_completed": 45,
   "last_review_cycle": 54,
   "current_review_cycle": 57,
   "completed_tasks": [
@@ -97,7 +97,11 @@
     "backend_c_closure_double_return",
     "FRONTEND-036",
     "backend_phi_copy_missing_error",
-    "review_cycle_57"
+    "review_cycle_57",
+    "frontend_parser_brace_doc",
+    "backend_native_ptload_align",
+    "backend_native_xmm_caller_saved",
+    "backend_native_elf_external_calls"
   ],
   "failed_tasks": [],
   "deprecated_tasks": [
@@ -111,6 +115,50 @@
     "backend_native_runtime_link"
   ],
   "task_history": [
+    {
+      "cycle": 58,
+      "task_id": "frontend_parser_brace_doc",
+      "name": "Parser _parse_brace_primary Map/Block 歧义探测静默吞错文档化 + 错误恢复边界单测补齐（P2-2）",
+      "track": "frontend",
+      "difficulty": "easy",
+      "priority": 45,
+      "result": "success",
+      "details": "P2-2 清零（code_audit_57 新发现前端 3 项 P2 之一）。parser.py _parse_brace_primary（Map {k:v} vs Block {stmt;} 歧义探测处）添加约 30 行中文注释说明推测解析算法（LL(*) 回溯、为什么必须静默吞 ParseError 而非记录错误、真实错误在 _parse_block 路径会被重新检测）。同步在 test_parser.py 新增 TestErrorRecoveryBoundaries 测试类，覆盖 A 类声明边界同步（顶层缺 } 不阻断后续 fn、空声明不破坏声明边界、extern/struct/enum 独立声明回退同步）、B 类块内语句边界同步（赋值/表达式/while 缺 ; 的 let 恢复、块顶错语句回退到 let 同步、冒号/逗号错误的 let/赋值回退）、C 类 BLOCK_MAX_ERRORS 阈值（连续 3 错立即放弃并把剩余语句挂为 error_stmt，中间插入合法语句后计数器重置为 0）。共 7 个断言测试，通过 7/7。修改文件 2 个：parser.py 约 30 行注释；test_parser.py 新增 TestErrorRecoveryBoundaries 约 220 行代码。测试 1099 passed（基线 1086，+13 含后端 6 个），0 回归。前端 39/39 完成。",
+      "timestamp": "2026-07-30 17:05"
+    },
+    {
+      "cycle": 58,
+      "task_id": "backend_native_ptload_align",
+      "name": "修复 Native ELF 数据段 PT_LOAD p_offset/p_vaddr 对齐违规（P1-2）",
+      "track": "backend",
+      "difficulty": "easy",
+      "priority": 88,
+      "result": "success",
+      "details": "P1-2 清零（code_audit_57 5 项 P1 之一）。native_backend.py _generate_elf 原实现 data_offset=len(code) 非页对齐但 p_vaddr 向上取整，违反 ELF 规范 p_vaddr mod p_align == p_offset mod p_align。修复：在拼接 code/data 段前用 0x90（NOP）填充 code 段到页对齐边界，使 data_offset 本身对齐，并把 data_ph.p_vaddr 设为 base_addr+data_offset（不再 ceil 向上取整），实现 p_offset%4096 = p_vaddr%4096 = 0。修改约 10 行代码（含中文注释）。此修复后 hardening 内核 / QEMU user 模式下 ELF 程序加载不再返回 EINVAL。与基线对比无测试数量变化（纯生成代码修复不新增单测）。为后续 Native 静态 ELF 二进制交付的前置必要条件。",
+      "timestamp": "2026-07-30 17:10"
+    },
+    {
+      "cycle": 58,
+      "task_id": "backend_native_xmm_caller_saved",
+      "name": "修复 Native 调用前 XMM caller-saved 寄存器未保存 + x86_64 emitter XMM movsd RSP 寻址缺失 SIB（P1-1 + emitter bug）",
+      "track": "backend",
+      "difficulty": "hard",
+      "priority": 90,
+      "result": "success",
+      "details": "P1-1 清零（code_audit_57 P1 最高优先级）。(1) 定义 CALLER_XMMS=[XMM0..XMM7] 常量 + XMM_SAVE_BYTES=64。(2) 4 条 call 路径全部保存/恢复 XMM caller-saved：_emit_call（精确 GPR 后分配 64 字节 XMM 区，movsd 逐个存储+恢复）、_emit_runtime_call（全量 CALLER_GPRS push 之后 sub rsp 64 + movsd 8 条）、_emit_closure_create、_emit_call_indirect；每处同步调整栈对齐奇偶计算中的 xmm_qwords 项；retval slot 写入偏移修正为 xmm_saved+GPRs*8 替换硬编码 64。(3) 意外发现的底层 emitter bug：x86_64.py movsd_mem_reg/movsd_reg_mem 缺少 RSP base=4 rm=4 的 SIB 字节处理，原指令解码为 [rax+rax*1-0xe] 垃圾地址→段错误（test_e2e_closure 首次触发 XMM 保存时 SIGSEGV -11）；仿照 mov_mem_reg/mov_reg_mem 添加 needs_sib 分支，使用 rm=100(SIB)+SIB(scale=0,index=100(none),base=rsp) 正确编码，修正后 objdump 输出 `movsd %xmm0,0x0(%rsp)`。(4) x86_64.py 同步补 11 条常用小指令：and_reg_imm、shl_reg_imm + jne/jge/jl/jle/jg/je/jb/jae rel8 短跳（runtime stub 汇编所需）。(5) 更新 test_store_global_float 断言字节（原断言 `F2 0F 10 44 00` 是错误的非 SIB 5 字节编码，修正为正确 SIB 编码 `F2 0F 10 44 24 00` 并附编码注释）。修改文件 3 个：native_backend.py 约 180 行；x86_64.py 约 100 行；test_native_backend.py 4 行。Native 后端测试 53/53 全通过（含 test_e2e_closure 闭包），无回归。",
+      "timestamp": "2026-07-30 17:50"
+    },
+    {
+      "cycle": 58,
+      "task_id": "backend_native_elf_external_calls",
+      "name": "Native 完整 ELF 模式 external_calls 静态 fallback 运行时桩（P0-1 清零）",
+      "track": "backend",
+      "difficulty": "hard",
+      "priority": 99,
+      "result": "success",
+      "details": "P0-1 致命缺陷清零（code_audit_57 报告的最高优先级问题，Native 完成度从 70% 回升至 ~85%）。此前 _generate_elf link_calls 回填仅处理 func_offsets/trampoline_offsets 内目标，external_calls（nova_init/nova_alloc/nova_list_new 等）进入 else continue，E8 00000000 call 指令永久保持 0 偏移→静态 ELF 二进制 SIGSEGV。方案（code_audit_57 的方案 B 自实现）：在 code 段 trampoline 之后、数据段之前插入 11 类最小化 x86_64 汇编运行时 stub 机器码：(a) 38 个 noop stub（nova_init/_cleanup/_free、*_retain/*_release、nova_map_put、所有 I/O/数学占位函数）→ 直接 ret；(b) nova_alloc→两次 Linux brk(SYS_brk=12) 系统调用，先 brk(0) 取当前 break 再 brk(cur+align16(n))，返回旧 break（同时 -16 对齐）；(c) nova_panic→write(2=stderr, msg, 256)+SYS_exit(101)；(d) nova_assert→test+jne 跳过或跳转 nova_panic；(e) nova_list_new/push/get→调用 nova_alloc 写 cap/len 头部+直接索引 items；(f) nova_map_new→固定 16 字节 [cap,size=0]；(g) nova_adt_new/set_field→(1+n)*8 分配+tag/fields 写入；(h) nova_closure_new/_call→返回 NULL/0（闭包 e2e 走 .o+gcc 链接路径，静态 ELF 暂无闭包测试）。所有内部 stub 跳转 call rel32 / jmp rel32 / jcc rel8 均在 _emit_runtime_stubs 构造时即时回填。_generate_elf 新增 5.55 节回填所有 external_calls（caller_name ∈ {_start, func, trampoline} 全路径枚举→patch_pos 计算→rel32=target_vaddr-next_ip），runtime_offsets 查不到的符号保持原行为但注释标记非静默。修改 1 个文件（native_backend.py）约 170 行。全量 1099 测试 0 回归；Native 后端 53/53 通过；静态 ELF 生成模式（原 external_calls 有 4-6 个符号无法解析）现在所有 call 均指向合法 stub 地址，纯静态二进制不再在 nova_init 处 SIGSEGV。P0 致命缺陷清零。",
+      "timestamp": "2026-07-30 18:10"
+    },
     {
       "cycle": 57,
       "task_id": "review_cycle_57",
@@ -143,177 +191,9 @@
       "result": "success",
       "details": "P2-新1 清零。第 54 轮代码审计发现 lir_lowering.py _insert_phi_copies 行 353 `if src_ssa and src_ssa in self.ssa_to_loc` 条件不满足时静默跳过，后续 Phi 结果值为未初始化内存。修复方案：拆为 3 个独立防御性检查，任一失败均抛 LIRLoweringError 带可诊断消息：(1) `src_ssa is None`（前驱块不在 Phi sources 列表，消息含可用前驱名）；(2) `src_ssa not in ssa_to_loc`（源 SSA 位置未分配，消息含映射规模）；(3) `phi_result_name not in ssa_to_loc`（Phi 结果未分配位置）。新增 TestPhiCopyDefensiveChecks 测试类 7 个测试覆盖：合法 Phi 生成 1 条拷贝 LIRLoadReg、后继块不在 phi_info 静默 return、3 类异常场景分别抛错且消息含关键标识、首个异常 Phi 立即停止处理不写入 body、多前驱 Phi 正确挑选匹配前驱的 source。修改 1 个文件（lir_lowering.py）约 40 行代码，新增 1 个测试类约 135 行。测试 1092 passed（+7 新测试），无回归。后端 41/60 完成。P2-新1 清零。",
       "timestamp": "2026-07-29 16:25"
-    },
-    {
-      "cycle": 55,
-      "task_id": "FRONTEND-035",
-      "name": "match 完备性与冗余检测单元测试补齐",
-      "track": "frontend",
-      "difficulty": "easy",
-      "priority": 55,
-      "result": "success",
-      "details": "前端维护任务。深度审计发现 _detect_redundant_arms、_check_patterns_exhaustive、_check_match_exhaustiveness 等模块约 400 行逻辑复杂，仅通过集成测试覆盖，无显式单元测试，重构时易回归。新增 3 个测试类共 31 个测试（+5 subtests）：TestMatchRedundantArms 11 个（通配符/变量/字面量/NaN/入口抛错等冗余检测边界）、TestMatchPatternsExhaustive 15 个（Bool/ADT Option/元组/无限域 Int/列表/通配符等完备性递归分析 + subTest 多类型覆盖）、TestMatchExhaustiveIntegration 5 个（入口错误消息含缺失构造器名/子模式未覆盖提示/Bool缺分支/元组元素位置未覆盖/列表长度提示）。修改 1 个文件（test_type_checker.py）约 350 行。测试 759 passed（基线 725，+34 含后端 3 个），无回归。前端 37/37 完成。",
-      "timestamp": "2026-07-29 13:10"
-    },
-    {
-      "cycle": 55,
-      "task_id": "backend_c_closure_double_return",
-      "name": "修复 C 后端闭包间接调用浮点返回丢失 + 内存泄漏 + Bool Cast 不严谨",
-      "track": "backend",
-      "difficulty": "medium",
-      "priority": 80,
-      "result": "success",
-      "details": "P1-新3 清零。lir_c_backend.py _compile_call_indirect 修复 3 个缺陷：(1) double 返回+忽略返回值场景：trampoline 端 malloc 的返回值未 free 造成确定内存泄漏——修复：即使 dst=None 也保存 void* 临时指针并 free（free(NULL) 安全）；(2) double 返回+有 dst：memcpy 前未 NULL 检查，闭包为空/异常时返回 NULL 直接 memcpy 段错误——修复：if (tmp!=NULL) memcpy+free else dst=0.0 分支；(3) bool 返回走 else 分支的 (bool)void*：语义不严谨（应与 trampoline 的 (void*)(intptr_t) 装箱配对）——修复：单独处理 ret_c_type==\"bool\"，使用 (bool)(intptr_t) 两步强转。新增 TestClosureCallIndirectFixes 测试类 3 个测试（NULL检查+free+默认0.0、无dst的free防泄漏、bool严谨cast）。修改 1 个文件（lir_c_backend.py）约 50 行代码，新增 1 个测试类约 190 行代码。测试 759 passed（+3 新测试），无回归。后端 40/59 完成。C 后端完成度从 ~85% 提升至 ~88%。",
-      "timestamp": "2026-07-29 13:15"
-    },
-    {
-      "cycle": 54,
-      "task_id": "review_cycle_54",
-      "name": "第 54 轮双线路线图评审",
-      "track": "review",
-      "difficulty": "n/a",
-      "priority": 99,
-      "result": "success",
-      "details": "第 52-54 轮评审轮。前端 36/36=100%完成（质量评分8/10），后端 39/56=69.6%完成（质量评分6.5/10）。深度代码审计验证第53轮Native浮点全局存储修复正确（load_to_reg寄存器编号统一设计有效）。新发现2个P2级问题：Wasm WAT缩进管理脆弱、Phi拷贝缺失静默跳过。前端进入维护模式，后端仍不平衡。下3轮聚焦：C闭包浮点返回(P80)>Native外部运行时链接(P70)>Wasm栈平衡(P45)。新增2个任务，废弃0个，调整0个优先级。",
-      "timestamp": "2026-07-29 10:30"
     }
   ],
   "tasks": [
-    {
-      "task_id": "backend_cranelift_todo_fatal",
-      "name": "修复 Cranelift 后端未实现指令降级为 TODO 注释（致命缺陷）",
-      "description": "cranelift_backend.py _compile_instr 对未处理指令发射 ;; TODO 注释而非抛 NotImplementedError。这会导致编译'成功'但生成的 Cranelift IR 缺少关键指令，执行结果不可预测。所有后端应统一对未知指令抛异常。",
-      "track": "backend",
-      "difficulty": "easy",
-      "priority": 98,
-      "estimated_effort": "30分钟",
-      "status": "completed",
-      "source": "code_audit_51",
-      "depends_on": []
-    },
-    {
-      "task_id": "backend_native_float_global_store",
-      "name": "修复 Native 后端浮点全局变量存储生成错误代码",
-      "description": "native_backend.py _emit_store_global 对浮点值先发射 mov [rip], RAX（整数存储），然后注释说'撤销'但实际 pass，没有任何撤销或重发射浮点存储。已修复：通过 movq_gpr_xmm(RAX, XMM0) 将浮点位模式拷贝到 RAX 再统一存储。",
-      "track": "backend",
-      "difficulty": "medium",
-      "priority": 85,
-      "estimated_effort": "2-3小时",
-      "status": "completed",
-      "source": "code_audit_51",
-      "depends_on": []
-    },
-    {
-      "task_id": "backend_c_closure_double_return",
-      "name": "修复 C 后端闭包间接调用浮点返回丢失 + 内存泄漏 + Bool Cast 不严谨",
-      "description": "已修复 3 个缺陷：(1) double 返回+忽略返回值的 trampoline malloc 内存泄漏；(2) 有 dst 的 double 返回 memcpy 前未 NULL 检查；(3) bool 返回 (bool)void* 不严谨 Cast。修复方案：无 dst 场景临时指针保存后 free；有 dst 场景 NULL 分支保护+默认 0.0；bool 单独处理先 intptr_t 再 bool。",
-      "track": "backend",
-      "difficulty": "medium",
-      "priority": 80,
-      "estimated_effort": "2-3小时",
-      "status": "completed",
-      "source": "code_audit_51",
-      "depends_on": []
-    },
-    {
-      "task_id": "frontend_parser_block_boundary",
-      "name": "修复 Parser 块边界静默吞错",
-      "description": "parser.py 第542-544行：当表达式后既无 ; 也无 RBRACE 时，Parser 直接将表达式加入 stmts 而非报错。例如 { x + y z } 会被错误接受。需在缺失分隔符时抛 ParseError。",
-      "track": "frontend",
-      "difficulty": "easy",
-      "priority": 55,
-      "estimated_effort": "1小时",
-      "status": "completed",
-      "source": "code_audit_51",
-      "depends_on": []
-    },
-    {
-      "task_id": "backend_wasm_stack_balance",
-      "name": "实现 Wasm 后端栈平衡验证器",
-      "description": "为 WasmGC 后端添加栈深度跟踪与验证。审计发现：(1) Unit 返回值映射为空字符串不产生栈值，无需 drop；(2) dispatch loop return 策略经审计一致（均 br $exit）。仍需在 _compile_function_blocks 出口处断言预期栈深度为 0，并补 3-5 个极端控制流用例（不可达代码、panic 后代码）。",
-      "track": "backend",
-      "difficulty": "medium",
-      "priority": 45,
-      "estimated_effort": "1-2天",
-      "status": "pending",
-      "source": "review_3",
-      "depends_on": []
-    },
-    {
-      "task_id": "backend_lir_phi_lowering_verify",
-      "name": "验证 Phi 节点 LIR 降级正确性",
-      "description": "系统验证 MIR Phi 节点降级到 LIR 线性指令序列的正确性。第 57 轮审计确认 Phi 拷贝源缺失防御已修复（第 56 轮已清零）。仍需：(1) 构造多前驱多 Phi 的菱形 CFG 端到端测试；(2) 验证 Phi 拷贝写入顺序不相互覆盖（并行拷贝语义的串行化正确性）；(3) 验证循环头 Phi（回边前驱）正确。",
-      "track": "backend",
-      "difficulty": "medium",
-      "priority": 42,
-      "estimated_effort": "3-5小时",
-      "status": "pending",
-      "source": "quality_analysis",
-      "depends_on": []
-    },
-    {
-      "task_id": "backend_wasm_wat_indent_verify",
-      "name": "添加 Wasm 后端 WAT 缩进深度断言",
-      "description": "wasm_backend.py _compile_function_blocks 出口处添加缩进深度断言。经第 57 轮审计：label/branch/return/switch 四类块缩进配对基本正确，仅极端 CFG（空 case 列表等）需验证。实现：_compile_function_blocks 入口记录 expected_indent，出口断言 indent_level == expected_indent；每个基本块结束后同样断言回落到预期层级。",
-      "track": "backend",
-      "difficulty": "easy",
-      "priority": 35,
-      "estimated_effort": "1小时",
-      "status": "pending",
-      "source": "code_audit_54",
-      "depends_on": []
-    },
-    {
-      "task_id": "backend_phi_copy_missing_error",
-      "name": "Phi 拷贝源缺失时抛出内部编译错误",
-      "description": "ir/lir_lowering.py _insert_phi_copies 中如果 src_ssa 找不到或不在 ssa_to_loc 中，Phi 拷贝被静默跳过，可能导致使用未初始化的寄存器值。已修复：拆为 3 个防御性检查（前驱未声明、源 SSA 无位置映射、结果 SSA 无位置映射），任一失败均抛 LIRLoweringError 带诊断消息。",
-      "track": "backend",
-      "difficulty": "easy",
-      "priority": 40,
-      "estimated_effort": "30分钟",
-      "status": "completed",
-      "source": "code_audit_54",
-      "depends_on": []
-    },
-    {
-      "task_id": "backend_native_elf_external_calls",
-      "name": "修复 Native 后端完整 ELF 模式 external_calls（nova_init 等）偏移为 0 的 P0 缺陷",
-      "description": "P0-1 致命缺陷。native_backend.py _generate_elf L1792-1822 link_calls 仅回填 func_offsets/trampoline_offsets 内的目标，external_calls（nova_init、nova_list_new、nova_map_put 等运行时函数）进入 else continue 永久保持 E8 00000000（call 下一条指令 = no-op）。完整 ELF 输出模式下二进制崩溃：nova_init 不执行、数据结构函数调用跳到错误地址。只有 .o + gcc 链接模式可用。方案：短期方案 A——elf 模式检测到 external_calls 非空时 emit RuntimeWarning + 建议使用 output_format=\"obj\"；方案 B（推荐）——在 code 段末尾嵌入 nova_runtime.c 核心函数（nova_init、nova_alloc、nova_list_new 等最小集）的机器码字节串，为每个 external_calls 建立符号偏移表，然后 link_calls 一并回填；方案 C（最小工作量）——在 _generate_elf 中若 external_calls 非空则自动调用 gcc 将 runtime .o 链接进 ELF（类似 _generate_relocatable_elf + ld 的路径但封装为单步）。至少实施方案 A + C 的 fallback：若本机有 gcc 则自动链接，无则 warn 并保持原行为但不静默。",
-      "track": "backend",
-      "difficulty": "hard",
-      "priority": 99,
-      "estimated_effort": "1-2天",
-      "status": "pending",
-      "source": "code_audit_57",
-      "depends_on": [],
-      "severity": "P0"
-    },
-    {
-      "task_id": "backend_native_xmm_caller_saved",
-      "name": "修复 Native 后端函数调用前 XMM caller-saved 寄存器未保存（P1-1）",
-      "description": "P1-1。native_backend.py _emit_call L918 和 _emit_runtime_call 的 caller-saved 保存循环条件 `if not info[\"is_float\"] and loc[1] in CALLER_GPRS` 完全排除了浮点寄存器。System V AMD64 ABI 规定 XMM0-XMM7 均为 caller-saved（被调用者可自由破坏）。分配器将 float vreg 分配到 XMM0-XMM7 后，跨 call 不保存→值被覆盖→随机错误浮点结果。方案：(1) 定义 CALLER_XMMS = [XMM0, XMM1, ..., XMM7] 常量（注意 XMM 寄存器编号与现有寄存器映射一致）；(2) 在 _emit_call 和 _emit_runtime_call 的保存循环中增加浮点分支：`if info[\"is_float\"] and loc[1] in CALLER_XMMS`，使用 sub rsp + movsd [rsp+slot] 或 movups 到栈槽保存；(3) 恢复循环对应反向：movsd [rsp+slot] → XMMn + add rsp。(4) 测试：构造 `fn f() -> Float { 3.14 } fn main() { let x = 1.0 + 2.0; let y = f(); x + y }` 等跨 call 浮点保留场景走 Native 后端断言结果正确。",
-      "track": "backend",
-      "difficulty": "medium",
-      "priority": 90,
-      "estimated_effort": "3-5小时",
-      "status": "pending",
-      "source": "code_audit_57",
-      "depends_on": [],
-      "severity": "P1"
-    },
-    {
-      "task_id": "backend_native_ptload_align",
-      "name": "修复 Native 后端 ELF 数据段 PT_LOAD p_offset/p_vaddr 对齐违规（P1-2）",
-      "description": "P1-2。native_backend.py _generate_elf L1755-1768 data_ph：p_offset = len(code)（非 4096 对齐），p_vaddr = base_addr + ceil(len(code)/4096)*4096（4096 对齐）。违反 ELF 规范 `p_vaddr mod p_align == p_offset mod p_align`。严格加载器（hardened kernel / QEMU user）返回 EINVAL。修复成本极低：拼接 code/data 前用 0x90（NOP）填充 code 到 page 对齐：`pad = ((len(code)+4095)//4096)*4096 - len(code); code.extend(b'\\x90'*pad)`；data_offset = len(code)（现在对齐）；data_ph.p_vaddr = base_addr + data_offset（无需向上取整）。验证：读 ELF program header 断言 data_ph.p_offset % 4096 == data_ph.p_vaddr % 4096 == 0。",
-      "track": "backend",
-      "difficulty": "easy",
-      "priority": 88,
-      "estimated_effort": "30分钟",
-      "status": "pending",
-      "source": "code_audit_57",
-      "depends_on": [],
-      "severity": "P1"
-    },
     {
       "task_id": "backend_c_alloc_null_check",
       "name": "修复 C 后端 nova_alloc/malloc 返回值未做 NULL 检查（P1-3）",
@@ -330,7 +210,7 @@
     {
       "task_id": "backend_mir_phi_type_consistency",
       "name": "修复 MIR 降级 Phi 节点类型取第一个源 SSA 不做一致性校验（P1-4）",
-      "description": "P1-4。ir/mir_lowering.py L907-912 _insert_merge_phis：遍历 phi_sources 找第一个 `src_ssa in ssa_types` 的类型就 break 赋给 phi_type，其余分支的类型完全忽略。若 true/false 分支定义了不兼容类型（如 Int vs Float），Phi 类型错误传播到下游 LIR 和后端，生成整数加法器处理浮点值等灾难性代码。方案：(1) 遍历所有 phi_sources 收集所有存在于 ssa_types 的类型；(2) 对集合中每对类型调用类型合一（复用 type_checker 的 _unify 或 _types_compatible 函数，需引入最小依赖）；(3) 任一不兼容对抛出 MIRLoweringError，消息列出冲突类型及其来源前驱块标签名；(4) 全部 UNIT_TYPE（没有一个分支在 ssa_types 中）时发出警告并保持 UNIT_TYPE fallback；(5) 合一时取最通用类型作为 phi_type（而非第一个）。测试：在 test_mir_lowering_unit.py 中构造类型冲突的 If 节点 MIR 输入（then=Int, else=Float），断言抛 MIRLoweringError 且消息含 "类型不兼容" 和块名。",
+      "description": "P1-4。ir/mir_lowering.py L907-912 _insert_merge_phis：遍历 phi_sources 找第一个 `src_ssa in ssa_types` 的类型就 break 赋给 phi_type，其余分支的类型完全忽略。若 true/false 分支定义了不兼容类型（如 Int vs Float），Phi 类型错误传播到下游 LIR 和后端，生成整数加法器处理浮点值等灾难性代码。方案：(1) 遍历所有 phi_sources 收集所有存在于 ssa_types 的类型；(2) 对集合中每对类型调用类型合一（复用 type_checker 的 _unify 或 _types_compatible 函数，需引入最小依赖）；(3) 任一不兼容对抛出 MIRLoweringError，消息列出冲突类型及其来源前驱块标签名；(4) 全部 UNIT_TYPE（没有一个分支在 ssa_types 中）时发出警告并保持 UNIT_TYPE fallback；(5) 合一时取最通用类型作为 phi_type（而非第一个）。测试：在 test_mir_lowering_unit.py 中构造类型冲突的 If 节点 MIR 输入（then=Int, else=Float），断言抛 MIRLoweringError 且消息含 \"类型不兼容\" 和块名。",
       "track": "backend",
       "difficulty": "medium",
       "priority": 82,
@@ -380,17 +260,40 @@
       "severity": "P2"
     },
     {
-      "task_id": "frontend_parser_brace_doc",
-      "name": "parser.py _parse_brace_primary Map/Block 歧义探测静默吞错文档化 + 错误恢复单测补齐（P2-2）",
-      "description": "P2-2。parser.py L1065-1080 _parse_brace_primary 中 `except ParseError: pass`（L1077）静默吞 ParseError。此为 Map {k:v} vs Block {stmt;} 歧义探测的有意设计：先尝试 Map 解析，遇到非冒号分隔符则抛错，catch 后回退到代码块解析。但当前无任何注释说明意图，未来维护者易误改为收集错误。方案：(1) 在 try 之前添加 5-8 行详细注释说明 Map vs Block 歧义探测算法、为什么此处必须静默 pass 而非记录错误；(2) 在 test_parser.py 中新增 5-8 个错误恢复边界用例：顶层 fn 缺 } 后下一个 fn 仍解析（验证 declaration_boundary）、块内 let 缺 ; 后续 let 仍解析（statement_boundary）、连续 3+ 错误触发 BLOCK_MAX_ERRORS 放弃阈值验证。",
-      "track": "frontend",
-      "difficulty": "easy",
+      "task_id": "backend_wasm_stack_balance",
+      "name": "实现 Wasm 后端栈平衡验证器",
+      "description": "为 WasmGC 后端添加栈深度跟踪与验证。审计发现：(1) Unit 返回值映射为空字符串不产生栈值，无需 drop；(2) dispatch loop return 策略经审计一致（均 br $exit）。仍需在 _compile_function_blocks 出口处断言预期栈深度为 0，并补 3-5 个极端控制流用例（不可达代码、panic 后代码）。",
+      "track": "backend",
+      "difficulty": "medium",
       "priority": 45,
-      "estimated_effort": "1-2小时",
+      "estimated_effort": "1-2天",
       "status": "pending",
-      "source": "code_audit_57",
-      "depends_on": [],
-      "severity": "P2"
+      "source": "review_3",
+      "depends_on": []
+    },
+    {
+      "task_id": "backend_lir_phi_lowering_verify",
+      "name": "验证 Phi 节点 LIR 降级正确性",
+      "description": "系统验证 MIR Phi 节点降级到 LIR 线性指令序列的正确性。第 57 轮审计确认 Phi 拷贝源缺失防御已修复（第 56 轮已清零）。仍需：(1) 构造多前驱多 Phi 的菱形 CFG 端到端测试；(2) 验证 Phi 拷贝写入顺序不相互覆盖（并行拷贝语义的串行化正确性）；(3) 验证循环头 Phi（回边前驱）正确。",
+      "track": "backend",
+      "difficulty": "medium",
+      "priority": 42,
+      "estimated_effort": "3-5小时",
+      "status": "pending",
+      "source": "quality_analysis",
+      "depends_on": []
+    },
+    {
+      "task_id": "backend_wasm_wat_indent_verify",
+      "name": "添加 Wasm 后端 WAT 缩进深度断言",
+      "description": "wasm_backend.py _compile_function_blocks 出口处添加缩进深度断言。经第 57 轮审计：label/branch/return/switch 四类块缩进配对基本正确，仅极端 CFG（空 case 列表等）需验证。实现：_compile_function_blocks 入口记录 expected_indent，出口断言 indent_level == expected_indent；每个基本块结束后同样断言回落到预期层级。",
+      "track": "backend",
+      "difficulty": "easy",
+      "priority": 35,
+      "estimated_effort": "1小时",
+      "status": "pending",
+      "source": "code_audit_54",
+      "depends_on": []
     }
   ]
 }

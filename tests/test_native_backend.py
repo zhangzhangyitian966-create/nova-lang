@@ -392,8 +392,12 @@ class TestNativeCodeGen(unittest.TestCase):
         code = e.get_code()
 
         # 检查包含 movsd xmm0, [rsp+0] (浮点加载)
-        # F2 0F 10 44 00  (movsd xmm0, [rsp + 0], 使用 SIB 字节)
-        self.assertIn(bytes([0xF2, 0x0F, 0x10, 0x44, 0x00]), code)
+        # 正确 SIB 编码（RSP 为 base 时必须加 SIB 字节）:
+        #   F2 0F 10 44 24 00 = movsd xmm0, [rsp+disp8]
+        #   ModRM=0x44 (mod=01, reg=000(xmm0), rm=100(SIB))
+        #   SIB  =0x24 (scale=00, index=100(none), base=100(RSP))
+        #   disp8=0x00
+        self.assertIn(bytes([0xF2, 0x0F, 0x10, 0x44, 0x24, 0x00]), code)
         # 检查包含 movq rax, xmm0
         # F2 0F D6 C0
         self.assertIn(bytes([0xF2, 0x0F, 0xD6, 0xC0]), code)
