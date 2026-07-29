@@ -1,6 +1,8 @@
 {
-  "cycles": 72,
+  "cycles": 73,
   "completed_tasks": [
+    "parser_unit_tests",
+    "refactor_analyze_loops",
     "test_lir_c_backend_switch",
     "pass_manager_unit_tests",
     "refactor_redirect_branch",
@@ -158,6 +160,22 @@
   ],
   "failed_tasks": [],
   "task_history": [
+    {
+      "cycle": 73,
+      "task_id": "parser_unit_tests",
+      "status": "completed",
+      "source": "自主规划",
+      "reason": "第72轮评审明确列为第73轮最高优先级任务。parser.py（1223行）是编译器最前端模块，零独立测试意味着任何解析变更都可能导致无感知的语法回归。",
+      "details": "新建 tests/test_parser.py（657行，81个测试用例+6个子测试），覆盖11大测试类：1)TestLiteralParsing（8测）：int/float/string/char/bool/unit/negative_int；2)TestIdentifierAndPrimary（5测）：标识符/break/continue/分组括号；3)TestBinaryOperators（12测+6子测试）：优先级/结合性/管道/字符串拼接/取模/全部比较运算符；4)TestUnaryAndPostfix（8测）：一元-/!、函数调用/嵌套调用、字段访问(.name/.0)、TryExpr(?)；5)TestControlFlow（7测）：if-then-else/无else/块分支、while、for-in/for-range/for-range-step；6)TestBindingsAndFunctions（7测）：let/mut类型注解、fn定义/无参数/块体/表达式体；7)TestADTAndTypes（7测）：ADT变体/字段/省略管道、alias、函数类型/泛型/元组类型；8)TestCompoundExpressions（10测）：空列表/有元素列表、元组、Map、lambda单参数/多参数/带类型、块表达式/尾表达式、列表推导式；9)TestPatternAndMatch（9测）：match表达式/guard、int/bool/wildcard/identifier/constructor/tuple/list模式；10)TestTopLevelAndModule（4测）：import/export/多声明/空程序；11)TestErrorRecovery（5测）：意外token/未闭合块/无效顶层/missing_then/错误位置。测试780 passed，零回归。"
+    },
+    {
+      "cycle": 73,
+      "task_id": "refactor_analyze_loops",
+      "status": "completed",
+      "source": "审查驱动",
+      "reason": "第1511轮Top10复杂函数CC=14，循环分析基础设施。四阶段（回边检测→自然循环收集→循环树构建→出口计算）可完全拆分为独立函数。",
+      "details": "将 analyze_loops 从72行CC≈9重构为6行编排入口+4个独立阶段函数：1)_merge_loop_for_header()按header合并自然循环体与latches；2)_compute_loop_exits()计算每个循环的出口块；3)_build_loop_nesting_tree()建立循环嵌套父子关系；4)_compute_innermost_loop_map()建立block→最内层循环映射。每个子函数职责单一、docstring完整、CC≤4。analyze_loops主函数变为四阶段流水线编排器，CC降至约3。现有test_cfg_utils.py中TestAnalyzeLoops全部通过，零回归。"
+    },
     {
       "cycle": 72,
       "task_id": "review_cycle_72",
@@ -772,12 +790,12 @@
     {
       "id": "refactor_analyze_loops",
       "name": "重构 cfg_utils.analyze_loops 降低圈复杂度",
-      "description": "cfg_utils.analyze_loops 圈复杂度 14，包含回边检测、自然循环收集、循环树构建、出口计算四个阶段。可拆分为 _detect_back_edges、_collect_natural_loops、_build_loop_tree、_compute_loop_exits 四个独立函数。",
+      "description": "cfg_utils.analyze_loops 圈复杂度 14，包含回边检测、自然循环收集、循环树构建、出口计算四个阶段。已拆分为 _merge_loop_for_header、_compute_loop_exits、_build_loop_nesting_tree、_compute_innermost_loop_map 四个独立函数，主函数变为6行编排入口。",
       "difficulty": "medium",
       "priority": 60,
       "category": "engineering",
       "estimated": "3-5 小时",
-      "status": "pending",
+      "status": "completed",
       "depends_on": [],
       "reason": "第1511轮Top10复杂函数CC=14，循环分析基础设施。四阶段（回边检测→自然循环收集→循环树构建→出口计算）可完全拆分为独立函数，analyze_loops本身变为pipeline编排器，CC降至约3。[审查驱动]"
     },
@@ -1100,12 +1118,12 @@
     {
       "id": "parser_unit_tests",
       "name": "Parser单元测试基线",
-      "description": "为 parser.py（1223行）建立独立单元测试基线，覆盖：基本表达式解析（字面量/标识符/二元运算/一元运算）、控制流解析（if/while/for/match）、函数定义解析、ADT定义解析、列表/元组/Map解析、模式匹配解析、错误恢复等核心路径。当前零独立测试，仅通过集成测试间接覆盖。",
+      "description": "为 parser.py（1223行）建立独立单元测试基线，覆盖：基本表达式解析（字面量/标识符/二元运算/一元运算）、控制流解析（if/while/for/match）、函数定义解析、ADT定义解析、列表/元组/Map解析、模式匹配解析、错误恢复等核心路径。已完成：81个测试用例+6个子测试，覆盖11大测试类。",
       "difficulty": "medium",
       "priority": 70,
       "category": "test",
       "estimated": "4-6小时",
-      "status": "pending",
+      "status": "completed",
       "depends_on": [],
       "reason": "1223行零独立测试，前端核心路径无任何直接验证。parser是编译器最前端模块，任何解析变更都可能导致无感知的语法回归。当前最大测试盲区之一。[自主发现]"
     },

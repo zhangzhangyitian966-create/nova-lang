@@ -400,20 +400,20 @@ def _find_loop_exits(
     return exits
 
 
-def analyze_loops(fn: MIRFunction) -> LoopInfo:
+def _merge_loop_for_header(
+    fn: MIRFunction,
+    back_edges: List[BackEdge],
+    predecessors: Dict[str, List[str]],
+) -> Dict[str, Loop]:
     """
-    完整的循环分析：检测所有自然循环，构建循环树。
+    对每条回边收集自然循环，按 header 合并循环体和 latches。
 
-    返回 LoopInfo 对象，包含所有循环和查询接口。
+    同一个循环头可能有多条回边（如多个 continue 目标），
+    此时需要合并所有回边对应的自然循环体。
+
+    返回: {header: Loop} 的原始映射（不含 exits/parent/children）。
     """
-    back_edges = find_back_edges(fn)
-    predecessors = build_predecessors(fn)
-    succ_map = build_successor_map(fn)
-
     loops: Dict[str, Loop] = {}
-    block_to_innermost: Dict[str, str] = {}  # block -> 最内层循环 header
-
-    # 1. 收集每条回边的自然循环
     for be in back_edges:
         header = be.head
         body = _collect_natural_loop(fn, be, predecessors)
@@ -422,21 +422,36 @@ def analyze_loops(fn: MIRFunction) -> LoopInfo:
             loops[header] = Loop(header=header, body=body)
             loops[header].latches.add(be.source)
         else:
-            # 同一个循环头可能有多条回边
-            # 合并循环体
             loops[header].body |= body
             loops[header].latches.add(be.source)
+    return loops
 
-    # 2. 计算每个循环的出口
+
+def _compute_loop_exits(
+    loops: Dict[str, Loop],
+    succ_map: Dict[str, List[str]],
+) -> None:
+    """
+    为每个循环计算出口块集合，原地修改 loop.exits。
+
+    出口块定义：循环体内有后继块在循环外的基本块。
+    """
     for loop in loops.values():
         loop.exits = _find_loop_exits(loop, succ_map)
 
-    # 3. 构建循环树（父子关系）
-    # 对每个循环，找到包含它的最小外层循环
-    top_level_loops: List[str] = []
 
+def _build_loop_nesting_tree(
+    loops: Dict[str, Loop],
+) -> List[str]:
+    """
+    建立循环间的父子嵌套关系，返回最外层循环 header 列表。
+
+    对每个循环，在其余循环中找包含它的最小外层循环
+    （body 包含当前循环 header 且 body 大小最小）。
+    原地修改 loop.parent 和 loops[outer].children。
+    """
+    top_level_loops: List[str] = []
     for header, loop in loops.items():
-        # 在除自己外的所有循环中，找 body 包含当前循环 header 且最小的那个
         outer_header = None
         outer_size = float("inf")
 
@@ -444,7 +459,6 @@ def analyze_loops(fn: MIRFunction) -> LoopInfo:
             if other_header == header:
                 continue
             if header in other_loop.body:
-                # other_loop 包含当前循环
                 if len(other_loop.body) < outer_size:
                     outer_size = len(other_loop.body)
                     outer_header = other_header
@@ -454,19 +468,50 @@ def analyze_loops(fn: MIRFunction) -> LoopInfo:
             loops[outer_header].children.append(header)
         else:
             top_level_loops.append(header)
+    return top_level_loops
 
-    # 4. 计算每个块所在的最内层循环
+
+def _compute_innermost_loop_map(
+    loops: Dict[str, Loop],
+) -> Dict[str, str]:
+    """
+    建立 block -> 最内层循环 header 的映射。
+
+    规则：若块属于多个循环，取 body 最小的那个（最内层）。
+    """
+    block_to_innermost: Dict[str, str] = {}
     for header, loop in loops.items():
         for block in loop.body:
             current_innermost = block_to_innermost.get(block)
             if current_innermost is None:
                 block_to_innermost[block] = header
             else:
-                # 比较哪个更小（更内层）
-                # 内层循环的 body 是外层的子集
                 current_loop = loops[current_innermost]
                 if len(loop.body) < len(current_loop.body):
                     block_to_innermost[block] = header
+    return block_to_innermost
+
+
+def analyze_loops(fn: MIRFunction) -> LoopInfo:
+    """
+    完整的循环分析：检测所有自然循环，构建循环树。
+
+    四阶段流水线编排：
+    1. 按 header 合并自然循环
+    2. 计算循环出口
+    3. 构建循环嵌套树
+    4. 计算最内层循环映射
+
+    返回 LoopInfo 对象，包含所有循环和查询接口。
+    """
+    back_edges = find_back_edges(fn)
+    predecessors = build_predecessors(fn)
+    succ_map = build_successor_map(fn)
+
+    loops = _merge_loop_for_header(fn, back_edges, predecessors)
+    _compute_loop_exits(loops, succ_map)
+    top_level_loops = _build_loop_nesting_tree(loops)
+    block_to_innermost = _compute_innermost_loop_map(loops)
 
     return LoopInfo(
         loops=loops,

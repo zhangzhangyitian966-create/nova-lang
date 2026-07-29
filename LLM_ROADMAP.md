@@ -150,7 +150,7 @@
 | ⏳ | LOW 级问题批量治理（docstring + 魔法数字） | easy | 40 | 2-4 小时 | - |
 | ✅ | 重构 MIRLowering._lower_call_expr 降低复杂度 | medium | 70 | 3-5 小时 | - |
 | ✅ | 重构 LoopInvariantCodeMotion._redirect_branch 降低复杂度 | medium | 65 | 3-5 小时 | - |
-| ⏳ | 重构 cfg_utils.analyze_loops 降低复杂度 | medium | 60 | 3-5 小时 | - |
+| ✅ | 重构 cfg_utils.analyze_loops 降低复杂度 | medium | 60 | 3-5 小时 | - |
 | ✅ | 批量清理未使用导入 v5 | easy | 50 | 1-2 小时 | - |
 
 ---
@@ -169,16 +169,16 @@
 | ✅ | TypeChecker 单元测试基线 | medium | 75 | 4-6 小时 | - |
 | ✅ | MIRLowering 单元测试基线 | medium | 75 | 4-6 小时 | - |
 | ✅ | PassManager 单元测试基线 | medium | 65 | 4-6 小时 | - |
-| ⏳ | Parser 单元测试基线 | medium | 70 | 4-6 小时 | - |
+| ✅ | Parser 单元测试基线 | medium | 70 | 4-6 小时 | - |
 | ⏳ | Evaluator 单元测试基线 | medium | 65 | 4-6 小时 | - |
 | ⏳ | VM 单元测试基线 | medium | 60 | 4-6 小时 | - |
 
 ---
 
-**进度**: 152/163 (93.3%)
-- **已完成**: 152（含第72轮评审 + 第70-71轮6个任务）
+**进度**: 154/163 (94.5%)
+- **已完成**: 154（含第72轮评审 + 第70-73轮8个任务）
 - **进行中**: 0
-- **待开发**: 8（unify_c_backend P70、benchmark_enhance_exec_time P38、low_quality_issues_cleanup P40、refactor_analyze_loops P60、parser_unit_tests P70、evaluator_unit_tests P65、vm_unit_tests P60、refactor_compile_switch P55）
+- **待开发**: 6（unify_c_backend P70、benchmark_enhance_exec_time P38、low_quality_issues_cleanup P40、evaluator_unit_tests P65、vm_unit_tests P60、refactor_compile_switch P55）
 - **已废弃**: 3（native_call_abi、refactor_native_emit_call、native_call_abi）
 
-> 注：第72轮评审完成。第70-71轮完成6个任务（mir_lowering_unit_tests +50测、pass_manager_unit_tests +18测、refactor_redirect_branch CC=14→~3、refactor_lower_call_expr、clean_unused_imports_v5、test_lir_c_backend_switch）。测试总数621→699（+78），零回归。下阶段方向：前端基础测试补齐 + 架构债务启动 + 审查数据校准。
+> 注：第73轮完成2个任务。parser_unit_tests：新建 tests/test_parser.py（81测+6子测），覆盖11大测试类，parser.py零测试→81测试。refactor_analyze_loops：CC=14→~4，四阶段完全拆分。测试总数699→780（+81），零回归。下阶段方向：evaluator测试补齐 + compile_switch复杂度治理 + 架构债务启动。
