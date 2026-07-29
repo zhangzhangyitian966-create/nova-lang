@@ -98,6 +98,43 @@ class LIRLowering:
             MIRIndexAccess: self._lower_index_access,
         }
 
+    def _require_ssa_loc(self, ssa_name: str, bb_label: str, terminator_kind: str) -> str:
+        """查找 SSA 名对应的 LIR 位置，找不到时抛出 LIRLoweringError（P1-5 防御性检查）。
+
+        原实现使用 self.ssa_to_loc.get(ssa_name, "") 静默回退为空字符串，
+        当 SSA 构建异常（前向引用、Phi 循环依赖、降级顺序错）时下游生成
+        `if () goto` / `switch ((int64_t))` 等无效代码或空键崩溃。
+
+        Args:
+            ssa_name: 待查找的 SSA 变量名
+            bb_label: 当前基本块标签（用于错误定位）
+            terminator_kind: 终结指令类型（如 "MIRBranch"、"MIRSwitch"）
+
+        Returns:
+            对应的 LIR 位置名（寄存器/栈槽）
+
+        Raises:
+            LIRLoweringError: ssa_name 未在 ssa_to_loc 注册
+        """
+        if ssa_name is None:
+            raise LIRLoweringError(
+                f"[{terminator_kind}] 块 '{bb_label}': SSA 名为 None（前驱 Phi 或降级顺序错误），"
+                f"当前已注册 SSA 位置数={len(self.ssa_to_loc)}"
+            )
+        loc = self.ssa_to_loc.get(ssa_name)
+        if loc is None:
+            raise LIRLoweringError(
+                f"[{terminator_kind}] 块 '{bb_label}': SSA '{ssa_name}' 未在 ssa_to_loc 注册"
+                f"（可能是前向引用、Phi 循环依赖或降级顺序错误），"
+                f"当前已注册 SSA 位置数={len(self.ssa_to_loc)}"
+            )
+        if not loc:
+            raise LIRLoweringError(
+                f"[{terminator_kind}] 块 '{bb_label}': SSA '{ssa_name}' 映射到空字符串位置"
+                f"（寄存器分配器异常）"
+            )
+        return loc
+
     def lower(self, mir_module):
         """将 MIR 模块降级为 LIR 模块。
 
@@ -249,7 +286,8 @@ class LIRLowering:
                 self._insert_phi_copies(
                     final_body, bb.label, succ_label, phi_info
                 )
-        lir_term = self._lower_terminator(bb.terminator)
+        # P1-5：传递 bb.label 用于防御性 SSA 错误定位
+        lir_term = self._lower_terminator(bb.terminator, bb_label=bb.label)
         final_body.append(lir_term)
         return edge_counter
 
@@ -269,7 +307,8 @@ class LIRLowering:
                 bb, final_body, phi_info, edge_counter, succ_blocks
             )
         # 其他多后继情况，降级处理
-        lir_term = self._lower_terminator(bb.terminator)
+        # P1-5：传递 bb.label 用于防御性 SSA 错误定位
+        lir_term = self._lower_terminator(bb.terminator, bb_label=bb.label)
         final_body.append(lir_term)
         return edge_counter
 
@@ -290,12 +329,9 @@ class LIRLowering:
         lir_branch.true_target = true_edge_label
         lir_branch.false_target = false_edge_label
         if bb.terminator.condition:
-            lir_branch.src_locs = [
-                (
-                    self.ssa_to_loc.get(bb.terminator.condition, ""),
-                    BOOL_TYPE,
-                )
-            ]
+            # P1-5 修复：使用 _require_ssa_loc 替代 get(..., "")，空位置直接抛 LIRLoweringError
+            cond_loc = self._require_ssa_loc(bb.terminator.condition, bb.label, "MIRBranch")
+            lir_branch.src_locs = [(cond_loc, BOOL_TYPE)]
         final_body.append(lir_branch)
 
         final_body.append(LIRLabel(name=true_edge_label))
@@ -325,8 +361,9 @@ class LIRLowering:
             edge_counter += 1
             edge_labels[tgt] = edge_label
 
+        # P1-5：传递 bb.label 用于防御性 SSA 错误定位
         lir_term = self._lower_terminator_with_targets(
-            bb.terminator, edge_labels
+            bb.terminator, edge_labels, bb_label=bb.label
         )
         final_body.append(lir_term)
 
@@ -385,27 +422,34 @@ class LIRLowering:
             copy_instr.dst_loc = (dst_loc, phi_result_type)
             body.append(copy_instr)
 
-    def _lower_terminator_with_targets(self, term, target_map):
-        """降低终结指令，但将目标标签替换为 target_map 中的映射（用于边缘块）。"""
+    def _lower_terminator_with_targets(self, term, target_map, bb_label="unknown"):
+        """降低终结指令，但将目标标签替换为 target_map 中的映射（用于边缘块）。
+
+        P1-5 修复：新增 bb_label 参数，供 _require_ssa_loc 错误定位使用。
+        """
         if isinstance(term, MIRSwitch):
             lir = LIRSwitch()
             lir.default_target = target_map.get(term.default_target, term.default_target)
             if term.value:
-                lir.src_locs = [(self.ssa_to_loc.get(term.value, ""), INT_TYPE)]
+                # P1-5 修复：_require_ssa_loc 替代 get(..., "")
+                val_loc = self._require_ssa_loc(term.value, bb_label, "MIRSwitch")
+                lir.src_locs = [(val_loc, INT_TYPE)]
             lir.cases = [(val, target_map.get(tgt, tgt)) for val, tgt in term.cases]
             return lir
         elif isinstance(term, MIRMatchJump):
             lir = LIRSwitch()
             lir.default_target = target_map.get(term.default_target, term.default_target)
             if term.value:
+                # P1-5 修复：_require_ssa_loc 替代 get(..., "")
+                val_loc = self._require_ssa_loc(term.value, bb_label, "MIRMatchJump")
                 val_type = self.ssa_types.get(term.value, UNIT_TYPE)
-                lir.src_locs = [(self.ssa_to_loc.get(term.value, ""), val_type)]
+                lir.src_locs = [(val_loc, val_type)]
             lir.cases = [
                 (variant_name, target_map.get(tgt, tgt))
                 for variant_name, _fields, tgt in term.variant_tests
             ]
             return lir
-        return self._lower_terminator(term)
+        return self._lower_terminator(term, bb_label)
 
     def _get_successor_blocks(self, terminator):
         """获取终结指令跳转到的后继块标签列表"""
@@ -748,7 +792,7 @@ class LIRLowering:
             )
         result.append(lir)
 
-    def _lower_terminator(self, term):
+    def _lower_terminator(self, term, bb_label="unknown"):
         if isinstance(term, MIRJump):
             return LIRJump(target=term.target)
 
@@ -757,14 +801,18 @@ class LIRLowering:
             lir.true_target = term.true_target
             lir.false_target = term.false_target
             if term.condition:
-                lir.src_locs = [(self.ssa_to_loc.get(term.condition, ""), BOOL_TYPE)]
+                # P1-5 修复：_require_ssa_loc 替代 get(..., "")
+                cond_loc = self._require_ssa_loc(term.condition, bb_label, "MIRBranch")
+                lir.src_locs = [(cond_loc, BOOL_TYPE)]
             return lir
 
         if isinstance(term, MIRReturn):
             lir = LIRReturn()
             if term.value and term.value in self.ssa_to_loc:
                 ret_type = self.ssa_types.get(term.value, UNIT_TYPE)
-                lir.src_locs = [(self.ssa_to_loc.get(term.value, ""), ret_type)]
+                # P1-5 修复：_require_ssa_loc 替代 get(..., "")（已在 in 检查后安全）
+                ret_loc = self._require_ssa_loc(term.value, bb_label, "MIRReturn")
+                lir.src_locs = [(ret_loc, ret_type)]
             return lir
 
         if isinstance(term, MIRSwitch):
@@ -772,7 +820,9 @@ class LIRLowering:
             lir = LIRSwitch()
             lir.default_target = term.default_target
             if term.value:
-                lir.src_locs = [(self.ssa_to_loc.get(term.value, ""), INT_TYPE)]
+                # P1-5 修复：_require_ssa_loc 替代 get(..., "")
+                val_loc = self._require_ssa_loc(term.value, bb_label, "MIRSwitch")
+                lir.src_locs = [(val_loc, INT_TYPE)]
             # 复制 cases 列表: [(value, target_block), ...]
             lir.cases = list(term.cases)
             return lir
@@ -784,8 +834,10 @@ class LIRLowering:
             lir = LIRSwitch()
             lir.default_target = term.default_target
             if term.value:
+                # P1-5 修复：_require_ssa_loc 替代 get(..., "")
+                val_loc = self._require_ssa_loc(term.value, bb_label, "MIRMatchJump")
                 val_type = self.ssa_types.get(term.value, UNIT_TYPE)
-                lir.src_locs = [(self.ssa_to_loc.get(term.value, ""), val_type)]
+                lir.src_locs = [(val_loc, val_type)]
             # 将 variant_tests 转换为 cases：variant_name 作为 case 值
             lir.cases = [
                 (variant_name, target)

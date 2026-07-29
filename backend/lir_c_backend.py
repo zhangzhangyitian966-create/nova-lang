@@ -295,8 +295,13 @@ class LIRCBackend:
             elif ret_type == "double":
                 # double 不能通过 intptr_t 强转为 void*（UB：浮点截断）
                 # 使用 malloc + memcpy 进行安全的类型双关
+                # P1-3 修复：malloc 返回 NULL 时 panic，不直接 memcpy
                 self._emit(f"double _nova_ret = {c_name}({args_str});")
-                self._emit("double* _nova_ret_ptr = (double*)malloc(sizeof(double));")
+                self._emit_alloc_with_null_check(
+                    "double* _nova_ret_ptr = (double*)malloc(sizeof(double))",
+                    "_nova_ret_ptr",
+                    "trampoline_double_return",
+                )
                 self._emit("memcpy(_nova_ret_ptr, &_nova_ret, sizeof(double));")
                 self._emit("return (void*)_nova_ret_ptr;")
             elif ret_type == "bool":
@@ -545,11 +550,17 @@ class LIRCBackend:
 
         分配内存后零初始化，然后逐个字段填充 src_locs 中的元素值。
         每个字段 8 字节（NovaValue 大小）。
+
+        P1-3 修复：nova_alloc 返回 NULL 时 panic，不直接 memset。
         """
         dst = self._dst_var_name(instr) if instr.dst_loc else None
         if dst:
             size = instr.count * NOVA_VALUE_SIZE
-            self._emit(f"{dst} = (NovaValue*)nova_alloc({size});")
+            self._emit_alloc_with_null_check(
+                f"{dst} = (NovaValue*)nova_alloc({size})",
+                dst,
+                f"build_tuple[{instr.count}]",
+            )
             self._emit(f"memset({dst}, 0, {size});")
             # 逐个字段填充元素
             for i, (elem_loc, _) in enumerate(instr.src_locs):
@@ -612,8 +623,11 @@ class LIRCBackend:
         # 如果有捕获变量，生成环境数组分配与填充代码
         if instr.src_locs and capture_count > 0:
             env_var = f"_nova_env_{self._tmp_counter()}"
-            self._emit(
-                f"void** {env_var} = nova_alloc(sizeof(void*) * {capture_count});"
+            # P1-3 修复：nova_alloc 返回 NULL 时 panic，不直接索引
+            self._emit_alloc_with_null_check(
+                f"void** {env_var} = nova_alloc(sizeof(void*) * {capture_count})",
+                env_var,
+                f"closure_env[{instr.fn_name},{capture_count}]",
             )
             for i, (loc, _) in enumerate(instr.src_locs[:capture_count]):
                 cap_var = self._loc_var_name(loc)
@@ -649,7 +663,8 @@ class LIRCBackend:
     def _compile_panic(self, instr: LIRPanic):
         """编译 Panic 指令"""
         msg = instr.message or "panic"
-        self._emit(f'nova_panic("{msg}");')
+        # P1-3 修复：使用 NOVA_PANIC 宏自动填入 file/line，匹配 runtime 3 参数签名
+        self._emit(f'NOVA_PANIC("{msg}");')
 
     def _compile_load_const(self, instr: LIRLoadConst, dst: str):
         """编译常量加载指令"""
@@ -913,6 +928,27 @@ class LIRCBackend:
         """输出一行代码"""
         indent = "    " * self._indent_level
         self._output.append(f"{indent}{line}")
+
+    def _emit_alloc_with_null_check(self, alloc_stmt: str, ptr_var: str, panic_msg: str):
+        """输出内存分配语句 + NULL 检查。
+
+        P1-3 修复：nova_alloc/malloc 返回值可能为 NULL（OOM 场景），
+        若直接 memset/索引会触发段错误。在分配后、首次使用前插入
+        `if (!ptr) NOVA_PANIC("...")` 防御性检查。
+
+        注意：运行时 nova_panic(msg, file, line) 需要 3 个参数，
+        使用 NOVA_PANIC 宏自动填入 __FILE__ / __LINE__。
+
+        Args:
+            alloc_stmt: 完整的分配语句（不含末尾分号，如 "r0 = (NovaValue*)nova_alloc(16)"）
+            ptr_var: 指针变量名（如 "r0"、"_nova_env_0"、"_nova_ret_ptr"），
+                     用于 if 判断和 panic 消息
+            panic_msg: nova_panic 消息（建议含分配场景，便于定位 OOM 点）
+        """
+        # 自动补末尾分号（允许调用方省略 ; 减少拼写错误）
+        stmt = alloc_stmt.rstrip().rstrip(";") + ";"
+        self._emit(stmt)
+        self._emit(f"if (!{ptr_var}) NOVA_PANIC(\"{panic_msg}: out of memory\");")
 
     def _loc_var_name(self, loc: str) -> str:
         """虚拟寄存器名 → C 变量名"""

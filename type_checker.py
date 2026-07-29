@@ -41,6 +41,7 @@ from .ast_nodes import (
     MutBinding,
     PipeExpr,
     Program,
+    Span,
     StringLiteral,
     TryExpr,
     TupleExpr,
@@ -473,13 +474,10 @@ class TypeChecker:
         if decl.type_annotation:
             annotated = self._from_ast_type(decl.type_annotation)
             if not self._unify_types(ty, annotated):
-                line = decl.span.line if decl.span else -1
-                col = decl.span.column if decl.span else -1
                 kind = "mut" if mutable else "let"
-                raise TypeCheckError(
+                self._error(
                     f"{kind} 绑定 '{decl.name}' 的推断类型 {ty} 与标注类型 {annotated} 不匹配",
-                    line,
-                    col,
+                    span=decl.span,
                 )
         self.env.define(decl.name, self._unify_and_resolve(ty), mutable=mutable)
 
@@ -517,8 +515,9 @@ class TypeChecker:
         if decl.return_type:
             expected = self._from_ast_type(decl.return_type)
             if not self._unify_types(body_type, expected):
-                raise TypeCheckError(
-                    f"函数 '{decl.name}' 返回类型 {body_type} 与声明的 {expected} 不匹配"
+                self._error(
+                    f"函数 '{decl.name}' 返回类型 {body_type} 与声明的 {expected} 不匹配",
+                    span=decl.span,
                 )
 
     def _check_type_decl(self, decl):
@@ -859,12 +858,9 @@ class TypeChecker:
         if expr.type_annotation:
             annotated = self._from_ast_type(expr.type_annotation)
             if not self._unify_types(val_ty, annotated):
-                line = expr.span.line if expr.span else -1
-                col = expr.span.column if expr.span else -1
-                raise TypeCheckError(
+                self._error(
                     f"let 绑定类型不匹配：推断为 {val_ty}，标注为 {annotated}",
-                    line,
-                    col,
+                    expr=expr,
                 )
         self.env.define(expr.name, self._unify_and_resolve(val_ty), mutable=False)
         return UNIT_T
@@ -875,12 +871,9 @@ class TypeChecker:
         if expr.type_annotation:
             annotated = self._from_ast_type(expr.type_annotation)
             if not self._unify_types(val_ty, annotated):
-                line = expr.span.line if expr.span else -1
-                col = expr.span.column if expr.span else -1
-                raise TypeCheckError(
+                self._error(
                     f"mut 绑定类型不匹配：推断为 {val_ty}，标注为 {annotated}",
-                    line,
-                    col,
+                    expr=expr,
                 )
         self.env.define(expr.name, self._unify_and_resolve(val_ty), mutable=True)
         return UNIT_T
@@ -890,26 +883,16 @@ class TypeChecker:
         val_ty = self.check_expr(expr.value)
         existing = self.env.lookup(expr.name)
         if existing is None:
-            line = expr.span.line if expr.span else -1
-            col = expr.span.column if expr.span else -1
-            raise TypeCheckError(
-                f"赋值目标 '{expr.name}' 未定义", line, col
-            )
+            self._error(f"赋值目标 '{expr.name}' 未定义", expr=expr)
         if not self.env.is_mutable(expr.name):
-            line = expr.span.line if expr.span else -1
-            col = expr.span.column if expr.span else -1
-            raise TypeCheckError(
+            self._error(
                 f"无法赋值给不可变绑定 '{expr.name}'（使用 mut 声明可变变量）",
-                line,
-                col,
+                expr=expr,
             )
         if not self._unify_types(val_ty, existing):
-            line = expr.span.line if expr.span else -1
-            col = expr.span.column if expr.span else -1
-            raise TypeCheckError(
+            self._error(
                 f"赋值类型不匹配：'{expr.name}' 为 {existing}，值为 {val_ty}",
-                line,
-                col,
+                expr=expr,
             )
         return UNIT_T
 
@@ -1092,13 +1075,10 @@ class TypeChecker:
         if isinstance(inner_ty, TypeVar):
             # 合一算法已就绪，但 TypeVar 在此点无法确定是 Option 还是 Result
             # 返回 error 类型，要求用户显式标注类型
-            # 从 AST 节点的 span 获取位置信息（兼容无 span 的情况）
-            span = getattr(expr.expr, 'span', None)
-            raise TypeCheckError(
+            self._error(
                 f"无法推断 '{expr.expr}' 的类型为 Option 或 Result，"
                 f"请为变量添加显式类型标注",
-                span.line if span else -1,
-                span.column if span else -1,
+                expr=expr,
             )
         
         if isinstance(inner_ty, ADTType):
@@ -1166,10 +1146,9 @@ class TypeChecker:
             self.env = child_env
             guard_ty = self.check_expr(arm.guard)
             if not self._unify_types(guard_ty, BOOL_T):
-                raise TypeCheckError(
+                self._error(
                     f"match 分支的 guard 条件必须是 Bool 类型，实际为 {guard_ty}",
-                    line=arm.guard.span.line if arm.guard.span else -1,
-                    column=arm.guard.span.column if arm.guard.span else -1,
+                    expr=arm.guard,
                 )
             self.env = old_env
         old_env = self.env
@@ -1453,11 +1432,13 @@ class TypeChecker:
 
         return (redundant, has_wildcard_or_var)
 
-    def _generate_missing_message(self, subject_type, all_patterns, line, column):
+    def _generate_missing_message(self, subject_type, all_patterns, span):
         """根据 subject_type 生成匹配不完备的详细错误消息。
 
         按 ADT/Bool/Tuple/其他 四种类型分别生成有针对性的提示，
         帮助用户快速定位缺失的分支。
+
+        所有报错统一走 self._error(span=span) 出口，确保 source_code 被写入。
         """
         from .ast_nodes import PatternConstructor
 
@@ -1474,29 +1455,25 @@ class TypeChecker:
                 missing = expected - covered_names
                 if missing:
                     missing_list = ", ".join(sorted(missing))
-                    raise TypeCheckError(
+                    self._error(
                         f"match 表达式不完备：缺失构造器 {missing_list}",
-                        line=line,
-                        column=column,
+                        span=span,
                     )
-                raise TypeCheckError(
+                self._error(
                     "match 表达式不完备：构造器的子模式未完全覆盖所有情况，"
                     "考虑添加通配符子模式（如 Some(_)）",
-                    line=line,
-                    column=column,
+                    span=span,
                 )
         elif isinstance(subject_type, PrimType) and subject_type.name == "Bool":
-            raise TypeCheckError(
+            self._error(
                 "match 表达式不完备：缺失 true 或 false 分支",
-                line=line,
-                column=column,
+                span=span,
             )
         elif isinstance(subject_type, TupleType):
-            raise TypeCheckError(
+            self._error(
                 "match 表达式不完备：元组模式的元素位置未完全覆盖，"
                 "考虑添加通配符元素（如 (_, _)）",
-                line=line,
-                column=column,
+                span=span,
             )
         elif isinstance(subject_type, ListType):
             # 列表类型：根据精细分析结果给出针对性提示
@@ -1505,32 +1482,28 @@ class TypeChecker:
                 lengths = info["lengths_covered"]
                 if lengths:
                     lengths_str = ", ".join(str(n) for n in lengths)
-                    raise TypeCheckError(
+                    self._error(
                         f"match 表达式不完备：列表模式仅覆盖了长度为 {lengths_str} 的情况，"
                         f"列表长度可以是任意值，考虑添加通配符分支 (_)",
-                        line=line,
-                        column=column,
+                        span=span,
                     )
                 else:
-                    raise TypeCheckError(
+                    self._error(
                         "match 表达式不完备：列表模式的元素位置未完全覆盖，"
                         "且列表长度可以是任意值，考虑添加通配符分支 (_)",
-                        line=line,
-                        column=column,
+                        span=span,
                     )
             else:
-                raise TypeCheckError(
+                self._error(
                     "match 表达式不完备：列表长度可以是任意值，"
                     "固定长度模式无法覆盖所有情况，考虑添加通配符分支 (_)",
-                    line=line,
-                    column=column,
+                    span=span,
                 )
         else:
-            raise TypeCheckError(
+            self._error(
                 "match 表达式可能不完备：考虑添加通配符分支 (_) "
                 "确保覆盖所有情况",
-                line=line,
-                column=column,
+                span=span,
             )
 
     def _check_match_exhaustiveness(
@@ -1549,18 +1522,16 @@ class TypeChecker:
 
         编排逻辑：冗余检测 → 快速返回 → 递归完备性 → 错误消息
         """
-        # 提取行号列号用于报错
-        line = match_expr.span.line if match_expr.span else -1
-        column = match_expr.span.column if match_expr.span else -1
+        # 提取 span 用于报错（统一传给 _generate_missing_message 和冗余/空分支检查）
+        span = match_expr.span
 
         # 阶段 1: 冗余分支检测
         redundant_arms, has_wildcard_or_var = self._detect_redundant_arms(arms)
         if redundant_arms:
             first = redundant_arms[0]
-            raise TypeCheckError(
+            self._error(
                 f"match 分支 {first} 是冗余的：之前的分支已经覆盖了所有情况",
-                line=line,
-                column=column,
+                span=span,
             )
 
         # 阶段 2: 无 guard 通配符/变量绑定视为完备
@@ -1569,26 +1540,26 @@ class TypeChecker:
 
         # 阶段 3: 空分支视为不完备
         if not arms:
-            raise TypeCheckError(
+            self._error(
                 "match 表达式必须至少有一个分支",
-                line=line,
-                column=column,
+                span=span,
             )
 
         # 阶段 4: 递归检查模式完备性（支持嵌套模式）
         all_patterns = [arm.pattern for arm in arms]
         if not self._check_patterns_exhaustive(all_patterns, subject_type):
-            self._generate_missing_message(subject_type, all_patterns, line, column)
+            self._generate_missing_message(subject_type, all_patterns, span)
 
     def _check_pattern(self, pattern, subject_type: NovaType, env: TypeEnv, match_expr):
         """检查模式与类型的匹配
 
         使用调度表模式分发到对应的检查方法，圈复杂度 O(1)。
+        所有子方法报错统一走 self._error(expr=match_expr)，携带源码位置。
         """
         checker = self._pattern_checkers.get(type(pattern))
         if checker is not None:
             return checker(pattern, subject_type, env, match_expr)
-        raise TypeCheckError(f"未知的模式类型: {type(pattern).__name__}")
+        self._error(f"未知的模式类型: {type(pattern).__name__}", expr=match_expr)
 
     # --- 模式检查方法 ---
 
@@ -1599,27 +1570,27 @@ class TypeChecker:
     def _check_pattern_int(self, pattern, subject_type: NovaType, env: TypeEnv, match_expr):
         """整数模式要求 subject 为 Int 类型"""
         if not self._unify_types(subject_type, INT_T):
-            raise TypeCheckError(f"整数模式与类型 {subject_type} 不匹配")
+            self._error(f"整数模式与类型 {subject_type} 不匹配", expr=match_expr)
 
     def _check_pattern_float(self, pattern, subject_type: NovaType, env: TypeEnv, match_expr):
         """浮点数模式要求 subject 为 Float 类型"""
         if not self._unify_types(subject_type, FLOAT_T):
-            raise TypeCheckError(f"浮点数模式与类型 {subject_type} 不匹配")
+            self._error(f"浮点数模式与类型 {subject_type} 不匹配", expr=match_expr)
 
     def _check_pattern_bool(self, pattern, subject_type: NovaType, env: TypeEnv, match_expr):
         """布尔模式要求 subject 为 Bool 类型"""
         if not self._unify_types(subject_type, BOOL_T):
-            raise TypeCheckError(f"布尔模式与类型 {subject_type} 不匹配")
+            self._error(f"布尔模式与类型 {subject_type} 不匹配", expr=match_expr)
 
     def _check_pattern_string(self, pattern, subject_type: NovaType, env: TypeEnv, match_expr):
         """字符串模式要求 subject 为 String 类型"""
         if not self._unify_types(subject_type, STRING_T):
-            raise TypeCheckError(f"字符串模式与类型 {subject_type} 不匹配")
+            self._error(f"字符串模式与类型 {subject_type} 不匹配", expr=match_expr)
 
     def _check_pattern_char(self, pattern, subject_type: NovaType, env: TypeEnv, match_expr):
         """字符模式要求 subject 为 Char 类型"""
         if not self._unify_types(subject_type, CHAR_T):
-            raise TypeCheckError(f"字符模式与类型 {subject_type} 不匹配")
+            self._error(f"字符模式与类型 {subject_type} 不匹配", expr=match_expr)
 
     def _check_pattern_identifier(self, pattern, subject_type: NovaType, env: TypeEnv, match_expr):
         """标识符模式将 subject 类型绑定到变量名"""
@@ -1638,12 +1609,13 @@ class TypeChecker:
                 break
 
         if variants_info is None:
-            raise TypeCheckError(f"未知的构造器 '{pattern.name}'")
+            self._error(f"未知的构造器 '{pattern.name}'", expr=match_expr)
 
         adt_name, field_types = variants_info
         if len(pattern.fields) != len(field_types):
-            raise TypeCheckError(
-                f"构造器 '{pattern.name}' 期望 {len(field_types)} 个字段，得到 {len(pattern.fields)} 个"
+            self._error(
+                f"构造器 '{pattern.name}' 期望 {len(field_types)} 个字段，得到 {len(pattern.fields)} 个",
+                expr=match_expr,
             )
         for p, ft in zip(pattern.fields, field_types):
             self._check_pattern(p, ft, env, match_expr)
@@ -1651,16 +1623,16 @@ class TypeChecker:
     def _check_pattern_tuple(self, pattern, subject_type: NovaType, env: TypeEnv, match_expr):
         """元组模式要求 subject 为 Tuple 类型，且长度匹配"""
         if not isinstance(subject_type, TupleType):
-            raise TypeCheckError(f"元组模式与类型 {subject_type} 不匹配")
+            self._error(f"元组模式与类型 {subject_type} 不匹配", expr=match_expr)
         if len(pattern.elements) != len(subject_type.elements):
-            raise TypeCheckError("元组模式长度不匹配")
+            self._error("元组模式长度不匹配", expr=match_expr)
         for p, t in zip(pattern.elements, subject_type.elements):
             self._check_pattern(p, t, env, match_expr)
 
     def _check_pattern_list(self, pattern, subject_type: NovaType, env: TypeEnv, match_expr):
         """列表模式要求 subject 为 List 类型"""
         if not isinstance(subject_type, ListType):
-            raise TypeCheckError(f"列表模式与类型 {subject_type} 不匹配")
+            self._error(f"列表模式与类型 {subject_type} 不匹配", expr=match_expr)
         for p in pattern.elements:
             self._check_pattern(p, subject_type.elem_type, env, match_expr)
 
@@ -1690,7 +1662,8 @@ class TypeChecker:
         使用分发表将不同操作符路由到对应的辅助检查方法，
         避免在主方法中堆积大量 if-elif 分支。
 
-        对辅助方法抛出的 TypeCheckError 统一补充 span 位置信息。
+        辅助方法签名统一为 (op, left_ty, right_ty, expr)，
+        其中 expr 用于将位置信息通过 self._error() 写入错误对象。
         """
         left_ty = self.check_expr(expr.left)
         right_ty = self.check_expr(expr.right)
@@ -1700,45 +1673,40 @@ class TypeChecker:
             self._error(f"未知的操作符 '{expr.op}'", expr=expr)
 
         handler = getattr(self, handler_name)
-        try:
-            return handler(expr.op, left_ty, right_ty)
-        except TypeCheckError as e:
-            # 辅助方法没有位置信息，在此统一补全
-            if e.line < 0 and expr.span:
-                e.line = expr.span.line
-                e.column = expr.span.column
-            if self._source and e.source_code is None:
-                e.source_code = self._source
-            raise
+        # 直接传 expr 给辅助方法，由其内部调用 self._error(expr=expr)
+        # 移除原 try-except 包装，确保所有路径统一走 _error() 出口
+        return handler(expr.op, left_ty, right_ty, expr)
 
-    def _check_arithmetic_op(self, op: str, left_ty: NovaType, right_ty: NovaType) -> NovaType:
+    def _check_arithmetic_op(self, op: str, left_ty: NovaType, right_ty: NovaType, expr=None) -> NovaType:
         """检查算术操作 (+, -, *, /)：要求两侧同为 Int 或同为 Float"""
         if self._unify_types(left_ty, INT_T) and self._unify_types(right_ty, INT_T):
             return INT_T
         if self._unify_types(left_ty, FLOAT_T) and self._unify_types(right_ty, FLOAT_T):
             return FLOAT_T
-        raise TypeCheckError(
-            f"操作符 '{op}' 的操作数类型不兼容：{left_ty} 和 {right_ty}"
+        self._error(
+            f"操作符 '{op}' 的操作数类型不兼容：{left_ty} 和 {right_ty}",
+            expr=expr,
         )
 
-    def _check_modulo_op(self, op: str, left_ty: NovaType, right_ty: NovaType) -> NovaType:
+    def _check_modulo_op(self, op: str, left_ty: NovaType, right_ty: NovaType, expr=None) -> NovaType:
         """检查取模操作 (%)：要求两侧均为 Int"""
         if self._unify_types(left_ty, INT_T) and self._unify_types(right_ty, INT_T):
             return INT_T
-        raise TypeCheckError(f"操作符 '%' 需要 Int 类型操作数")
+        self._error(f"操作符 '%' 需要 Int 类型操作数", expr=expr)
 
-    def _check_string_concat_op(self, op: str, left_ty: NovaType, right_ty: NovaType) -> NovaType:
+    def _check_string_concat_op(self, op: str, left_ty: NovaType, right_ty: NovaType, expr=None) -> NovaType:
         """检查字符串拼接 (++)：要求两侧均为 String"""
         if self._unify_types(left_ty, STRING_T) and self._unify_types(right_ty, STRING_T):
             return STRING_T
-        raise TypeCheckError(f"操作符 '++' 需要 String 类型操作数")
+        self._error(f"操作符 '++' 需要 String 类型操作数", expr=expr)
 
-    def _check_comparison_op(self, op: str, left_ty: NovaType, right_ty: NovaType) -> NovaType:
+    def _check_comparison_op(self, op: str, left_ty: NovaType, right_ty: NovaType, expr=None) -> NovaType:
         """检查比较操作 (==, !=, <, >, <=, >=)"""
         # 所有比较操作都要求左右操作数类型兼容
         if not self._unify_types(left_ty, right_ty):
-            raise TypeCheckError(
-                f"操作符 '{op}' 的操作数类型不兼容：{left_ty} 和 {right_ty}"
+            self._error(
+                f"操作符 '{op}' 的操作数类型不兼容：{left_ty} 和 {right_ty}",
+                expr=expr,
             )
         # 有序比较（< > <= >=）额外要求数值类型
         if op in ("<", ">", "<=", ">="):
@@ -1746,17 +1714,18 @@ class TypeChecker:
                 self._unify_types(left_ty, INT_T)
                 or self._unify_types(left_ty, FLOAT_T)
             ):
-                raise TypeCheckError(
-                    f"操作符 '{op}' 需要数值类型操作数，得到 {left_ty}"
+                self._error(
+                    f"操作符 '{op}' 需要数值类型操作数，得到 {left_ty}",
+                    expr=expr,
                 )
         return BOOL_T
 
-    def _check_logical_op(self, op: str, left_ty: NovaType, right_ty: NovaType) -> NovaType:
+    def _check_logical_op(self, op: str, left_ty: NovaType, right_ty: NovaType, expr=None) -> NovaType:
         """检查逻辑操作 (&&, ||)：要求两侧均为 Bool"""
         if not self._unify_types(left_ty, BOOL_T):
-            raise TypeCheckError(f"'{op}' 左侧必须是 Bool，得到 {left_ty}")
+            self._error(f"'{op}' 左侧必须是 Bool，得到 {left_ty}", expr=expr)
         if not self._unify_types(right_ty, BOOL_T):
-            raise TypeCheckError(f"'{op}' 右侧必须是 Bool，得到 {right_ty}")
+            self._error(f"'{op}' 右侧必须是 Bool，得到 {right_ty}", expr=expr)
         return BOOL_T
 
     def _check_unary_op(self, expr: UnaryOp) -> NovaType:
@@ -1804,7 +1773,11 @@ class TypeChecker:
 
         使用类型映射表和独立辅助方法替代长 if-elif 链，
         将单函数圈复杂度从 ~18 降至约 3。
+
+        所有类型错误统一走 self._error(span=type_node.span) 出口，
+        确保位置信息和 source_code 被正确写入。
         """
+        span = getattr(type_node, "span", None)
         node_type = type(type_node)
         # 1. 基本类型：直接查表
         basic = self._BASIC_TYPE_MAP.get(node_type)
@@ -1812,11 +1785,11 @@ class TypeChecker:
             return basic
         # 2. 标识符类型：别名/环境查找
         if isinstance(type_node, TypeIdentifier):
-            return self._resolve_type_identifier(type_node.name)
+            return self._resolve_type_identifier(type_node.name, span=span)
         # 3. 泛型类型：List/Map/Option/Result/其他 ADT
         if isinstance(type_node, TypeGeneric):
             params = [self._from_ast_type(p) for p in type_node.params]
-            return self._make_generic_type(type_node.base, params)
+            return self._make_generic_type(type_node.base, params, span=span)
         # 4. 元组类型
         if isinstance(type_node, TypeTuple):
             return TupleType([self._from_ast_type(e) for e in type_node.elements])
@@ -1826,32 +1799,34 @@ class TypeChecker:
                 [self._from_ast_type(p) for p in type_node.param_types],
                 self._from_ast_type(type_node.return_type),
             )
-        raise TypeCheckError(f"未知的类型注解: {type(type_node).__name__}")
+        self._error(f"未知的类型注解: {type(type_node).__name__}", span=span)
 
-    def _resolve_type_identifier(self, name: str) -> NovaType:
+    def _resolve_type_identifier(self, name: str, span=None) -> NovaType:
         """解析类型标识符名称为具体的 NovaType。
 
         查找顺序：别名 -> 环境类型（ADT、基本类型等）。
-        若均不存在则抛出 TypeCheckError。
+        若均不存在则抛出 TypeCheckError（统一走 _error 出口）。
 
         Args:
             name: 类型标识符名称。
+            span: 可选的源代码位置（由调用方 _from_ast_type 传入 type_node.span）。
 
         Returns:
             解析后的 NovaType。
 
         Raises:
-            TypeCheckError: 未知类型名。
+            TypeCheckError: 未知类型名（通过 _error 抛出，携带 span/source_code）。
         """
         if name in self.env.aliases:
             return self.env.aliases[name]
         if name in self.env.types:
             return self.env.types[name]
-        raise TypeCheckError(
-            f"未知的类型 '{name}'（检查是否拼写正确，或是否缺少类型定义）"
+        self._error(
+            f"未知的类型 '{name}'（检查是否拼写正确，或是否缺少类型定义）",
+            span=span,
         )
 
-    def _make_generic_type(self, base: str, params: List[NovaType]) -> NovaType:
+    def _make_generic_type(self, base: str, params: List[NovaType], span=None) -> NovaType:
         """根据泛型基名和参数构建对应的 NovaType。
 
         支持 List、Map、Option、Result 及自定义 ADT。
@@ -1860,41 +1835,47 @@ class TypeChecker:
         Args:
             base: 泛型基名（如 "List", "Option"）。
             params: 泛型参数类型列表。
+            span: 可选的源代码位置（由调用方 _from_ast_type 传入 type_node.span）。
 
         Returns:
             构建好的泛型 NovaType。
 
         Raises:
-            TypeCheckError: 参数数量不匹配时抛出。
+            TypeCheckError: 参数数量不匹配时通过 _error 抛出，携带 span/source_code。
         """
         if base == "List":
             if len(params) != 1:
-                raise TypeCheckError(
-                    f"List 需要恰好 1 个类型参数，实际得到 {len(params)} 个"
+                self._error(
+                    f"List 需要恰好 1 个类型参数，实际得到 {len(params)} 个",
+                    span=span,
                 )
             return ListType(params[0])
         if base == "Map":
             if len(params) != 2:
-                raise TypeCheckError(
-                    f"Map 需要恰好 2 个类型参数，实际得到 {len(params)} 个"
+                self._error(
+                    f"Map 需要恰好 2 个类型参数，实际得到 {len(params)} 个",
+                    span=span,
                 )
             return MapType(params[0], params[1])
         if base == "Option":
             if len(params) != 1:
-                raise TypeCheckError(
-                    f"Option 需要恰好 1 个类型参数，实际得到 {len(params)} 个"
+                self._error(
+                    f"Option 需要恰好 1 个类型参数，实际得到 {len(params)} 个",
+                    span=span,
                 )
             return ADTType("Option", params)
         if base == "Result":
             if len(params) != 2:
-                raise TypeCheckError(
-                    f"Result 需要恰好 2 个类型参数，实际得到 {len(params)} 个"
+                self._error(
+                    f"Result 需要恰好 2 个类型参数，实际得到 {len(params)} 个",
+                    span=span,
                 )
             return ADTType("Result", params)
         # 自定义 ADT（当前不支持类型参数）
         if params:
-            raise TypeCheckError(
-                f"类型 '{base}' 不支持类型参数，实际得到 {len(params)} 个"
+            self._error(
+                f"类型 '{base}' 不支持类型参数，实际得到 {len(params)} 个",
+                span=span,
             )
         return ADTType(base, params)
 

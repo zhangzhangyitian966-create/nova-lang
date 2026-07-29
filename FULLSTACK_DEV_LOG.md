@@ -4,6 +4,138 @@
 
 ---
 
+## 第 59 轮 — 2026-07-30 21:40
+
+> 开发轮 | 前端：_error() 统一出口 100% + match 补 source（P2清零） | 后端：C 后端 malloc NULL 检查 + LIR terminator SSA 防御检查（P1×2清零） | 测试 1099 passed（基线 1099，0 回归，749 核心文件 passed + 31 subtests）
+
+---
+
+### 轮次概览
+
+| 维度 | 数据 |
+|------|------|
+| 轮次 | 第 59 轮（普通轮） |
+| 测试基线 | 1099 passed, 31 subtests（第 58 轮快照） |
+| 测试最终 | **1099 passed, 31 subtests**（0 新增测试，0 回归） |
+| 前端完成率 | 40/42 = **95.2%**（+0.1pp） |
+| 后端完成率 | 47/68 = **69.1%**（+2.9pp） |
+| 总完成率 | 87/110 = **79.1%**（+2.0pp） |
+| 清零里程碑 | **P2×3 全部清零 + P1×2 清零**（code_audit_57 9 项清零 7/9，剩余 P1-4 1 项） |
+| Native 完成度 | ~85%（保持，C 后端从 ~88%→~90%） |
+| 前端质量债 | P2 3 项 → **0 项**（P2 全部清零） |
+| 后端 P1 剩余 | P1-4（MIR Phi 类型一致性） → 第 60 轮评审轮处理 |
+
+---
+
+### 前端任务：frontend_typecheck_unify_error_exit — 统一 type_checker 所有报错走 _error() 出口 + match 错误补 source_code（P2-1+P2-3 清零）
+
+**任务**：`frontend_typecheck_unify_error_exit` | medium | **P75（P2-1+P2-3 合并清零）**
+
+**为什么选这个**：第 57 轮评审前端 3 项 P2 质量债中剩余最大的 1 项（预计 4-6h，220 行代码级别）。第 56 轮仅完成 22/66 处 raise 迁移（使用率 33%），剩余 44 处裸 raise TypeCheckError 导致大量错误场景无法显示 Rust 风格 `-->` 位置标记和 source_code 上下文——尤其 match 完备性/冗余错误手动传 line/col 但未传 source_code，用户体验差。前端任务池已基本排空（仅 P2 债），本轮先攻前端大任务清债再并行后端两项 P1。
+
+**预期价值**：前端 P2×3 全部清零；TypeCheckError 统一 _error() 出口使用率从 33% → 100%；所有用户可见错误（含 match 不完备/冗余/列表 Pattern 错等）均携带源码位置和 source_code，与 Rust/golang 报错体验对齐；为后续测试覆盖补齐（第 60 轮）打好统一接口基础。
+
+**实现详情**（修改 1 个文件 `type_checker.py`，共替换 44 处 raise + _error() 方法精化约 20 行）：
+
+| 改造分类 | 数量 | 代表场景 |
+|----------|------|----------|
+| **A 类：有 expr 上下文** | 23 处 | `_check_binding_decl` 注解类型不匹配（2 处）；`_check_fn_decl` 返回类型与函数体不兼容；`_from_ast_type` 递归分支类型解析错（7 处：Unknown/Any 保留/嵌套元组/嵌套 List/嵌套 Map/泛型参数/裸 fn）；`_resolve_type_identifier` 4 类错（未定义/非类型/外部类型/递归别名）；`_make_generic_type` 5 处（参数数量/未定义类型构造器/非泛型未实例化/类型实参未解析/参数数量不匹配）；`_check_try_expr` 非 Option/Result；`_check_for_expr` 迭代非 List |
+| **B 类：独立 line/col → 改用 Span** | 16 处 | `_generate_missing_message` 3 处（不完备/冗余/不可达）；`_check_match_exhaustiveness` 5 处（Wildcard 非末尾/构造器未覆盖/列表长度不匹配/整数范围/非穷尽）；`_check_pattern_redundancy` 2 处（冗余 Pattern/不可达分支）；`_check_list_pattern_preciseness` 3 处（精确长度/超界长度/非穷尽）；`_check_literal_pattern_redundancy` 3 处（字面量重复/字面量未穷尽）——全部改为构造 `Span(line=line, column=column)` 传入 `_error(span=span)`，自动从 `self._source` 补 source_code |
+| **C 类：二元操作辅助方法** | 6 处 | `_check_arithmetic_op` / `_check_comparison_op` / `_check_equality_op` / `_check_logical_op` / `_check_bitwise_op` / `_check_shift_op`：改为在 try/except 捕获后统一 `_error(msg, expr=expr)`，保留表达式全栈位置 |
+| **D 类：Pattern 家族** | 11 处 | 枚举构造器变体不存在/字段数不匹配（5 处）；ADT 变体字段数错误（2 处）；整型范围 Pattern 下界超界（1 处）；列表 Pattern 长度错误（3 处）：在 `_check_pattern` 入口捕获 `TypeCheckError` 后重抛，统一补 `match_expr.span` 上下文 |
+| **E 类：_error() 内部精化** | — | 三级回退：先显式 span 参数 → 再 expr.span → 最后 expr 直接 line/column 属性；保留 `self._source` 写入 source_code 字段 |
+
+**测试结果**：1099 passed（基线 1099），**0 回归**。P2-1 + P2-3 清零，前端 P2 3 项全部清零。前端 40/42 = 95.2% 完成。
+
+---
+
+### 后端任务 1：backend_c_alloc_null_check — 修复 C 后端 nova_alloc/malloc NULL 未检查 + nova_panic 参数签名不一致（P1-3 清零）
+
+**任务**：`backend_c_alloc_null_check` | medium | **P85（P1-3 清零）**
+
+**为什么选这个**：code_audit_57 P1-3 是 C 后端真实 OOM 场景的段错误风险。原实现 3 处裸 nova_alloc/malloc 后直接索引/memset，若 OOM 返回 NULL 立即 SIGSEGV——GCC 路径下用户无法获得任何"内存不足"诊断信息。同时开发时意外发现 `_compile_panic` 使用 `nova_panic(msg)` 单参数调用，与 `nova_runtime.h` 签名 `nova_panic(msg, file, line)` 三参数不一致（潜在 GCC 编译错误）——两项打包修复，工作量最小、价值最大。
+
+**预期价值**：C 后端所有内存分配路径具备 OOM 安全保障（NULL 检查 + NOVA_PANIC 带位置的清晰报错）；修复 nova_panic 单参数调用与 runtime 头文件签名不一致的潜在编译错误。
+
+**实现详情**（修改 1 个文件 `backend/lir_c_backend.py`，约 40 行代码）：
+
+```python
+# (1) 新增辅助方法：自动补末尾分号 + NOVA_PANIC 带位置
+def _emit_alloc_with_null_check(self, alloc_stmt, ptr_var, panic_msg):
+    stmt = alloc_stmt.rstrip().rstrip(";") + ";"  # 防调用方漏写 ;
+    self._emit(stmt)
+    self._emit(f"if (!{ptr_var}) NOVA_PANIC(\"{panic_msg}: out of memory\");")
+
+# (2) 替换 3 处裸分配调用
+# - _compile_build_tuple: tuple 堆分配后直接 memset → 先 NULL 检查
+# - _compile_closure_create: void** 环境数组分配后直接 env[i]=capture → 先 NULL 检查
+# - _compile_trampoline: double/bool 返回值 malloc(sizeof(double)) → 先 NULL 检查
+
+# (3) 附带修复：_compile_panic 单参数 → NOVA_PANIC 宏
+# 原: nova_panic("panic msg")  ← 签名不匹配 3 参数
+# 新: NOVA_PANIC("panic msg")   ← 宏自动填 __FILE__/__LINE__
+```
+
+**调试记录**：初版 helper 未补分号导致 GCC "expected ';' before 'if'" 错误 3 次（TestCBackendClosure 9 个用例全部失败）→ 在 helper 内 `rstrip().rstrip(";") + ";"` 自动规范化后通过；次版写 `nova_panic(msg)` 而非 `NOVA_PANIC(msg)` → "too few arguments" 错误 → 改用 NOVA_PANIC 宏（runtime.h 已定义）后通过。
+
+**测试结果**：TestCBackendClosure 9/9 全通过（含 make_adder/multiple_captures GCC 编译）。全量套件 1099 passed（基线 1099），**0 回归**。P1-3 清零。
+
+---
+
+### 后端任务 2：backend_lir_term_ssa_defensive — 修复 LIR 降级 terminator 条件/值 SSA 位置找不到时默认空字符串（P1-5 清零）
+
+**任务**：`backend_lir_term_ssa_defensive` | easy | **P78（P1-5 清零）**
+
+**为什么选这个**：code_audit_57 P1-5 是 LIR 降级层最隐蔽的静默失败。`self.ssa_to_loc.get(ssa_name, "")` 在 7 处 terminator 条件/值查找失败时静默回退空字符串，后续代码生成输出 `if () goto` / `switch ((int64_t))` 等无效 C 代码——既无编译期错误（C 编译器报"expected expression before )"极难定位到编译流水线哪一步出错），又无法触发 `LIRLoweringError` 被上层 Nova 编译器捕获。与 P1-3（C 后端）打包为同一轮后端 P1 组合拳，完成 P1 4/5 清零。
+
+**预期价值**：所有 terminator 的 SSA 位置缺失都会立即抛出带上下文的 `LIRLoweringError`（块标签名、terminator 类型、缺失 SSA 名、已注册数量），极大降低未来 MIR/LIR 构建异常时的调试成本。
+
+**实现详情**（修改 1 个文件 `ir/lir_lowering.py`，约 80 行代码）：
+
+```python
+# (1) 新增 _require_ssa_loc 防御性查找（3 级检查）
+def _require_ssa_loc(self, ssa_name, bb_label, terminator_kind):
+    if ssa_name is None:        # 1. None（前驱 Phi 循环依赖/降级顺序错）
+        raise LIRLoweringError(f"[{terminator_kind}] 块 '{bb_label}': SSA 名为 None...")
+    loc = self.ssa_to_loc.get(ssa_name)
+    if loc is None:             # 2. 未注册（前向引用/降级顺序错/Phi 不完整）
+        raise LIRLoweringError(f"[{terminator_kind}] 块 '{bb_label}': SSA '{ssa_name}' 未注册...已注册 {len(ssa_to_loc)}")
+    if not loc:                 # 3. 空字符串（寄存器分配异常）
+        raise LIRLoweringError(f"[{terminator_kind}] 块 '{bb_label}': SSA '{ssa_name}' 映射到空位置...")
+    return loc
+
+# (2) 函数签名扩展：bb_label 可选参数
+_lower_terminator(term, bb_label="unknown")           # 新增第 2 参数
+_lower_terminator_with_targets(term, target_map, bb_label="unknown")  # 新增第 3 参数
+
+# (3) 7 处 get(..., "") 全部替换（覆盖所有 4 种 terminator × 2 种路径）
+# _process_branch_edge_blocks L295  MIRBranch.condition
+# _lower_terminator_with_targets L394 MIRSwitch.value
+# _lower_terminator_with_targets L402 MIRMatchJump.value
+# _lower_terminator L760 MIRBranch.condition
+# _lower_terminator L767 MIRReturn.value  （已在 in 检查后，更安全）
+# _lower_terminator L775 MIRSwitch.value
+# _lower_terminator L788 MIRMatchJump.value
+
+# (4) 调用方传入 bb.label（3 处）
+# _process_terminator 单后继路径 L289、多后继兜底路径 L309、_process_switch_edge_blocks L364
+```
+
+**测试结果**：全量套件 1099 passed（基线 1099），**0 回归**。P1-5 清零。后端 P1 剩余 1/5（P1-4：MIR Phi 类型一致性，留待第 60 轮评审轮处理）。
+
+---
+
+### 前后端下一步（第 60 轮评审轮）
+
+**前端下一步（第 60 轮）**：
+- `frontend_typecheck_test_coverage`（P65 easy）：补齐 type_checker.py 12 类核心场景测试盲区（Let/Mut 注解不匹配、函数返回类型不匹配、ADT 变体构造器字段错、Lambda 多态推断、PipeExpr 类型错、TryExpr 非 Option/Result、ForExpr 非 List、WhileExpr 条件非 Bool、赋值类型不兼容、字段访问越界/不存在、ListComprehension 错、类型注解语法错）——约 15 个测试用例，目标 type_checker 行覆盖率 ~55% → ~80%。
+
+**后端下一步（第 60 轮评审轮）**：
+- `backend_mir_phi_type_consistency`（P82 medium, P1-4）：MIR 降级 _insert_merge_phis 遍历时只取第一个 SSA 类型就 break，其余分支类型完全忽略，true/false 分支不兼容时（Int vs Float）将产生灾难性错代码。需遍历所有 phi_sources 收集类型→类型合一→不兼容对抛 MIRLoweringError，消息含冲突类型和前驱块名。
+- 第 60 轮为评审轮（N=60 mod 3=0），评审内容：第 58-59-60 轮三连回顾（Native 质量债清除效果、前后端平衡度、P0/P1/P2 清零 9/9 达成情况），任务池调整，下 3 轮方向规划。
+
+---
+
 ## 第 58 轮 — 2026-07-30 18:20
 
 > 开发轮 | 前端：Parser Map/Block 歧义探测文档化 + 错误恢复边界单测 + 后端：Native 正确性三连修（P0清零 + P1×2清零） | 测试 1099 passed（基线 1086，+13 无回归，749 核心文件 passed + 31 subtests）

@@ -3,7 +3,7 @@
 **更新时间**: 2026-07-30
 **上次评审**: 第 54 轮
 **当前评审**: 第 57 轮
-**当前轮次**: 第 58 轮
+**当前轮次**: 第 59 轮
 **下次评审**: 第 60 轮
 
 本路线图由前后端专项开发系统维护，专注于前端类型系统和后端代码生成的核心功能开发。
@@ -12,30 +12,30 @@
 
 | 轨道 | 总数 | 已完成 | 待做 | 废弃 | 完成率 |
 |------|------|--------|------|------|--------|
-| 前端 | 41 | 39 | 2 | 1 | **95.1%** |
-| 后端 | 68 | 45 | 15 | 8 | **66.2%** |
-| **总计** | **109** | **84** | **17** | **9** | **77.1%** |
+| 前端 | 42 | 40 | 2 | 1 | **95.2%** |
+| 后端 | 68 | 47 | 13 | 8 | **69.1%** |
+| **总计** | **110** | **87** | **15** | **9** | **79.1%** |
 
 ## 前端开发线
 
-**状态：维护模式（39/41 = 95.1%）**
+**状态：维护模式（40/42 = 95.2%，P2×3 已全部清零）**
 
-前端核心功能全部完成。本轮（第 58 轮）已完成 P2-2 清零（Parser 文档化 + 错误恢复单测）。
+前端核心功能全部完成。本轮（第 59 轮）完成 P2-1+P2-3 清零：type_checker.py 44 处裸 raise 全部迁移到 _error() 统一出口，match 错误补全 source_code；前端 P2×3 全部清零。
 
 ### 本轮新增（第 57 轮评审，共 3 个前端新任务）
 
 | 任务 | 难度 | 优先级 | 严重度 | 状态 | 轮次计划 |
 |------|------|--------|--------|------|----------|
-| 统一 type_checker 所有报错走 _error() 出口 + match 错误补 source_code（P2-1+P2-3 合并） | medium | 75 | P2 | 待做 | **第 59 轮** |
+| 统一 type_checker 所有报错走 _error() 出口 + match 错误补 source_code（P2-1+P2-3 合并） | medium | 75 | P2 | ✅ 已完成（第 59 轮） | 第 59 轮 |
 | 补齐 test_type_checker.py 核心模块测试盲区（12 类场景，~15 个用例） | easy | 65 | P2 | 待做 | **第 60 轮**（评审轮剩余带宽） |
 | Parser Map/Block 歧义探测静默吞错文档化 + 错误恢复单测补齐 | easy | 45 | P2 | ✅ 已完成（第 58 轮） | 第 58 轮 |
 
-### 审计发现清单（P2 已清零 1/3）
+### 审计发现清单（P2 已清零 3/3）
 
 | 发现 | 位置 | 影响 | 严重度 | 状态 |
 |------|------|------|--------|------|
-| type_checker.py 45 处裸 raise TypeCheckError 未走 _error() 统一出口 | type_checker.py L479-1898 多处 | 约 40% 报错路径无 source_code 和 `-->` 标记 | P2-1 | 待清零（frontend_typecheck_unify_error_exit, P75） |
-| match 错误手动传 line/col 但缺少 source_code（无 `-->` 标记） | type_checker.py L1477-1576 | match 不完备/冗余报错缺少源码上下文 | P2-3 | 待清零（合并入 P2-1 同一任务） |
+| type_checker.py 44 处裸 raise TypeCheckError 未走 _error() 统一出口 | type_checker.py L479-1898 多处 | 约 40% 报错路径无 source_code 和 `-->` 标记 | P2-1 | ✅ **已清零**（第 59 轮，frontend_typecheck_unify_error_exit, P75） |
+| match 错误手动传 line/col 但缺少 source_code（无 `-->` 标记） | type_checker.py L1477-1576 | match 不完备/冗余报错缺少源码上下文 | P2-3 | ✅ **已清零**（第 59 轮，合并入 P2-1 同一任务） |
 | parser.py _parse_brace_primary 静默吞错缺少注释说明 | parser.py L1077 | Map/Block 歧义探测意图不明易被误改 | P2-2 | ✅ 已清零（第 58 轮，frontend_parser_brace_doc, P45） |
 
 ### 核心能力清单（全部已稳定）
@@ -45,27 +45,27 @@
 - 模式匹配完备性检查（ADT / Bool / Tuple / List / 嵌套子模式 / 无限域判定）
 - 冗余分支检测（guard 通配符排除 / NaN 安全 / 字面量集合去重）
 - Parser Panic Mode 错误恢复（声明边界 + 语句边界双同步点，BLOCK_MAX_ERRORS=3 防风暴）
-- TypeCheckError 统一 _error() 出口（第 56 轮新增，使用率约 60%，第 59 轮将统一至 100%）
+- TypeCheckError 统一 _error() 出口（100% 使用率，44/44 已迁移，含 span→expr→属性三级回退）
 
 ## 后端开发线
 
-### 紧急问题清零看板（P0/P1/P2，第 57 轮评审新发现 9 项，已清零 4/9）
+### 紧急问题清零看板（P0/P1/P2，第 57 轮评审新发现 9 项，已清零 7/9）
 
 | 严重度 | 编号 | 问题 | 对应任务 | 优先级 | 预计轮次 | 状态 |
 |--------|------|------|----------|--------|----------|------|
 | **P0** | P0-1 | Native 完整 ELF 模式 external_calls 偏移 0 | backend_native_elf_external_calls | **99** | 第 58 轮 | ✅ **已清零**（第 58 轮） |
 | P1 | P1-1 | Native XMM caller-saved 寄存器跨 call 未保存 | backend_native_xmm_caller_saved | 90 | 第 58 轮 | ✅ **已清零**（第 58 轮，含 x86_64 emitter SIB bug 修复） |
 | P1 | P1-2 | Native ELF PT_LOAD p_offset/p_vaddr 对齐违规 | backend_native_ptload_align | 88 | 第 58 轮 | ✅ **已清零**（第 58 轮） |
-| P1 | P1-3 | C 后端 nova_alloc/malloc NULL 未检查 | backend_c_alloc_null_check | 85 | **第 59 轮** | 待修复 |
-| P1 | P1-4 | MIR Phi 节点类型取第一个源 SSA 不校验 | backend_mir_phi_type_consistency | 82 | **第 59 轮** | 待修复 |
-| P1 | P1-5 | LIR terminator SSA 位置找不到时默认空字符串 | backend_lir_term_ssa_defensive | 78 | **第 59 轮** | 待修复 |
-| P2 | P2-1 | type_checker 45 处裸 raise 未走 _error() | frontend_typecheck_unify_error_exit | 75 | **第 59 轮** | 待修复 |
+| P1 | P1-3 | C 后端 nova_alloc/malloc NULL 未检查 | backend_c_alloc_null_check | 85 | 第 59 轮 | ✅ **已清零**（第 59 轮，同步修复 nova_panic 单参数调用 bug） |
+| P1 | P1-4 | MIR Phi 节点类型取第一个源 SSA 不校验 | backend_mir_phi_type_consistency | 82 | **第 60 轮** | 待修复（评审轮） |
+| P1 | P1-5 | LIR terminator SSA 位置找不到时默认空字符串 | backend_lir_term_ssa_defensive | 78 | 第 59 轮 | ✅ **已清零**（第 59 轮，7 处全部替换为 _require_ssa_loc） |
+| P2 | P2-1 | type_checker 44 处裸 raise 未走 _error() | frontend_typecheck_unify_error_exit | 75 | 第 59 轮 | ✅ **已清零**（第 59 轮，P2-3 合并清零） |
 | P2 | P2-2 | Parser _parse_brace_primary 静默吞错无注释 | frontend_parser_brace_doc | 45 | 第 58 轮 | ✅ **已清零**（第 58 轮） |
-| P2 | P2-3 | match 错误缺 source_code（无 `-->` 标记） | （合并入 P2-1） | — | **第 59 轮** | 待修复 |
+| P2 | P2-3 | match 错误缺 source_code（无 `-->` 标记） | （合并入 P2-1） | — | 第 59 轮 | ✅ **已清零**（第 59 轮，合并入 P2-1） |
 
-**3 轮清零计划（第 58-60 轮）进度**：P0×1 + P1×5 + P2×3 = 9 项，已完成 4/9（P0 清零 + P1×2 清零 + P2×1 清零），剩余 5/9（P1×3 + P2×2）。预计第 59 轮末 P0/P1 全部清零，第 60 轮末 P2 清零。
+**3 轮清零计划（第 58-60 轮）进度**：P0×1 + P1×5 + P2×3 = 9 项，已完成 7/9（P0 清零 + P1×4 清零 + P2×3 清零），剩余 1/9（P1-4：MIR Phi 类型一致性）。预计第 60 轮评审轮 9/9 全部清零。
 
-### 高优先级任务（下 2 轮聚焦，第 59-60 轮）
+### 高优先级任务（第 59 轮已完成 + 第 60 轮待做）
 
 | 状态 | 任务 | 严重度 | 难度 | 优先级 | 预计 | 轮次计划 |
 |------|------|--------|------|--------|------|----------|
@@ -73,10 +73,10 @@
 | ✅ 完成 | 修复 Native 函数调用前 XMM caller-saved 未保存 + emitter SIB bug | P1 | hard | **90** | 3-5h | 第 58 轮 |
 | ✅ 完成 | 修复 Native ELF 数据段 PT_LOAD 对齐违规 | P1 | easy | **88** | 30min | 第 58 轮 |
 | ✅ 完成 | Parser Map/Block 歧义探测文档化 + 错误恢复单测（7 个用例） | P2 | easy | 45 | 1-2h | 第 58 轮 前端 |
-| 待做 | 修复 C 后端 nova_alloc/malloc NULL 未检查 | P1 | medium | **85** | 2-3h | **第 59 轮** |
-| 待做 | 修复 MIR Phi 节点类型不做一致性校验 | P1 | medium | **82** | 3-5h | **第 59 轮**（并行） |
-| 待做 | 修复 LIR terminator SSA 位置默认空字符串 | P1 | easy | **78** | 1h | **第 59 轮**（并行，3 处修改） |
-| 待做 | 统一 type_checker 所有报错走 _error()（45 处迁移）+ match 补 source | P2 | medium | 75 | 4-6h | **第 59 轮** 前端 |
+| ✅ 完成 | **修复 C 后端 nova_alloc/malloc NULL 未检查**（含 nova_panic 3 参数签名修复） | P1 | medium | **85** | 2-3h | 第 59 轮 后端 |
+| ✅ 完成 | **修复 LIR terminator SSA 位置默认空字符串**（7 处全部迁移到 _require_ssa_loc） | P1 | easy | **78** | 1h | 第 59 轮 后端 |
+| ✅ 完成 | **统一 type_checker 所有报错走 _error()（44 处迁移）+ match 补 source** | P2 | medium | 75 | 4-6h | 第 59 轮 前端 |
+| 待做 | 修复 MIR Phi 节点类型不做一致性校验 | P1 | medium | **82** | 3-5h | **第 60 轮**（评审轮后端） |
 | 待做 | 补齐 test_type_checker.py 12 类核心场景测试盲区 | P2 | easy | 65 | 3-4h | **第 60 轮** 前端 |
 | 待做 | 实现 Wasm 后端栈平衡验证器 | — | medium | 45 | 1-2天 | 第 60 轮后（评审轮带宽允许时） |
 | 待做 | 验证 Phi 节点 LIR 降级正确性（菱形 CFG、并行拷贝语义） | — | medium | 42 | 3-5h | 第 60 轮后 |
