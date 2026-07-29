@@ -1,11 +1,11 @@
 {
-  "cycles": 77,
+  "cycles": 78,
   "architecture_strategy": {
     "document": "ARCHITECTURE_VISION.md",
     "effective_date": "2026-07-29",
     "backup_tag": "llm-dev-arch-decision-20260729-1658",
-    "immediate_surgeries_deadline": 3,
-    "note": "架构战略正式生效。三项立即手术（拆ir_nodes/隔离旧C后端/弃用Cranelift）必须在cycles=80前完成。"
+    "immediate_surgeries_deadline": 2,
+    "note": "架构战略正式生效。三项立即手术（拆ir_nodes/隔离旧C后端/弃用Cranelift）必须在cycles=80前完成。剩余2轮（79、80）必须完成5个子任务（a1/a2/a3/phase1/deprecate_cranelift）。"
   },
   "task_selection_rules": [
     "1. 审查驱动任务 ≥1 个/轮（来自 AUTO_REVIEW_LOG.md CRITICAL+HIGH+TOP10 MEDIUM）",
@@ -244,6 +244,7 @@
     "review_cycle_69",
     "review_cycle_72",
     "review_cycle_75",
+    "review_cycle_78",
     "review_cycle_9",
     "review_data_calibration",
     "split_vm_execute_instruction",
@@ -268,6 +269,14 @@
     "unify_c_backend_phase1"
   ],
   "task_history": [
+    {
+      "cycle": 78,
+      "task_id": "review_cycle_78",
+      "status": "completed",
+      "source": "评审轮",
+      "reason": "第78轮路线图评审：评审范围第75轮评审+第76-77轮开发轮+架构战略决策轮。完成方向/质量/效率/价值/审查对齐/问题总结/下阶段方向七维评估，更新任务池（新增3个审查驱动高价值任务，调整优先级），明确剩余2轮（79-80）必须完成三项立即架构手术。",
+      "details": "评审结论：1)方向优秀——完全遵循架构战略决策要求，三线并进（架构债务+审查驱动+测试盲区）；2)质量持续提升——HIGH/CRITICAL连续5轮清零，MEDIUM 78→73(-6.4%)，LOW增速低于代码增速，测试1099(+192, +21.2%)；3)效率优秀——5/5成功零失败，平均2.5任务/轮（vs 历史2.1）；4)价值极高——架构战略决策（M-ARCH定板）+ 最后两大测试盲区清零 + 高CC函数持续收尾 + 正确性bug修复；5)审查对齐58.3%（满足≥50%，但有提升空间）；6)问题根因：架构债务三项手术（split_ir_nodes/unify_c_backend/deprecate_cranelift）是self-hosting前置条件，已在路线图P85-90但尚未启动，剩余2轮窗口极紧；7)下阶段79-81轮聚焦：①deprecate_cranelift（1-2h, P85, easy）②split_ir_nodes_a1→a2→a3（2-3天, P90, easy/medium）③unify_c_backend_phase1（1-2天, P90, medium）④审查驱动：Evaluator._convert_nova_to_json CC=13收尾。新增3个审查驱动任务：split_type_checker_unify(P65)、split_native_backend_elf(P62)、split_ir_nodes_a4_tc(P68)。"
+    },
     {
       "cycle": 77,
       "date": "2026-07-29 16:20",
@@ -1019,6 +1028,60 @@
         "backend_benchmark_framework"
       ],
       "reason": "[ARCHITECTURE_VISION.md §5.3 下调] nice-to-have，不阻塞架构手术和self-hosting。优先级从 38 下调至 30。[自主规划]"
+    },
+    {
+      "id": "refactor_convert_nova_to_json_cc13",
+      "name": "重构 Evaluator._convert_nova_to_json 降低圈复杂度 CC=13",
+      "description": "Evaluator._convert_nova_to_json CC=13（全项目剩余Top10复杂函数#2），约120行，处理 Nova→JSON 转换（12种类型分支：null/bool/int/float/string/list/tuple/map/adt/some/none/closure）。拆分为 12 个类型专属子方法 + 主入口调度表化，主函数 CC 降至约 2-3。",
+      "difficulty": "medium",
+      "priority": 68,
+      "category": "engineering",
+      "estimated": "3-5 小时",
+      "status": "pending",
+      "depends_on": [],
+      "reason": "[审查驱动·新增] 第1505轮审查 MEDIUM 级 Top10 最复杂函数#2（CC=13）。Evaluator._convert_nova_to_json 是 evaluator.py 中复杂度最高的函数，单一大 switch 结构可读性差，测试覆盖无法独立验证各类型分支。[来源：AUTO_REVIEW_LOG.md cyclomatic_complexity Top10 #2]",
+      "source": "review_driven"
+    },
+    {
+      "id": "split_type_checker_unify",
+      "name": "拆分 TypeChecker._unify 子模块（CC=26 统一算法独立）",
+      "description": "从 type_checker.py 中抽离 Hindley-Milner 统一算法到 type_checker/unification.py 子模块。_unify 方法 CC=26，约 180 行，是 HM 类型推断正确性根基。拆分后单测可独立覆盖 unify(t1, t2, subst) 纯函数，大幅降低 type_checker.py 2128 行单体体积。",
+      "difficulty": "hard",
+      "priority": 65,
+      "category": "architecture",
+      "estimated": "2-3 天",
+      "status": "pending",
+      "depends_on": [
+        "split_ir_nodes_a1"
+      ],
+      "reason": "[审查驱动·评审发现] 深度代码审计最薄弱模块#1 type_checker.py 2128 行，Top10 复杂函数独占 6 席（CC=30/26/24/20/19/18）。_unify（CC=26）是 HM 推断引擎纯函数核心，可 0 破坏性迁移（外部签名不变，内部调用替换为 import）。拆分后降低 type_checker 认知负担和合并冲突风险。[来源：深度代码审计薄弱模块#1 + 审查 cyclomatic_complexity]",
+      "source": "review_driven"
+    },
+    {
+      "id": "split_native_backend_elf",
+      "name": "拆分 NativeCodeGen ELF 生成子模块（2708 行单体拆分第一步）",
+      "description": "从 backend/native_backend.py 中抽离 ELF 生成相关逻辑到 backend/native/elf_writer.py。_generate_elf CC=17，约 420 行，处理 ELF64 header/program header/section header/symbol table/string table/relocation。与 x86_64 指令生成（~1300行）解耦。",
+      "difficulty": "hard",
+      "priority": 62,
+      "category": "architecture",
+      "estimated": "2-3 天",
+      "status": "pending",
+      "depends_on": [],
+      "reason": "[审查驱动·评审发现] 深度代码审计最薄弱模块#2 native_backend.py 2708 行全项目最大单体文件。ELF 生成、寄存器分配、ABI 调用、指令生成四项职责混在单文件，单测无法独立验证。拆分第一步 ELF writer 是边界最清晰的子模块（输入：符号列表+节列表→输出：bytes），外部依赖极小，0 回归风险。[来源：深度代码审计薄弱模块#2 + 审查 class_too_large MEDIUM #1]",
+      "source": "review_driven"
+    },
+    {
+      "id": "refactor_iter_hir_children_cc13",
+      "name": "重构 _iter_hir_children 降低圈复杂度 CC=13",
+      "description": "HIRRewriter._iter_hir_children CC=13（Top10复杂函数#4），约 110 行，40+ 个 HIR 节点类型的 children 遍历分支。按节点大类拆分为 _iter_stmt_children/_iter_expr_children/_iter_pat_children 三个子方法 + 调度表化，主入口 CC 降至约 3，同时为 Visitor 模式复用提供统一基础。",
+      "difficulty": "medium",
+      "priority": 60,
+      "category": "engineering",
+      "estimated": "3-5 小时",
+      "status": "pending",
+      "depends_on": [],
+      "reason": "[审查驱动·新增] 第1505轮审查 MEDIUM 级 Top10 复杂函数#4 _iter_hir_children CC=13。是 HIRRewriter/HIRVisitor 两大基础设施的遍历核心，CC>10 导致新增节点类型时容易遗漏分支产生静默 bug。调度表化后新增节点只需在 dict 中注册，避免大 if-elif 修改错误。[来源：AUTO_REVIEW_LOG.md cyclomatic_complexity Top10 #4]",
+      "source": "review_driven"
     },
     {
       "id": "refactor_check_patterns_exhaustive",
