@@ -1,3 +1,51 @@
+## 2026-07-29 17:00 架构战略决策（ARCHITECTURE_VISION.md 落地）
+
+> 本条目不是普通开发轮，是架构战略决策轮。**对后续所有开发轮具有约束力**。
+
+### 决策背景
+- 当前第 77 轮，已完成 113 个任务，测试 1065 passed + 31 subtests
+- 三层 IR + 多后端（C/Native/Wasm）+ evaluator 参考实现 骨架已验证正确
+- 但存在多个架构债务：ir_nodes 上帝模块（1413 行 112 类）、两条 C 后端路径并存、Cranelift 后端 stub 化
+- **关键洞察**：self-hosting 启动之前必须清理所有架构债务，否则债务会被翻译成 Nova 代码中的债务，清理代价 5-10 倍
+
+### 决策产出
+1. **新增文件**：`ARCHITECTURE_VISION.md`（390 行，7 大章节）
+   - §0 执行摘要 + §1 三项已验证正确的架构原则（三层 IR / 多后端共享 LIR / evaluator 语义权威）
+   - §2 三项**立即架构手术**（P85-90，3 轮内必须完成，self-hosting 前置条件）
+     - 手术 A：拆 `ir/ir_nodes.py` → `ir_types.py` + `hir.py` + `mir.py` + `lir.py` + `ir_nodes.py`（兼容 re-export 层），分 A1/A2/A3 三步零破坏性迁移
+     - 手术 B：统一 C 后端 Phase1（旧路径标记 deprecated + 入口点清理，Phase2 功能对齐后删旧文件）
+     - 手术 C：弃用 Cranelift 后端（0 测试 / 17 条调度 / _compile_store_reg 空实现）
+   - §3 三个**生死攸关决策**（时间表明确）
+     - 决策 I：**内存模型选择 Zig 风格显式 Allocator API**（v0.5 前必须定板，第 84-87 轮前），四步落地：接口→数据结构适配→栈/堆语义→Option/Result 推广
+     - 决策 II：**Self-Hosting 三阶段时间表**（SH-1 8轮 / SH-2 12轮 / SH-3 12轮，共约 32 轮约 8 个月）
+     - 决策 III：**后端取舍为三条（C + Native x86_64 + WasmGC）**，VM 字节码降级参考实现，Cranelift 立即弃用
+   - §4 稳态架构图（v1.0 目标）
+   - §5 与 LLM 智能开发系统绑定：每轮架构债务 ≥ 50%、4 个新增高优先级审查 gate、任务优先级重排表
+   - §6 风险与降级预案（R1-R4）
+   - §7 决策变更流程（门槛高于普通代码，需架构评审轮记录）
+2. **路线图同步**：`LLM_ROADMAP.md`
+   - 新增 v0.3→v1.0 总览里程碑表（M-ARCH / M-MEM / M-SH1/2/3 / M-STD）
+   - 架构治理板块优先级重排（P85-90 立即手术）
+   - 进度更新：113/134（84.3%），新增 Allocator API 四步任务
+3. **状态文件同步**：`.llm_dev_state.json`
+   - 新增 `architecture_strategy` 元信息（文档/日期/备份 tag / 立即手术截止轮次）
+   - 新增 `task_selection_rules` 5 条硬约束（架构债务≥50%、SH-1 前置条件等）
+   - 新增 `milestones` 6 项（M-ARCH 到 M-STD，含目标轮次/版本/依赖关系）
+   - 任务池重排：`split_ir_nodes` 拆为 a1(P90)/a2(P90)/a3(P88)，unify_c_backend_phase1(P70→P90)，deprecate_cranelift(P35→P85)，**新增 allocator_api_step1-4（P78-88）**，low_quality(P40→P35)，benchmark(P38→P30)
+4. **Git 备份**：创建 tag `llm-dev-arch-decision-20260729-1658`
+
+### 对后续开发的直接影响
+- **下三轮（78-80）必须完成的硬指标**：完成手术 A（a1/a2/a3）+ 手术 B（phase1）+ 手术 C（deprecate_cranelift）= 5 个高优先任务（P85-90）
+- **每轮任务选择公式（三项手术完成前）**：1 个审查驱动 + ≥1 个架构债务任务（架构债务占比 ≥ 50%）
+- **P35 及以下任务仅作为 filler**（所有高优先任务都无法推进时才选）
+
+### 下一步（第 78 轮启动时）
+- 首选任务：`deprecate_cranelift_backend`（手术C，P85，easy，1-2 小时，风险极低）+ 1 个审查驱动任务
+- 次轮：`split_ir_nodes_a1`（手术A-1，P90，easy）+ `unify_c_backend_phase1`（手术B，P90，medium）并行推进
+- 完成后立即推进 Allocator API Step1
+
+---
+
 ## 2026-07-29 16:15 第77轮开发
 
 ### 开发概览

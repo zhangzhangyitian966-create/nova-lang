@@ -1,22 +1,46 @@
 # Nova LLM 智能开发路线图
 
-**更新时间**: 2026-07-29 16:15:00
+**更新时间**: 2026-07-29 17:00:00
 **上次评审**: 第 75 轮（路线图评审）
 **上次开发**: 第 77 轮（普通轮）
+**架构战略文档**: [ARCHITECTURE_VISION.md](./ARCHITECTURE_VISION.md) — 架构决策最高参考，如与本路线图冲突以其为准，本文件同步更新
 
 本路线图由 LLM 智能开发系统动态维护。
 
-## 🏗️ 架构治理
+---
 
-| 状态 | 任务 | 难度 | 优先级 | 预计 | 依赖 |
-|------|------|------|--------|------|------|
-| ✅ | C 后端接入统一 IR 管线 | hard | 95 | 2-3 天 | - |
-| ✅ | C 后端 LIR 代码生成基础框架 | medium | 92 | 1 天 | - |
-| ❌ | 统一 C 后端（LIR 路径功能对齐） | hard | 70 | 2-3 天 | 已拆分，见 phase1/phase2 |
-| ⏳ | 统一 C 后端 Phase1（路径隔离+弃用标记） | medium | 70 | 1-2 天 | - |
-| ⏳ | 统一 C 后端 Phase2（ADT/match 功能迁移） | hard | 65 | 2-3 天 | unify_c_backend_phase1 |
-| ⏳ | 拆分 ir/ir_nodes.py 上帝模块 | medium | 55 | 1-2 天 | - |
-| ⏳ | 弃用 Cranelift 后端 | easy | 35 | 1-2 小时 | - |
+## 🗺️ v0.3.0 → v1.0 总览里程碑（架构战略约束）
+
+| 里程碑 | 内容 | 目标版本 | 预计轮次 | 状态 | 说明 |
+|--------|------|---------|---------|------|------|
+| M-ARCH | 三项立即架构手术（拆ir_nodes/隔离旧C后端/弃用Cranelift） | v0.3.x | 3 轮内 | ⏳ 进行中 | **self-hosting 前置条件，强制执行** |
+| M-MEM  | Allocator API 落地（Step1-2）+ 栈/堆语义明确 | v0.4.0 | 第 84-87 轮前 | ⏳ 未启动 | **v0.5 前必须定板** |
+| M-SH1  | Self-Hosting SH-1：lexer + parser 用 Nova 写出 + 字节级一致性 | v0.4.0 | 约 8 轮 | ⏳ 未启动 | 前置：M-ARCH 完成 + 测试连续 3 轮零失败 |
+| M-SH2  | Self-Hosting SH-2：type_checker + 三层 IR lowering 移植 | v0.5.0 | 约 12 轮 | ⏳ 未启动 | 前置：M-MEM 定板 |
+| M-SH3  | Self-Hosting SH-3：一个后端（C后端）+ stage2==stage3 自举 | v1.0 | 约 12 轮 | ⏳ 未启动 | 成功后 Python 编译器降级为参考实现 |
+| M-STD  | 标准库覆盖 IO/FS/Net/Concurrency/Serialize | v1.0 | 并行推进 | ⏳ 未启动 | 与 SH-2/SH-3 并行 |
+
+---
+
+## 🏗️ 架构治理（优先级按 ARCHITECTURE_VISION.md §5.3 重新调整）
+
+> **架构债务任务占比 ≥ 50% 约束**：三项立即手术全部完成前，每轮 LLM 开发任务中至少 1 个属于本板块。
+
+| 状态 | 任务 | 难度 | 优先级 | 预计 | 依赖 | 来源 |
+|------|------|------|--------|------|------|------|
+| ✅ | C 后端接入统一 IR 管线 | hard | 95 | 2-3 天 | - | 自主规划 |
+| ✅ | C 后端 LIR 代码生成基础框架 | medium | 92 | 1 天 | - | 自主规划 |
+| ❌ | 统一 C 后端（LIR 路径功能对齐）总任务 | hard | 70 | 2-3 天 | - | 已拆分 phase1/phase2 |
+| ⏳ | **统一 C 后端 Phase1（路径隔离+弃用标记）** · 手术B | medium | **90** | 1-2 天 | - | **ARCHITECTURE_VISION §2.2 强制** |
+| ⏳ | 统一 C 后端 Phase2（ADT/match 功能迁移 + 删除旧c_codegen.py） | hard | 70 | 2-3 天 | unify_c_backend_phase1 | 架构战略 |
+| ⏳ | **拆分 ir/ir_nodes.py 上帝模块 A1（抽 ir_types.py）** · 手术A-1 | easy | **90** | 2-3 小时 | - | **ARCHITECTURE_VISION §2.1 强制** |
+| ⏳ | 拆分 ir/ir_nodes.py A2（抽 hir.py / mir.py / lir.py + 兼容层） | medium | **90** | 1 天 | split_ir_nodes_a1 | 架构战略 |
+| ⏳ | 拆分 ir/ir_nodes.py A3（确认无外部依赖后删冗余、ir_nodes 变薄 re-export） | easy | **88** | 2-3 小时 | split_ir_nodes_a2 | 架构战略 |
+| ⏳ | **弃用 Cranelift 后端** · 手术C | easy | **85** | 1-2 小时 | - | **ARCHITECTURE_VISION §2.3 强制** |
+| ⏳ | Allocator API Step1（定义 trait + ArenaAllocator + LibcAllocator 实现） | medium | **88** | 1 天 | - | **ARCHITECTURE_VISION §3.1 Step1** |
+| ⏳ | Allocator API Step2（List/Map/Tuple 数据结构接受 allocator 参数） | hard | 82 | 2-3 天 | allocator_api_step1 | 架构战略 |
+| ⏳ | Allocator API Step3（栈/堆语法明确 + Box 语义） | medium | 80 | 1-2 天 | allocator_api_step2 | 架构战略 |
+| ⏳ | Allocator API Step4（Option/Result 推广至所有 fallible API） | medium | 78 | 1-2 天 | allocator_api_step3 | 架构战略 |
 
 ## 🔧 IR 降级 / 正确性
 
@@ -114,7 +138,7 @@
 | ✅ | 重构 compiler_cli.py main 函数调度表化 | easy | 60 | 2-3 小时 | - |
 | ✅ | 拆分 cfg_utils.py _build_operand_dispatch_tables 过长函数 | easy | 55 | 2-3 小时 | - |
 | ✅ | 重构 c_codegen.py _compile_pattern 调度表化 | medium | 52 | 3-5 小时 | - |
-| ⏳ | LOW 级问题批量治理（docstring + 魔法数字） | easy | 40 | 2-4 小时 | - |
+| ⏳ | LOW 级问题批量治理（docstring + 魔法数字） | easy | **35** | 2-4 小时 | - | 架构战略下调（不阻塞架构） |
 | ✅ | 高复杂度函数补全 docstring | easy | 55 | 2-3 小时 | - |
 | ✅ | 重构 cfg_utils 操作数访问调度表化 | medium | 55 | 3-5 小时 | - |
 | ✅ | 重构 CraneliftBackend._compile_instr 调度表化 | medium | 65 | 3-5 小时 | - |
@@ -163,7 +187,7 @@
 | ✅ | 为 SSA 验证器编写完整测试 | easy | 78 | 2-3 小时 | mir_ssa_verifier, extract_loop_ssa |
 | ✅ | 建立后端性能基准测试框架 | medium | 60 | 3-5 小时 | unify_c_backend |
 | ✅ | LICM 优化正确性测试 | medium | 60 | 3-5 小时 | implement_licm_pass, ssa_verifier_tests |
-| ⏳ | 基准测试框架增强（C/Wasm执行时间+优化对比） | medium | 38 | 3-5 小时 | backend_benchmark_framework |
+| ⏳ | 基准测试框架增强（C/Wasm执行时间+优化对比） | medium | **30** | 3-5 小时 | backend_benchmark_framework | 架构战略下调（nice-to-have） |
 | ✅ | LIR C后端单元测试 | medium | 55 | 4-6 小时 | - |
 | ✅ | CFG 基础设施单元测试 | medium | 50 | 3-5 小时 | mir_cfg_loop_analysis |
 | ✅ | TypeChecker 单元测试基线 | medium | 75 | 4-6 小时 | - |
@@ -175,10 +199,19 @@
 
 ---
 
-**进度**: 110/123 (89.4%)
+**进度**: 113/134 (84.3%)
 - **已完成**: 113（本轮+3）
 - **进行中**: 0
-- **待开发**: 5（unify_c_backend_phase1 P70、unify_c_backend_phase2 P65、split_ir_nodes P55、low_quality_issues_cleanup P40、benchmark_enhance_exec_time P38、deprecate_cranelift_backend P35）
+- **待开发（架构债务优先）**: 17
+  - P90（立即架构手术）：`unify_c_backend_phase1`、`split_ir_nodes_a1`、`split_ir_nodes_a2`
+  - P88（self-hosting 前置）：`split_ir_nodes_a3`、`allocator_api_step1`
+  - P85（立即瘦身）：`deprecate_cranelift_backend`
+  - P82/80/78（内存模型 Step 2/3/4）：`allocator_api_step2/3/4`
+  - P70：`unify_c_backend_phase2`
+  - P35/P30（低优先级 nice-to-have）：`low_quality_issues_cleanup`、`benchmark_enhance_exec_time`
+  - SH-1/SH-2/SH-3 self-hosting 三阶段里程碑 12+ 子任务（M-SH1/SH2/SH3 内细化）
 - **已废弃**: 5（native_call_abi、refactor_native_emit_call、native_call_abi、unify_c_backend 总任务）
 
-> 第77轮开发完成。完成3个任务（2审查驱动+1自主规划）：1) refactor_compute_idom（CC=13→3，审查Top10#3）；2) clean_unused_imports_v6（8个MEDIUM级unused_import清理）；3) fix_field_index_inference（ADT字段访问field_index推断，修复潜在正确性问题）。审查对齐率 66.7%（2/3）。测试总数 1065+31 subtests（+34 vs 第76轮的完整套件1031）。下阶段方向：架构债务启动（统一C后端Phase1 + 拆分ir_nodes）+ 复杂度收尾（CC>12清零）。
+> 第77轮开发完成。完成3个任务（2审查驱动+1自主规划）：1) refactor_compute_idom（CC=13→3，审查Top10#3）；2) clean_unused_imports_v6（8个MEDIUM级unused_import清理）；3) fix_field_index_inference（ADT字段访问field_index推断，修复潜在正确性问题）。审查对齐率 66.7%（2/3）。测试总数 1065+31 subtests（+34 vs 第76轮的完整套件1031）。
+>
+> **架构战略文档落地**：已写入 [ARCHITECTURE_VISION.md](./ARCHITECTURE_VISION.md)，并按 §5.3 重排本路线图优先级。**下三轮必须完成的架构手术**：P90 的 `unify_c_backend_phase1`（手术B）、`split_ir_nodes_a1/a2`（手术A前两步）、P85 的 `deprecate_cranelift_backend`（手术C）。架构债务完成前，每轮任务选择中架构债务占比 ≥ 50%。
