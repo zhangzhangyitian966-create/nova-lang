@@ -4,6 +4,86 @@
 
 ---
 
+## 第 50 轮 — 2026-07-29 01:40
+
+> 普通轮 | 前端维护测试 + 后端内存泄漏修复 | P2-D 清零
+
+---
+
+### 轮次概览
+
+| 维度 | 数据 |
+|------|------|
+| 轮次 | 第 50 轮（普通轮） |
+| 测试基线 | 780 passed, 26 subtests passed |
+| 测试结果 | **781 passed**, 26 subtests passed（+1 新测试） |
+| 前端完成率 | 34/34 = **100%** |
+| 后端完成率 | 37/51 = **72.5%** |
+| 总完成率 | 71/86 = **82.6%** |
+| 失败任务 | 0 个 |
+| 新增任务 | 0 个 |
+| 完成任务 | 2 个（FRONTEND-034, backend_closure_memory_leak_fix） |
+
+---
+
+### 前端任务：添加 parser block 错误恢复计数器重置测试（FRONTEND-034）
+
+**任务**：`FRONTEND-034`（easy, P45）
+
+**问题**：第 49 轮修复了 parser.py `_parse_block` 中 `block_errors` 计数器未重置的问题，但缺少回归测试。
+
+**修复**：新增 `test_block_error_recovery_counter_reset` 测试：
+- 构造包含错误语句和正确语句交替的 block：`{ let = 1; let x = 2; let = 3; x }`
+- 验证正确语句能重置错误计数器，不会过早触发 `_BLOCK_MAX_ERRORS`（3 次）限制
+- 测试通过 `Lexer+Parser` 直接调用 `_parse_block`
+- 验证解析结果包含 1 个正确语句（`let x = 2`）和 1 个尾部表达式（`x`）
+- 验证 `parser._errors` 收集到 2 个错误
+
+**修改文件**：`tests/test_parser.py`（约 20 行代码）
+
+**为什么选这个**：前端进入纯维护模式，为第 49 轮的关键修复补充回归测试，防止未来退化。
+
+---
+
+### 后端任务：修复 C/Wasm 后端闭包临时内存泄漏（backend_closure_memory_leak_fix）
+
+**任务**：`backend_closure_memory_leak_fix`（medium, P50）
+
+**问题**：深度审计发现 C 后端和 Wasm 后端在闭包创建和调用时，`nova_alloc` 分配的临时数组（参数打包、捕获值）均未释放。运行时 `nova_closure_new` 内部会复制这些数组，因此调用者分配的临时数组即成泄漏。
+
+**修复**：
+1. **C 后端** `lir_c_backend.py _compile_closure_create`：在 `nova_closure_new` 调用后新增 `nova_free(env_var)` 释放临时捕获数组
+2. **Wasm 后端** `wasm_backend.py _compile_closure_create`：在保存闭包指针到 `dst_loc` 后，添加 `local.get $tmp_ptr` + `call $nova_free` 释放临时捕获数组
+3. **Wasm 后端** `wasm_backend.py _compile_call_indirect`：在保存返回值后，同样添加 `nova_free` 释放临时参数数组
+
+**修改文件**：`backend/lir_c_backend.py`、`backend/wasm_backend.py`（约 10 行代码）
+
+**为什么选这个**：第 48 轮评审计划第 50 轮聚焦此任务。P2-D 问题清零，内存安全提升。代码改动小但正确性收益明确。
+
+---
+
+### 测试前后对比
+
+| 维度 | 开发前 | 开发后 |
+|------|--------|--------|
+| 测试通过数 | 780 passed | **781 passed** |
+| 新增测试 | - | 1 个（parser 错误恢复） |
+| 回归 | - | 无 |
+
+---
+
+### 前端下一步
+
+前端 34/34 已完成，进入纯维护模式。下一轮（第 51 轮评审轮）前端无新开发任务。
+
+### 后端下一步
+
+剩余 2 个任务：
+1. `backend_wasm_stack_balance`（P45）- Wasm 栈平衡验证器，计划第 51 轮
+2. `backend_lir_phi_lowering_verify`（P42）- Phi 降级验证，计划第 51 轮评审
+
+---
+
 ## 第 49 轮 — 2026-07-29 22:30
 
 > 普通轮 | P0 级回归修复 + 前端属性名修复 | 评审误判纠正

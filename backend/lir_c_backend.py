@@ -625,6 +625,9 @@ class LIRCBackend:
             f"{dst} = (NovaClosure*)nova_closure_new((void*){fn_ptr}, {env_arg}, {capture_count});"
             f" /* closure: {instr.fn_name} */"
         )
+        # 释放临时捕获数组（nova_closure_new 内部已复制）
+        if env_var:
+            self._emit(f"nova_free({env_var});")
 
     def _compile_field_access(self, instr: LIRFieldAccess):
         """编译字段访问"""

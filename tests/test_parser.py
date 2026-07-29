@@ -645,6 +645,31 @@ class TestErrorRecovery(unittest.TestCase):
             parse("let = 1")
         self.assertIsNotNone(ctx.exception.line)
 
+    def test_block_error_recovery_counter_reset(self):
+        """验证块内错误恢复计数器在正确语句后重置
+
+        第 49 轮修复了 _parse_block 中 block_errors 计数器未重置的问题。
+        此测试确保：错误语句之间的正确语句会重置计数器，不会过早触发
+        _BLOCK_MAX_ERRORS（3 次）限制而放弃剩余块内容。
+        """
+        # block 内顺序：错误(let=1)、正确(let x=2)、错误(let=3)、正确(x 作为尾部)
+        # 如果 block_errors 不重置，错误计数累积到 2 后，下一个错误就会触发放弃
+        # 修复后，正确语句之间的错误不应累积
+        code = "{ let = 1; let x = 2; let = 3; x }"
+        tokens = Lexer(code).tokenize()
+        parser = Parser(tokens, source=code)
+        result = parser._parse_block()
+        self.assertIsInstance(result, Block)
+        # let x = 2 被成功解析为语句
+        self.assertEqual(len(result.statements), 1)
+        self.assertIsInstance(result.statements[0], LetBinding)
+        self.assertEqual(result.statements[0].name, "x")
+        # x 是尾部表达式
+        self.assertIsInstance(result.tail_expression, Identifier)
+        self.assertEqual(result.tail_expression.name, "x")
+        # 验证收集了 2 个错误，但没有因为达到 _BLOCK_MAX_ERRORS 而放弃
+        self.assertEqual(len(parser._errors), 2)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -662,6 +662,11 @@ class WasmGCBackend:
         if instr.dst_loc:
             self._emit(f"(local.set ${instr.dst_loc[0]})")
 
+        # 5. 释放临时参数数组（nova_closure_call 内部已使用完）
+        if arg_count > 0 and len(instr.src_locs) > 1:
+            self._emit("(local.get $tmp_ptr)")
+            self._emit("(call $nova_free)")
+
     def _compile_return(self, instr: LIRReturn):
         """编译返回指令（将返回值压入 Wasm 栈后 return）"""
         if instr.src_locs:
@@ -796,6 +801,11 @@ class WasmGCBackend:
         # 4. 保存返回值（闭包指针）到 dst_loc
         if instr.dst_loc:
             self._emit(f"(local.set ${instr.dst_loc[0]})")
+
+        # 5. 释放临时捕获数组（nova_closure_new 内部已复制到闭包对象）
+        if capture_count > 0:
+            self._emit("(local.get $tmp_ptr)")
+            self._emit("(call $nova_free)")
 
     def _compile_field_access(self, instr: LIRFieldAccess):
         """编译字段访问
