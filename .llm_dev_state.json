@@ -1,5 +1,5 @@
 {
-  "cycles": 74,
+  "cycles": 75,
   "completed_tasks": [
     "parser_unit_tests",
     "refactor_analyze_loops",
@@ -158,10 +158,19 @@
     "refactor_compiler_cli_main",
     "refactor_c_codegen_pattern",
     "fix_sys_path_hack_and_gate_docstring",
-    "evaluator_unit_tests"
+    "evaluator_unit_tests",
+    "review_cycle_75"
   ],
   "failed_tasks": [],
   "task_history": [
+    {
+      "cycle": 75,
+      "task_id": "review_cycle_75",
+      "status": "completed",
+      "source": "评审轮",
+      "reason": "第75轮路线图评审：回顾第72-74轮（1个评审轮+2个开发轮），完成五维评估（方向/质量/效率/价值/审查对齐），更新任务池（新增4个任务，调整5个状态/优先级），确定下阶段方向。",
+      "details": "评审结论：1)方向优秀——完全遵循三线并进策略；2)质量持续提升——HIGH清零、测试907(+208)、测试密度+20%；3)效率优秀——4/4成功零失败；4)价值极高——无低价值任务；5)审查对齐50%（低于前阶段，需提升）。新增任务：unify_c_backend_phase1(P70)、unify_c_backend_phase2(P65)、split_ir_nodes(P55)、deprecate_cranelift_backend(P35)。下阶段方向：最后测试盲区清零+复杂度收尾+架构债务启动。"
+    },
     {
       "cycle": 74,
       "date": "2026-07-29 04:25",
@@ -632,6 +641,56 @@
   "last_review_cycle": 72,
   "tasks": [
     {
+      "id": "unify_c_backend_phase1",
+      "name": "统一C后端Phase1（路径隔离+旧后端标记弃用）",
+      "description": "将旧的c_codegen.py（AST→C路径）标记为deprecated，从默认编译管道移除，添加弃用警告。清理入口点中对旧路径的引用，减少维护混淆。为Phase2功能迁移做准备。",
+      "difficulty": "medium",
+      "priority": 70,
+      "category": "architecture",
+      "estimated": "1-2 天",
+      "status": "pending",
+      "depends_on": [],
+      "reason": "架构债务已拖延3轮，必须启动。Phase1做路径隔离和弃用标记，风险低、见效快，能立即降低维护负担。[自主规划]"
+    },
+    {
+      "id": "unify_c_backend_phase2",
+      "name": "统一C后端Phase2（ADT/match功能迁移）",
+      "description": "将c_codegen.py中已实现但lir_c_backend.py缺失的ADT代码生成和match编译功能迁移到LIR路径。先迁移ADT构造和字段访问，再迁移match模式匹配编译。",
+      "difficulty": "hard",
+      "priority": 65,
+      "category": "architecture",
+      "estimated": "2-3 天",
+      "status": "pending",
+      "depends_on": [
+        "unify_c_backend_phase1"
+      ],
+      "reason": "Phase1完成后进入功能迁移阶段，先迁移ADT和match这两个最大的功能块，逐步减少对旧路径的依赖。[自主规划]"
+    },
+    {
+      "id": "split_ir_nodes",
+      "name": "拆分ir/ir_nodes.py上帝模块",
+      "description": "将ir/ir_nodes.py（1413行、112个类）拆分为hir_nodes.py、mir_nodes.py、lir_nodes.py三个文件，通用类型和基类移到types.py和base.py。降低单文件复杂度，减少修改冲突。",
+      "difficulty": "medium",
+      "priority": 55,
+      "category": "architecture",
+      "estimated": "1-2 天",
+      "status": "pending",
+      "depends_on": [],
+      "reason": "Explore深度审计发现ir_nodes是全项目耦合度最高的模块（入度10），承担三层IR节点定义。拆分后可大幅降低模块耦合度，提升可维护性。[审查发现]"
+    },
+    {
+      "id": "deprecate_cranelift_backend",
+      "name": "弃用Cranelift后端",
+      "description": "将cranelift_backend.py标记为deprecated，从默认编译管道移除，添加弃用警告。Cranelift后端0测试、多处stub实现、依赖外部工具不可控，native_backend已覆盖原生编译需求。",
+      "difficulty": "easy",
+      "priority": 35,
+      "category": "architecture",
+      "estimated": "1-2 小时",
+      "status": "pending",
+      "depends_on": [],
+      "reason": "Explore深度审计确认Cranelift后端完成度极低，投入产出比太差。弃用后可减少维护负担，聚焦于更有价值的后端。[自主发现]"
+    },
+    {
       "id": "refactor_check_patterns_exhaustive",
       "name": "重构 TypeChecker._check_patterns_exhaustive 降低圈复杂度",
       "description": "TypeChecker._check_patterns_exhaustive 圈复杂度 30（全项目最高），约130行。已通过类型分发模式重构为 4 个类型专属子方法：_check_adt_exhaustive、_check_bool_exhaustive、_check_tuple_exhaustive、_check_list_exhaustive，主函数 CC 降至约 5。",
@@ -703,7 +762,7 @@
       "priority": 70,
       "category": "architecture",
       "estimated": "2-3 天",
-      "status": "pending",
+      "status": "deprecated",
       "depends_on": [
         "fix_match_lowering",
         "fix_mir_ssa",
@@ -711,7 +770,7 @@
         "lir_switch_match_lowering",
         "c_backend_closure_support"
       ],
-      "reason": "目前有两套 C 代码生成路径（AST 路径功能完整，LIR 路径仅阶段一），功能重叠增加维护成本。SSA 基础打好后，统一到 LIR→C 路径可以让所有后端共享 IR 优化成果。优先级从 70 提升至 72，Top10复杂度攻坚完成后转向架构债务治理。[自主规划]"
+      "reason": "目前有两套 C 代码生成路径（AST 路径功能完整，LIR 路径仅阶段一），功能重叠增加维护成本。SSA 基础打好后，统一到 LIR→C 路径可以让所有后端共享 IR 优化成果。优先级从 70 提升至 72，Top10复杂度攻坚完成后转向架构债务治理。[自主规划] [deprecated] 拆分为phase1和phase2两个独立任务，原总任务标记为已拆分解"
     },
     {
       "id": "refactor_lower_match_expr",
@@ -1160,7 +1219,7 @@
       "priority": 65,
       "category": "test",
       "estimated": "4-6小时",
-      "status": "pending",
+      "status": "completed",
       "depends_on": [],
       "reason": "1017行零独立测试，语言求值语义核心。evaluator是Nova解释执行路径的基础，测试不足意味着任何求值逻辑变更都可能引入语义回归。[自主发现]"
     },

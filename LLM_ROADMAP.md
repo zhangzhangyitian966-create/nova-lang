@@ -1,7 +1,7 @@
 # Nova LLM 智能开发路线图
 
-**更新时间**: 2026-07-29 04:30:00
-**上次评审**: 第 72 轮（路线图评审）
+**更新时间**: 2026-07-29 08:12:00
+**上次评审**: 第 75 轮（路线图评审）
 **上次开发**: 第 74 轮（普通轮）
 
 本路线图由 LLM 智能开发系统动态维护。
@@ -12,7 +12,11 @@
 |------|------|------|--------|------|------|
 | ✅ | C 后端接入统一 IR 管线 | hard | 95 | 2-3 天 | - |
 | ✅ | C 后端 LIR 代码生成基础框架 | medium | 92 | 1 天 | - |
-| ⏳ | 统一 C 后端（LIR 路径功能对齐） | hard | 70 | 2-3 天 | fix_match_lowering, fix_mir_ssa, refactor_visitor_pattern, lir_switch_match_lowering, c_backend_closure_support |
+| ❌ | 统一 C 后端（LIR 路径功能对齐） | hard | 70 | 2-3 天 | 已拆分，见 phase1/phase2 |
+| ⏳ | 统一 C 后端 Phase1（路径隔离+弃用标记） | medium | 70 | 1-2 天 | - |
+| ⏳ | 统一 C 后端 Phase2（ADT/match 功能迁移） | hard | 65 | 2-3 天 | unify_c_backend_phase1 |
+| ⏳ | 拆分 ir/ir_nodes.py 上帝模块 | medium | 55 | 1-2 天 | - |
+| ⏳ | 弃用 Cranelift 后端 | easy | 35 | 1-2 小时 | - |
 
 ## 🔧 IR 降级 / 正确性
 
@@ -65,8 +69,10 @@
 | ✅ | C 后端闭包 Phase3（lambda 函数体编译） | hard | 80 | 3-5 天 | c_backend_closure_support |
 | ✅ | 修复 Wasm 后端全局变量声明缺失 | easy | 62 | 1-2 小时 | wasm_control_flow_rewrite |
 | ✅ | 重构 Wasm 后端指令编译调度表化 | medium | 72 | 3-5 小时 | wasm_control_flow_rewrite |
-| ⏳ | 实现原生后端函数调用 ABI | hard | 20 | 3-5 天 | fix_mir_ssa |
+| ❌ | 实现原生后端函数调用 ABI | hard | 20 | 3-5 天 | deprecated |
 | ✅ | 重构 WasmGCBackend._compile_function 分层拆分 | medium | 68 | 3-5 小时 | - |
+| ✅ | Native/Wasm 后端闭包 fn_ptr 回填 | hard | 80 | 4-6 小时 | c_backend_closure_phase3 |
+| ✅ | 闭包后端端到端测试 | medium | 78 | 3-4 小时 | c_backend_closure_phase3 |
 
 ## 🛠️ 工程质量
 
@@ -108,7 +114,7 @@
 | ✅ | 重构 compiler_cli.py main 函数调度表化 | easy | 60 | 2-3 小时 | - |
 | ✅ | 拆分 cfg_utils.py _build_operand_dispatch_tables 过长函数 | easy | 55 | 2-3 小时 | - |
 | ✅ | 重构 c_codegen.py _compile_pattern 调度表化 | medium | 52 | 3-5 小时 | - |
-| ⏳ | LOW 级问题批量治理（docstring + 魔法数字） | easy | 45 | 2-4 小时 | - |
+| ⏳ | LOW 级问题批量治理（docstring + 魔法数字） | easy | 40 | 2-4 小时 | - |
 | ✅ | 高复杂度函数补全 docstring | easy | 55 | 2-3 小时 | - |
 | ✅ | 重构 cfg_utils 操作数访问调度表化 | medium | 55 | 3-5 小时 | - |
 | ✅ | 重构 CraneliftBackend._compile_instr 调度表化 | medium | 65 | 3-5 小时 | - |
@@ -127,9 +133,7 @@
 | ✅ | 重构 TypeChecker._check_match_exhaustiveness 降低圈复杂度 | hard | 85 | 1-2 天 | - |
 | ✅ | 重构 Parser._parse_pattern 降低圈复杂度 | medium | 55 | 2-3 小时 | - |
 | ✅ | 重构 TypeChecker._check_binary_op 降低圈复杂度 | medium | 58 | 2-3 小时 | - |
-| ✅ | Native/Wasm 后端闭包 fn_ptr 回填 | hard | 80 | 4-6 小时 | c_backend_closure_phase3 |
-| ✅ | 闭包后端端到端测试 | medium | 78 | 3-4 小时 | c_backend_closure_phase3 |
-| ❌ | 重构 NativeCodeGen._emit_runtime_call + _emit_call 降低圈复杂度 | medium | 60 | 4-6 小时 | - |
+| ❌ | 重构 NativeCodeGen._emit_runtime_call + _emit_call 降低圈复杂度 | medium | 60 | 4-6 小时 | deprecated |
 | ✅ | 审查数据校准（修复过时检测逻辑） | easy | 60 | 1-2 小时 | - |
 | ✅ | 重构 TypeChecker._check_patterns_exhaustive 降低圈复杂度 | hard | 85 | 1-2 天 | - |
 | ✅ | 为 compiler.py + vm.py 建立单元测试基线 | medium | 80 | 3-5 小时 | - |
@@ -145,13 +149,7 @@
 | ✅ | 批量清理未使用导入 v4 | easy | 55 | 1-2 小时 | - |
 | ✅ | 统一治理过宽异常捕获 | easy | 70 | 2-3 小时 | - |
 | ✅ | 重构 cli.py 主函数降低复杂度 | easy | 60 | 2-3 小时 | - |
-| ✅ | 重构 compiler_cli.py main 函数调度表化 | easy | 60 | 2-3 小时 | - |
-| ✅ | 拆分 cfg_utils.py _build_operand_dispatch_tables 过长函数 | easy | 55 | 2-3 小时 | - |
-| ✅ | 重构 c_codegen.py _compile_pattern 调度表化 | medium | 52 | 3-5 小时 | - |
-| ⏳ | LOW 级问题批量治理（docstring + 魔法数字） | easy | 40 | 2-4 小时 | - |
-| ✅ | 重构 MIRLowering._lower_call_expr 降低复杂度 | medium | 70 | 3-5 小时 | - |
-| ✅ | 重构 LoopInvariantCodeMotion._redirect_branch 降低复杂度 | medium | 65 | 3-5 小时 | - |
-| ✅ | 重构 cfg_utils.analyze_loops 降低复杂度 | medium | 60 | 3-5 小时 | - |
+| ✅ | 重构 LIRCBackend._compile_switch 降低圈复杂度 | medium | 55 | 2-3 小时 | - |
 | ✅ | 批量清理未使用导入 v5 | easy | 50 | 1-2 小时 | - |
 | ✅ | 修复 sys.path hack + 增量门禁 docstring | easy | 80 | 1 小时 | - |
 
@@ -177,10 +175,10 @@
 
 ---
 
-**进度**: 156/163 (95.7%)
-- **已完成**: 156（含第72轮评审 + 第70-74轮12个任务）
+**进度**: 108/123 (87.8%)
+- **已完成**: 108
 - **进行中**: 0
-- **待开发**: 5（unify_c_backend P70、benchmark_enhance_exec_time P38、low_quality_issues_cleanup P40、vm_unit_tests P60、refactor_compile_switch P55）
-- **已废弃**: 3（native_call_abi、refactor_native_emit_call、native_call_abi）
+- **待开发**: 10（unify_c_backend_phase1 P70、unify_c_backend_phase2 P65、vm_unit_tests P60、split_ir_nodes P55、refactor_compile_switch P55、low_quality_issues_cleanup P40、benchmark_enhance_exec_time P38、deprecate_cranelift_backend P35）
+- **已废弃**: 5（native_call_abi、refactor_native_emit_call、native_call_abi、unify_c_backend 总任务）
 
-> 注：第74轮完成2个任务。fix_sys_path_hack_and_gate_docstring：消除唯一HIGH级sys_path_hack + 74个gate_no_docstring门禁问题。evaluator_unit_tests：新建 tests/test_evaluator.py（126测），覆盖15大测试类，evaluator.py零测试→126测试。测试总数781→907（+126），零回归。下阶段方向：compile_switch复杂度治理 + 架构债务启动 + VM测试补齐。
+> 第75轮评审完成。新增4个任务（架构治理3个 + 后端1个），完成4个任务（parser_unit_tests、evaluator_unit_tests、refactor_analyze_loops、fix_sys_path_hack_and_gate_docstring），废弃1个任务（unify_c_backend 总任务拆分为 phase1/phase2）。测试总数 907，HIGH级别问题清零。下阶段方向：最后测试盲区清零 + 复杂度收尾 + 架构债务启动。
