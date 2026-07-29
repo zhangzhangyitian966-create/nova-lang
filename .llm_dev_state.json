@@ -262,7 +262,11 @@
     "wasm_global_vars_fix",
     "wasmgc_storereg"
   ],
-  "failed_tasks": [],
+  "failed_tasks": [
+    "fix_native_test_import",
+    "split_ir_nodes_a1",
+    "unify_c_backend_phase1"
+  ],
   "task_history": [
     {
       "cycle": 77,
@@ -806,6 +810,44 @@
       "test_before": "0/0",
       "test_after": "0/0",
       "test_result": "fail"
+    },
+    {
+      "cycle": 78,
+      "timestamp": "2026-07-29T17:53:30.266654",
+      "planned_ids": [
+        "unify_c_backend_phase1",
+        "split_ir_nodes_a1",
+        "low_quality_issues_cleanup"
+      ],
+      "planned_sources": [
+        "architecture_mandatory",
+        "architecture_mandatory",
+        "review_driven"
+      ],
+      "results": [
+        {
+          "task_id": "unify_c_backend_phase1",
+          "task_name": "统一C后端Phase1（路径隔离+旧后端标记弃用） · 架构手术B",
+          "status": "failed",
+          "message": "路径切换后测试失败: 0/4"
+        },
+        {
+          "task_id": "split_ir_nodes_a1",
+          "task_name": "拆分ir_nodes A1：抽 ir_types.py（共享类型常量） · 架构手术A-1",
+          "status": "failed",
+          "message": "拆分后测试失败: 0/2"
+        },
+        {
+          "task_id": "fix_native_test_import",
+          "task_name": "修复原生后端测试导入",
+          "status": "failed",
+          "message": "找不到参考的导入模式"
+        }
+      ],
+      "architecture_alignment_score": 45,
+      "test_before": "0/4",
+      "test_after": "374/374",
+      "test_result": "fail"
     }
   ],
   "current_cycle": 72,
@@ -824,7 +866,9 @@
       "status": "pending",
       "depends_on": [],
       "reason": "来自 ARCHITECTURE_VISION.md §2.2 手术 B（三项立即架构手术） [ARCHITECTURE_VISION.md §2.2]",
-      "source": "architecture_mandatory"
+      "source": "architecture_mandatory",
+      "fail_count": 1,
+      "last_fail_cycle": 78
     },
     {
       "id": "split_ir_nodes_a1",
@@ -837,7 +881,9 @@
       "status": "pending",
       "depends_on": [],
       "reason": "来自 ARCHITECTURE_VISION.md §2.1 手术 A-1（三项立即架构手术） [ARCHITECTURE_VISION.md §2.1]",
-      "source": "architecture_mandatory"
+      "source": "architecture_mandatory",
+      "fail_count": 1,
+      "last_fail_cycle": 78
     },
     {
       "id": "low_quality_issues_cleanup",

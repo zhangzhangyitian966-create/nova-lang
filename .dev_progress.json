@@ -1,12 +1,13 @@
 {
   "completed": [
     "low_quality_issues_cleanup",
-    "dce_pass"
+    "dce_pass",
+    "inlining_pass"
   ],
   "failed": [
     "unify_c_backend_phase1",
     "split_ir_nodes_a1",
     "fix_native_test_import"
   ],
-  "last_update": "2026-07-29T17:53:26.826292"
+  "last_update": "2026-07-29T18:05:57.898892"
 }

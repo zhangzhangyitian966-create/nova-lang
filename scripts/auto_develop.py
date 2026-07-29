@@ -956,10 +956,433 @@ class TaskInlining(DevTask):
 
 
 # ============================================================
+# 新：架构战略 · LLM 智能开发系统三大任务（第 78 轮执行）
+# 参考：ARCHITECTURE_VISION.md §2.1 手术A-1 / §2.2 手术B / §5.3 审查清理
+# ============================================================
+
+
+class _ArchTaskMixin:
+    """公共 mixin：直接根据 state.tasks 元数据初始化 DevTask 字段 + 提供快速读写。"""
+
+    @classmethod
+    def init_from_state(cls, task_id):
+        state = _load_state_file() or {}
+        meta = next((t for t in state.get("tasks", []) if t.get("id") == task_id), {})
+        inst = cls()
+        inst.task_id = task_id
+        inst.name = meta.get("name") or task_id
+        inst.description = meta.get("reason") or meta.get("description") or inst.name
+        diff_map = {"1": "easy", "2": "easy", "3": "medium", "4": "medium", "5": "hard"}
+        diff = str(meta.get("difficulty") or "medium").lower()
+        for kw, lv in diff_map.items():
+            if kw in diff:
+                inst.difficulty = lv
+                break
+        else:
+            inst.difficulty = {"easy": "easy", "hard": "hard"}.get(diff, "medium")
+        inst.priority = int(meta.get("priority") or 80)
+        inst.category = meta.get("category") or "architecture"
+        inst.estimated_effort = meta.get("estimated_effort") or "1-2 小时"
+        return inst
+
+    def _read(self, rel):
+        return read_file(os.path.join(PROJECT_DIR, *rel.split("/")))
+
+    def _write(self, rel, content):
+        return write_file(os.path.join(PROJECT_DIR, *rel.split("/")), content)
+
+    def _path(self, rel):
+        return os.path.join(PROJECT_DIR, *rel.split("/"))
+
+
+class TaskSplitIRNodesA1(_ArchTaskMixin, DevTask):
+    """架构手术 A-1：从 ir/ir_nodes.py 抽出 ir/ir_types.py（纯类型常量+枚举+类型构造器）。
+
+    范围：IRType Enum、NovaType、8 个常用类型常量、8 个类型构造器（ListType/MapType/...）。
+    保持兼容性：ir_nodes.py 保留 re-export，外部导入不受影响。
+    """
+
+    def is_completed(self):
+        p = self._path("ir/ir_types.py")
+        if not os.path.exists(p):
+            return False
+        src = self._read("ir/ir_types.py")
+        return all(tok in src for tok in ("class IRType", "class NovaType", "INT_TYPE", "def ListType"))
+
+    def implement(self):
+        """A1 拆 ir_nodes → ir_types。策略：AST 级提取，不依赖行号。"""
+        import ast as _ast_mod
+        src = self._read("ir/ir_nodes.py")
+        if not src:
+            return False, "读取 ir_nodes.py 失败"
+
+        tree = _ast_mod.parse(src)
+        src_lines = src.split("\n")
+
+        # --- Step A: 从 AST 挑出类型系统相关节点，记录行号范围（1-based，inclusive） ---
+        KEEP_CLASSES = {"NovaType"}
+        KEEP_FUNCTIONS = {
+            "ListType", "MapType", "TupleType", "FnType", "ADTType",
+            "OptionType", "ResultType", "_iter_hir_children",
+        }
+        keep_ranges = []
+
+        def add_range(node):
+            s = getattr(node, "lineno", None)
+            e = getattr(node, "end_lineno", s)
+            if s is None:
+                return
+            s0, e0 = int(s), int(e or s)
+            # @dataclass/@dataclass(slots=True) 等装饰器通常紧贴在 class def 上一行或几行，
+            # 往前最多扫 3 行确保装饰器块被带入。
+            for j in range(max(1, s0 - 3), s0):
+                if src_lines[j - 1].lstrip().startswith("@"):
+                    s0 = j
+                else:
+                    break
+            keep_ranges.append((s0, e0))
+
+        # IRType enum 一定在 NovaType 之前，单独强制保留
+        for node in tree.body:
+            if isinstance(node, ast.ClassDef) and node.name == "IRType":
+                add_range(node)
+        for node in tree.body:
+            if isinstance(node, (ast.Import, ast.ImportFrom)):
+                add_range(node)
+        for node in tree.body:
+            if isinstance(node, ast.ClassDef) and node.name in KEEP_CLASSES:
+                add_range(node)
+            elif isinstance(node, ast.FunctionDef) and node.name in KEEP_FUNCTIONS:
+                add_range(node)
+        for node in tree.body:
+            if isinstance(node, ast.Assign):
+                for tgt in node.targets:
+                    if isinstance(tgt, ast.Name) and tgt.id.endswith("_TYPE"):
+                        add_range(node)
+                        break
+        keep_ranges.sort()
+        merged = []
+        for s, e in keep_ranges:
+            if merged and s <= merged[-1][1] + 2:
+                merged[-1] = (merged[-1][0], max(merged[-1][1], e))
+            else:
+                merged.append((s, e))
+
+        # --- Step B: 组装 ir_types.py 正文（按行号切片，保留原注释/空白）---
+        types_lines = []
+        for s, e in merged:
+            for i in range(s, e + 1):
+                if 1 <= i <= len(src_lines):
+                    types_lines.append(src_lines[i - 1])
+        types_body = "\n".join(types_lines).rstrip() + "\n"
+        # 必须手动补回被 AST 合并到类定义行的 @dataclass 装饰器
+        # （AST 将 @dataclass 视为装饰器，但合并范围时因行号 42=装饰器而 NovaType 行 43 本身
+        #  class 行的 ast.ClassDef.lineno 是 43（不是装饰器 42）。我们 add_range 已往前扫装饰器，
+        #  但如果 range 是 (43, 79) 则表明 class def 上没有装饰器行，这里补一下。）
+        if "@dataclass" not in types_body and "class NovaType:" in types_body:
+            types_body = types_body.replace(
+                "class NovaType:",
+                "@dataclass\nclass NovaType:",
+                1,
+            )
+        need_imports = []
+        if "from dataclasses import" not in types_body:
+            need_imports.append("from dataclasses import dataclass, field")
+        if "from enum import" not in types_body:
+            need_imports.append("from enum import Enum, auto")
+        if "from typing import" not in types_body:
+            need_imports.append("from typing import Any, Dict, List, Optional, Tuple")
+        if need_imports:
+            types_body = "\n".join(need_imports) + "\n\n" + types_body
+        header = (
+            '"""Nova IR 共享类型模块（ARCHITECTURE_VISION.md §2.1 手术 A-1 产物）。\n'
+            "\n"
+            "从 ir/ir_nodes.py 上帝模块中拆出的第一层：纯类型枚举 + 统一类型表示 +\n"
+            "常用类型构造器。三层 IR（HIR/MIR/LIR）共享这些定义。严禁依赖 HIR/MIR/LIR 节点。\n"
+            '"""\n\n'
+        )
+        types_py = header + types_body
+        if not self._write("ir/ir_types.py", types_py):
+            return False, "写入 ir/ir_types.py 失败"
+        try:
+            _ast_mod.parse(types_py)
+        except SyntaxError as exc:
+            return False, f"ir_types.py 语法错误: {exc}"
+
+        # --- Step C: 组装新 ir_nodes.py（reexport + 原 IR 节点定义） ---
+        cut_line = len(src_lines) + 1
+        for node in tree.body:
+            if isinstance(node, ast.ClassDef) and node.name.startswith(("HIR", "MIR", "LIR")):
+                cut_line = min(cut_line, node.lineno)
+                break
+        if cut_line > len(src_lines):
+            for node in tree.body:
+                if isinstance(node, ast.ClassDef) and node.name == "NovaType":
+                    cut_line = (node.end_lineno or node.lineno) + 3
+                    break
+        rest_lines = src_lines[cut_line - 1:]
+        # 原 ir_nodes.py 顶层的 from dataclasses / from typing 导入块原本落在 cut_line
+        # 之前（因为它们在文件顶部）。此处为 reexport 之后追加 dataclass/typing 必要导入，
+        # 避免 HIRModule 等 dataclass 定义找不到 dataclass/field。
+        need_dc = False
+        if not any(re.match(r"from\s+dataclasses\s+import\s+", ln) for ln in rest_lines):
+            need_dc = True
+        need_ty = False
+        if not any(re.match(r"from\s+typing\s+import\s+", ln) for ln in rest_lines):
+            need_ty = True
+        prefix_imports = ""
+        if need_dc:
+            prefix_imports += "from dataclasses import dataclass, field, replace  # noqa: F401\n"
+        if need_ty:
+            prefix_imports += "from typing import Any, Callable, Dict, List, Optional, Tuple, Union  # noqa: F401\n"
+        if prefix_imports:
+            prefix_imports += "\n"
+        reexport = (
+            "# ============================================================\n"
+            "# 兼容层：类型系统已迁移到 ir.ir_types（架构手术 A-1，§2.1）\n"
+            "# 新代码请直接 from nova.ir.ir_types import X\n"
+            "# ============================================================\n"
+            "from .ir_types import (  # noqa: F401\n"
+            "    ADTType,\n"
+            "    BOOL_TYPE,\n"
+            "    CHAR_TYPE,\n"
+            "    CLOSURE_TYPE,\n"
+            "    FLOAT_TYPE,\n"
+            "    FnType,\n"
+            "    INT_TYPE,\n"
+            "    IRType,\n"
+            "    ListType,\n"
+            "    MapType,\n"
+            "    NEVER_TYPE,\n"
+            "    NovaType,\n"
+            "    OptionType,\n"
+            "    ResultType,\n"
+            "    STRING_TYPE,\n"
+            "    TupleType,\n"
+            "    UNIT_TYPE,\n"
+            "    _iter_hir_children,\n"
+            ")\n\n"
+        )
+        new_ir_nodes = reexport + prefix_imports + "\n".join(rest_lines)
+        if not self._write("ir/ir_nodes.py", new_ir_nodes):
+            return False, "重写 ir/ir_nodes.py 失败"
+        # HIR* 等 @dataclass 定义的装饰器行号（通常紧跟 class def 上一行）在 cut_line
+        # 之前就被丢掉了；add_range 时仅针对 keep_classes/functions 扫描，导致 reexport
+        # 之后 HIRModule/HIRExpr/... 没有 @dataclass，构造时报 takes no arguments。
+        # 这里统一在落盘后用正则为所有 "class HIR*:" 等定义补齐 @dataclass（缺装饰器时）。
+        patch_src = self._read("ir/ir_nodes.py")
+        import re as _re
+        DATACLASS_CLS_RE = _re.compile(r"(^|\n)( *)(class (?:HIR|MIR|LIR)\w+:)")
+        def _inject(match):
+            head, indent, clsdef = match.group(1), match.group(2), match.group(3)
+            # 往上看 3 行（match 之前已在 pattern 中包含 \n，所以我们再看整个文件）
+            return head + indent + "@dataclass\n" + indent + clsdef
+        # 只在缺失装饰器的类定义前注入，避免重复 @dataclass
+        lines = patch_src.split("\n")
+        new_lines = []
+        i = 0
+        while i < len(lines):
+            line = lines[i]
+            stripped = line.lstrip()
+            leading_spaces = len(line) - len(stripped)
+            indent = " " * leading_spaces
+            is_target = (
+                stripped.startswith("class HIR")
+                or stripped.startswith("class MIR")
+                or stripped.startswith("class LIR")
+            )
+            if is_target and stripped.endswith(":"):
+                has_deco = False
+                for j in range(max(0, i - 3), i):
+                    if lines[j].strip().startswith("@dataclass"):
+                        has_deco = True; break
+                if not has_deco:
+                    # 注入：在类定义前加入 @dataclass（保持缩进）
+                    new_lines.append(f"{indent}@dataclass")
+            new_lines.append(line)
+            i += 1
+        patched = "\n".join(new_lines)
+        if patched != patch_src:
+            self._write("ir/ir_nodes.py", patched)
+        try:
+            _ast_mod.parse(self._read("ir/ir_nodes.py"))
+        except SyntaxError as exc:
+            return False, f"ir_nodes.py 语法错误: {exc}"
+
+        # --- Step D: ir/__init__.py 追加兼容导出 ---
+        init_path = self._path("ir/__init__.py")
+        if os.path.exists(init_path):
+            init_src = self._read("ir/__init__.py")
+            if "ir_types" not in init_src and (".ir_nodes" in init_src or "ir_nodes" in init_src):
+                init_src += (
+                    "\n# 架构手术 A-1 兼容导出：类型常量模块\n"
+                    "from .ir_types import *  # noqa: F401,F403\n"
+                )
+                self._write("ir/__init__.py", init_src)
+
+        # --- Step E: 测试 ---
+        ok, desc, _, _ = run_tests()
+        if not ok:
+            return False, f"拆分后测试失败: {desc}"
+        return True, f"ir_types.py 抽出 OK + re-export 保留 + {desc}"
+
+
+class TaskUnifyCBackendPhase1(_ArchTaskMixin, DevTask):
+    """架构手术 B Phase1：新 C 后端移入 backend/c/ + 旧 c_codegen.py 标记弃用 + 入口切换。"""
+
+    def is_completed(self):
+        return (
+            os.path.exists(self._path("backend/c/__init__.py"))
+            and os.path.exists(self._path("backend/c/lir_to_c.py"))
+            and "__DEPRECATED__ = True" in (self._read("c_codegen.py") or "")
+        )
+
+    def implement(self):
+        lir_c_src = self._read("backend/lir_c_backend.py")
+        if not lir_c_src:
+            return False, "backend/lir_c_backend.py 为空"
+        lir_to_c_header = (
+            '"""Nova LIR → C 代码生成统一入口（架构手术 B Phase 1 · §2.2 新路径）。\n'
+            "\n"
+            "新路径：nova.backend.c.lir_to_c.LIRCBackend\n"
+            "旧路径：nova.c_codegen.CCodeGen （已弃用，Phase 2 删除）\n"
+            '"""\n\n'
+        )
+        lir_to_c_src = lir_to_c_header + lir_c_src.lstrip("\n")
+        # 相对导入修正：原 backend/lir_c_backend.py 在 backend/ 根，新文件在 backend/c/
+        # from ..ir.X → from ...ir.X（多上升一级到 nova → nova.ir）
+        # from .common → from ..common（common.py 在 backend/ 根）
+        lir_to_c_src = re.sub(
+            r"^from \.\.ir\.", "from ...ir.", lir_to_c_src, count=99, flags=re.MULTILINE
+        )
+        lir_to_c_src = re.sub(
+            r"^from \.common import", "from ..common import", lir_to_c_src, count=99, flags=re.MULTILINE
+        )
+        self._write("backend/c/lir_to_c.py", lir_to_c_src)
+        init_src = (
+            '"""Nova C 后端包（架构手术 B Phase 1 · §2.2 路径隔离）。"""\n'
+            "\n"
+            "from .lir_to_c import LIRCBackend  # noqa: F401\n"
+            "\n"
+            '__all__ = ["LIRCBackend"]\n'
+        )
+        self._write("backend/c/__init__.py", init_src)
+
+        # 2) 旧 c_codegen.py 顶部加弃用标记
+        old = self._read("c_codegen.py") or ""
+        if "__DEPRECATED__" not in old:
+            dep = (
+                "# ============================================================\n"
+                "# 已弃用 · 架构手术 B Phase 1 标记（ARCHITECTURE_VISION.md §2.2）\n"
+                "# 新代码请使用 nova.backend.c.LIRCBackend\n"
+                "# Phase 2（M-ARCH 子任务）将彻底删除本文件。\n"
+                "# ============================================================\n"
+                "import warnings as _warnings\n"
+                "_warnings.warn(\n"
+                '    "nova.c_codegen 已弃用，请改为 from nova.backend.c import LIRCBackend",\n'
+                "    DeprecationWarning,\n"
+                "    stacklevel=2,\n"
+                ")\n"
+                "__DEPRECATED__ = True\n\n"
+            )
+            self._write("c_codegen.py", dep + old)
+
+        # 3) compiler_cli.py: 切换到新路径（用别名 CCodeGen 保持兼容）
+        cli_src = self._read("compiler_cli.py")
+        if cli_src and "from .c_codegen import CCodeGen" in cli_src:
+            new_import = (
+                "# 架构手术 B Phase 1 · §2.2：切换到新 C 后端路径 backend/c\n"
+                "from .backend.c.lir_to_c import LIRCBackend as CCodeGen  # noqa: F401\n"
+            )
+            cli_src = cli_src.replace("from .c_codegen import CCodeGen", new_import)
+            self._write("compiler_cli.py", cli_src)
+
+        # 4) __init__.py: 同步切换
+        initpkg_src = self._read("__init__.py")
+        if initpkg_src and "from .c_codegen import CCodeGen" in initpkg_src:
+            new_line = (
+                "# 架构手术 B Phase 1 · §2.2：切换到新 C 后端路径 backend/c\n"
+                "from .backend.c.lir_to_c import LIRCBackend as CCodeGen  # noqa: F401\n"
+            )
+            initpkg_src = initpkg_src.replace("from .c_codegen import CCodeGen", new_line)
+            self._write("__init__.py", initpkg_src)
+
+        for rel in ("backend/c/lir_to_c.py", "backend/c/__init__.py", "c_codegen.py", "compiler_cli.py", "__init__.py"):
+            try:
+                ast.parse(self._read(rel))
+            except SyntaxError as exc:
+                return False, f"{rel} 语法错误: {exc}"
+
+        ok, desc, _, _ = run_tests()
+        if not ok:
+            return False, f"路径切换后测试失败: {desc}"
+        return True, f"backend/c/ 新路径 OK + 旧 c_codegen 弃用标记 + 入口切换 + {desc}"
+
+
+class TaskCleanSysPathHacksReviewV77(_ArchTaskMixin, DevTask):
+    """审查驱动：清理 AUTO_REVIEW_LOG.md 标为 HIGH 的 19 处 sys_path_hack。"""
+
+    HIT_FILES = [
+        "backend/compiler_pipeline.py",
+        "backend/cranelift_backend.py",
+        "backend/lir_c_backend.py",
+        "backend/native_backend.py",
+        "backend/wasm_backend.py",
+        "compiler_cli.py",
+        "ir/hir_lowering.py",
+        "tests/test_backends.py",
+        "tests/test_c_codegen.py",
+        "tests/test_ir.py",
+        "tests/test_native_backend.py",
+        "tests/test_nova.py",
+    ]
+
+    def is_completed(self):
+        for rel in self.HIT_FILES:
+            src = self._read(rel) or ""
+            if "sys.path.insert" in src:
+                return False
+        return True
+
+    def implement(self):
+        cleaned_any = False
+        for rel in self.HIT_FILES:
+            src = self._read(rel)
+            if not src:
+                continue
+            if "sys.path.insert" not in src:
+                continue
+            new_lines = []
+            for line in src.split("\n"):
+                if "sys.path.insert" in line:
+                    cleaned_any = True
+                    continue
+                new_lines.append(line)
+            tmp = "\n".join(new_lines)
+            if re.search(r"^import\s+sys\s*$", tmp, re.MULTILINE) and "sys." not in re.sub(r"#.*$", "", tmp, flags=re.MULTILINE):
+                tmp = re.sub(r"^import\s+sys\s*$\n?", "", tmp, count=1, flags=re.MULTILINE)
+                cleaned_any = True
+            self._write(rel, tmp)
+            try:
+                ast.parse(self._read(rel))
+            except SyntaxError as exc:
+                return False, f"{rel} 清理后语法错误: {exc}"
+        if not cleaned_any:
+            return True, "19 处 sys_path_hack 均已清理，无需再动"
+        ok, desc, _, _ = run_tests()
+        if not ok:
+            return False, f"清理 sys_path_hack 后测试失败: {desc}"
+        return True, f"19 处 HIGH sys_path_hack 清理完毕 + {desc}"
+
+
+# ============================================================
 # 任务注册表
 # ============================================================
 
 ALL_TASKS = [
+    TaskSplitIRNodesA1.init_from_state("split_ir_nodes_a1"),
+    TaskUnifyCBackendPhase1.init_from_state("unify_c_backend_phase1"),
+    TaskCleanSysPathHacksReviewV77.init_from_state("low_quality_issues_cleanup"),
     TaskDCE(),
     TaskFixNativeTestImport(),
     TaskInlining(),
@@ -1075,10 +1498,41 @@ def persist_state_after_cycle(
 
 
 class AutoDeveloper:
+    """AutoDeveloper：优先从 state.tasks（LLM 智能开发系统任务池）动态构造任务。
+
+    架构战略 §2 修正：
+      • get_next_task() 先扫描 state.tasks 中匹配到可执行 DevTask 实现的条目
+        （通过 id → 类映射），再回退到内建 ALL_TASKS。
+      • get_current_cycle() 改为从 state.cycles+1 读取（原基于 DEV_LOG --- 分隔
+        符的方式会被 AUTO_DEVELOP_LOG.md 每轮追加误算）。
+    """
+
+    _STATE_TASK_CLASS_MAP = {
+        "split_ir_nodes_a1": TaskSplitIRNodesA1,
+        "unify_c_backend_phase1": TaskUnifyCBackendPhase1,
+        "low_quality_issues_cleanup": TaskCleanSysPathHacksReviewV77,
+    }
+
     def __init__(self):
         self.completed_tasks = []
         self.failed_tasks = []
         self.results = []
+
+    def _iter_state_tasks_as_devtask(self):
+        state = _load_state_file() or {}
+        out = []
+        for t in state.get("tasks", []) or []:
+            if t.get("status") != "pending":
+                continue
+            cls = self._STATE_TASK_CLASS_MAP.get(str(t.get("id", "")))
+            if cls is None:
+                continue
+            try:
+                inst = cls.init_from_state(t["id"])
+                out.append(inst)
+            except Exception:  # noqa: BLE001
+                continue
+        return out
 
     def load_progress(self):
         if os.path.exists(PROGRESS_FILE):
@@ -1108,20 +1562,32 @@ class AutoDeveloper:
 
     def get_next_task(self):
         candidates = []
-        for task in ALL_TASKS:
-            if task.task_id in self.completed_tasks:
-                continue
-            if task.task_id in self.failed_tasks:
+        seen_ids = set()
+        # 1) 优先从 state.tasks 动态构造任务（LLM 智能开发系统主任务池）
+        for task in self._iter_state_tasks_as_devtask():
+            if task.task_id in self.completed_tasks or task.task_id in self.failed_tasks:
                 continue
             if task.is_completed():
                 self.completed_tasks.append(task.task_id)
                 continue
             candidates.append(task)
+            seen_ids.add(task.task_id)
+        # 2) 内建 ALL_TASKS 作为 fallback（state.tasks 中未覆盖的传统任务）
+        for task in ALL_TASKS:
+            if task.task_id in seen_ids:
+                continue
+            if task.task_id in self.completed_tasks or task.task_id in self.failed_tasks:
+                continue
+            if task.is_completed():
+                self.completed_tasks.append(task.task_id)
+                continue
+            candidates.append(task)
+            seen_ids.add(task.task_id)
 
         if not candidates:
             return None
 
-        candidates.sort(key=lambda t: -t.priority)
+        candidates.sort(key=lambda t: -getattr(t, "priority", 0))
         return candidates[0]
 
     def run_task(self, task):
@@ -1370,12 +1836,14 @@ def git_commit_and_push(cycle_num, completed_count, results, planned_ids, planne
 
 
 def get_current_cycle():
-    if not os.path.exists(DEV_LOG):
-        return 1
-    with open(DEV_LOG, "r") as f:
-        content = f.read()
-    count = content.count("---")
-    return count + 1
+    """架构战略 §2 修正：轮次从 state.cycles 读取（LLM 智能开发系统维护的权威计数）。
+
+    原实现基于 DEV_LOG 中 '---' 分隔符计数，会被 AUTO_DEVELOP_LOG.md 每轮追加的
+    '---' 分隔误算（例如真实 cycles=77 被算成 3）。此处改为读取 .llm_dev_state.json
+    的 cycles 字段，+1 作为「即将开始的轮次号」（与 main() 中 next_cycle = current+1 一致）。
+    """
+    state = _load_state_file() or {}
+    return int(state.get("cycles", 0) or 0) + 1
 
 
 # ============================================================
