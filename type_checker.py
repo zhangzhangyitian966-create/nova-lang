@@ -1804,6 +1804,7 @@ class TypeChecker:
         """根据泛型基名和参数构建对应的 NovaType。
 
         支持 List、Map、Option、Result 及自定义 ADT。
+        对内置泛型类型进行参数数量校验，防止静默降级。
 
         Args:
             base: 泛型基名（如 "List", "Option"）。
@@ -1811,15 +1812,39 @@ class TypeChecker:
 
         Returns:
             构建好的泛型 NovaType。
+
+        Raises:
+            TypeCheckError: 参数数量不匹配时抛出。
         """
         if base == "List":
-            return ListType(params[0]) if params else ListType(TypeVar("T"))
-        if base == "Map" and len(params) >= 2:
+            if len(params) != 1:
+                raise TypeCheckError(
+                    f"List 需要恰好 1 个类型参数，实际得到 {len(params)} 个"
+                )
+            return ListType(params[0])
+        if base == "Map":
+            if len(params) != 2:
+                raise TypeCheckError(
+                    f"Map 需要恰好 2 个类型参数，实际得到 {len(params)} 个"
+                )
             return MapType(params[0], params[1])
         if base == "Option":
+            if len(params) != 1:
+                raise TypeCheckError(
+                    f"Option 需要恰好 1 个类型参数，实际得到 {len(params)} 个"
+                )
             return ADTType("Option", params)
         if base == "Result":
+            if len(params) != 2:
+                raise TypeCheckError(
+                    f"Result 需要恰好 2 个类型参数，实际得到 {len(params)} 个"
+                )
             return ADTType("Result", params)
+        # 自定义 ADT（当前不支持类型参数）
+        if params:
+            raise TypeCheckError(
+                f"类型 '{base}' 不支持类型参数，实际得到 {len(params)} 个"
+            )
         return ADTType(base, params)
 
     # ------------------------------------------------------------------

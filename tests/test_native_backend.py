@@ -28,7 +28,9 @@ from nova.ir.ir_nodes import (
     LIRLoadConst,
     LIRReturn,
     LIRCall,
+    LIRStoreGlobal,
     INT_TYPE,
+    FLOAT_TYPE,
 )
 
 
@@ -365,6 +367,38 @@ class TestNativeCodeGen(unittest.TestCase):
                          struct.pack('<d', 3.14))
         self.assertEqual(codegen.string_constants[0][0],
                          b'hello\x00')
+
+    def test_store_global_float(self):
+        """浮点全局变量存储应发射 movq rax, xmm0 指令"""
+        from nova.backend.native_backend import _EmitContext
+
+        codegen = NativeCodeGen()
+        codegen._global_var_map["test_float"] = 0
+
+        e = X86_64Emitter()
+        # vreg 分配到栈上，load_to_reg 会发射 movsd xmm0, [rsp+offset]
+        ctx = _EmitContext(
+            e=e,
+            func_name="test",
+            vreg_alloc={"v0": ("stack", 0)},
+            label_offsets={},
+            jump_fixups=[],
+        )
+
+        instr = LIRStoreGlobal(global_name="test_float")
+        instr.src_locs = [("v0", FLOAT_TYPE)]
+
+        codegen._emit_store_global(instr, ctx)
+        code = e.get_code()
+
+        # 检查包含 movsd xmm0, [rsp+0] (浮点加载)
+        # F2 0F 10 44 00  (movsd xmm0, [rsp + 0], 使用 SIB 字节)
+        self.assertIn(bytes([0xF2, 0x0F, 0x10, 0x44, 0x00]), code)
+        # 检查包含 movq rax, xmm0
+        # F2 0F D6 C0
+        self.assertIn(bytes([0xF2, 0x0F, 0xD6, 0xC0]), code)
+        # 检查包含 mov [rip+disp32], rax
+        self.assertIn(bytes([0x48, 0x89, 0x05]), code)
 
 
 class TestEndToEndNative(unittest.TestCase):

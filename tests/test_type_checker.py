@@ -395,5 +395,90 @@ class TestTypeCheckerBuiltins(unittest.TestCase):
         self.assertEqual(ty.return_type, INT_T)
 
 
+class TestGenericParamCount(unittest.TestCase):
+    """泛型参数数量校验测试"""
+
+    def setUp(self):
+        from nova.type_checker import TypeChecker
+
+        self.tc = TypeChecker()
+
+    def _from_ast_type_str(self, src: str):
+        """从类型表达式字符串解析为 NovaType"""
+        from nova.parser import Parser
+        from nova.lexer import Lexer
+
+        tokens = Lexer(src).tokenize()
+        # 包装为函数参数类型表达式以便解析
+        ast = Parser(tokens, source=src).parse()
+        # 提取函数声明的参数类型
+        fn_decl = ast.body[0]
+        return self.tc._from_ast_type(fn_decl.params[0].type_annotation)
+
+    def test_list_correct_arity(self):
+        """List[T] 参数数量正确时应通过"""
+        ty = self.tc._make_generic_type("List", [INT_T])
+        self.assertIsInstance(ty, ListType)
+
+    def test_list_too_few_params(self):
+        """List[] 参数数量不足时应报错"""
+        with self.assertRaises(Exception) as ctx:
+            self.tc._make_generic_type("List", [])
+        self.assertIn("List 需要恰好 1 个类型参数", str(ctx.exception))
+
+    def test_list_too_many_params(self):
+        """List[Int, String] 参数数量过多时应报错"""
+        with self.assertRaises(Exception) as ctx:
+            self.tc._make_generic_type("List", [INT_T, STRING_T])
+        self.assertIn("List 需要恰好 1 个类型参数", str(ctx.exception))
+
+    def test_map_correct_arity(self):
+        """Map[K, V] 参数数量正确时应通过"""
+        ty = self.tc._make_generic_type("Map", [STRING_T, INT_T])
+        self.assertIsInstance(ty, MapType)
+
+    def test_map_too_few_params(self):
+        """Map[Int] 参数数量不足时应报错"""
+        with self.assertRaises(Exception) as ctx:
+            self.tc._make_generic_type("Map", [INT_T])
+        self.assertIn("Map 需要恰好 2 个类型参数", str(ctx.exception))
+
+    def test_option_correct_arity(self):
+        """Option[T] 参数数量正确时应通过"""
+        ty = self.tc._make_generic_type("Option", [INT_T])
+        self.assertIsInstance(ty, ADTType)
+        self.assertEqual(ty.name, "Option")
+
+    def test_option_too_many_params(self):
+        """Option[Int, String] 参数数量过多时应报错"""
+        with self.assertRaises(Exception) as ctx:
+            self.tc._make_generic_type("Option", [INT_T, STRING_T])
+        self.assertIn("Option 需要恰好 1 个类型参数", str(ctx.exception))
+
+    def test_result_correct_arity(self):
+        """Result[T, E] 参数数量正确时应通过"""
+        ty = self.tc._make_generic_type("Result", [INT_T, STRING_T])
+        self.assertIsInstance(ty, ADTType)
+        self.assertEqual(ty.name, "Result")
+
+    def test_result_too_few_params(self):
+        """Result[Int] 参数数量不足时应报错"""
+        with self.assertRaises(Exception) as ctx:
+            self.tc._make_generic_type("Result", [INT_T])
+        self.assertIn("Result 需要恰好 2 个类型参数", str(ctx.exception))
+
+    def test_custom_adt_rejects_params(self):
+        """自定义 ADT 不支持类型参数"""
+        with self.assertRaises(Exception) as ctx:
+            self.tc._make_generic_type("Color", [INT_T])
+        self.assertIn("'Color' 不支持类型参数", str(ctx.exception))
+
+    def test_custom_adt_no_params(self):
+        """自定义 ADT 无类型参数时应通过"""
+        ty = self.tc._make_generic_type("Color", [])
+        self.assertIsInstance(ty, ADTType)
+        self.assertEqual(ty.name, "Color")
+
+
 if __name__ == "__main__":
     unittest.main()

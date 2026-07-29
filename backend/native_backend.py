@@ -1606,6 +1606,9 @@ class NativeCodeGen:
 
         通过 RIP-relative 寻址将值存储到数据段的全局变量位置。
         复用 data_fixups 机制进行地址回填。
+
+        浮点值通过 movq 将 XMM 位模式拷贝到 RAX，再统一用 RAX 存储，
+        避免新增 RIP-relative 浮点存储指令。
         """
         e = ctx.e
         if not instr.src_locs or not instr.global_name:
@@ -1617,15 +1620,13 @@ class NativeCodeGen:
         # 加载源值到 RAX（整数）或 XMM0（浮点）
         ctx.load_to_reg(src_name, RAX, is_float=is_float)
 
-        # mov [rip + 0], RAX（RIP-relative 存储整数）
-        fixup_offset = e.mov_rip_reg(RAX)
         if is_float:
-            # 浮点值需要单独的 movsd [rip + 0], xmm0
-            # 先撤销上面的整数存储占位，改用浮点路径
-            # 由于 x86_64 emitter 可能没有 movsd_rip_reg，我们使用 movq
-            # xmm0 -> rax（位模式拷贝），然后 mov [rip], rax
-            # 上面的 load_to_reg 已经把值加载到 RAX 了（整数路径）
-            pass
+            # 浮点值在 XMM0 中，通过 movq 将位模式拷贝到 RAX，
+            # 再用统一的整数存储指令写入全局变量位置。
+            e.movq_gpr_xmm(RAX, XMM0)
+
+        # mov [rip + 0], RAX（RIP-relative 存储）
+        fixup_offset = e.mov_rip_reg(RAX)
 
         # 记录数据段回填信息
         data_off = self._global_var_map.get(instr.global_name)

@@ -1,8 +1,8 @@
 {
-  "cycles": 52,
-  "frontend_completed": 35,
-  "backend_completed": 38,
-  "last_review_cycle": 48,
+  "cycles": 53,
+  "frontend_completed": 36,
+  "backend_completed": 39,
+  "last_review_cycle": 51,
   "current_review_cycle": 51,
   "completed_tasks": [
     "frontend_try_expr_typecheck",
@@ -89,7 +89,9 @@
     "FRONTEND-034",
     "backend_closure_memory_leak_fix",
     "frontend_parser_block_boundary",
-    "backend_cranelift_todo_fatal"
+    "backend_cranelift_todo_fatal",
+    "frontend_generic_param_count_check",
+    "backend_native_float_global_store"
   ],
   "failed_tasks": [],
   "deprecated_tasks": [
@@ -103,6 +105,28 @@
   ],
   "task_history": [
     {
+      "cycle": 53,
+      "task_id": "frontend_generic_param_count_check",
+      "name": "添加泛型参数数量校验",
+      "track": "frontend",
+      "difficulty": "easy",
+      "priority": 60,
+      "result": "success",
+      "details": "前端增强任务。type_checker.py _make_generic_type 原来对泛型参数数量不做任何校验：List[Int, String] 会静默忽略第二个参数，Map[Int] 会降级为 ADTType 而非 MapType，自定义 ADT 传入类型参数也被静默接受。修复：为 List/Map/Option/Result 和自定义 ADT 分别添加参数数量校验，不匹配时抛出 TypeCheckError。新增 TestGenericParamCount 测试类 11 个测试覆盖所有边界情况。修改 1 个文件（type_checker.py）约 25 行代码，新增 1 个测试文件约 90 行代码。测试 919 passed（+12 新测试），无回归。前端 36/36 完成。",
+      "timestamp": "2026-07-29 08:30"
+    },
+    {
+      "cycle": 53,
+      "task_id": "backend_native_float_global_store",
+      "name": "修复 Native 后端浮点全局变量存储生成错误代码",
+      "track": "backend",
+      "difficulty": "medium",
+      "priority": 85,
+      "result": "success",
+      "details": "P1-新2 清零。native_backend.py _emit_store_global 对浮点值原来先发射 mov [rip], RAX（整数存储），然后 if is_float: pass，没有任何修复或重发射浮点存储。修复：在 ctx.load_to_reg 之后，如果是浮点值，添加 e.movq_gpr_xmm(RAX, XMM0) 将 XMM0 的位模式拷贝到 RAX，再用统一的整数存储指令 mov [rip], RAX 写入全局变量位置。新增 test_store_global_float 测试验证指令序列中包含 movsd xmm0, [rsp]、movq rax, xmm0 和 mov [rip], rax。修改 1 个文件（native_backend.py）约 10 行代码，新增 1 个测试约 30 行代码。测试 919 passed，无回归。后端 39/56 完成。Native 后端完成度维持 ~88%。",
+      "timestamp": "2026-07-29 08:45"
+    },
+    {
       "cycle": 52,
       "task_id": "frontend_parser_block_boundary",
       "name": "修复 Parser 块边界静默吞错",
@@ -110,7 +134,7 @@
       "difficulty": "easy",
       "priority": 55,
       "result": "success",
-      "details": "前端唯一剩余审计问题。parser.py _parse_block 中当表达式后既无 ; 也无 RBRACE 时，原代码直接将表达式加入 stmts 而不检查后续 token 是否合法。保守修复：仅当后续 token 是明显不能开始新表达式的符号（RPAREN、RBRACKET、COMMA）时才抛出 ParseError。这样既捕获了真实语法错误（如 { x + y ) }），又保持了对 Nova 合法换行分隔语法的兼容性（如 if ... then continue\\nresult = ...）。修改 1 个文件（parser.py）约 8 行代码。测试 907 passed，无回归。前端 35/35 完成。",
+      "details": "前端唯一剩余审计问题。parser.py _parse_block 中当表达式后既无 ; 也无 RBRACE 时，原代码直接将表达式加入 stmts 而不检查后续 token 是否合法。保守修复：仅当后续 token 是明显不能开始新表达式的符号（RPAREN、RBRACKET、COMMA）时才抛出 ParseError。这样既捕获了真实语法错误（如 { x + y ) }），又保持了对 Nova 合法换行分隔语法的兼容性（如 if ... then continue\nresult = ...）。修改 1 个文件（parser.py）约 8 行代码。测试 907 passed，无回归。前端 35/35 完成。",
       "timestamp": "2026-07-29 07:15"
     },
     {
@@ -262,12 +286,12 @@
     {
       "task_id": "backend_native_float_global_store",
       "name": "修复 Native 后端浮点全局变量存储生成错误代码",
-      "description": "native_backend.py _emit_store_global 对浮点值先发射 mov [rip], RAX（整数存储），然后注释说'撤销'但实际 pass，没有任何撤销或重发射浮点存储。需区分整数/浮点路径，浮点值用 movsd [rip], XMM 寄存器。",
+      "description": "native_backend.py _emit_store_global 对浮点值先发射 mov [rip], RAX（整数存储），然后注释说'撤销'但实际 pass，没有任何撤销或重发射浮点存储。已修复：通过 movq_gpr_xmm(RAX, XMM0) 将浮点位模式拷贝到 RAX 再统一存储。",
       "track": "backend",
       "difficulty": "medium",
       "priority": 85,
       "estimated_effort": "2-3小时",
-      "status": "pending",
+      "status": "completed",
       "source": "code_audit_51",
       "depends_on": []
     },
