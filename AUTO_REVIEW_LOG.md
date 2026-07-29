@@ -17351,3 +17351,284 @@ type_checker.py:413: in check_program
 ---
 
 *本报告由 Nova Auto Review v2.0 自动生成*
+
+---
+
+# 第 1512 轮 Nova 深度审查报告 (v2.0)
+
+> 生成时间: 2026-07-29 01:20:16
+> 审查版本: v0.3.0
+
+## 1. 审查概览
+
+| 指标 | 数值 |
+|------|------|
+| 扫描文件数 | 48 |
+| 代码行数 | 32,667 |
+| 函数总数 | 2032 |
+| 类总数 | 347 |
+| 发现问题数 | **1401** |
+| CRITICAL | 0 |
+| HIGH | 1 |
+| MEDIUM | 66 |
+| LOW | 1334 |
+
+### 严重程度分布
+
+- 🔴 **CRITICAL**: 0 个
+- 🟠 **HIGH**: 1 个
+- 🟡 **MEDIUM**: 66 个
+- 🟢 **LOW**: 1334 个
+
+## 2. 代码质量审查
+
+### 2.1 问题类型分布
+
+| 问题类型 | 数量 | 严重级别 |
+|----------|------|----------|
+| no_docstring | 671 | LOW |
+| magic_number | 544 | LOW |
+| print_debug | 105 | LOW |
+| unused_import | 32 | MEDIUM |
+| class_too_large | 20 | MEDIUM |
+| inconsistent_naming | 14 | LOW |
+| function_too_long | 8 | MEDIUM |
+| cyclomatic_complexity | 5 | MEDIUM |
+| too_broad_exception | 1 | MEDIUM |
+| sys_path_hack | 1 | HIGH |
+
+### 2.2 高优先级问题 (CRITICAL + HIGH)
+
+1. **[HIGH] sys_path_hack**
+   - 文件: `tests/test_mir_lowering_unit.py:16`
+   - 描述: sys.path 修改，非标准导入方式
+   - 代码: `sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))`
+
+### 2.3 各模块问题统计 (Top 10)
+
+| 模块 | 问题数 |
+|------|--------|
+| tests | 692 |
+| (root) | 362 |
+| backend | 264 |
+| ir | 82 |
+| tree-sitter-nova | 1 |
+
+## 3. 架构审查
+
+### 3.1 模块概览
+
+- 模块总数: **48**
+- 平均依赖数: **1.31**
+- 循环依赖: **0** 个
+- sys.path hack: **1** 处
+
+### 3.2 循环依赖
+
+✅ 未发现循环依赖
+
+### 3.3 耦合度分析
+
+#### 高被依赖模块 (入度 Top 10)
+
+| 模块 | 入度 (被依赖数) |
+|------|----------------|
+| ir.ir_nodes | 10 |
+| errors | 8 |
+| ast_nodes | 7 |
+| lexer | 5 |
+| parser | 4 |
+| type_checker | 4 |
+| compiler | 3 |
+| environment | 3 |
+| evaluator | 2 |
+| ir.cfg_utils | 2 |
+
+#### 高依赖模块 (出度 Top 10)
+
+| 模块 | 出度 (依赖数) |
+|------|--------------|
+|  | 10 |
+| backend.compiler_pipeline | 10 |
+| cli | 8 |
+| compiler_cli | 6 |
+| parser | 3 |
+| evaluator | 3 |
+| ir.mir_lowering | 2 |
+| tests.test_mir_lowering_unit | 2 |
+| backend.native_backend | 2 |
+| backend.lir_c_backend | 2 |
+
+### 3.5 代码量分布
+
+| 目录 | 文件数 | 行数 | 占比 |
+|------|--------|------|------|
+| (root) | 14 | 10,210 | 31.3% |
+| tests | 18 | 9,897 | 30.3% |
+| ir | 7 | 6,976 | 21.4% |
+| backend | 8 | 5,505 | 16.9% |
+| tree-sitter-nova | 1 | 79 | 0.2% |
+
+## 4. 测试分析
+
+- 测试总数: **780**
+- 通过数: ✅ 775
+- 失败数: ❌ 0
+- 错误数: ⚠️  0
+- 跳过数: ⏭️  0
+- 通过率: **99.4%**
+- 耗时: 0s
+
+## 5. 复杂度分析
+
+- 函数总数: **2026**
+- 平均圈复杂度: **2.18**
+- 最高复杂度: **29**
+
+### 5.1 复杂度分布
+
+| 复杂度区间 | 函数数 |
+|------------|--------|
+| 1-5 (简单) | 1859 |
+| 6-10 (中等) | 133 |
+| 11-15 (复杂) | 29 |
+| 16-25 (高复杂) | 2 |
+| 25+ (极复杂) | 3 |
+
+### 5.2 Top 10 最复杂函数
+
+| 排名 | 函数 | 文件 | 圈复杂度 |
+|------|------|------|----------|
+| 1 | LIRCBackend._compile_switch | `backend/lir_c_backend.py` | 13 |
+| 2 | Evaluator._convert_nova_to_json | `evaluator.py` | 13 |
+| 3 | compute_idom | `ir/cfg_utils.py` | 13 |
+| 4 | _iter_hir_children | `ir/ir_nodes.py` | 13 |
+| 5 | MIRLowering._lower_list_comprehension | `ir/mir_lowering.py` | 13 |
+| 6 | Parser._parse_primary_type | `parser.py` | 13 |
+| 7 | NovaCompiler.build | `compiler_cli.py` | 12 |
+| 8 | NovaCompiler._compile_c_to_binary | `compiler_cli.py` | 12 |
+| 9 | replace_terminator_operands | `ir/cfg_utils.py` | 12 |
+| 10 | HIRLowering._lower_pattern | `ir/hir_lowering.py` | 12 |
+
+## 7. 增量质量门禁
+
+❌ **门禁失败** — 发现 74 个增量质量问题
+
+- 检查文件数（有变更）: 2
+- 门禁问题数: 74
+
+### 7.1 门禁问题详情
+
+1. **[gate_no_docstring]** `tests/test_parser.py:87`
+   - 增量门禁：新增函数 'test_int_literal' 必须有 docstring
+   - 代码: `def test_int_literal(self):`
+
+2. **[gate_no_docstring]** `tests/test_parser.py:92`
+   - 增量门禁：新增函数 'test_negative_int_literal' 必须有 docstring
+   - 代码: `def test_negative_int_literal(self):`
+
+3. **[gate_no_docstring]** `tests/test_parser.py:99`
+   - 增量门禁：新增函数 'test_float_literal' 必须有 docstring
+   - 代码: `def test_float_literal(self):`
+
+4. **[gate_no_docstring]** `tests/test_parser.py:104`
+   - 增量门禁：新增函数 'test_string_literal' 必须有 docstring
+   - 代码: `def test_string_literal(self):`
+
+5. **[gate_no_docstring]** `tests/test_parser.py:109`
+   - 增量门禁：新增函数 'test_char_literal' 必须有 docstring
+   - 代码: `def test_char_literal(self):`
+
+6. **[gate_no_docstring]** `tests/test_parser.py:114`
+   - 增量门禁：新增函数 'test_bool_true' 必须有 docstring
+   - 代码: `def test_bool_true(self):`
+
+7. **[gate_no_docstring]** `tests/test_parser.py:119`
+   - 增量门禁：新增函数 'test_bool_false' 必须有 docstring
+   - 代码: `def test_bool_false(self):`
+
+8. **[gate_no_docstring]** `tests/test_parser.py:124`
+   - 增量门禁：新增函数 'test_unit_literal' 必须有 docstring
+   - 代码: `def test_unit_literal(self):`
+
+9. **[gate_no_docstring]** `tests/test_parser.py:137`
+   - 增量门禁：新增函数 'test_identifier_expr' 必须有 docstring
+   - 代码: `def test_identifier_expr(self):`
+
+10. **[gate_no_docstring]** `tests/test_parser.py:142`
+   - 增量门禁：新增函数 'test_break_expr' 必须有 docstring
+   - 代码: `def test_break_expr(self):`
+
+11. **[gate_no_docstring]** `tests/test_parser.py:146`
+   - 增量门禁：新增函数 'test_continue_expr' 必须有 docstring
+   - 代码: `def test_continue_expr(self):`
+
+12. **[gate_no_docstring]** `tests/test_parser.py:150`
+   - 增量门禁：新增函数 'test_grouped_expr' 必须有 docstring
+   - 代码: `def test_grouped_expr(self):`
+
+13. **[gate_no_docstring]** `tests/test_parser.py:155`
+   - 增量门禁：新增函数 'test_nested_grouped' 必须有 docstring
+   - 代码: `def test_nested_grouped(self):`
+
+14. **[gate_no_docstring]** `tests/test_parser.py:169`
+   - 增量门禁：新增函数 'test_simple_add' 必须有 docstring
+   - 代码: `def test_simple_add(self):`
+
+15. **[gate_no_docstring]** `tests/test_parser.py:221`
+   - 增量门禁：新增函数 'test_string_concat' 必须有 docstring
+   - 代码: `def test_string_concat(self):`
+
+16. **[gate_no_docstring]** `tests/test_parser.py:226`
+   - 增量门禁：新增函数 'test_pipe_operator' 必须有 docstring
+   - 代码: `def test_pipe_operator(self):`
+
+17. **[gate_no_docstring]** `tests/test_parser.py:241`
+   - 增量门禁：新增函数 'test_modulo_operator' 必须有 docstring
+   - 代码: `def test_modulo_operator(self):`
+
+18. **[gate_no_docstring]** `tests/test_parser.py:246`
+   - 增量门禁：新增函数 'test_all_comparison_operators' 必须有 docstring
+   - 代码: `def test_all_comparison_operators(self):`
+
+19. **[gate_no_docstring]** `tests/test_parser.py:262`
+   - 增量门禁：新增函数 'test_unary_minus' 必须有 docstring
+   - 代码: `def test_unary_minus(self):`
+
+20. **[gate_no_docstring]** `tests/test_parser.py:267`
+   - 增量门禁：新增函数 'test_unary_not' 必须有 docstring
+   - 代码: `def test_unary_not(self):`
+
+> 还有 54 个门禁问题未列出
+
+### 7.2 门禁问题类型分布
+
+| 问题类型 | 数量 |
+|----------|------|
+| gate_no_docstring | 74 |
+
+---
+
+## 8. 改进建议
+
+### P0 - 立即修复
+
+✅ 无 P0 级问题
+
+### P1 - 高优先级
+
+- 修复 1 个 HIGH 级别问题
+- 修复 74 个增量质量门禁问题（新增代码 docstring/魔法数字/命名规范）
+- 移除 sys.path hack，改用标准包结构
+
+### P2 - 中优先级
+
+- 处理 66 个 MEDIUM 级别问题（函数过长、圈复杂度、未使用导入等）
+
+### P3 - 低优先级 / 优化
+
+- 清理 1334 个 LOW 级别问题（TODO、命名规范、魔法数字等）
+
+---
+
+*本报告由 Nova Auto Review v2.0 自动生成*
