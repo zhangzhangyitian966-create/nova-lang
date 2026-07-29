@@ -8,14 +8,9 @@
 确保 MIRLowering 的内部逻辑被精确验证。
 """
 
-import os
-import sys
 import unittest
 
-# 确保项目根目录在 sys.path 中
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
-from ir.ir_nodes import (
+from nova.ir.ir_nodes import (
     BOOL_TYPE,
     FLOAT_TYPE,
     INT_TYPE,
@@ -53,7 +48,7 @@ from ir.ir_nodes import (
     MIRPanic,
     MIRUnaryOp,
 )
-from ir.mir_lowering import MIRLowering
+from nova.ir.mir_lowering import MIRLowering
 
 
 def make_lowerer():

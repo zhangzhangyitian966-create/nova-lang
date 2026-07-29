@@ -1,5 +1,5 @@
 {
-  "cycles": 73,
+  "cycles": 74,
   "completed_tasks": [
     "parser_unit_tests",
     "refactor_analyze_loops",
@@ -156,10 +156,35 @@
     "lir_c_backend_unit_tests",
     "closure_fn_ptr_backfill",
     "refactor_compiler_cli_main",
-    "refactor_c_codegen_pattern"
+    "refactor_c_codegen_pattern",
+    "fix_sys_path_hack_and_gate_docstring",
+    "evaluator_unit_tests"
   ],
   "failed_tasks": [],
   "task_history": [
+    {
+      "cycle": 74,
+      "date": "2026-07-29 04:25",
+      "tasks": [
+        {
+          "name": "fix_sys_path_hack_and_gate_docstring",
+          "source": "review_driven",
+          "status": "success",
+          "reason": "第1512轮审查唯一HIGH级sys_path_hack在tests/test_mir_lowering_unit.py:16，修复为标准nova.包导入。同时修复74个gate_no_docstring（第73轮新增test_parser.py测试方法缺少docstring）。",
+          "description": "消除1个HIGH级sys_path_hack + 74个增量门禁问题"
+        },
+        {
+          "name": "evaluator_unit_tests",
+          "source": "self_planned",
+          "status": "success",
+          "reason": "evaluator.py（1017行）是语言求值语义核心模块，零独立测试。第72轮评审明确列为第73轮最高优先级任务之一。新建tests/test_evaluator.py覆盖15大测试类126个测试用例。",
+          "description": "为evaluator.py建立独立单元测试基线，126个测试用例"
+        }
+      ],
+      "test_before": "781 passed, 26 subtests",
+      "test_after": "907 passed, 26 subtests",
+      "review_alignment": "50% (1/2 from review)"
+    },
     {
       "cycle": 73,
       "task_id": "parser_unit_tests",

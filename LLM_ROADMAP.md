@@ -1,7 +1,8 @@
 # Nova LLM 智能开发路线图
 
-**更新时间**: 2026-07-28 20:02:00
+**更新时间**: 2026-07-29 04:30:00
 **上次评审**: 第 72 轮（路线图评审）
+**上次开发**: 第 74 轮（普通轮）
 
 本路线图由 LLM 智能开发系统动态维护。
 
@@ -152,6 +153,7 @@
 | ✅ | 重构 LoopInvariantCodeMotion._redirect_branch 降低复杂度 | medium | 65 | 3-5 小时 | - |
 | ✅ | 重构 cfg_utils.analyze_loops 降低复杂度 | medium | 60 | 3-5 小时 | - |
 | ✅ | 批量清理未使用导入 v5 | easy | 50 | 1-2 小时 | - |
+| ✅ | 修复 sys.path hack + 增量门禁 docstring | easy | 80 | 1 小时 | - |
 
 ---
 
@@ -170,15 +172,15 @@
 | ✅ | MIRLowering 单元测试基线 | medium | 75 | 4-6 小时 | - |
 | ✅ | PassManager 单元测试基线 | medium | 65 | 4-6 小时 | - |
 | ✅ | Parser 单元测试基线 | medium | 70 | 4-6 小时 | - |
-| ⏳ | Evaluator 单元测试基线 | medium | 65 | 4-6 小时 | - |
+| ✅ | Evaluator 单元测试基线 | medium | 65 | 4-6 小时 | - |
 | ⏳ | VM 单元测试基线 | medium | 60 | 4-6 小时 | - |
 
 ---
 
-**进度**: 154/163 (94.5%)
-- **已完成**: 154（含第72轮评审 + 第70-73轮8个任务）
+**进度**: 156/163 (95.7%)
+- **已完成**: 156（含第72轮评审 + 第70-74轮12个任务）
 - **进行中**: 0
-- **待开发**: 6（unify_c_backend P70、benchmark_enhance_exec_time P38、low_quality_issues_cleanup P40、evaluator_unit_tests P65、vm_unit_tests P60、refactor_compile_switch P55）
+- **待开发**: 5（unify_c_backend P70、benchmark_enhance_exec_time P38、low_quality_issues_cleanup P40、vm_unit_tests P60、refactor_compile_switch P55）
 - **已废弃**: 3（native_call_abi、refactor_native_emit_call、native_call_abi）
 
-> 注：第73轮完成2个任务。parser_unit_tests：新建 tests/test_parser.py（81测+6子测），覆盖11大测试类，parser.py零测试→81测试。refactor_analyze_loops：CC=14→~4，四阶段完全拆分。测试总数699→780（+81），零回归。下阶段方向：evaluator测试补齐 + compile_switch复杂度治理 + 架构债务启动。
+> 注：第74轮完成2个任务。fix_sys_path_hack_and_gate_docstring：消除唯一HIGH级sys_path_hack + 74个gate_no_docstring门禁问题。evaluator_unit_tests：新建 tests/test_evaluator.py（126测），覆盖15大测试类，evaluator.py零测试→126测试。测试总数781→907（+126），零回归。下阶段方向：compile_switch复杂度治理 + 架构债务启动 + VM测试补齐。
