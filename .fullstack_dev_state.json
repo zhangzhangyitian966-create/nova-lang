@@ -1,9 +1,9 @@
 {
-  "cycles": 50,
+  "cycles": 51,
   "frontend_completed": 34,
   "backend_completed": 37,
   "last_review_cycle": 48,
-  "current_review_cycle": 48,
+  "current_review_cycle": 51,
   "completed_tasks": [
     "frontend_try_expr_typecheck",
     "backend_native_label_patch",
@@ -100,6 +100,17 @@
     "backend_c_todo_error"
   ],
   "task_history": [
+    {
+      "cycle": 51,
+      "task_id": "review_cycle_51",
+      "name": "第 51 轮双线路线图评审",
+      "track": "review",
+      "difficulty": "n/a",
+      "priority": 99,
+      "result": "success",
+      "details": "第 49-51 轮评审轮。前端 34/34=100%完成（质量评分7.5/10），后端 37/51=72.5%完成（质量评分6.5/10）。深度代码审计发现多个隐藏缺陷：Cranelift 后端未实现指令降级为 TODO 注释（致命，静默生成错误代码）、Native 后端浮点全局变量存储完全错误、C 后端闭包浮点返回丢失、Parser 块边界静默吞错。新增 5 个高价值任务，废弃 0 个。下 3 轮聚焦：Cranelift 安全修复(P0) > Native 浮点全局存储(P1) > C 闭包浮点返回(P1)。",
+      "timestamp": "2026-07-29 03:30"
+    },
     {
       "cycle": 50,
       "task_id": "FRONTEND-034",
@@ -212,6 +223,66 @@
     }
   ],
   "tasks": [
+    {
+      "task_id": "backend_cranelift_todo_fatal",
+      "name": "修复 Cranelift 后端未实现指令降级为 TODO 注释（致命缺陷）",
+      "description": "cranelift_backend.py _compile_instr 对未处理指令发射 ;; TODO 注释而非抛 NotImplementedError。这会导致编译'成功'但生成的 Cranelift IR 缺少关键指令，执行结果不可预测。所有后端应统一对未知指令抛异常。",
+      "track": "backend",
+      "difficulty": "easy",
+      "priority": 98,
+      "estimated_effort": "30分钟",
+      "status": "pending",
+      "source": "code_audit_51",
+      "depends_on": []
+    },
+    {
+      "task_id": "backend_native_float_global_store",
+      "name": "修复 Native 后端浮点全局变量存储生成错误代码",
+      "description": "native_backend.py _emit_store_global 对浮点值先发射 mov [rip], RAX（整数存储），然后注释说'撤销'但实际 pass，没有任何撤销或重发射浮点存储。需区分整数/浮点路径，浮点值用 movsd [rip], XMM 寄存器。",
+      "track": "backend",
+      "difficulty": "medium",
+      "priority": 85,
+      "estimated_effort": "2-3小时",
+      "status": "pending",
+      "source": "code_audit_51",
+      "depends_on": []
+    },
+    {
+      "task_id": "backend_c_closure_double_return",
+      "name": "修复 C 后端闭包间接调用浮点返回丢失",
+      "description": "lir_c_backend.py _compile_call_indirect 将 nova_closure_call 返回值统一当作 int64_t/void* 处理，未对 double 返回做 memcpy 解包。与 trampoline 中 double 返回的 malloc+memcpy 逻辑不匹配，闭包返回浮点数时产生错误结果。",
+      "track": "backend",
+      "difficulty": "medium",
+      "priority": 80,
+      "estimated_effort": "2-3小时",
+      "status": "pending",
+      "source": "code_audit_51",
+      "depends_on": []
+    },
+    {
+      "task_id": "frontend_parser_block_boundary",
+      "name": "修复 Parser 块边界静默吞错",
+      "description": "parser.py 第542-544行：当表达式后既无 ; 也无 RBRACE 时，Parser 直接将表达式加入 stmts 而非报错。例如 { x + y z } 会被错误接受。需在缺失分隔符时抛 ParseError。",
+      "track": "frontend",
+      "difficulty": "easy",
+      "priority": 55,
+      "estimated_effort": "1小时",
+      "status": "pending",
+      "source": "code_audit_51",
+      "depends_on": []
+    },
+    {
+      "task_id": "backend_native_runtime_link",
+      "name": "修复 Native 后端外部运行时调用偏移为0的问题",
+      "description": "native_backend.py link_calls 中若目标不在 func_offsets/trampoline_offsets（如 nova_init、nova_list_new），则 continue 保持0偏移。运行时调用这些函数会直接跳转到错误地址导致段错误。需实现 PLT/GOT 或链接时符号解析，至少对运行时函数硬编码偏移或引入 ELF 动态链接。",
+      "track": "backend",
+      "difficulty": "hard",
+      "priority": 70,
+      "estimated_effort": "1-2天",
+      "status": "pending",
+      "source": "code_audit_51",
+      "depends_on": []
+    },
     {
       "task_id": "backend_wasm_stack_balance",
       "name": "实现 Wasm 后端栈平衡验证器",
