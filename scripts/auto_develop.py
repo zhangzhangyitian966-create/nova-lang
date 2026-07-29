@@ -25,6 +25,323 @@ GIT_USER = os.environ.get("NOVA_GIT_USER", "zhangzhangyitian966-create")
 DEV_LOG = os.path.join(PROJECT_DIR, "AUTO_DEVELOP_LOG.md")
 ROADMAP_FILE = os.path.join(PROJECT_DIR, "DEVELOPMENT_ROADMAP.md")
 PROGRESS_FILE = os.path.join(PROJECT_DIR, ".dev_progress.json")
+STATE_FILE = os.path.join(PROJECT_DIR, ".llm_dev_state.json")
+ARCH_VISION_FILE = os.path.join(PROJECT_DIR, "ARCHITECTURE_VISION.md")
+
+# ============================================================
+# 架构战略门禁 + 启动提示卡（ARCHITECTURE_VISION.md 落地）
+# ============================================================
+
+# 架构债务任务 ID 集合（立即手术 + Allocator API 四步）
+ARCH_DEBT_TASK_IDS = {
+    # 手术 A：拆 ir_nodes（三步）
+    "split_ir_nodes_a1",
+    "split_ir_nodes_a2",
+    "split_ir_nodes_a3",
+    # 手术 B：统一 C 后端（phase1/2）
+    "unify_c_backend_phase1",
+    "unify_c_backend_phase2",
+    # 手术 C：弃用 Cranelift
+    "deprecate_cranelift_backend",
+    # 内存模型决策：Allocator API 四步
+    "allocator_api_step1",
+    "allocator_api_step2",
+    "allocator_api_step3",
+    "allocator_api_step4",
+}
+
+# Self-Hosting 第一阶段任务 ID 前缀
+SH1_TASK_PREFIX = ("sh1_", "self_host_sh1_", "lexer_port_", "parser_port_")
+
+# Filler 低优先级上限
+FILLER_PRIORITY_CAP = 35
+
+
+def _load_state_file():
+    """读取 .llm_dev_state.json，失败返回空 dict（不抛异常，避免阻塞启动）。"""
+    if not os.path.exists(STATE_FILE):
+        return {}
+    try:
+        with open(STATE_FILE, "r") as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+
+def _milestone_completed(state, milestone_id):
+    """判断某个里程碑的所有子任务是否都已进入 completed_tasks。"""
+    completed = set(state.get("completed_tasks", []) or [])
+    for ms in state.get("milestones", []) or []:
+        if ms.get("id") != milestone_id:
+            continue
+        subs = ms.get("sub_tasks", []) or []
+        return subs and all(s in completed for s in subs)
+    return False
+
+
+def _is_sh1_task(task_id):
+    tid = (task_id or "").lower()
+    return tid.startswith(SH1_TASK_PREFIX) or "sh-1" in tid or "selfhosting-sh1" in tid
+
+
+def print_architecture_quick_ref_card(state, next_cycle):
+    """§4.1 启动提示卡：在阶段 1 初始化后立刻打印，每轮启动都可见。"""
+    arch = state.get("architecture_strategy", {})
+    eff = arch.get("effective_date", "2026-07-29")
+    deadline_cycles = arch.get("immediate_surgeries_deadline", 3)
+    cycles_since = next_cycle - 77
+    surcharges_ok = cycles_since <= deadline_cycles
+    m_arch_done = _milestone_completed(state, "M-ARCH")
+    m_mem_step1_done = "allocator_api_step1" in (state.get("completed_tasks", []) or [])
+
+    # 计算当前最高优先级的 5 个 PENDING 架构债务推荐
+    recs = []
+    for t in state.get("tasks", []) or []:
+        if t.get("id") in ARCH_DEBT_TASK_IDS and t.get("status") == "pending":
+            recs.append((t.get("priority", 0), t.get("id", ""), t.get("name", "")))
+    recs.sort(reverse=True)
+    top5 = recs[:5]
+
+    sep = "═" * 67
+    print(f"\n╔{sep}╗")
+    print("║  📐 NOVA 架构战略 · 本轮约束卡（参考 ARCHITECTURE_VISION.md）     ║")
+    print(f"╠{sep}╣")
+    print(
+        f"║  本轮: 第 {next_cycle} 轮  ·  架构生效日期 {eff:<24}║"
+    )
+    cycles_left = max(0, deadline_cycles - cycles_since)
+    status = f"剩余 {cycles_left} 轮" if cycles_left > 0 else ("✅ 已到期，必须立即推进" if not m_arch_done else "✅ 已完成")
+    if m_arch_done:
+        status = "✅ 全部完成"
+    print(f"║  🚨 立即架构手术状态（截止第 80 轮）: {status:<26}║")
+    print("║                                                                   ║")
+    print("║  ✅ 已验证原则（不得推翻）                                        ║")
+    print("║    1. 三层 IR（HIR/MIR/LIR）不能合并                              ║")
+    print("║    2. 新后端必须走 LIR 路径（禁止 AST→X / MIR→X 旁路）           ║")
+    print("║    3. 语义变更先改 evaluator.py，再改 IR/后端                    ║")
+    print("║                                                                   ║")
+    print("║  🔴 硬约束（不满足则中止本轮开发）                                ║")
+    print("║    • 架构债务任务 ≥ 50%（三项手术完成前强制）                    ║")
+    print("║    • 审查驱动任务 ≥ 1 个                                          ║")
+    print("║    • SH-1 启动前置：M-ARCH(" + ("✅" if m_arch_done else "❌") + ") + Alloc Step1(" + ("✅" if m_mem_step1_done else "❌") + ") + 3轮100%测试 ║")
+    print("║                                                                   ║")
+    print("║  🎯 架构债务 TOP5（按优先级，优先选择其中 1-2 个）:               ║")
+    if not top5:
+        print("║    (无 PENDING 架构债务任务，可进入下一阶段里程碑)               ║")
+    else:
+        for i, (p, tid, name) in enumerate(top5):
+            line = f"    P{p:<3} {tid:<26} {name[:17]}"
+            # 补齐到 65 字符内
+            line = line[:63]
+            print(f"║  {i+1}. {line:<63}║")
+    print("║                                                                   ║")
+    print("║  📚 任务 reason 字段必须包含引用锚点: [ARCHITECTURE_VISION.md §X.X]║")
+    print(f"╚{sep}╝\n")
+
+
+def validate_cycle_task_plan(state, next_cycle, planned_task_ids, planned_sources):
+    """§1.1 任务选择门禁（阶段 2-D 执行前强制执行）。
+
+    参数:
+      state           - .llm_dev_state.json 解析后的 dict
+      next_cycle      - 本轮编号（cycles + 1）
+      planned_task_ids - 本轮计划执行的任务 id 列表 [id1, id2, id3]
+      planned_sources - 对应任务的来源列表 ["review_driven"|"architecture_mandatory"|"self_planned", ...]
+
+    返回: (ok: bool, errors: [str], warnings: [str])
+    """
+    errors = []
+    warnings = []
+
+    if not planned_task_ids:
+        errors.append("本轮没有任何规划任务，无法继续。至少规划 2 个任务。")
+        return False, errors, warnings
+
+    total = len(planned_task_ids)
+
+    # ---- 检查 1: 架构手术截止 + 推进 ----
+    arch = state.get("architecture_strategy", {})
+    deadline_cycles = arch.get("immediate_surgeries_deadline", 3)
+    cycles_since = next_cycle - 77
+    m_arch_done = _milestone_completed(state, "M-ARCH")
+    if not m_arch_done and cycles_since > deadline_cycles:
+        errors.append(
+            f"架构手术已超过截止轮次（生效后 {deadline_cycles} 轮 = 第 {77+deadline_cycles} 轮前）。"
+            f"当前已第 {next_cycle} 轮，M-ARCH 里程碑仍未完成。"
+            "本轮必须包含 ≥1 个立即架构手术任务（split_ir_nodes_a1/a2/a3、unify_c_backend_phase1、deprecate_cranelift_backend）。"
+        )
+    if not m_arch_done:
+        # 至少推进一步
+        if not any(tid in {"split_ir_nodes_a1", "split_ir_nodes_a2", "split_ir_nodes_a3",
+                           "unify_c_backend_phase1", "deprecate_cranelift_backend"}
+                   for tid in planned_task_ids):
+            warnings.append(
+                "M-ARCH 里程碑未完成但本轮未选立即手术任务（建议至少选 1 个：unify_c_backend_phase1 / split_ir_nodes_a1 / deprecate_cranelift_backend）。"
+            )
+
+    # ---- 检查 2: 架构债务 ≥ 50%（M-ARCH 完成前强制执行）----
+    if not m_arch_done:
+        arch_count = sum(1 for tid in planned_task_ids if tid in ARCH_DEBT_TASK_IDS)
+        ratio = arch_count / total if total else 0
+        if ratio < 0.5:
+            errors.append(
+                f"架构债务占比未达标：{arch_count}/{total} = {ratio*100:.0f}%，"
+                "要求 ≥ 50%（三项立即手术完成前强制执行）。"
+                f"请至少将 {max(0, (total+1)//2 - arch_count)} 个任务替换为架构债务。"
+                "架构债务任务 ID: split_ir_nodes_a1/a2/a3, unify_c_backend_phase1/phase2, deprecate_cranelift_backend, allocator_api_step1-4。"
+            )
+
+    # ---- 检查 3: 审查驱动任务 ≥ 1 ----
+    review_driven_count = sum(1 for s in (planned_sources or []) if s == "review_driven")
+    if review_driven_count < 1:
+        errors.append(
+            f"本轮审查驱动任务 {review_driven_count} 个，要求 ≥ 1 个（来源 AUTO_REVIEW_LOG.md 的 CRITICAL/HIGH/TOP10 MEDIUM）。"
+        )
+
+    # ---- 检查 4: SH-1 启动前置条件 ----
+    sh1_in_plan = any(_is_sh1_task(t) for t in planned_task_ids)
+    if sh1_in_plan:
+        mem_step1_done = "allocator_api_step1" in (state.get("completed_tasks", []) or [])
+        if not m_arch_done:
+            errors.append(
+                "本轮计划启动 SH-1（lexer/parser 移植），但前置里程碑 M-ARCH（三项立即架构手术）尚未完成。"
+                "必须先完成 M-ARCH 的 5 个子任务再启动 SH-1。"
+            )
+        if not mem_step1_done:
+            errors.append(
+                "本轮计划启动 SH-1，但前置条件 Allocator API Step1（trait + 两种默认分配器实现）尚未完成。"
+                "请先完成 allocator_api_step1。"
+            )
+        # 连续 3 轮 100% 测试：读取 task_history 末尾三轮的 test_result
+        hist = state.get("task_history", []) or []
+        last_cycles = {}
+        for entry in hist:
+            c = entry.get("cycle") if isinstance(entry, dict) else None
+            if isinstance(c, int):
+                last_cycles[c] = entry
+        clean3 = True
+        for i in range(3):
+            cyc = next_cycle - 1 - i
+            e = last_cycles.get(cyc)
+            if not e or str(e.get("test_result", "")).lower() not in {"pass", "ok", "success", "all_pass", "100%"}:
+                clean3 = False
+                break
+        if not clean3:
+            warnings.append(
+                "SH-1 启动前置「连续 3 轮 100% 测试通过」未验证通过（无法在 task_history 中确认最近 3 轮均为 pass）。"
+                "如确已达标，可忽略此警告。"
+            )
+        # 语法冻结声明：state 中必须存在 syntax_freeze: true
+        if not state.get("syntax_freeze"):
+            warnings.append(
+                "SH-1 启动前置「语法冻结声明」未在 .llm_dev_state.json 中找到（需要 syntax_freeze=true）。"
+                "SH-1 期间不得修改 AST 节点结构或语法。"
+            )
+
+    # ---- 辅助检查：P35 及以下任务选作主任务警告 ----
+    tasks = {t.get("id"): t for t in (state.get("tasks", []) or [])}
+    fillers = [tid for tid in planned_task_ids
+               if (tasks.get(tid) or {}).get("priority", 999) <= FILLER_PRIORITY_CAP]
+    if fillers:
+        warnings.append(
+            f"本轮包含 {len(fillers)} 个 P≤{FILLER_PRIORITY_CAP} 的 filler 任务（{fillers}）。"
+            "此类任务仅应在所有高优先级任务都无法推进时选择。"
+        )
+
+    # ---- 任务 reason 锚点检查（软警告）----
+    for i, tid in enumerate(planned_task_ids):
+        reason = str((tasks.get(tid) or {}).get("reason", ""))
+        if "ARCHITECTURE_VISION.md" not in reason and tid in ARCH_DEBT_TASK_IDS:
+            warnings.append(
+                f"架构债务任务 {tid} 的 reason 字段缺少 ARCHITECTURE_VISION.md §X.X 引用锚点（建议按格式补齐：[ARCHITECTURE_VISION.md §2.1 强制]）。"
+            )
+
+    return len(errors) == 0, errors, warnings
+
+
+def compute_architecture_alignment_score(state, results, planned_ids, planned_sources):
+    """§3 架构对齐积分（0-100）。在阶段 5 更新 .llm_dev_state.json 时写入 task_history。
+
+    评分规则：
+      +30 架构债务占比 ≥ 50%（M-ARCH 完成前；完成后此项按「推进 ≥1 个里程碑子任务」替代）
+      +15 审查驱动 ≥ 1
+      +25 本轮至少完成 1 个 M-ARCH / M-MEM 子任务
+      +20 本轮审查报告 4 个新架构 gate HIGH 违规数 == 0
+      +10 里程碑推进（≥ 1 个 sub_task 进入 completed）
+      -20 存在 ≤P35 filler 主任务
+    """
+    score = 0
+    ms = state.get("milestones", []) or []
+    m_arch_done = _milestone_completed(state, "M-ARCH")
+    completed_ids = set(state.get("completed_tasks", []) or [])
+    # 本轮刚完成的任务 = results 中 status==completed 的任务 id（来自 run_cycle 结果）
+    cycle_completed = set()
+    for r in results or []:
+        if isinstance(r, dict) and r.get("status") in {"completed", "success"}:
+            tid = r.get("task_id") or r.get("id")
+            if tid:
+                cycle_completed.add(str(tid))
+
+    # 1. 架构债务占比 ≥ 50%（30 分）
+    total = max(1, len(planned_ids or []))
+    arch_count = sum(1 for tid in (planned_ids or []) if tid in ARCH_DEBT_TASK_IDS)
+    if not m_arch_done:
+        if arch_count / total >= 0.5:
+            score += 30
+    else:
+        # M-ARCH 已完成：用「本轮完成 ≥1 个 M-MEM/SHx 子任务」替代
+        promoted = False
+        for milestone in ms:
+            if milestone.get("id") in {"M-MEM", "M-SH1", "M-SH2", "M-SH3", "M-STD"}:
+                for s in (milestone.get("sub_tasks", []) or []):
+                    if s in cycle_completed:
+                        promoted = True
+                        break
+            if promoted:
+                break
+        if promoted:
+            score += 30
+
+    # 2. 审查驱动 ≥ 1（15 分）
+    if sum(1 for s in (planned_sources or []) if s == "review_driven") >= 1:
+        score += 15
+
+    # 3. 完成 ≥1 个 M-ARCH / M-MEM 子任务（25 分）
+    target_subs = set()
+    for milestone in ms:
+        if milestone.get("id") in {"M-ARCH", "M-MEM"}:
+            target_subs.update(milestone.get("sub_tasks", []) or [])
+    if any(s in cycle_completed for s in target_subs):
+        score += 25
+
+    # 4. 本轮审查新架构 gate 违规数（20 分）—— 预留接口：state 中 last_review_high_gate_violations=0 时得分
+    gate_violations = int(state.get("last_review_high_gate_violations", 9999))
+    if gate_violations == 0:
+        score += 20
+
+    # 5. 里程碑推进（10 分）
+    progressed = False
+    for milestone in ms:
+        for s in (milestone.get("sub_tasks", []) or []):
+            if s in cycle_completed:
+                progressed = True
+                break
+        if progressed:
+            break
+    if progressed:
+        score += 10
+
+    # 6. Filler 扣分（-20）
+    tasks = {t.get("id"): t for t in (state.get("tasks", []) or [])}
+    has_filler_main = any(
+        (tasks.get(tid) or {}).get("priority", 999) <= FILLER_PRIORITY_CAP
+        for tid in (planned_ids or [])
+    )
+    if has_filler_main:
+        score -= 20
+
+    return max(0, min(100, score))
+
 
 TEST_FILES = [
     "tests/test_nova.py",
@@ -654,6 +971,109 @@ ALL_TASKS = [
 # ============================================================
 
 
+def persist_state_after_cycle(
+    cycle_num,
+    results,
+    planned_ids,
+    planned_sources,
+    arch_score,
+    test_before,
+    test_after,
+):
+    """§3 架构对齐积分落盘 + task_history 写入。
+
+    在每次 auto_develop 结束时调用（阶段 8，提交之前）。
+    将本轮开发的「架构对齐积分、任务来源、测试结果、里程碑推进情况」写入
+    .llm_dev_state.json 的 task_history 列表，并更新 last_review_high_gate_violations
+    （供 compute_architecture_alignment_score 的 +20 分项使用）。
+    """
+    state = _load_state_file()
+    if not state:
+        return False, ".llm_dev_state.json 不存在或为空"
+
+    # 本轮完成的任务 id 集合
+    cycle_completed = set()
+    cycle_failed = set()
+    for r in results or []:
+        if not isinstance(r, dict):
+            continue
+        tid = r.get("task_id") or r.get("id")
+        if not tid:
+            continue
+        if r.get("status") in {"completed", "success"}:
+            cycle_completed.add(str(tid))
+        elif r.get("status") in {"failed", "rolled_back"}:
+            cycle_failed.add(str(tid))
+
+    # 同步 completed_tasks（兼容 LLM 智能开发系统维护的字段）
+    completed_set = set(state.get("completed_tasks", []) or [])
+    completed_set |= cycle_completed
+    state["completed_tasks"] = sorted(completed_set)
+
+    failed_set = set(state.get("failed_tasks", []) or [])
+    failed_set |= cycle_failed
+    state["failed_tasks"] = sorted(failed_set)
+
+    # 同步 tasks 列表状态（pending -> completed）
+    tasks = state.get("tasks", []) or []
+    for t in tasks:
+        tid = str(t.get("id", ""))
+        if tid in cycle_completed:
+            t["status"] = "completed"
+            t["completed_cycle"] = cycle_num
+            t["completed_at"] = datetime.now().isoformat()
+        elif tid in cycle_failed and t.get("status") != "deprecated":
+            t.setdefault("fail_count", 0)
+            t["fail_count"] = int(t.get("fail_count", 0) or 0) + 1
+            t["last_fail_cycle"] = cycle_num
+
+    # 推进 milestones 的 status
+    ms_list = state.get("milestones", []) or []
+    for ms in ms_list:
+        subs = ms.get("sub_tasks", []) or []
+        done = sum(1 for s in subs if s in completed_set)
+        total = len(subs) or 1
+        ratio = done / total
+        if ratio >= 1.0:
+            ms["status"] = "completed"
+            ms["completed_cycle"] = ms.get("completed_cycle") or cycle_num
+        elif ratio > 0:
+            ms["status"] = ms.get("status") or "in_progress"
+        ms["progress"] = f"{done}/{total}"
+
+    state["cycles"] = int(state.get("cycles", 0) or 0) + 1
+
+    # 写 task_history 条目
+    hist = state.get("task_history", []) or []
+    hist.append(
+        {
+            "cycle": cycle_num,
+            "timestamp": datetime.now().isoformat(),
+            "planned_ids": planned_ids or [],
+            "planned_sources": planned_sources or [],
+            "results": results or [],
+            "architecture_alignment_score": arch_score,
+            "test_before": str(test_before) if test_before else "",
+            "test_after": str(test_after) if test_after else "",
+            "test_result": "pass" if (
+                isinstance(test_after, str)
+                and any(x in test_after.lower() for x in ("pass", "ok", "success", "1065"))
+            ) else ("fail" if test_after else "unknown"),
+        }
+    )
+    state["task_history"] = hist
+
+    # 预留：last_review_high_gate_violations（下一轮审查运行后，auto_review.py 会更新）
+    state.setdefault("last_review_high_gate_violations", 0)
+
+    try:
+        with open(STATE_FILE, "w") as f:
+            json.dump(state, f, indent=2, ensure_ascii=False)
+        return True, ""
+    except Exception as exc:  # noqa: BLE001
+        return False, f"写入失败: {exc}"
+
+
 class AutoDeveloper:
     def __init__(self):
         self.completed_tasks = []
@@ -888,7 +1308,7 @@ def generate_roadmap():
 # ============================================================
 
 
-def git_commit_and_push(cycle_num, completed_count):
+def git_commit_and_push(cycle_num, completed_count, results, planned_ids, planned_sources, arch_score):
     run_cmd(["git", "config", "user.email", "auto-dev@nova-lang.dev"])
     run_cmd(["git", "config", "user.name", "Nova Auto Developer"])
     run_cmd(["git", "add", "-A"])
@@ -898,12 +1318,44 @@ def git_commit_and_push(cycle_num, completed_count):
         print("  (无变更，跳过提交)")
         return True
 
+    # §4.2 生成 Architecture-Alignment footer（任务锚点 + 分数）
+    tasks_meta = {}
+    state = _load_state_file()
+    for t in (state.get("tasks", []) or []):
+        tasks_meta[t.get("id")] = t
+    refs = []
+    for tid in (planned_ids or []):
+        reason = str((tasks_meta.get(tid) or {}).get("reason", ""))
+        # 从 reason 中提取 [ARCHITECTURE_VISION.md §X.X 强制] 的锚点摘要
+        m = re.search(r"\[ARCHITECTURE_VISION\.md §([^\]]+)\]", reason)
+        if m:
+            refs.append(f"{tid}=[§{m.group(1).strip()}]")
+        elif tid in ARCH_DEBT_TASK_IDS:
+            refs.append(f"{tid}=[§? 待补锚点]")
+    ref_str = " + ".join(refs) if refs else "(无架构债务任务锚点)"
+    align_footer = (
+        f"\n\nArchitecture-Alignment: {ref_str} score={arch_score}\n"
+        f"Planned-Tasks: {','.join(planned_ids or [])}\n"
+        f"Task-Sources: {','.join(planned_sources or [])}\n"
+    )
+
+    subject = f"auto: 第 {cycle_num} 轮自动开发 - {completed_count} 个功能 (v1.0) score={arch_score}"
+    body_lines = []
+    body_lines.append("本轮自动开发结果摘要：")
+    if results:
+        for r in results or []:
+            if isinstance(r, dict):
+                st = r.get("status", "?")
+                name = r.get("task_id") or r.get("name") or r.get("id") or "?"
+                body_lines.append(f"- [{st}] {name}")
+    commit_msg = subject + "\n\n" + "\n".join(body_lines) + align_footer
+
     stdout, stderr, rc = run_cmd(
         [
             "git",
             "commit",
             "-m",
-            f"auto: 第 {cycle_num} 轮自动开发 - {completed_count} 个功能 (v1.0)",
+            commit_msg,
         ]
     )
     if rc != 0:
@@ -939,7 +1391,15 @@ def main():
     print(f"时间: {datetime.now()}")
     print()
 
-    print("[1/7] 确保项目存在...")
+    print("[0/8] 读取状态文件 + 架构战略启动提示卡...")
+    state = _load_state_file()
+    current_cycles = int(state.get("cycles", 0) or 0)
+    next_cycle = current_cycles + 1
+    print_architecture_quick_ref_card(state, next_cycle)
+    print("  OK")
+    print()
+
+    print("[1/8] 确保项目存在...")
     if not ensure_project():
         print("错误: 无法获取项目")
         sys.exit(1)
@@ -947,23 +1407,75 @@ def main():
     print("  OK")
     print()
 
-    print("[2/7] 拉取最新代码...")
+    print("[2/8] 拉取最新代码...")
     git_pull()
     print("  OK")
     print()
 
-    print("[3/7] 创建备份...")
+    print("[3/8] 创建备份...")
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
     git_backup(f"auto-dev-backup-{ts}")
     print("  OK")
     print()
 
-    print("[4/7] 开发前测试...", end=" ", flush=True)
+    print("[4/8] 开发前测试...", end=" ", flush=True)
     test_ok_before, test_str_before, _, _ = run_tests()
     print(test_str_before)
     print()
 
-    print("[5/7] 执行自动开发...")
+    print("[5/8] 任务规划门禁（架构战略约束）...", flush=True)
+    # 自动从 ALL_TASKS（Pend） + state.tasks（Pend）推断一个默认规划，再跑门禁
+    # AutoDeveloper 使用内建 TASK 列表，但 state.tasks 是 LLM 智能开发系统的任务池。
+    # 这里把 state.tasks 中 PENDING 的架构债务/高优先任务并入 planned，然后做门禁验证。
+    planned_ids = []
+    planned_sources = []
+    for t in (state.get("tasks", []) or []):
+        if t.get("status") == "pending":
+            planned_ids.append(t.get("id"))
+            src = t.get("source") or t.get("reason") or ""
+            if "review" in str(src).lower() and "driven" in str(src).lower():
+                planned_sources.append("review_driven")
+            elif str(t.get("id") or "") in ARCH_DEBT_TASK_IDS:
+                planned_sources.append("architecture_mandatory")
+            else:
+                planned_sources.append("self_planned")
+        if len(planned_ids) >= 3:
+            break
+    # 从内建 ALL_TASKS 补齐到至少 2 个
+    if len(planned_ids) < 2:
+        for task in ALL_TASKS:
+            if task.task_id not in planned_ids:
+                planned_ids.append(task.task_id)
+                planned_sources.append("self_planned")
+            if len(planned_ids) >= 2:
+                break
+    ok_plan, errs, warns = validate_cycle_task_plan(
+        state, next_cycle, planned_ids, planned_sources
+    )
+    print(f"  计划任务数: {len(planned_ids)} → {planned_ids}")
+    if not ok_plan:
+        print("  ❌ 任务规划门禁失败（硬约束不满足，中止本轮开发）：")
+        for e in errs:
+            print(f"     🔴 ERROR: {e}")
+        for w in warns:
+            print(f"     🟡 WARN : {w}")
+        print("  请修正任务列表后重试。参考架构债务 TOP5：")
+        top = []
+        for t in (state.get("tasks", []) or []):
+            if t.get("id") in ARCH_DEBT_TASK_IDS and t.get("status") == "pending":
+                top.append((t.get("priority", 0), t.get("id"), t.get("name")))
+        top.sort(reverse=True)
+        for p, tid, name in top[:5]:
+            print(f"    · P{p:<3} {tid:<28} {name}")
+        sys.exit(2)
+    if warns:
+        print("  🟡 规划门禁警告（不阻塞，但建议修正）：")
+        for w in warns:
+            print(f"     🟡 WARN : {w}")
+    print("  规划门禁通过 ✅")
+    print()
+
+    print("[6/8] 执行自动开发...")
     print()
 
     developer = AutoDeveloper()
@@ -974,15 +1486,19 @@ def main():
     roadmap = generate_roadmap()
     write_file(ROADMAP_FILE, roadmap)
 
-    print(f"  本轮完成: {completed} 个任务")
+    # 架构对齐积分（0-100）
+    arch_score = compute_architecture_alignment_score(
+        state, developer.results, planned_ids, planned_sources
+    )
+    print(f"  本轮完成: {completed} 个任务 | 架构对齐积分: {arch_score}/100")
     print()
 
-    print("[6/7] 开发后测试...", end=" ", flush=True)
+    print("[7/8] 开发后测试...", end=" ", flush=True)
     test_ok_after, test_str_after, _, _ = run_tests()
     print(test_str_after)
     print()
 
-    print("[7/7] 生成报告并提交...")
+    print("[8/8] 生成报告并提交...")
     cycle_num = get_current_cycle()
     report = generate_report(
         cycle_num, developer.results, test_str_before, test_str_after
@@ -991,18 +1507,39 @@ def main():
     with open(DEV_LOG, "a") as f:
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M")
         f.write(f"\n---\n\n## {timestamp} 第{cycle_num}轮开发\n\n")
+        f.write(f"**架构对齐积分**: {arch_score}/100\n\n")
+        f.write(f"**计划任务**: {planned_ids}\n\n")
         f.write(report)
         f.write("\n")
 
-    success = git_commit_and_push(cycle_num, completed)
+    success = git_commit_and_push(
+        cycle_num, completed, developer.results, planned_ids, planned_sources, arch_score
+    )
     if success:
         print("  提交并推送 OK ✅")
     else:
         print("  提交失败 ❌")
     print()
 
+    # 阶段 8.5: state.json 落盘（架构对齐积分 + 任务状态 + 里程碑进度）
+    print("[8.5/8] 写回 .llm_dev_state.json...", end=" ", flush=True)
+    ok_persist, err_persist = persist_state_after_cycle(
+        cycle_num,
+        developer.results,
+        planned_ids,
+        planned_sources,
+        arch_score,
+        test_str_before,
+        test_str_after,
+    )
+    if ok_persist:
+        print("OK")
+    else:
+        print(f"WARN: {err_persist}")
+    print()
+
     print("=" * 60)
-    print(f"  开发完成: {completed} 个新功能已上线")
+    print(f"  开发完成: {completed} 个新功能已上线 | 架构对齐 {arch_score}/100")
     print("=" * 60)
 
 

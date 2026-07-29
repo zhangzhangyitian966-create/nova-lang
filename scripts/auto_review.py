@@ -925,7 +925,147 @@ def phase3b_incremental_gate():
                             )
                         )
 
-    # 统计
+    # ============================================================
+    # 新增：架构战略 4 个 HIGH 级 gate（ARCHITECTURE_VISION.md §5.2 强制）
+    # 所有 gate 违规均为 SEV_HIGH，优先级高于 docstring/魔法数字。
+    # ============================================================
+
+    # 检查 4: gate_ir_layer_mixin —— IR 层级泄漏（HIR/MIR Pass 引入 LIR 节点，或 LIR Lowering 引入 HIR 节点）
+    import_name_map = {}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom):
+            mod = node.module or ""
+            for alias in (node.names or []):
+                import_name_map[alias.name] = mod
+        elif isinstance(node, ast.Import):
+            for alias in (node.names or []):
+                import_name_map[alias.asname or alias.name.split(".")[-1]] = alias.name or ""
+
+    hir_pass_files = {
+        "ir/pass_manager.py",      # DCE/Inlining/CSE/LICM/ConstantFolding 等 HIR/MIR Pass
+        "ir/pass_executor.py",
+    }
+    lir_lowering_files = {
+        "ir/lir_lowering.py",       # MIR → LIR 降级
+        "ir/mir_lowering.py",       # 顺带检查（HIR→MIR，也不能引用 LIR）
+    }
+    if rel_path in hir_pass_files:
+        for name, mod in import_name_map.items():
+            if name.startswith("LIR") and not name.startswith("LIRLowering") and mod.endswith(("ir_nodes", "lir")):
+                # HIR/MIR Pass 引入了 LIR* 节点（LIRLowering 类本身允许）
+                gate_issues.append(
+                    CodeIssue(
+                        SEV_HIGH,
+                        "gate_ir_layer_mixin",
+                        rel_path,
+                        0,  # import 行号下面会补，先 0
+                        (
+                            f"架构门禁：{rel_path}（HIR/MIR Pass 文件）不应 import LIR 节点 '{name}'，"
+                            "违反 ARCHITECTURE_VISION.md §1.1「三层 IR 不得跨层混用」。"
+                        ),
+                        f"from {mod} import {name}",
+                    )
+                )
+    if rel_path in lir_lowering_files:
+        for name, mod in import_name_map.items():
+            if name.startswith("HIR") and not name.startswith("HIRLowering") and mod.endswith(("ir_nodes", "hir")):
+                gate_issues.append(
+                    CodeIssue(
+                        SEV_HIGH,
+                        "gate_ir_layer_mixin",
+                        rel_path,
+                        0,
+                        (
+                            f"架构门禁：{rel_path}（LIR/MIR Lowering 文件）不应 import HIR 节点 '{name}'，"
+                            "违反 ARCHITECTURE_VISION.md §1.1「三层 IR 不得跨层混用」。"
+                        ),
+                        f"from {mod} import {name}",
+                    )
+                )
+
+    # 检查 5: gate_direct_c_codegen_call —— 入口文件直接调用旧 c_codegen.py（手术B 后应为 0）
+    entry_files = {"cli.py", "compiler_cli.py", "compiler.py", "__main__.py"}
+    if os.path.basename(rel_path) in entry_files or rel_path in {"compiler.py", "cli.py", "compiler_cli.py"}:
+        # 文本搜索比 AST 搜索更稳（含字符串/动态 import 也能抓）
+        for line_no in sorted(changed_lines) if changed_lines else list(range(1, len(source_lines) + 1)):
+            if line_no > len(source_lines):
+                continue
+            line = source_lines[line_no - 1]
+            if ("from nova.c_codegen" in line or "import nova.c_codegen" in line) and line.strip().startswith("#") is False:
+                gate_issues.append(
+                    CodeIssue(
+                        SEV_HIGH,
+                        "gate_direct_c_codegen_call",
+                        rel_path,
+                        line_no,
+                        (
+                            "架构门禁：入口文件直接 import 旧 c_codegen.py 路径，"
+                            "违反 ARCHITECTURE_VISION.md §2.2「统一C后端 Phase1：所有入口切 LIR→C 路径」。"
+                            "应改为 backend.lir_c_backend.LIRCBackend。"
+                        ),
+                        line.strip(),
+                    )
+                )
+
+    # 检查 6: gate_ast_to_backend_shortcut —— 后端模块绕过 LIR 直接 import AST 或 HIR 节点（旁路）
+    if rel_path.startswith("backend/") and rel_path.endswith(".py"):
+        bad_imports = []
+        for name, mod in import_name_map.items():
+            if "ast_nodes" in mod or "ast_nodes" in name:
+                bad_imports.append((name, mod, "ast_nodes（前端AST）"))
+            elif rel_path not in {"backend/lir_c_backend.py"} and name.startswith("HIR") and not name.startswith("HIRLowering"):
+                bad_imports.append((name, mod, "HIR 节点（非 LIR 层）"))
+        for name, mod, reason in bad_imports:
+            gate_issues.append(
+                CodeIssue(
+                    SEV_HIGH,
+                    "gate_ast_to_backend_shortcut",
+                    rel_path,
+                    0,
+                    (
+                        f"架构门禁：后端 {rel_path} 不应直接 import {reason}（{name} from {mod}），"
+                        "违反 ARCHITECTURE_VISION.md §1.2「新后端必须走 LIR 路径，不得新增 AST→X 或 MIR→X 旁路」。"
+                    ),
+                    f"from {mod} import {name}",
+                )
+            )
+
+    # 检查 7: gate_sh1_parity —— SH-1 启动后 Python parser vs Nova parser AST 序列化一致性检查（桩）
+    # 真实比对需要 tests/scripts/sh1_parity_check.py（后续由 Allocator API Step1 之后的轮次补充）。
+    # 这里做的是「开关存在性」检查：如果里程碑 M-SH1.status == in_progress 且 sh1_parity_check 脚本不存在 → HIGH 警告。
+    STATE_FILE = os.path.join(PROJECT_DIR, ".llm_dev_state.json")
+    if os.path.exists(STATE_FILE):
+        try:
+            import json as _json
+            with open(STATE_FILE, "r") as _sf:
+                _st = _json.load(_sf)
+            _sh1_in_progress = False
+            for _ms in _st.get("milestones", []) or []:
+                if _ms.get("id") == "M-SH1" and _ms.get("status") == "in_progress":
+                    _sh1_in_progress = True
+                    break
+            if _sh1_in_progress:
+                parity_script = os.path.join(PROJECT_DIR, "tests", "scripts", "sh1_parity_check.py")
+                # 只在"每次审查全量运行时"（not changed_lines）报，避免增量刷屏
+                if not changed_lines and not os.path.exists(parity_script):
+                    gate_issues.append(
+                        CodeIssue(
+                            SEV_HIGH,
+                            "gate_sh1_parity",
+                            rel_path,
+                            0,
+                            (
+                                "架构门禁：Self-Hosting SH-1 已启动（M-SH1=in_progress），"
+                                "但 tests/scripts/sh1_parity_check.py 字节级一致性校验脚本尚未创建。"
+                                "违反 ARCHITECTURE_VISION.md §3.2 SH-1 验证要求。"
+                            ),
+                            "SH-1 进度检查（桩）",
+                        )
+                    )
+        except Exception:
+            pass
+
+    # 统计（沿用原 gate 统计结构）
     gate_sev_counts = defaultdict(int)
     gate_type_counts = defaultdict(int)
     for issue in gate_issues:
