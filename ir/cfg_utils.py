@@ -161,6 +161,34 @@ def _get_predecessors_for_block(fn: MIRFunction, block_label: str) -> List[str]:
     return preds
 
 
+def _find_deepest_idom(
+    strict_doms: Set[str], dom: Dict[str, Set[str]]
+) -> Optional[str]:
+    """
+    在严格支配者集合中找最深的节点（离目标块最近）。
+
+    标准：最深节点不支配集合中的任何其他节点。
+    """
+    for candidate in strict_doms:
+        if _dominates_any_other(candidate, strict_doms, dom):
+            continue
+        return candidate
+    return next(iter(strict_doms)) if strict_doms else None
+
+
+def _dominates_any_other(
+    candidate: str, strict_doms: Set[str], dom: Dict[str, Set[str]]
+) -> bool:
+    """检查 candidate 是否支配 strict_doms 中除自己外的任何其他节点"""
+    candidate_doms = dom[candidate]
+    for other in strict_doms:
+        if other == candidate:
+            continue
+        if other in candidate_doms:
+            return True
+    return False
+
+
 def compute_idom(fn: MIRFunction) -> Dict[str, Optional[str]]:
     """
     计算每个块的直接支配者 (immediate dominator)。
@@ -177,68 +205,11 @@ def compute_idom(fn: MIRFunction) -> Dict[str, Optional[str]]:
         if label == fn.entry_block:
             idom[label] = None
             continue
-
-        # 直接支配者是：支配集合中（除自己外）被其他所有支配者支配的那个
-        # 即：在支配树中，idom 是 label 的父节点
-        # 简化方法：找一个支配者 d ≠ label，使得不存在 d' 满足 d dom d' 且 d' dom label
-        other_doms = dominators - {label}
-        if not other_doms:
+        strict_doms = dominators - {label}
+        if not strict_doms:
             idom[label] = None
             continue
-
-        # 找最"近"的支配者：被其他所有支配者支配的那个
-        for candidate in other_doms:
-            # 检查 candidate 是否被其他所有支配者支配
-            is_idom = True
-            for other in other_doms:
-                if other == candidate:
-                    continue
-                if candidate not in dom[other]:
-                    # other 不支配 candidate，说明 candidate 不是最近的
-                    # （如果 candidate 是 idom，它应该被所有其他支配者支配）
-                    # 等等，我们需要的是：在从入口到 label 的路径上，candidate 是最后一个
-                    # 即：candidate 支配 label，且没有其他节点 d 使得 candidate 支配 d 且 d 支配 label
-                    pass
-            # 正确做法：idom 是满足 idom dom label 且 idom ≠ label 的节点中，
-            # 被 label 的所有其他支配者（除自己和idom外）支配的那个
-            # 简单方法：从支配集中移除 label 后，找一个节点，
-            # 它被所有剩下的节点支配（不，应该是它支配所有"更接近label"的节点）
-            # 实际上：idom 是 dom(label) \ {label} 中，不支配 dom(label) \ {label, idom} 中任何节点的那个
-            # 即：在 dom(label) \ {label} 集合里，找一个"最深"的节点
-            # 最深 = 被最多节点支配
-
-        # 更简单的算法：idom 是 dom(label) \ {label} 中
-        # 不在任何其他 dom(label) \ {label, x} 节点的支配集中的那个？
-        # 不，让我用标准方法：
-
-        # idom(label) 是 label 的严格支配者中，离 label 最近的那个
-        # 即：d 是 idom 当且仅当 d ∈ dom(label) \ {label}，
-        # 且不存在 d' ∈ dom(label) \ {label, d} 使得 d ∈ dom(d')
-        # （d' 严格支配 d 意味着 d 在 d' 和 label 之间）
-
-        # 实际上：在严格支配者集合中，找一个节点，
-        # 它不支配任何其他严格支配者
-        # （这样它就是最深的，离 label 最近）
-
-        strict_doms = other_doms
-        for candidate in strict_doms:
-            # 检查 candidate 是否支配其他任何严格支配者
-            dominates_other = False
-            for other in strict_doms:
-                if other == candidate:
-                    continue
-                if other in dom[candidate]:
-                    # candidate 支配 other，说明 candidate 比 other 更靠近入口
-                    dominates_other = True
-                    break
-            if not dominates_other:
-                # candidate 不支配任何其他严格支配者
-                # 说明它是最深的（离 label 最近）
-                idom[label] = candidate
-                break
-        else:
-            # 找不到，可能有多条路径？取任意一个
-            idom[label] = next(iter(strict_doms)) if strict_doms else None
+        idom[label] = _find_deepest_idom(strict_doms, dom)
 
     return idom
 

@@ -1,8 +1,8 @@
 # Nova LLM 智能开发路线图
 
-**更新时间**: 2026-07-29 16:30:00
+**更新时间**: 2026-07-29 16:15:00
 **上次评审**: 第 75 轮（路线图评审）
-**上次开发**: 第 76 轮（普通轮）
+**上次开发**: 第 77 轮（普通轮）
 
 本路线图由 LLM 智能开发系统动态维护。
 
@@ -176,9 +176,9 @@
 ---
 
 **进度**: 110/123 (89.4%)
-- **已完成**: 110
+- **已完成**: 113（本轮+3）
 - **进行中**: 0
-- **待开发**: 8（unify_c_backend_phase1 P70、unify_c_backend_phase2 P65、split_ir_nodes P55、low_quality_issues_cleanup P40、benchmark_enhance_exec_time P38、deprecate_cranelift_backend P35）
+- **待开发**: 5（unify_c_backend_phase1 P70、unify_c_backend_phase2 P65、split_ir_nodes P55、low_quality_issues_cleanup P40、benchmark_enhance_exec_time P38、deprecate_cranelift_backend P35）
 - **已废弃**: 5（native_call_abi、refactor_native_emit_call、native_call_abi、unify_c_backend 总任务）
 
-> 第76轮开发完成。完成2个任务：refactor_compile_switch（审查驱动，CC=13→~3）、vm_unit_tests（自主规划，vm.py从0测试→70+测）。测试总数 1031（+112），前端三大模块（parser/evaluator/vm）测试盲区全部清零。下阶段方向：架构债务启动（统一C后端Phase1 + 拆分ir_nodes）+ 复杂度收尾。
+> 第77轮开发完成。完成3个任务（2审查驱动+1自主规划）：1) refactor_compute_idom（CC=13→3，审查Top10#3）；2) clean_unused_imports_v6（8个MEDIUM级unused_import清理）；3) fix_field_index_inference（ADT字段访问field_index推断，修复潜在正确性问题）。审查对齐率 66.7%（2/3）。测试总数 1065+31 subtests（+34 vs 第76轮的完整套件1031）。下阶段方向：架构债务启动（统一C后端Phase1 + 拆分ir_nodes）+ 复杂度收尾（CC>12清零）。

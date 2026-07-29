@@ -586,8 +586,6 @@ class TestMatchRedundantArms(unittest.TestCase):
 
     def test_nan_float_not_redundant(self):
         """NaN（val is None）不参与字面量冗余比较"""
-        import math
-
         nan = float("nan")
         arms = [
             MatchArm(pattern=PatternFloat(value=nan)),

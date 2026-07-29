@@ -5,6 +5,8 @@ HIR -> MIR 降级器
 这是编译管道的第二步。
 """
 
+from typing import Optional
+
 from .ir_nodes import (
     BOOL_TYPE,
     INT_TYPE,
@@ -503,7 +505,35 @@ class MIRLowering:
         instr = MIRFieldAccess(hir_expr.ir_type)
         instr.object = obj_ssa or ""
         instr.field_name = hir_expr.field_name
+        # 根据 object 的 ADT 类型推断 field_index（index 0 = tag，实际字段从 1 开始）
+        obj_type = getattr(hir_expr.object, "ir_type", None)
+        if obj_type is not None and obj_type.kind == IRType.ADT:
+            type_name = obj_type.name
+            if type_name and type_name in self.type_defs:
+                idx = self._find_field_index(type_name, hir_expr.field_name)
+                if idx is not None:
+                    instr.field_index = idx
         return self._emit(instr)
+
+    def _find_field_index(self, type_name: str, field_name: str) -> Optional[int]:
+        """
+        在 ADT 类型定义中查找字段名对应的索引（tag在index 0，实际字段从1开始）。
+
+        逻辑：遍历所有变体的所有字段，返回第一个匹配 field_name 的位置 + 1。
+        如果同一字段名在多个变体中索引不一致，返回 None（保守回退）。
+        """
+        td = self.type_defs[type_name]
+        found_idx: Optional[int] = None
+        for variant in td.variants:
+            for j, (fname, _) in enumerate(variant.fields):
+                if fname == field_name:
+                    current_idx = j + 1  # tag 在 index 0
+                    if found_idx is None:
+                        found_idx = current_idx
+                    elif found_idx != current_idx:
+                        # 同一字段名在不同变体中索引不同，保守不设置
+                        return None
+        return found_idx
 
     def _lower_index_expr(self, hir_expr, block):
         obj_ssa = self._lower_expr(hir_expr.object, block)

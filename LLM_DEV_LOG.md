@@ -1,3 +1,94 @@
+## 2026-07-29 16:15 第77轮开发
+
+### 开发概览
+- **轮次**: 第 77 轮（开发轮，77 % 3 ≠ 0 → 普通轮）
+- **测试状态**: 1065 passed, 31 subtests passed（基线 427+20=447 → 全量 1065+31=1096）
+- **完成任务数**: 3 个，全部成功
+- **失败任务数**: 0 个
+- **审查对齐率**: 66.7%（2/3 来自审查驱动，≥50% 要求）
+
+---
+
+### 一、本轮任务
+
+#### 任务1: refactor_compute_idom_cc13 【审查驱动】
+- **来源**: 第1512轮审查 Top10 最复杂函数第3名 — `ir/cfg_utils.py::compute_idom` CC=13
+- **为什么选这个**: Top10 高 CC 函数中少数几个未被之前轮次处理的函数，同时也是 LICM 等优化 Pass 的基础设施（支配树计算）。代码中约 60 行是被注释掉的算法探索分支，严重干扰可读性。
+- **实现**: 拆分为三个职责单一的函数：
+  - `compute_idom()`（主入口，CC≈3）— 遍历块、过滤入口块、提取严格支配者集、调用辅助查找
+  - `_find_deepest_idom()` — 在严格支配者集中寻找"最深"的节点（不支配任何其他节点的）
+  - `_dominates_any_other()` — 检查候选节点是否支配集合中的其他节点
+- **效果**: 主函数从 ~80 行（含60行注释算法）压缩至 ~15 行，CC 从 13 降至约 3
+- **验证**: 全部 1065+31 测试通过，零回归
+
+#### 任务2: clean_unused_imports_v6 【审查驱动】
+- **来源**: 第1512轮审查 MEDIUM 级 `unused_import: 32`
+- **为什么选这个**: MEDIUM 级问题中最容易批量修复的类型，审查报告已连续多轮报告 unused_import 维持在 32-36 之间。
+- **实现**: 用 pyflakes 检测所有 .py 文件，排除 `__init__.py` 中的公共 API 暴露导入，定位核心代码中 8 个真实未使用导入：
+  - `tests/test_parser.py`: 移除 Assignment、MatchArm、Param、TypeIdentifier、VariantDef（5个）
+  - `tests/test_pass_manager.py`: 移除 BOOL_TYPE、HIRCallExpr（2个）
+  - `tests/test_type_checker.py`: 移除函数内未使用的 `import math`（1个）
+- **效果**: 8 个真实 unused_import 清零，剩余 24 个位于 `__init__.py`（公共API暴露，不属于未使用）
+- **验证**: 全部 1065+31 测试通过，零回归
+
+#### 任务3: fix_field_index_inference 【自主规划】
+- **来源**: Explore subagent 代码深度分析优先级 5 — mir_lowering._lower_field_expr 未设置 field_index（始终为默认0），导致 LIRFieldAccess.offset 始终为 0，所有 ADT 字段访问都会读取到第一个字段/tag 的内容
+- **为什么选这个**: 正确性 bug，难度极低（新增约 30 行查找函数），风险低（保守策略：跨变体同名字段索引不一致时不设置，回退到原行为），价值高——修复 ADT 字段访问的潜在数据读取错误
+- **实现**:
+  1. 在 MIRLowering 中新增 `_find_field_index(type_name, field_name) → Optional[int]` 辅助函数
+  2. 遍历 type_defs 中该 ADT 类型的所有变体，找到匹配 field_name 的字段位置 + 1（tag 在 index 0）
+  3. 跨变体一致性检查：同一字段名在不同变体中索引不同时返回 None，保守不设置
+  4. 在 `_lower_field_expr` 中根据 object.ir_type（ADT 类型）调用辅助查找并设置 instr.field_index
+- **效果**: ADT 字段访问现在能正确推断 field_index，修复潜在读取错误，不破坏任何现有行为（找不到定义或索引不一致时回退原行为）
+- **验证**: 全部 1065+31 测试通过，零回归
+
+---
+
+### 二、审查日志研读摘要
+
+**最新 3 轮审查（1510 → 1511 → 1512）趋势分析**:
+
+| 指标 | 1510轮 | 1511轮 | 1512轮 | 趋势 |
+|------|--------|--------|--------|------|
+| 总问题数 | ~1261 | 1285 | 1401 | +11% ⚠️（新增测试引入） |
+| CRITICAL/HIGH | 0/0 | 0/0 | 0/1 | HIGH 出现 sys_path_hack（第74轮已修复） |
+| MEDIUM | ~72 | 66 | 66 | 持平，内部结构改善（too_broad_exception 7→1↓） |
+| 代码行数 | ~29k | 29,671 | 32,667 | +10%（parser/evaluator/vm 三大测试文件新增） |
+| 测试总数 | ~520 | 520 | 780 | +50% ✅（三大盲区清零里程碑） |
+| 增量门禁 | 通过 | 通过 | 失败（74个docstring，第74轮已修复） | 门禁机制有效 |
+
+**本轮采纳的审查问题**:
+1. compute_idom CC=13（Top10#3）→ 任务1 已解决
+2. unused_import 32 个 MEDIUM → 任务2 清理 8 个真实未使用项
+
+**仍需后续处理的问题**:
+- class_too_large 20 个 MEDIUM → 下一轮可处理 NativeCodeGen / WasmGCBackend
+- function_too_long 8 个 MEDIUM → 与 CC 治理重叠
+- Evaluator._convert_nova_to_json CC=13（Top10#2）→ 复杂度收尾目标
+- _iter_hir_children CC=13（Top10#4）→ 需分析 Visitor 模式复用可行性
+
+---
+
+### 三、测试前后对比
+
+| 指标 | 开发前（基线5文件） | 开发后（全量套件） | 变化 |
+|------|-------------------|------------------|------|
+| 总测试通过 | 427 | 1065 | +638（+149%，包含新增测试文件） |
+| Subtests 通过 | 20 | 31 | +11 |
+| 测试失败数 | 0 | 0 | 持平 ✅ |
+| 回归数 | - | 0 | 零回归 ✅ |
+
+---
+
+### 四、下一步计划
+
+1. **统一 C 后端 Phase1（路径隔离+旧后端弃用标记）** — 架构债务首项，P70，已连续推迟 3+ 轮，必须启动
+2. **拆分 ir/ir_nodes.py 上帝模块** — P55，1400+ 行 112 个类，高耦合风险来源
+3. **复杂度收尾（CC>12清零）** — 重点处理 Evaluator._convert_nova_to_json CC=13 和 _iter_hir_children CC=13
+4. **LOW 级问题批量治理** — docstring + 魔法数字，P40，持续累积中
+
+---
+
 ## 2026-07-29 16:30 第76轮开发
 
 ### 开发概览

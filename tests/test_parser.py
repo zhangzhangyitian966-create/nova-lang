@@ -12,7 +12,6 @@ from nova.parser import Parser
 from nova.errors import ParseError, ParseErrorGroup
 from nova.ast_nodes import (
     AliasDef,
-    Assignment,
     BinaryOp,
     Block,
     BoolLiteral,
@@ -34,10 +33,8 @@ from nova.ast_nodes import (
     ListComprehension,
     ListExpr,
     MapExpr,
-    MatchArm,
     MatchExpr,
     MutBinding,
-    Param,
     PatternBool,
     PatternConstructor,
     PatternIdentifier,
@@ -53,12 +50,10 @@ from nova.ast_nodes import (
     TypeDef,
     TypeFn,
     TypeGeneric,
-    TypeIdentifier,
     TypeInt,
     TypeTuple,
     UnaryOp,
     UnitLiteral,
-    VariantDef,
     WhileExpr,
 )
 

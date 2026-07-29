@@ -18,7 +18,6 @@ from nova.ir.lir_lowering import LIRLowering
 
 from nova.ir.ir_nodes import (
     INT_TYPE,
-    BOOL_TYPE,
     HIRModule,
     HIRFnDecl,
     HIRFunction,
@@ -27,7 +26,6 @@ from nova.ir.ir_nodes import (
     HIRIdentifier,
     HIRBlockExpr,
     HIRLetDecl,
-    HIRCallExpr,
     MIRModule,
     MIRBasicBlock,
     MIRConst,
