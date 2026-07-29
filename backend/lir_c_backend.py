@@ -732,35 +732,59 @@ class LIRCBackend:
         )
 
         if all_int_cases and len(instr.cases) >= 3:
-            # 整型 case 较多：使用 C switch 语句
-            self._emit(f"switch ((int64_t){cond_val}) {{")
-            self._indent_level += 1
-            for case_val, target in instr.cases:
-                self._emit(f"case {case_val}: goto {target};")
-            if instr.default_target:
-                self._emit(f"default: goto {instr.default_target};")
-            self._indent_level -= 1
-            self._emit("}")
+            self._emit_switch_int_table(cond_val, instr)
         else:
-            # 使用 if-else if 级联
-            for i, (case_val, target) in enumerate(instr.cases):
-                if isinstance(case_val, str):
-                    # 字符串比较
-                    self._emit(
-                        f'if (nova_str_eq({cond_val}, "{case_val}")) goto {target};'
-                    )
-                elif isinstance(case_val, bool):
-                    # 布尔比较
-                    self._emit(
-                        f"if ({cond_val} == {'1' if case_val else '0'}) goto {target};"
-                    )
-                else:
-                    # 数值比较（int, float 等）
-                    self._emit(f"if ({cond_val} == {case_val}) goto {target};")
+            self._emit_switch_if_cascade(cond_val, instr)
 
-            # default 分支
-            if instr.default_target:
-                self._emit(f"goto {instr.default_target};")
+    def _emit_switch_int_table(self, cond_val: str, instr: LIRSwitch):
+        """生成 C switch 语句（整型 case >= 3 时）
+
+        Args:
+            cond_val: 条件变量的 C 表达式
+            instr: LIRSwitch 指令
+        """
+        self._emit(f"switch ((int64_t){cond_val}) {{")
+        self._indent_level += 1
+        for case_val, target in instr.cases:
+            self._emit(f"case {case_val}: goto {target};")
+        if instr.default_target:
+            self._emit(f"default: goto {instr.default_target};")
+        self._indent_level -= 1
+        self._emit("}")
+
+    def _emit_switch_if_cascade(self, cond_val: str, instr: LIRSwitch):
+        """生成 if-else if 级联（非整型或 case 数量 < 3 时）
+
+        Args:
+            cond_val: 条件变量的 C 表达式
+            instr: LIRSwitch 指令
+        """
+        for case_val, target in instr.cases:
+            self._emit_case_comparison(cond_val, case_val, target)
+
+        # default 分支
+        if instr.default_target:
+            self._emit(f"goto {instr.default_target};")
+
+    def _emit_case_comparison(self, cond_val: str, case_val, target: str):
+        """生成单个 case 的比较和跳转代码
+
+        Args:
+            cond_val: 条件变量的 C 表达式
+            case_val: case 值（可为 str/bool/int/float）
+            target: 匹配成功时的跳转目标标签
+        """
+        if isinstance(case_val, str):
+            self._emit(
+                f'if (nova_str_eq({cond_val}, "{case_val}")) goto {target};'
+            )
+        elif isinstance(case_val, bool):
+            self._emit(
+                f"if ({cond_val} == {'1' if case_val else '0'}) goto {target};"
+            )
+        else:
+            # 数值比较（int, float 等）
+            self._emit(f"if ({cond_val} == {case_val}) goto {target};")
 
     def _compile_call(self, instr: LIRCall, dst: str):
         """编译函数调用"""

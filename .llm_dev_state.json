@@ -1,5 +1,5 @@
 {
-  "cycles": 75,
+  "cycles": 76,
   "completed_tasks": [
     "parser_unit_tests",
     "refactor_analyze_loops",
@@ -159,10 +159,35 @@
     "refactor_c_codegen_pattern",
     "fix_sys_path_hack_and_gate_docstring",
     "evaluator_unit_tests",
+    "refactor_compile_switch",
+    "vm_unit_tests",
     "review_cycle_75"
   ],
   "failed_tasks": [],
   "task_history": [
+    {
+      "cycle": 76,
+      "date": "2026-07-29 16:30",
+      "tasks": [
+        {
+          "name": "refactor_compile_switch",
+          "source": "review_driven",
+          "status": "success",
+          "reason": "第1511轮审查Top10复杂函数中LIRCBackend._compile_switch CC=13。拆分为_emit_switch_int_table、_emit_switch_if_cascade、_emit_case_comparison三个子方法，主函数CC降至约3。",
+          "description": "重构LIR C后端switch生成，降低圈复杂度"
+        },
+        {
+          "name": "vm_unit_tests",
+          "source": "self_planned",
+          "status": "success",
+          "reason": "vm.py（1109行）是最后一个大测试盲区。新建tests/test_vm_unit.py（980行+），覆盖8大测试类70+测试用例：常量加载、算术运算、比较逻辑、控制流、函数调用、数据结构、模式匹配、管道与ADT、内置函数、辅助方法。",
+          "description": "为vm.py建立独立单元测试基线"
+        }
+      ],
+      "test_before": "919 passed",
+      "test_after": "1031 passed",
+      "review_alignment": "50% (1/2 from review)"
+    },
     {
       "cycle": 75,
       "task_id": "review_cycle_75",
@@ -637,7 +662,7 @@
   ],
   "current_cycle": 72,
   "baseline_tests": 699,
-  "current_tests": 699,
+  "current_tests": 1031,
   "last_review_cycle": 72,
   "tasks": [
     {
@@ -1226,24 +1251,24 @@
     {
       "id": "vm_unit_tests",
       "name": "VM单元测试基线",
-      "description": "为 vm.py（1109行）建立独立单元测试基线，覆盖：字节码指令执行（栈操作/算术/逻辑/控制流/函数调用/数据结构/内存管理）、VM状态管理、错误处理、边界情况等核心路径。当前无独立测试。",
+      "description": "为 vm.py（1109行）建立独立单元测试基线，覆盖：字节码指令执行（栈操作/算术/逻辑/控制流/函数调用/数据结构/内存管理）、VM状态管理、错误处理、边界情况等核心路径。新建tests/test_vm_unit.py（980行+），8大测试类70+测试用例全部通过。",
       "difficulty": "medium",
       "priority": 60,
       "category": "test",
       "estimated": "4-6小时",
-      "status": "pending",
+      "status": "completed",
       "depends_on": [],
       "reason": "1109行无独立测试，字节码执行核心。VM是nova run/vm/repl等命令的底层执行引擎，任何指令实现bug都可能导致整个程序崩溃。[自主发现]"
     },
     {
       "id": "refactor_compile_switch",
       "name": "重构LIRCBackend._compile_switch降低复杂度",
-      "description": "LIRCBackend._compile_switch 圈复杂度 13，负责LIR Switch指令到C switch语句的生成（>=3整型case时生成C switch，否则生成if-else级联）。可重构为调度表模式，将case类型判断和代码生成逻辑分离。",
+      "description": "LIRCBackend._compile_switch 圈复杂度 13，负责LIR Switch指令到C switch语句的生成（>=3整型case时生成C switch，否则生成if-else级联）。已重构为三个子方法：_emit_switch_int_table、_emit_switch_if_cascade、_emit_case_comparison，主函数CC降至约3。",
       "difficulty": "medium",
       "priority": 55,
       "category": "engineering",
       "estimated": "2-3小时",
-      "status": "pending",
+      "status": "completed",
       "depends_on": [],
       "reason": "第1511轮Top10复杂函数CC=13，LIR C后端switch生成核心。函数包含case数量判断、整型类型检查、C switch生成、if-else级联生成等多重逻辑，调度表化后CC可降至约5。[审查驱动]"
     }

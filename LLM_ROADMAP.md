@@ -1,8 +1,8 @@
 # Nova LLM 智能开发路线图
 
-**更新时间**: 2026-07-29 08:12:00
+**更新时间**: 2026-07-29 16:30:00
 **上次评审**: 第 75 轮（路线图评审）
-**上次开发**: 第 74 轮（普通轮）
+**上次开发**: 第 76 轮（普通轮）
 
 本路线图由 LLM 智能开发系统动态维护。
 
@@ -171,14 +171,14 @@
 | ✅ | PassManager 单元测试基线 | medium | 65 | 4-6 小时 | - |
 | ✅ | Parser 单元测试基线 | medium | 70 | 4-6 小时 | - |
 | ✅ | Evaluator 单元测试基线 | medium | 65 | 4-6 小时 | - |
-| ⏳ | VM 单元测试基线 | medium | 60 | 4-6 小时 | - |
+| ✅ | VM 单元测试基线 | medium | 60 | 4-6 小时 | - |
 
 ---
 
-**进度**: 108/123 (87.8%)
-- **已完成**: 108
+**进度**: 110/123 (89.4%)
+- **已完成**: 110
 - **进行中**: 0
-- **待开发**: 10（unify_c_backend_phase1 P70、unify_c_backend_phase2 P65、vm_unit_tests P60、split_ir_nodes P55、refactor_compile_switch P55、low_quality_issues_cleanup P40、benchmark_enhance_exec_time P38、deprecate_cranelift_backend P35）
+- **待开发**: 8（unify_c_backend_phase1 P70、unify_c_backend_phase2 P65、split_ir_nodes P55、low_quality_issues_cleanup P40、benchmark_enhance_exec_time P38、deprecate_cranelift_backend P35）
 - **已废弃**: 5（native_call_abi、refactor_native_emit_call、native_call_abi、unify_c_backend 总任务）
 
-> 第75轮评审完成。新增4个任务（架构治理3个 + 后端1个），完成4个任务（parser_unit_tests、evaluator_unit_tests、refactor_analyze_loops、fix_sys_path_hack_and_gate_docstring），废弃1个任务（unify_c_backend 总任务拆分为 phase1/phase2）。测试总数 907，HIGH级别问题清零。下阶段方向：最后测试盲区清零 + 复杂度收尾 + 架构债务启动。
+> 第76轮开发完成。完成2个任务：refactor_compile_switch（审查驱动，CC=13→~3）、vm_unit_tests（自主规划，vm.py从0测试→70+测）。测试总数 1031（+112），前端三大模块（parser/evaluator/vm）测试盲区全部清零。下阶段方向：架构债务启动（统一C后端Phase1 + 拆分ir_nodes）+ 复杂度收尾。
