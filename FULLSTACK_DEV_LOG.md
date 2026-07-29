@@ -4,6 +4,179 @@
 
 ---
 
+## 第 57 轮 — 2026-07-30 16:30
+
+> 评审轮 | 第 55-56 轮双线路线图评审 | 测试 1092 passed, 31 subtests
+
+---
+
+### 轮次概览
+
+| 维度 | 数据 |
+|------|------|
+| 轮次 | 第 57 轮（评审轮） |
+| 评审范围 | 第 55-56 轮（2 轮普通开发 + 1 轮评审，非完整 3 轮组） |
+| 测试基线 | 1092 passed, 31 subtests（评审前快照） |
+| 前端完成率 | 38/38 = **100%**（任务池待补充） → 新任务池：38/41 = **92.7%** |
+| 后端完成率 | 41/60 = **68.3%** → 新任务池：41/68 = **60.3%**（审计新增 8 任务，废弃 1 旧任务） |
+| 总完成率 | 79/98 = **80.6%** → 新任务池：79/109 = **72.5%** |
+| 前端质量评分 | **7.2/10**（↓0.8 vs 第 54 轮 8.0/10） |
+| 后端质量评分 | **6.5/10**（持平 vs 第 54 轮 6.5/10） |
+| 新发现问题 | **9 个**：P0×1、P1×5、P2×3 |
+| 新增任务 | **8 个**（来自代码审计 57） |
+| 废弃任务 | 1 个（backend_native_runtime_link 被 backend_native_elf_external_calls 替换） |
+
+---
+
+### 三轮回顾总结（第 55-56 轮，实际 2 轮普通开发）
+
+**第 55 轮**：前端 match 测试补齐 + 后端 P1-新3 清零
+- 前端（FRONTEND-035）：新增 TestMatchRedundantArms/PatternsExhaustive/ExhaustiveIntegration 3 个测试类，31 测试+5 subtests，覆盖约 400 行 match 完备性/冗余递归分析模块
+- 后端（backend_c_closure_double_return）：P1-新3 清零——修复 C 后端闭包间接调用 double 返回 NULL 检查/内存泄漏/bool cast 三重缺陷
+- 测试：725 → 759 passed（+34，无回归）
+- 关键成果：**P1 级问题清零**（P0 曾 2 个、P1 曾 3 个均已解决）
+- 前端完成率：37/37 = 100%，后端：40/59 = 67.8%
+
+**第 56 轮**：前端错误位置补全 + 后端 P2-新1 清零
+- 前端（FRONTEND-036）：TypeChecker 新增 `_error()` 统一出口（25 行辅助方法），批量替换 22 处高频裸 raise，新增 20 个位置信息断言测试
+- 后端（backend_phi_copy_missing_error）：P2-新1 清零——LIR 降级 _insert_phi_copies 拆为 3 个防御性检查，任一异常均抛 LIRLoweringError 带诊断消息
+- 测试：759 → 1092 passed, 31 subtests（+333 主要是测试框架扩大/第 55-56 轮累积，无回归）
+- 关键成果：**P2-新1 清零**，前端报错位置信息覆盖率从 30% 提升至约 60%（仍 40% 盲区）
+- 前端完成率：38/38 = 100%，后端：41/60 = 68.3%
+
+---
+
+### 双线评估结果
+
+#### 前端评估
+
+| 维度 | 评估 | 说明 |
+|------|------|------|
+| 质量趋势 | **小幅下滑**（8.0→7.2，↓0.8） | 第 56 轮 FRONTEND-036 虽改善高频报错路径，但审计发现 _error() 统一出口使用率仅 ~40%（45 处裸 raise 未迁移）、test_type_checker.py 行覆盖率仅 ~55%（12 类核心场景零覆盖）、match 错误手动传 line/col 但缺 source_code（无 `-->` 标记）。三项质量债拉低评分。 |
+| 进度评估 | 38/38 = 100%（旧池）/ 38/41 = 92.7%（新池） | 原有计划任务全部完成。本轮审计新增 3 个 P2 前端任务（统一报错出口、测试覆盖补齐、Parser 歧义探测文档化）。 |
+| 价值评估 | **高** | 类型系统（HM 推断+泛型参数校验）、模式匹配（完备性+冗余检测）、错误恢复（Parser 双同步点）三大核心模块均已稳定。新增维护性任务属长期价值投资。 |
+| 最大短板 | **报错一致性 + 测试覆盖缺口** | 45 处裸 raise（40% 路径无 source_code 上下文）、12 类核心场景（Let/Fn/ADT/Lambda/Pipe/Try/For/While/Assign/Field/ListComp/TypeAnno）零单元测试。 |
+
+**前端质量下滑根因**：FRONTEND-036 只覆盖高频 22 处报错，未系统替换全部路径。_error() 设计良好（自动提取 span、注入 source），但工程化投入不足导致使用率不达标。
+
+#### 后端评估
+
+| 维度 | 评估 | 说明 |
+|------|------|------|
+| 质量趋势 | **持平**（6.5→6.5） | 第 55-56 轮清零 P1-新3 和 P2-新1（加分项），但深度代码审计新发现 Native 后端 3 个阻塞级缺陷（P0+P1×2）和降级器 2 个类型安全漏洞（P1×2），以及 C 后端 1 个 OOM 内存安全隐患（P1），正负抵消后总质量持平。 |
+| 进度评估 | 41/68 = **60.3%**（新池） | 旧池 41/60 = 68.3%。新增 8 个审计任务使分母扩大。Native 后端完成度从 ~88% **大幅下调至 70%**（P0 独立 ELF 不可用 + P1 XMM 寄存器 + P1 PT_LOAD 对齐违规三大问题阻塞可用性）。 |
+| 价值评估 | **高但风险暴露** | C 后端（~85%）和 Wasm 后端（~78%）相对稳健。Native 后端虽完成寄存器分配、栈帧管理、ABI 调用约定等核心模块，但 3 个审计发现的问题意味着 .o 模式以外的完整 ELF 输出完全不可用。实际可用范围比之前估计的窄。 |
+| 最大短板 | **Native 后端正确性三连击** | (1) P0：完整 ELF 模式下运行时函数（nova_init/nova_list_new 等）的 call 指令保持 0 偏移→二进制崩溃；(2) P1：XMM caller-saved 寄存器跨 call 不保存→浮点值随机覆盖；(3) P1：PT_LOAD p_offset/p_vaddr 不对齐→严格加载器加载失败。三项合计使 Native 后端从"基本可用"降级为".o 链接模式可用，独立 ELF 模式不可用"。 |
+
+**各后端完成度更新排名（第 57 轮审计后）**：
+
+| 排名 | 后端 | 完成度 | 变化 | 关键缺失 |
+|------|------|--------|------|----------|
+| 1 | **C 后端** | **~85%** | ↓3pp | nova_alloc 返回 NULL 未检查（P1-3）、边界 case |
+| 2 | **WasmGC 后端** | **~78%** | 持平 | 栈平衡极端控制流验证、WAT 缩进断言 |
+| 3 | **原生后端** | **~70%** | ↓**18pp** | P0：external_calls 偏移 0 / P1：XMM caller-saved / P1：PT_LOAD 对齐 |
+| 4 | **Cranelift 后端** | **~35%** | 持平 | 大量指令未实现（安全基线已达标：未知指令抛错） |
+
+---
+
+### 问题总结与根因分析
+
+#### 新发现问题（9 个，按 P0/P1/P2 分级）
+
+| 严重度 | 编号 | 问题 | 文件 | 影响 |
+|--------|------|------|------|------|
+| **P0 致命** | P0-1 | 完整 ELF 模式 external_calls（nova_init 等）偏移保持 0 | native_backend.py L1792-1822 | 独立二进制 call 指令 = `E8 00000000`（no-op），nova_init 不执行→启动即崩溃或行为未定义。仅 .o+ld 路径安全。 |
+| **P1 严重** | P1-1 | XMM caller-saved 寄存器在函数调用前未保存 | native_backend.py L918/L1120-1150 | 浮点 vreg 分配到 XMM0-XMM7，跨 call 后值被被调用者破坏（按 ABI 约定），任何包含浮点运算+函数调用的函数产生随机错误值。 |
+| **P1 严重** | P1-2 | ELF 数据段 PT_LOAD p_offset/p_vaddr 对齐违规 | native_backend.py L1755-1768 | `p_vaddr % 4096 = 0` 但 `p_offset % 4096 ≠ 0`，违反 ELF 规范。严格加载器（hardened kernel / QEMU user）返回 EINVAL 加载失败。 |
+| **P1 严重** | P1-3 | C 后端 nova_alloc/malloc 返回值未做 NULL 检查 | lir_c_backend.py L552/L616/L299 | OOM 场景下 nova_alloc 返回 NULL，紧接着 memset/指针解引用→SIGSEGV。用户程序无机会优雅降级。 |
+| **P1 严重** | P1-4 | MIR Phi 节点类型取第一个源 SSA，其余分支完全忽略 | mir_lowering.py L907-912 | true/false 分支定义不兼容类型（如 Int vs Float）时 Phi 类型错误传播，后续 LIR/后端以错误类型生成代码（如整数加法器处理浮点值）。 |
+| **P1 严重** | P1-5 | LIR terminator 条件/值 SSA 位置找不到时默认空字符串 | lir_lowering.py L295/L394/L402 | CFG 构建异常（前向引用、Phi 循环依赖）时寄存器位置为空字符串 `""`，下游 LIR 消费者生成无效代码或访问空键崩溃。 |
+| **P2 质量** | P2-1 | type_checker.py 45 处裸 raise TypeCheckError 未走 _error() 统一出口 | type_checker.py 多处 | 约 40% 报错路径用户看不到 source_code 上下文和 `-->` 标记，也缺少精确列号。_check_fn_decl 返回类型和 _check_pattern_* 家族尤其严重。 |
+| **P2 质量** | P2-2 | parser.py _parse_brace_primary 静默吞错缺少注释说明 | parser.py L1077 | Map vs Block 歧义探测的 `except ParseError: pass` 是有意设计但无文档。未来维护者可能误改为收集错误，破坏 Map 语法回溯正确性。 |
+| **P2 质量** | P2-3 | match 错误手动传 line/column 但缺少 source_code | type_checker.py L1477-1576 | _generate_missing_message 和 _check_match_exhaustiveness 手动构造 line/col 但未传 source=source，导致格式化输出不包含 Rust 风格 `-->` 标记和源码行前缀。 |
+
+#### 根因分析
+
+1. **Native 后端审计覆盖延迟**：第 46 轮突破端到端执行后即标记完成度 ~88%，但仅验证了 .o + gcc 链接路径。完整 ELF 路径从未做端到端运行测试，导致 P0-1（external_calls 0 偏移）和 P1-2（PT_LOAD 对齐）两个早期设计问题在 11 轮后才被发现。
+2. **寄存器 ABI 测试盲区**：caller-saved 寄存器保存逻辑只通过整数场景验证（Native 端到端测试主要是 Int 类型的循环/函数调用），浮点跨 call 场景从未被测试。XMM caller-saved 属于 ABI 规定的标准部分，应在首次实现 float 支持时就补单测。
+3. **防御性编程不一致**：LIRLowering 中 _insert_phi_copies（第 56 轮已修复）和 3 处 terminator 条件位置（P1-5）同为 SSA 查找场景，前者已改为抛错，后者仍保留 `.get(..., "")` 默认值。降级器模块内部缺少统一的防御性编程规范。
+4. **前端 _error() 半程改造**：FRONTEND-036 只替换了约一半的裸 raise。工程化投入不足导致"统一出口"设计意图未完全落地。属于典型的"首轮改造完成，系统性收尾欠账"。
+
+---
+
+### 下阶段方向与理由（第 58-60 轮，3 轮计划）
+
+#### 第 58 轮：Native 后端正确性三连修（最高优先级，P0+P1×2）
+
+**前端任务**：`frontend_parser_brace_doc`（P2-2，easy，P45）——Parser Map/Block 歧义探测文档化 + 5-8 个错误恢复边界单测。
+- 理由：第 58 轮前端仅需轻量任务，集中资源攻克 Native 后端 P0。Parser 文档化工作量小（1-2h），且为 P2 级质量债。
+
+**后端任务**：`backend_native_elf_external_calls`（P0-1，hard，P99）——修复完整 ELF 模式 external_calls 0 偏移。
+- 理由：唯一 P0 级问题，不修复则 Native 后端独立输出模式完全不可用。修复后 Native 完成度有望回升至 ~82%。
+- 同步**并行修复**两个低成本 P1：
+  - `backend_native_ptload_align`（P1-2，easy，P88，30 分钟）——code padding NOP 对齐
+  - `backend_native_xmm_caller_saved`（P1-1，medium，P90，3-5h）——CALLER_XMMS 常量 + 保存恢复循环
+- 第 58 轮后端实际为 1 个 hard + 2 个 P1 打包，预计总工作量 1-2 天（与 P0 任务单独估计相当，可一轮内完成）。
+
+**预期成果**：P0 清零、Native 后端三连修完成，完成度从 70% 回升至 ~82%；P1 剩余数从 5 降到 3。
+
+#### 第 59 轮：降级器类型安全 + C 后端内存安全
+
+**前端任务**：`frontend_typecheck_unify_error_exit`（P2-1+P2-3，medium，P75）——统一 45 处裸 raise 走 _error() 出口，match 错误补 source_code。
+- 理由：前端最大质量债（评分下滑主因）。统一后 _error() 使用率从 40%→100%，用户报错体验全面提升。
+
+**后端任务**：`backend_mir_phi_type_consistency`（P1-4，medium，P82）+ `backend_c_alloc_null_check`（P1-3，medium，P85）并行。
+- 理由：Phi 类型一致性是 SSA 正确性根基（不修复理论上存在类型不匹配生成灾难性代码的路径）；C 后端 malloc NULL 检查是内存安全底线。两个 P1 均为 medium 难度，3-5h 估算合计可在一轮完成。
+- 同步完成 `backend_lir_term_ssa_defensive`（P1-5，easy，P78，1 小时）——与第 56 轮 Phi 拷贝防御风格一致，3 处修改 + 3 个单测。第 59 轮后端实际是 P1×3（1 medium+1 medium+1 easy），预计半天+半天。
+
+**预期成果**：P1 剩余数从 3 降到 0（P1 清零里程碑！），前端质量评分预计回升至 8.0+。
+
+#### 第 60 轮：评审轮 + 前端测试覆盖
+
+**第 60 轮是评审轮（60%3=0）**。如评审 + 打包有剩余带宽，前端补 `frontend_typecheck_test_coverage`（15 个测试），后端清理 Wasm 两个低优先级任务（`backend_wasm_stack_balance` / `backend_wasm_wat_indent_verify`）。
+
+**3 轮总目标**：
+- P0：1→0（清零）
+- P1：5→0（清零里程碑）
+- P2：3→0（有望在 60 轮前后端同步清）
+- Native 后端完成度：70%→82%+
+- 前端质量评分：7.2→8.0+
+- 后端质量评分：6.5→7.2+
+
+---
+
+### 任务池变更说明
+
+#### 新增任务（8 个，全部来自第 57 轮代码审计）
+
+| 任务 | 严重度 | 难度 | 优先级 | 来源 | 理由 |
+|------|--------|------|--------|------|------|
+| backend_native_elf_external_calls | **P0** | hard | **99** | code_audit_57 | 完整 ELF 模式 external_calls 偏移为 0，独立二进制崩溃 |
+| backend_native_xmm_caller_saved | P1 | medium | 90 | code_audit_57 | XMM caller-saved 跨 call 不保存，浮点值随机覆盖 |
+| backend_native_ptload_align | P1 | easy | 88 | code_audit_57 | ELF PT_LOAD p_offset/p_vaddr 对齐违规，严格加载器失败 |
+| backend_c_alloc_null_check | P1 | medium | 85 | code_audit_57 | C 后端 nova_alloc/malloc NULL 未检查，OOM 时段错误 |
+| backend_mir_phi_type_consistency | P1 | medium | 82 | code_audit_57 | Phi 节点类型取第一个源 SSA，不做一致性校验 |
+| backend_lir_term_ssa_defensive | P1 | easy | 78 | code_audit_57 | LIR terminator SSA 位置找不到时默认空字符串 |
+| frontend_typecheck_unify_error_exit | P2 | medium | 75 | code_audit_57 | 统一 type_checker 所有报错走 _error() + match 错误补 source |
+| frontend_typecheck_test_coverage | P2 | easy | 65 | code_audit_57 | test_type_checker.py 12 类核心场景零覆盖（~55%→~80%） |
+| frontend_parser_brace_doc | P2 | easy | 45 | code_audit_57 | Parser Map/Block 歧义探测静默吞错文档化 + 错误恢复单测 |
+
+#### 废弃任务（1 个）
+
+| 任务 | 原因 |
+|------|------|
+| backend_native_runtime_link（旧 P70 hard） | 与新增的 backend_native_elf_external_calls（P0 P99）描述同一问题但旧任务措辞宽泛（"PLT/GOT 或链接时符号解析，至少硬编码或动态链接"）。新任务精确定位为"external_calls 偏移 0"并给出三档实施方案（A warn + C fallback gcc 链接 + B 字节码嵌入）。废弃旧任务避免重复。 |
+
+#### 优先级调整：无。下 3 轮方向与第 54 轮评审总体一致（Native > C/Wasm 质量），新增任务按严重度自然排序。
+
+---
+
+### 更新后的路线图进度
+
+（见 FULLSTACK_ROADMAP.md 同步更新版本）
+
+---
+
 ## 第 55 轮 — 2026-07-29 13:20
 
 > 开发轮 | 前端：match 完备性/冗余检测单元测试补齐 + 后端：P1-新3 C 后端闭包浮点返回清零 | 测试 759 passed（基线 725，+34 无回归）

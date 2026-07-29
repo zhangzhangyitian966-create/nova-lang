@@ -1,9 +1,10 @@
 # Nova 前后端专项开发路线图
 
-**更新时间**: 2026-07-29
+**更新时间**: 2026-07-30
 **上次评审**: 第 54 轮
-**当前轮次**: 第 55 轮
-**下次评审**: 第 57 轮
+**当前评审**: 第 57 轮
+**当前轮次**: 第 57 轮
+**下次评审**: 第 60 轮
 
 本路线图由前后端专项开发系统维护，专注于前端类型系统和后端代码生成的核心功能开发。
 
@@ -11,150 +12,139 @@
 
 | 轨道 | 总数 | 已完成 | 待做 | 废弃 | 完成率 |
 |------|------|--------|------|------|--------|
-| 前端 | 37 | 37 | 0 | 1 | **100%** |
-| 后端 | 59 | 40 | 6 | 9 | **67.8%** |
-| **总计** | **96** | **77** | **6** | **10** | **80.2%** |
+| 前端 | 41 | 38 | 3 | 1 | **92.7%** |
+| 后端 | 68 | 41 | 19 | 8 | **60.3%** |
+| **总计** | **109** | **79** | **22** | **9** | **72.5%** |
 
 ## 前端开发线
 
-**状态：completed（37/37 = 100%）**
+**状态：维护模式（38/41 = 92.7%）**
 
-前端所有计划任务和审计发现问题已全部完成。进入维护模式。
+前端核心功能全部完成。本轮（第 57 轮）审计新增 3 个 P2 级维护性任务。
 
-### 本轮新增（第 55 轮）
+### 本轮新增（第 57 轮评审，共 3 个前端新任务）
 
-| 任务 | 难度 | 优先级 | 状态 |
-|------|------|--------|------|
-| match 完备性/冗余检测单元测试补齐 | easy | 55 | **已完成**（第 55 轮，FRONTEND-035） |
+| 任务 | 难度 | 优先级 | 严重度 | 状态 | 轮次计划 |
+|------|------|--------|--------|------|----------|
+| 统一 type_checker 所有报错走 _error() 出口 + match 错误补 source_code（P2-1+P2-3 合并） | medium | 75 | P2 | 待做 | **第 59 轮** |
+| 补齐 test_type_checker.py 核心模块测试盲区（12 类场景，~15 个用例） | easy | 65 | P2 | 待做 | **第 60 轮**（评审轮剩余带宽） |
+| Parser Map/Block 歧义探测静默吞错文档化 + 错误恢复单测补齐 | easy | 45 | P2 | 待做 | **第 58 轮** |
 
-### 审计发现（已全部清零）
+### 审计发现清单（P2 全部待清零）
 
-| 发现 | 位置 | 影响 | 优先级 | 状态 |
+| 发现 | 位置 | 影响 | 严重度 | 状态 |
 |------|------|------|--------|------|
-| ~~Parser 块边界静默吞错~~ | parser.py:542-544 | 错误语法被静默接受 | 中 | **已清零**（第 52 轮，frontend_parser_block_boundary） |
-| ~~Phi 类型推断取第一个源类型未做合一~~ | mir_lowering.py:860 | 理论上可能类型不匹配 | 低 | 维持观察 |
-| ~~缺少 let-polymorphism value restriction~~ | type_checker.py | 可变引用多态场景理论风险 | 低 | 维持观察 |
+| type_checker.py 45 处裸 raise TypeCheckError 未走 _error() 统一出口 | type_checker.py L479-1898 多处 | 约 40% 报错路径无 source_code 和 `-->` 标记 | P2-1 | 待清零（frontend_typecheck_unify_error_exit, P75） |
+| match 错误手动传 line/col 但缺少 source_code（无 `-->` 标记） | type_checker.py L1477-1576 | match 不完备/冗余报错缺少源码上下文 | P2-3 | 待清零（合并入 P2-1 同一任务） |
+| parser.py _parse_brace_primary 静默吞错缺少注释说明 | parser.py L1077 | Map/Block 歧义探测意图不明易被误改 | P2-2 | 待清零（frontend_parser_brace_doc, P45） |
+
+### 核心能力清单（全部已稳定）
+
+- Hindley-Milner 类型推断（含 let-polymorphism）
+- 泛型参数数量校验 + 参数化类型实例化
+- 模式匹配完备性检查（ADT / Bool / Tuple / List / 嵌套子模式 / 无限域判定）
+- 冗余分支检测（guard 通配符排除 / NaN 安全 / 字面量集合去重）
+- Parser Panic Mode 错误恢复（声明边界 + 语句边界双同步点，BLOCK_MAX_ERRORS=3 防风暴）
+- TypeCheckError 统一 _error() 出口（第 56 轮新增，使用率约 60%，第 59 轮将统一至 100%）
 
 ## 后端开发线
 
-### 高优先级任务（下 2 轮聚焦，第 56-57 轮）
+### 紧急问题清零看板（P0/P1/P2，第 57 轮评审新发现 9 项）
 
-| 状态 | 任务 | 难度 | 优先级 | 预计 | 依赖 | 轮次计划 |
-|------|------|------|--------|------|------|----------|
-| ~~完成~~ | ~~修复 Cranelift 后端 TODO 降级为致命异常~~ | easy | **98** | 30分钟 | - | **第 52 轮** |
-| ~~完成~~ | ~~修复 Parser 块边界静默吞错~~ | easy | **55** | 1小时 | - | **第 52 轮** |
-| ~~完成~~ | ~~修复 Native 后端浮点全局变量存储~~ | medium | **85** | 2-3小时 | - | **第 53 轮** |
-| ~~完成~~ | ~~修复 C 后端闭包间接调用浮点返回丢失~~ | medium | **80** | 2-3小时 | - | **第 55 轮** |
-| 待做 | 修复 Native 后端外部运行时调用偏移为0 | hard | **70** | 1-2天 | - | **第 56 轮** |
-| 待做 | 实现 Wasm 后端栈平衡验证器 | medium | 45 | 1-2天 | - | **第 57 轮评审** |
-| 待做 | 验证 Phi 节点 LIR 降级正确性 | medium | 42 | 3-5小时 | - | **第 57 轮评审** |
+| 严重度 | 编号 | 问题 | 对应任务 | 优先级 | 预计轮次 | 状态 |
+|--------|------|------|----------|--------|----------|------|
+| **P0** | P0-1 | Native 完整 ELF 模式 external_calls 偏移 0 | backend_native_elf_external_calls | **99** | **第 58 轮** | 待修复 |
+| P1 | P1-1 | Native XMM caller-saved 寄存器跨 call 未保存 | backend_native_xmm_caller_saved | 90 | **第 58 轮** | 待修复 |
+| P1 | P1-2 | Native ELF PT_LOAD p_offset/p_vaddr 对齐违规 | backend_native_ptload_align | 88 | **第 58 轮** | 待修复 |
+| P1 | P1-3 | C 后端 nova_alloc/malloc NULL 未检查 | backend_c_alloc_null_check | 85 | **第 59 轮** | 待修复 |
+| P1 | P1-4 | MIR Phi 节点类型取第一个源 SSA 不校验 | backend_mir_phi_type_consistency | 82 | **第 59 轮** | 待修复 |
+| P1 | P1-5 | LIR terminator SSA 位置找不到时默认空字符串 | backend_lir_term_ssa_defensive | 78 | **第 59 轮** | 待修复 |
+| P2 | P2-1 | type_checker 45 处裸 raise 未走 _error() | frontend_typecheck_unify_error_exit | 75 | **第 59 轮** | 待修复 |
+| P2 | P2-2 | Parser _parse_brace_primary 静默吞错无注释 | frontend_parser_brace_doc | 45 | **第 58 轮** | 待修复 |
+| P2 | P2-3 | match 错误缺 source_code（无 `-->` 标记） | （合并入 P2-1） | — | **第 59 轮** | 待修复 |
 
-### 第 54 轮评审新增任务
+**3 轮清零计划（第 58-60 轮）**：P0×1 + P1×5 + P2×3 = 9 项，预计第 59 轮末 P0/P1 全部清零，第 60 轮末 P2 清零。
 
-| 状态 | 任务 | 难度 | 优先级 | 来源 | 说明 |
-|------|------|------|--------|------|------|
-| 待做 | Phi 拷贝源缺失时抛出内部编译错误 | easy | 40 | 代码审计54 | lir_lowering.py 防御性增强 |
-| 待做 | 添加 Wasm 后端 WAT 缩进深度断言 | easy | 35 | 代码审计54 | 异常 CFG 下 WAT 格式安全 |
+### 高优先级任务（下 3 轮聚焦，第 58-60 轮）
 
-### P0/P1/P2 问题清零状态
+| 状态 | 任务 | 严重度 | 难度 | 优先级 | 预计 | 轮次计划 |
+|------|------|--------|------|--------|------|----------|
+| 待做 | **修复 Native 完整 ELF external_calls 偏移为 0（P0）** | P0 | hard | **99** | 1-2天 | **第 58 轮** |
+| 待做 | 修复 Native 函数调用前 XMM caller-saved 未保存 | P1 | medium | **90** | 3-5h | **第 58 轮**（并行） |
+| 待做 | 修复 Native ELF 数据段 PT_LOAD 对齐违规 | P1 | easy | **88** | 30min | **第 58 轮**（并行，5 行代码） |
+| 待做 | Parser Map/Block 歧义探测文档化 + 错误恢复单测 | P2 | easy | 45 | 1-2h | **第 58 轮** 前端 |
+| 待做 | 修复 C 后端 nova_alloc/malloc NULL 未检查 | P1 | medium | **85** | 2-3h | **第 59 轮** |
+| 待做 | 修复 MIR Phi 节点类型不做一致性校验 | P1 | medium | **82** | 3-5h | **第 59 轮**（并行） |
+| 待做 | 修复 LIR terminator SSA 位置默认空字符串 | P1 | easy | **78** | 1h | **第 59 轮**（并行，3 处修改） |
+| 待做 | 统一 type_checker 所有报错走 _error()（45 处迁移） | P2 | medium | 75 | 4-6h | **第 59 轮** 前端 |
+| 待做 | 补齐 test_type_checker.py 12 类核心场景测试盲区 | P2 | easy | 65 | 3-4h | **第 60 轮** 前端 |
+| 待做 | 实现 Wasm 后端栈平衡验证器 | — | medium | 45 | 1-2天 | 第 60 轮后（评审轮带宽允许时） |
+| 待做 | 验证 Phi 节点 LIR 降级正确性（菱形 CFG、并行拷贝语义） | — | medium | 42 | 3-5h | 第 60 轮后 |
+| 待做 | 添加 Wasm 后端 WAT 缩进深度断言 | — | easy | 35 | 1h | 第 60 轮后 |
 
-| 编号 | 问题 | 影响 | 状态 |
-|------|------|------|------|
-| ~~P0-回归~~ | ~~二元运算 RCX 临时寄存器覆盖活跃 vreg~~ | ~~test_e2e_loop 间歇性返回 10 而非 45~~ | **已清零**（第 49 轮） |
-| ~~P0-新1~~ | ~~三后端未实现指令静默跳过/注释~~ | ~~编译可能成功但生成错误代码~~ | **已清零**（第 40 轮） |
-| ~~P0-B1~~ | ~~native_backend 无链接器~~ | ~~原生后端 ELF 不可执行~~ | **已清零**（第 37 轮） |
-| ~~P0-2~~ | ~~wasm_backend fn_ptr 传 NULL~~ | ~~Wasm 闭包完全不可用~~ | **已清零**（第 34 轮） |
-| ~~P0-1~~ | ~~native_backend fn_ptr 传 NULL~~ | ~~闭包无法调用目标函数~~ | **已清零**（第 31 轮） |
-| ~~P0-3~~ | ~~lir_lowering 未处理 SSA callee~~ | ~~闭包调用错误编译为直接调用~~ | **已清零**（第 28 轮） |
-| ~~P0-新2~~ | ~~Cranelift 后端未实现指令降级为 TODO 注释~~ | ~~编译"成功"但生成错误 IR~~ | **已清零**（第 52 轮，backend_cranelift_todo_fatal） |
-| ~~P1-新1~~ | ~~Native 后端缺失 LIRLoadGlobal/LIRStoreGlobal~~ | ~~全局变量访问被静默丢弃~~ | **已清零**（第 41 轮） |
-| ~~P1-2~~ | ~~浮点立即数 NotImplementedError~~ | ~~浮点常量编译崩溃~~ | **已清零**（第 38 轮） |
-| ~~P1-B2~~ | ~~寄存器分配器不感知调用点~~ | ~~靠手动 push 兜底，低效~~ | **已清零**（第 47 轮） |
-| ~~P1-B3~~ | ~~原生后端无端到端执行测试~~ | ~~正确性无行为验证~~ | **已清零**（第 46 轮） |
-| ~~P1-新2~~ | ~~Native 后端浮点全局变量存储错误~~ | ~~浮点全局变量赋值完全错误~~ | **已清零**（第 53 轮，backend_native_float_global_store） |
-| **P1-新3** | **C 后端闭包间接调用浮点返回丢失** | **闭包返回 double 时结果错误 + 忽略返回值内存泄漏** | **已清零**（第 55 轮，backend_c_closure_double_return） |
-| ~~P2-D~~ | ~~闭包临时内存泄漏（C/Wasm）~~ | ~~nova_alloc 分配的数组未释放~~ | **已清零**（第 50 轮） |
-| ~~P2-F~~ | ~~Native 独立 ELF 跳过外部函数重定位~~ | ~~独立 ELF 模式无法运行~~ | **已清零**（第 46 轮） |
-| ~~P2-A~~ | ~~C 后端 trampoline double 返回值 UB~~ | ~~浮点闭包返回值截断~~ | **已清零**（第 35 轮） |
-| P2-B | Phi 节点 LIR 降级缺少系统验证 | SSA 汇合点边界情况可能出错 | 待验证（backend_lir_phi_lowering_verify, P42） |
-| P2-C | Wasm 栈平衡未验证 | 运行时可能栈错位 | 待验证（backend_wasm_stack_balance, P45） |
-| P2-E | Native 外部运行时调用偏移为0 | 调用运行时函数段错误 | 待修复（backend_native_runtime_link, P70） |
-| P2-新1 | Phi 拷贝源缺失静默跳过 | 可能使用未初始化寄存器 | 待修复（backend_phi_copy_missing_error, P40） |
-| P2-新2 | Wasm WAT 缩进管理脆弱 | 异常 CFG 下生成无效 WAT | 待修复（backend_wasm_wat_indent_verify, P35） |
+### 已完成的 P0/P1 历史清零里程碑
 
-### 第 51 轮评审遗留问题
-
-| 编号 | 问题 | 影响 | 状态 |
-|------|------|------|------|
-| 审计-1 | Native 闭包创建仍全保存 caller-saved | 第 47 轮优化遗漏点 | 待修复（低优先级） |
-| ~~审计-2~~ | ~~前端 _check_try_expr 属性名错误~~ | ~~位置信息丢失~~ | **已清零**（第 49 轮） |
-| 审计-3 | Wasm _compile_index_access 类型不安全 | 大索引可能溢出 | 待修复（低优先级） |
+| 编号 | 问题 | 清零轮次 | 对应任务 |
+|------|------|----------|----------|
+| P0-回归 | 二元运算 RCX 临时寄存器覆盖活跃 vreg | 第 49 轮 | backend_native_regalloc_loop_regression |
+| P0-新1 | 三后端未实现指令静默跳过/注释 | 第 40 轮 | backend_unified_silent_skip_fix |
+| P0-B1 | native_backend 无链接器（ELF 不可执行） | 第 37 轮 | backend_native_linker_strategy |
+| P0-2 | wasm_backend fn_ptr 传 NULL（闭包完全不可用） | 第 34 轮 | backend_wasm_fn_ptr |
+| P0-1 | native_backend fn_ptr 传 NULL | 第 31 轮 | backend_native_fn_ptr_tramp |
+| P0-3 | lir_lowering 未处理 SSA callee（闭包调用错误编译） | 第 28 轮 | backend_lir_callee_ssa |
+| P0-新2 | Cranelift 后端未实现指令降级为 TODO 注释 | 第 52 轮 | backend_cranelift_todo_fatal |
+| P1-新1 | Native 后端缺失 LIRLoadGlobal/LIRStoreGlobal | 第 41 轮 | backend_native_global_var_support |
+| P1-2 | 浮点立即数 NotImplementedError | 第 38 轮 | backend_native_float_imm |
+| P1-B2 | 寄存器分配器不感知调用点（低效） | 第 47 轮 | backend_native_regalloc_call_site |
+| P1-B3 | 原生后端无端到端执行测试（正确性无验证） | 第 46 轮 | backend_native_elf_e2e_exec |
+| P1-新2 | Native 后端浮点全局变量存储错误 | 第 53 轮 | backend_native_float_global_store |
+| P1-新3 | C 后端闭包间接调用浮点返回丢失 + 内存泄漏 + bool cast | 第 55 轮 | backend_c_closure_double_return |
+| P2-D | 闭包临时内存泄漏（C/Wasm） | 第 50 轮 | backend_closure_memory_leak_fix |
+| P2-F | Native 独立 ELF 跳过外部函数重定位 | 第 46 轮 | backend_native_relocatable_elf_link_fix |
+| P2-A | C 后端 trampoline double 返回值 UB | 第 35 轮 | backend_c_trampoline_double_fix |
+| P2-新1 | Phi 拷贝源缺失静默跳过（潜在使用未初始化寄存器） | 第 56 轮 | backend_phi_copy_missing_error |
 
 ### 已废弃/降级任务
 
 | 状态 | 任务 | 原因 |
 |------|------|------|
-| ~~降级~~ | ~~统一 C 后端（旧路径迁移到 LIR 路径）~~ | ~~优先级 P40，价值低于端到端执行和内存安全，降为维护模式~~ |
-| ~~废弃~~ | ~~收紧 TypeVar 兼容性判断~~ | ~~前端 value restriction 推迟~~ |
-| ~~废弃~~ | ~~实现 Wasm 多参数闭包调用~~ | ~~并入 wasm_closure_impl~~ |
-| ~~废弃~~ | ~~完善 WasmGC 原生类型定义~~ | ~~推迟到闭包后评估~~ |
+| 废弃 | 收紧 TypeVar 兼容性判断（frontend_type_var_strict） | value restriction 长期项，前端进入维护模式 |
+| 废弃 | 实现 Wasm 多参数闭包调用（backend_wasm_indirect_multiarg） | 并入 backend_wasm_closure_impl |
+| 废弃 | 完善 WasmGC 原生类型定义（backend_wasm_gc_types） | 推迟到闭包后评估，闭包已完成无需再新增 |
+| 废弃 | 统一 C 后端旧路径到 LIR 路径（backend_unify_c_codegen） | 降为维护模式，LIR 路径已覆盖 99% 场景 |
+| 废弃 | backend_native_fn_ptr / backend_wasm_store_reg / backend_native_instr_selection / backend_c_todo_error | 分别并入后续任务或被更高优先级替代 |
+| 废弃 | backend_native_runtime_link（旧 P70 hard，宽泛描述） | **第 57 轮评审废弃**——被更精确定位的 backend_native_elf_external_calls（P0 P99）替换，避免重复定义 |
 
-### 历史已完成（39/58）
+### 历史已完成（41/68 = 60.3%，后端部分）
 
-| 状态 | 任务 | 难度 | 优先级 |
-|------|------|------|--------|
-| 完成 | 添加泛型参数数量校验 | easy | 60 |
-| 完成 | 修复 Native 后端浮点全局变量存储生成错误代码 | medium | 85 |
-| 完成 | 修复 Parser 块边界静默吞错 | easy | 55 |
-| 完成 | 修复 Cranelift 后端 TODO 降级为致命异常 | easy | 98 |
-| 完成 | 修复 C/Wasm 后端闭包临时内存泄漏（P2-D 清零） | medium | 50 |
-| 完成 | 添加 parser block 错误恢复计数器重置测试 | easy | 45 |
-| 完成 | 寄存器分配器添加调用点活跃区间切口（P1-B2 清零） | hard | 55 |
-| 完成 | 修复 parser.py 块错误恢复计数器未重置 | easy | 60 |
-| 完成 | Native 后端端到端执行突破（P1-B3 清零） | hard | 80 |
-| 完成 | 修复 type_checker.py Set 导入 + try 表达式 TypeVar 放行 | easy | 55 |
-| 完成 | 修复 Native 后端可重定位 ELF 链接格式问题（P1-B3 推进） | hard | 60 |
-| 完成 | 建立三后端统一闭包执行测试矩阵（P1-B3 部分清零） | medium | 72 |
-| 完成 | Native 后端实现全局变量加载/存储指令（P1-新1 清零） | medium | 82 |
-| 完成 | 修复三后端未实现指令静默跳过问题（P0-新1 清零） | easy | 90 |
-| 完成 | 实现浮点立即数参数加载 + 修复返回值 bug | medium | 80 |
-| 完成 | 实现原生后端 gcc 链接方案（P0-B1 清零） | hard | 95 |
-| 完成 | 修复 C 后端调用点 double 返回值 UB | easy | 55 |
-| 完成 | 修复 C 后端 trampoline double 返回值 UB | easy | 55 |
-| 完成 | 实现 Wasm 后端闭包 fn_ptr 回填 | hard | 90 |
-| 完成 | 实现闭包后端执行测试（C 后端） | medium | 88 |
-| 完成 | 修复 MIR 闭包调用降级为直接调用 bug | easy | 85 |
-| 完成 | 实现原生后端闭包 fn_ptr trampoline 方案 | hard | 97 |
-| 完成 | 修复原生后端 _emit_call_indirect 浮点返回值处理 | easy | 80 |
-| 完成 | 修复 MIR lambda 降级的边界崩溃风险 | easy | 82 |
-| 完成 | 实现 LIR 降级 MIRCall SSA callee 为 LIRCallIndirect | medium | 99 |
-| 完成 | 实现 C 后端闭包函数指针非 NULL | medium | 68 |
-| 完成 | 实现 Wasm 后端完整闭包支持 | hard | 90 |
-| 完成 | 实现原生后端闭包创建与间接调用 | hard | 95 |
-| 完成 | 修复 MIR lambda 降级——编译 lambda 函数体 | hard | 85 |
-| 完成 | 修复原生后端 _emit_runtime_call P0 bug | easy | 99 |
-| 完成 | Wasm 后端数据结构构建指令完善 | medium | 65 |
-| 完成 | 原生后端复合指令迁移到 _emit_runtime_call | medium | 90 |
-| 完成 | 修复 nova_map_set/nova_map_put 命名不一致 | easy | 98 |
-| 完成 | 为原生后端补全复合数据结构指令代码生成 | hard | 90 |
-| 完成 | 实现原生后端 System V AMD64 ABI 调用约定 | hard | 99 |
-| 完成 | 实现原生后端完整栈帧管理 | hard | 96 |
-| 完成 | 修复原生后端 ELF phnum 不匹配 bug | easy | 95 |
-| 完成 | 修复 Phi 降级 MIRMatchJump 后继块计算不全 | medium | 93 |
-| 完成 | 修复 Phi 节点降级的边缘块问题 | medium | 86 |
-| 完成 | 修复原生后端寄存器分配设计缺陷 | hard | 98 |
-| 完成 | 修复原生后端 ELF 入口地址并接入编译管道 | medium | 96 |
-| 完成 | 实现原生后端线性扫描寄存器分配器 | hard | 94 |
-| 完成 | 实现原生后端函数间调用回填 | medium | 85 |
-| 完成 | 实现原生后端两阶段汇编与标签回填 | medium | 92 |
-| 完成 | 实现原生后端浮点/字符串常量加载 | medium | 75 |
-| 完成 | 修复 Wasm 后端 LIRReturn 返回值处理 bug | medium | 88 |
+| 排名 | 任务组 | 代表任务 | 完成轮次 |
+|------|--------|----------|----------|
+| 1 | 寄存器分配体系 | 线性扫描寄存器分配器 / 调用点活跃切口 / 循环回归修复 | 43 / 47 / 48 |
+| 2 | 原生后端 ELF 工具链 | 两阶段标签回填 / gcc 链接方案 / 可重定位 ELF / 端到端执行 | 19 / 37 / 45 / 46 |
+| 3 | System V ABI 调用约定 | 栈帧管理 / ABI 调用约定 / 外部运行时复合指令 | 27 / 29 / 31 |
+| 4 | 三后端闭包全栈支持 | MIR Lambda 降级 / LIR SSA callee / C/Wasm/Native 三后端实现 | 28 / 42 / 45 / 32 / 34 |
+| 5 | 浮点立即数 & 全局存储 | 浮点立即数加载 / 浮点返回值处理 / 浮点全局存储（P1-新2） | 38 / 44 / 53 |
+| 6 | C 后端健壮性 | trampoline double UB 修复 / 闭包双精度返回丢失清零（P1-新3） | 35 / 55 |
+| 7 | Phi & 控制流降级 | Phi 边缘块 / MatchJump 后继不全 / 并行拷贝语义防御 | 19 / 23 / 56 |
+| 8 | Cranelift 安全基线 | 未知指令从 TODO 注释改为 NotImplementedError（P0-新2 清零） | 52 |
+| 9 | Native 外部运行时 | 运行时调用重构 / bug 修复 / 闭包内存泄漏清零 | 34 / 40 / 50 |
+| 10 | 三后端静默跳过统一 | C/Wasm/Cranelift 三后端未知指令从静默改为异常 | 40 |
 
-## 各后端完成度排名
+## 各后端完成度排名（第 57 轮审计后）
 
-| 排名 | 后端 | 完成度 | 关键缺失 |
-|------|------|--------|----------|
-| 1 | **C 后端** | **~88%** | 类型映射子串误判（低优）、外部运行时链接健壮性 |
-| 2 | **原生后端** | **~88%** | 外部运行时链接、闭包全保存 caller-saved |
-| 3 | **WasmGC 后端** | **~78%** | 栈平衡验证、端到端验证缺失 |
-| 4 | **Cranelift 后端** | **~35%** | 大量指令未实现（至少不再静默生成错误代码） |
+| 排名 | 后端 | 完成度 | 变化 | 关键缺失 |
+|------|------|--------|------|----------|
+| 1 | **C 后端** | **~85%** | ↓3pp | nova_alloc NULL 未检查（P1-3）、边界类型映射子串误判（低优） |
+| 2 | **WasmGC 后端** | **~78%** | 持平 | 栈平衡极端控制流验证、WAT 缩进断言、端到端验证缺失 |
+| 3 | **原生后端** | **~70%** | ↓**18pp** | **P0**：external_calls 偏移 0 / **P1**：XMM caller-saved / **P1**：PT_LOAD 对齐 / 闭包全保存 caller-saved（低优） |
+| 4 | **Cranelift 后端** | **~35%** | 持平 | 大量指令未实现（安全基线已达标：未知指令抛 NotImplementedError 不静默） |
+
+### 原生后端完成度大幅下调说明（~88% → ~70%）
+
+第 46 轮突破端到端执行后 Native 完成度被乐观评估为 ~88%。第 57 轮深度代码审计确认以下问题被遗漏：
+
+1. **P0-1 external_calls 偏移为 0**：_generate_elf link_calls 仅回填 func_offsets/trampoline_offsets，nova_init/nova_list_new 等运行时函数走 else continue，完整 ELF 输出模式下 call 指令保持 E8 00000000（no-op）。只有 .o + gcc 链接模式安全。这使"独立 ELF 可运行"的评估结论不成立。
+2. **P1-1 XMM caller-saved**：caller-saved 保存循环完全排除浮点寄存器（条件 `if not info["is_float"]`）。System V AMD64 ABI 规定 XMM0-XMM7 为 caller-saved。任何浮点+函数调用组合场景值随机覆盖。
+3. **P1-2 PT_LOAD 对齐违规**：数据段 p_offset 非 4096 对齐但 p_vaddr 对齐，违反 ELF 规范，严格加载器加载失败。
+
+三项合计将 Native 后端实际可用范围从"独立 ELF + .o 链接"收窄为"仅 .o 链接模式"。第 58 轮修复三项后预计回升至 ~82%，后续完成闭包 caller-saved 优化后有望达到 ~85%。
