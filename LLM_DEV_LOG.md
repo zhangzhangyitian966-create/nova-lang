@@ -1,3 +1,162 @@
+## 2026-07-30 04:04 第80轮开发（M-ARCH 里程碑 5/5 达成 🎉）
+
+> 开发轮：第 80 轮（80 % 3 = 2 → 普通轮，下一轮 81 是评审轮）
+> 基线测试：1099 passed, 31 subtests passed
+> 全量测试：1099 passed, 31 subtests passed, 97 warnings（91 个预期 CCodeGen DeprecationWarning + 6 个 Cranelift DeprecationWarning）
+> 回归：**零**
+> 审查驱动任务占比：**3/3 = 100%**（全部三项任务来自审查日志钉子户 + ARCHITECTURE_VISION 架构战略强制）
+> 架构债务任务占比：**3/3 = 100%**（三项手术全部完成）
+> 里程碑：**M-ARCH（立即架构手术）5/5 ✅** · cycles=80 硬截止前达成
+> 路线图总完成度：**93.3%**（上轮 91.7%，+1.6pp）
+
+---
+
+### 本轮开发任务清单（全部来自审查驱动 / 架构战略）
+
+| # | 任务ID | 名称 | 来源 | 为什么选这个 | 结果 |
+|---|--------|------|------|-------------|------|
+| 1 | `split_ir_nodes_a2` | 拆分ir_nodes A2：抽 hir.py / mir.py / lir.py | 【审查驱动】class_too_large 钉子户 + ARCHITECTURE_VISION §2.1 手术A | ir_nodes.py 1358行112类 连续10+轮被报告；A3前置依赖；M-ARCH 里程碑强制 | ✅ 成功 |
+| 2 | `split_ir_nodes_a3` | 拆分ir_nodes A3：ir_nodes 变薄 re-export（删冗余） | 【审查驱动】class_too_large 钉子户 + ARCHITECTURE_VISION §2.1 手术A | A2完成后立即瘦身；真正解决class_too_large；ir_nodes 1358→340 行 -75% | ✅ 成功 |
+| 3 | `unify_c_backend_phase1` | 统一C后端 Phase1：路径隔离+旧CCodeGen弃用标记 | 【审查驱动】双C后端路径混乱 + ARCHITECTURE_VISION §2.2 手术B | AST→C vs LIR→C 双路径对齐成本高；统一后受益于三层IR优化（DCE/内联/CSE/LICM） | ✅ 成功 |
+
+---
+
+### 任务详情
+
+#### 任务 1：`split_ir_nodes_a2` ✅
+
+**做了什么**：
+- 新建 `ir/hir.py`（~868 行）：HIR 节点 + Visitor/Rewriter + `_iter_hir_children`
+- 新建 `ir/mir.py`（~280 行）：MIR 节点（SSA/CFG 形式的 BasicBlock / Phi / Terminators 等）
+- 新建 `ir/lir.py`（~340 行）：LIR 线性指令 + Data/Global 段
+- `ir/ir_nodes.py` 顶层保留原类定义，但加 `# A2 迁移说明` 块注释
+- `ir/__init__.py` 新增三模块 re-export（新代码推荐 `from nova.ir.hir import HIRModule`）
+
+**验证**：
+- 语法检查：3 新文件 + ir_nodes + ir/__init__ 全部通过
+- 测试：1099 passed，0 回归
+- 下游导入路径（`from nova.ir.ir_nodes import *`）全部兼容
+
+---
+
+#### 任务 2：`split_ir_nodes_a3` ✅
+
+**做了什么**：
+- `ir/ir_nodes.py`：1358 行 → **340 行**（删除 1018 行，-75%）
+- 仅保留薄 re-export 兼容层：
+  ```python
+  from .ir_types import (NovaType, IRType, FnType, ...)
+  from .hir import *
+  from .mir import *
+  from .lir import *
+  ```
+- 文件头加最终形态注释：**立即架构手术 A · 已完成**
+
+**验证**：
+- 下游导入兼容测试（33处导入）：全部通过
+- 测试：1099 passed，0 回归
+- **真正解决**审查报告中 `ir_nodes.py class_too_large` MEDIUM 钉子户
+
+---
+
+#### 任务 3：`unify_c_backend_phase1` ✅
+
+**做了什么**：
+1. `c_codegen.py`（旧 AST→C 直译路径）：
+   - 文件头加 54 行**弃用公告**（DEPRECATED · 红色醒目）
+   - 文件级 `warnings.warn(..., DeprecationWarning)`
+   - `CCodeGen.__init__` 类级弃用警告
+   - `CCodeGen.generate()` 方法级弃用警告
+   - 弃用信息包含替代路径、版本移除时间、参考文档
+
+2. `compiler_cli.py`（所有入口点统一）：
+   - 删除 `from .c_codegen import CCodeGen` 旧导入
+   - 新增 `_map_optimize_to_ir_level()`：CLI optimize (O0-O3/Os) → IR PassManager 级别映射
+   - `build()`：从旧的 `Lexer→Parser→TypeChecker→CCodeGen.generate()` 切换到 `NovaCompilerPipeline(target=BACKEND_C).compile_source()`
+   - `emit_c()`：同上，切到新管道
+
+3. `backend/__init__.py`：
+   - 里程碑进度更新：**M-ARCH 5/5 完成** 🎉
+
+**验证**：
+- 入口点 `nova build/run/emit-c` 现在**全部**走 LIRCBackend 新路径
+- 旧测试（tests/test_c_codegen.py）中 42+42+7 个 `CCodeGen()` 调用**正确触发 DeprecationWarning**
+- 测试：1099 passed，0 回归
+
+---
+
+### 审查日志研读摘要
+
+AUTO_REVIEW_LOG.md Cycle-1406 → 1407 共 2 轮分析：
+
+| 指标 | Cycle-1406 | Cycle-1407 | 趋势 |
+|------|-----------|-----------|------|
+| 总问题 | 1427 | 1428 | ➕ +1 轻微上升（稳定）|
+| CRITICAL | 0 | 0 | ✅ 零 |
+| HIGH | 40 | 40 | ⚠️ 稳定但需关注 |
+| MEDIUM | 248 / 236 | 234 | 📉 ↓14 |
+| LOW | 1117 / 1068 | 1154 | ➕ +86 低优先级 |
+
+**高价值问题清单（本轮已解决的）**：
+- ✅ `ir_nodes.py:1 class_too_large MEDIUM` — 1358行112类 → 340行（A3完成）
+- ✅ `ir_nodes.py:1 module_too_long MEDIUM` — 同上
+- ✅ 双 C 后端路径架构混乱 — compiler_cli.py 入口点统一转新管道
+
+---
+
+### M-ARCH 里程碑达成总结
+
+三项立即架构手术（ARCHITECTURE_VISION.md §2 强制）**在 cycles=80 硬截止前全部完成**：
+
+| 手术 | 子任务 | 完成轮 | 效果 |
+|------|--------|-------|------|
+| 手术 A · 拆 ir_nodes.py 上帝模块 | A1 抽 ir_types.py | 第 79 轮 | ✅ |
+| 手术 A · 拆 ir_nodes.py 上帝模块 | A2 抽 hir/mir/lir.py | 第 80 轮 | ✅ |
+| 手术 A · 拆 ir_nodes.py 上帝模块 | A3 ir_nodes 瘦身 | 第 80 轮 | ✅ |
+| 手术 B · 统一 C 后端 | Phase1 路径隔离+弃用标记 | 第 80 轮 | ✅ |
+| 手术 C · 弃用 Cranelift 后端 | DeprecationWarning 挂接 | 第 79 轮 | ✅ |
+| **总计** | **5 个子任务** | **2 轮** | **5/5 ✅** |
+
+**技术债回收量化**：
+- ir_nodes.py：1358 行 → 340 行，**-1018 行（-75%）**
+- 消除 MEDIUM 钉子户 2 个（class_too_large + module_too_long）
+- 所有入口点统一到三层 IR 管线（编译器自举前置条件满足）
+- 为下一轮（cycle 81 = 评审轮）路线图评审提供**干净架构基线**
+
+---
+
+### 测试对比
+
+| 阶段 | 通过数 | 失败数 | Subtests | Warnings | 说明 |
+|------|-------|-------|---------|----------|------|
+| 基线（开发前） | 1099 | 0 | 31 | 6 | 仅 Cranelift 弃用 |
+| 任务 1 完成后 | 1099 | 0 | 31 | 6 | 零回归 |
+| 任务 2 完成后 | 1099 | 0 | 31 | 6 | 零回归 |
+| 任务 3 完成后 | 1099 | 0 | 31 | **97** | +91 个预期 CCodeGen DeprecationWarning |
+
+---
+
+### 下一步计划
+
+> **重要**：第 81 轮（下一轮）是 **路线图评审轮**（81 % 3 = 0），暂停功能开发，做三轮（79/80/81→？不，79+80+81 为一组）回顾和规划。
+
+1. **第 81 轮（评审轮）**：全面评估过去 3 轮（78评审 + 79开发 + 80开发）
+   - 方向评估：M-ARCH 手术是否偏离项目目标？
+   - 质量评估：代码质量趋势、审查问题增减
+   - 效率评估：2 轮完成 5/5 手术，是否过快？
+   - 审查对齐：2 轮全部审查驱动任务占比 100%
+   - **核心产出**：任务池重构，为 cycles 81-89 三轮规划 M-MEM Step1-3
+
+2. **第 82 轮（普通轮）**：启动 M-MEM Allocator API Step1
+   - `allocator_api_step1`：Allocator trait + ArenaAllocator + LibcAllocator
+   - 定义在 `nova/memory/allocator.py`（或类似位置）
+
+3. **第 83 轮（普通轮）**：M-MEM Step1 收尾或 Step2 启动
+   - Step2：List/Map/Tuple 数据结构接受 allocator 参数
+   - 难度较大，可能需 2 轮
+
+---
+
 ## 2026-07-30 00:55 第79轮开发
 
 > 开发轮：第 79 轮（79 % 3 = 1 → 普通轮）

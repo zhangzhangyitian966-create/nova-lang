@@ -22,7 +22,6 @@ from typing import Optional
 
 from .parser import Parser
 
-from .c_codegen import CCodeGen
 from .errors import NovaError
 from .lexer import Lexer
 from .type_checker import TypeChecker
@@ -69,6 +68,11 @@ class NovaCompiler:
     # 编译流程
     # ----------------------------------------------------------
 
+    def _map_optimize_to_ir_level(self, optimize: str) -> int:
+        """将 CLI 优化级别 (O0-O3/Os) 映射到 IR PassManager 级别"""
+        mapping = {"O0": 0, "O1": 1, "O2": 2, "O3": 2, "Os": 2}
+        return mapping.get(optimize, 2)
+
     def build(
         self,
         source_path: str,
@@ -78,6 +82,9 @@ class NovaCompiler:
     ) -> str:
         """
         编译 Nova 源码为原生二进制
+
+        使用统一 IR 编译管线：AST→HIR→MIR→LIR→LIRCBackend（C 代码生成），
+        受益于三层 IR 优化 Pass（DCE/内联/CSE/LICM）。
 
         Args:
             source_path: Nova 源文件路径
@@ -97,20 +104,10 @@ class NovaCompiler:
         with open(source_path, "r", encoding="utf-8") as f:
             source = f.read()
 
-        # 2. 前端处理: Lexer -> Parser -> Type Checker
-        try:
-            tokens = Lexer(source).tokenize()
-            ast = Parser(tokens).parse()
-            TypeChecker().check_program(ast)
-        except NovaError as e:
-            print(f"错误: {e}", file=sys.stderr)
-            sys.exit(1)
+        # 2. 统一 IR 管线：Lexer→Parser→TypeChecker→HIR→MIR→LIR→LIRCBackend→C
+        #    （架构手术 B：旧 AST→CCodeGen 路径已弃用，仅 3-6 个月内保留作参照）
+        from .backend.compiler_pipeline import BACKEND_C, NovaCompilerPipeline
 
-        # 3. C 代码生成
-        gen = CCodeGen()
-        c_code = gen.generate(ast)
-
-        # 4. 写入临时 C 文件
         if not os.path.isdir(self.output_dir):
             os.makedirs(self.output_dir, exist_ok=True)
 
@@ -119,13 +116,24 @@ class NovaCompiler:
             output_name = base_name
 
         c_file_path = os.path.join(self.output_dir, f"{base_name}.c")
-        with open(c_file_path, "w", encoding="utf-8") as f:
-            f.write(c_code)
+
+        # 映射 CLI optimize 级别 → IR PassManager 级别
+        ir_optimize_level = self._map_optimize_to_ir_level(optimize)
+
+        pipeline = NovaCompilerPipeline(
+            target=BACKEND_C, optimize_level=ir_optimize_level
+        )
+        try:
+            # 内部完整流程：前端 + 三层 IR lowering + 三层优化 Pass + LIR→C
+            pipeline.compile_source(source, c_file_path)
+        except NovaError as e:
+            print(f"错误: {e}", file=sys.stderr)
+            sys.exit(1)
 
         if self.verbose:
-            print(f"[info] 已生成 C 代码: {c_file_path}")
+            print(f"[info] 已生成 C 代码（统一 IR 管线）: {c_file_path}")
 
-        # 5. 调用 C 编译器
+        # 3. 调用 C 编译器（与旧流程一致）
         if not self.c_compiler:
             print("错误: 未找到可用的 C 编译器 (gcc/clang)", file=sys.stderr)
             print("请安装 gcc 或 clang 后重试", file=sys.stderr)
@@ -214,7 +222,11 @@ class NovaCompiler:
             sys.exit(1)
 
     def emit_c(self, source_path: str, output_path: str = None):
-        """仅生成 C 代码，不编译为二进制"""
+        """仅生成 C 代码，不编译为二进制
+
+        使用统一 IR 编译管线（架构手术 B：旧 AST→CCodeGen 路径已弃用），
+        生成的 C 代码受益于三层 IR 优化 Pass。
+        """
         if not os.path.isfile(source_path):
             print(f"错误: 文件 '{source_path}' 不存在", file=sys.stderr)
             sys.exit(1)
@@ -222,24 +234,21 @@ class NovaCompiler:
         with open(source_path, "r", encoding="utf-8") as f:
             source = f.read()
 
-        try:
-            tokens = Lexer(source).tokenize()
-            ast = Parser(tokens).parse()
-            TypeChecker().check_program(ast)
-            gen = CCodeGen()
-            c_code = gen.generate(ast)
-        except NovaError as e:
-            print(f"错误: {e}", file=sys.stderr)
-            sys.exit(1)
-
         if output_path is None:
             base_name = os.path.splitext(os.path.basename(source_path))[0]
             output_path = f"{base_name}.c"
 
-        with open(output_path, "w", encoding="utf-8") as f:
-            f.write(c_code)
+        # 统一 IR 管线：前端 + HIR→MIR→LIR 三层优化 + LIRCBackend 生成 C
+        from .backend.compiler_pipeline import BACKEND_C, NovaCompilerPipeline
 
-        print(f"已生成 C 代码: {output_path}")
+        pipeline = NovaCompilerPipeline(target=BACKEND_C, optimize_level=2)
+        try:
+            pipeline.compile_source(source, output_path)
+        except NovaError as e:
+            print(f"错误: {e}", file=sys.stderr)
+            sys.exit(1)
+
+        print(f"已生成 C 代码（统一 IR 管线）: {output_path}")
 
     def compile_wasm(self, source_path: str, output_name: str = None):
         """编译为 WebAssembly (WasmGC)"""

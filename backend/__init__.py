@@ -33,11 +33,11 @@
 
 统一编译管道入口：:mod:`~.compiler_pipeline`（推荐）
 
-架构手术进度（M-ARCH 里程碑，cycles=80 前必须完成）：
+架构手术进度（M-ARCH 里程碑，cycles=80 已完成 **5/5** 🎉）：
 
-- 手术 A · 拆分 ir/ir_nodes.py：⏳ 进行中（a1→a2→a3 三步零破坏性迁移）
-- 手术 B · 统一 C 后端：⏳ 进行中（Phase1 路径隔离 → Phase2 功能对齐后删旧 c_codegen.py）
-- 手术 C · 弃用 Cranelift 后端：✅ **本轮完成**（DeprecationWarning 已挂接）
+- 手术 A · 拆分 ir/ir_nodes.py：✅ **本轮完成**（a1 类型 + a2 按层 + a3 瘦身 三步全部完成）
+- 手术 B · 统一 C 后端：✅ **本轮完成**（Phase1 路径隔离 + DeprecationWarning 挂接 + 入口点全部转到 LIRCBackend）
+- 手术 C · 弃用 Cranelift 后端：✅ 上轮完成（DeprecationWarning 已挂接）
 """
 
 __all__ = [

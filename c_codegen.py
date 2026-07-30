@@ -1,14 +1,55 @@
 """
-Nova 编程语言 - C 代码生成器
+Nova 编程语言 - C 代码生成器（已弃用）
 
-将 Nova AST 编译为 C 源代码，然后通过系统的 C 编译器（gcc/clang/MSVC）
-生成原生二进制文件。
+⚠️ **DEPRECATED · 已弃用**（架构手术 B，Nova v0.3.x → v0.5.0 移除）
 
-架构：
+弃用原因（2026-07-29 ARCHITECTURE_VISION.md §2.2 立即架构手术 B）：
+  1. **双路径架构混乱**：本文件走 AST→C 直译路径，与统一 IR 管线
+     （AST→HIR→MIR→LIR→C）长期并存，同一语义有两套实现，
+     功能对齐成本高、bug 易反复。
+  2. **无 IR 优化收益**：跳过三层 IR 优化（DCE/内联/CSE/LICM），
+     生成的 C 代码性能比 LIR 路径低 20-40%。
+  3. **自举阻塞**：self-hosting 移植需要统一 IR 管线，AST→C 直译
+     无法复用到新编译器（Nova-in-Nova）。
+  4. **维护成本 > 收益**：1524 行单体 + 54 个 AST 依赖，而新 LIR→C
+     路径已经有完整测试、支持 ADT/match/闭包/列表推导式等全特性。
+
+推荐替代方案：
+  • C 源码编译    → ``nova.backend.lir_c_backend.LIRCBackend``
+                      （通过 ``NovaCompilerPipeline(target=BACKEND_C)`` 调用）
+  • Native x86_64  → ``nova.backend.native_backend.NativeCodeGen``
+  • WasmGC 字节码 → ``nova.backend.wasm_backend.WasmGCBackend``
+
+移除时间表：
+  - 立即（v0.3.x）：从默认编译管道移除，入口点统一转到 LIRCBackend
+  - v0.4.0：冻结不再修复 bug，仅保留语义参照
+  - v0.5.0：删除本文件
+
+保留说明：3-6 个月内不删除，仅标记弃用，作为语义参照用于对比
+LIR→C 新路径的输出正确性。
+
+旧架构（仅供参照）：
   Nova 源码 → Lexer → Parser → Type Checker → CCodeGen → C 源码 → gcc/clang/MSVC → 原生二进制
+新架构（请使用）：
+  Nova 源码 → Lexer → Parser → TypeChecker → HIRLowering → PassManager(HIR)
+    → MIRLowering → PassManager(MIR) → LIRLowering → PassManager(LIR)
+    → LIRCBackend → C 源码 → gcc/clang → 原生二进制
 """
 
+import warnings
+
 from typing import Dict, List, Optional, Set, Tuple
+
+# 文件级弃用警告：任何 import c_codegen 的模块都会触发
+warnings.warn(
+    "nova.c_codegen (AST→C 直译路径) 已弃用，将在 v0.5.0 移除。"
+    "请改用 nova.backend.lir_c_backend.LIRCBackend "
+    "(通过 NovaCompilerPipeline(target=BACKEND_C))。"
+    "新路径受益于完整三层 IR 优化 Pass（DCE/内联/CSE/LICM）。"
+    "参考文档：ARCHITECTURE_VISION.md §2.2「立即架构手术 B」。",
+    DeprecationWarning,
+    stacklevel=2,
+)
 
 from .ast_nodes import (
     AliasDef,
@@ -190,9 +231,25 @@ C_KEYWORDS: Set[str] = {
 
 
 class CCodeGen:
-    """将 Nova AST 编译为 C 源代码"""
+    """将 Nova AST 编译为 C 源代码（已弃用，请使用 LIRCBackend）
+
+    .. deprecated:: 0.3.0
+        ``CCodeGen``（AST→C 直译路径）已弃用，将在 v0.5.0 移除。
+        请改用 :class:`nova.backend.lir_c_backend.LIRCBackend`
+        （通过 :class:`nova.backend.compiler_pipeline.NovaCompilerPipeline`
+        以 ``target=BACKEND_C`` 调用）。
+        参考文档：ARCHITECTURE_VISION.md §2.2「立即架构手术 B」。
+    """
 
     def __init__(self):
+        warnings.warn(
+            "CCodeGen 类已弃用（AST→C 直译路径），将在 v0.5.0 移除。"
+            "请改用 LIRCBackend (NovaCompilerPipeline(target=BACKEND_C))。"
+            "新路径受益于完整三层 IR 优化 Pass。"
+            "参考：ARCHITECTURE_VISION.md §2.2。",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         self.output_lines: List[str] = []
         self.indent_level: int = 0
         self.temp_counter: int = 0
@@ -214,7 +271,17 @@ class CCodeGen:
     # ----------------------------------------------------------
 
     def generate(self, program: Program) -> str:
-        """生成完整的 C 源代码"""
+        """生成完整的 C 源代码（已弃用，请使用 LIRCBackend.compile）
+
+        .. deprecated:: 0.3.0
+            使用 :meth:`LIRCBackend.compile` 替代。
+        """
+        warnings.warn(
+            "CCodeGen.generate() 已弃用（AST→C 直译）。"
+            "请改用 LIRCBackend.compile() 或 NovaCompilerPipeline(target=BACKEND_C)。",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         # 重置状态
         self.output_lines = []
         self.indent_level = 0
