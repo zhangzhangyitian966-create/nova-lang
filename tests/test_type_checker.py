@@ -292,6 +292,128 @@ class TestInstantiation(unittest.TestCase):
         self.assertIsNot(result1.return_type, result2.return_type)
 
 
+class TestGeneralization(unittest.TestCase):
+    """泛化 (_generalize) + HM let-polymorphism 完整性测试（第 65 轮前端新增）"""
+
+    def setUp(self):
+        self.tc = TypeChecker()
+
+    # ---------- _free_typevars_in_env 单元测试 ----------
+
+    def test_free_typevars_empty_env(self):
+        """_setup_builtins 注入了多态内建（print/list_length 等），
+        因此自由 TypeVar 集合应非空；验证至少覆盖 print/abs 等典型多态函数"""
+        free = self.tc._free_typevars_in_env()
+        # 内建多态函数（print: a->Unit, abs: a->a, list_length: List[a]->Int 等）
+        # 至少贡献了 1 个自由 TypeVar
+        self.assertGreaterEqual(
+            len(free), 1,
+            "setup_builtins 后应有多态内建的 TypeVar 在 free 集合中"
+        )
+
+    def test_free_typevars_after_let_with_typevar(self):
+        """环境中存入含 TypeVar 的类型后，free 集合应包含该 TVar id"""
+        tv = TypeVar("a")
+        self.tc.env.define("x", ListType(tv))
+        free = self.tc._free_typevars_in_env()
+        self.assertIn(id(tv), free)
+
+    def test_free_typevars_bound_typevar_not_included(self):
+        """已被合一为具体类型的 TypeVar 不应出现在 free 集合中"""
+        tv = TypeVar("b")
+        # 将 tv 绑定到具体类型
+        self.tc._subst[id(tv)] = INT_T
+        self.tc.env.define("y", ListType(tv))
+        free = self.tc._free_typevars_in_env()
+        self.assertNotIn(id(tv), free)
+
+    # ---------- _generalize 单元测试 ----------
+
+    def test_generalize_primitive_type_unchanged(self):
+        """对基本类型（Int/Float）泛化应原样返回"""
+        result = self.tc._generalize(INT_T)
+        self.assertEqual(result, INT_T)
+
+    def test_generalize_typevar_not_in_env_is_free(self):
+        """空环境中，TypeVar 泛化后仍保持 TypeVar（可泛化）"""
+        tv = TypeVar("T")
+        fn = FnType([tv], tv)
+        result = self.tc._generalize(fn)
+        self.assertIsInstance(result, FnType)
+        # 参数和返回值都是未绑定的 TypeVar（可泛化）
+        self.assertIsInstance(result.param_types[0], TypeVar)
+        self.assertIsInstance(result.return_type, TypeVar)
+
+    def test_generalize_preserves_env_bound_typevars(self):
+        """泛化时保持环境中已存在的 TypeVar 共享引用（不破坏外层约束）"""
+        outer_tv = TypeVar("outer")
+        self.tc.env.define("shared", ListType(outer_tv))
+        # 当前绑定的类型引用了外层的 outer_tv
+        fn_type = FnType([outer_tv], outer_tv)  # (outer) -> outer，共享同一个 TVar
+        generalized = self.tc._generalize(fn_type)
+        # 泛化后 param 和 return 指向的仍是同一个 outer_tv
+        self.assertIs(
+            self.tc._find(generalized.param_types[0]),
+            self.tc._find(generalized.return_type),
+            "外层 TypeVar 在泛化后应保持共享引用",
+        )
+
+    # ---------- _is_syntactic_value 单元测试 ----------
+
+    def test_syntactic_value_literals_and_lambda(self):
+        """字面量和 Lambda 是语法值"""
+        self.assertTrue(self.tc._is_syntactic_value(IntLiteral(42)))
+        self.assertTrue(self.tc._is_syntactic_value(FloatLiteral(3.14)))
+        self.assertTrue(self.tc._is_syntactic_value(StringLiteral("x")))
+        self.assertTrue(self.tc._is_syntactic_value(BoolLiteral(True)))
+        self.assertTrue(self.tc._is_syntactic_value(UnitLiteral()))
+
+    def test_syntactic_value_non_values(self):
+        """函数调用/运算/控制流是非语法值"""
+        from nova.ast_nodes import BinaryOp, FnCall
+        # 非语法值：用最小化构造即可（不需要完整 AST 语义）
+        fake_call = FnCall(
+            callee=Identifier(name="f"), args=[], span=None
+        )
+        self.assertFalse(self.tc._is_syntactic_value(fake_call))
+
+    # ---------- 端到端 let-polymorphism 场景 ----------
+
+    def test_e2e_id_double_instantiation(self):
+        """let id = |x| x; id(1); id(\"s\")：两种不同类型独立实例化（HM 经典场景）"""
+        src = """
+fn main() {
+    let id = |x| x
+    let a = id(1)
+    let b = id(\"s\")
+    0
+}
+"""
+        from nova.lexer import Lexer
+        from nova.parser import Parser
+        lex = Lexer(src)
+        parser = Parser(lex.tokenize(), source=src)
+        tc = TypeChecker(source=src)
+        tc.check_program(parser.parse())  # 不应抛错
+
+    def test_e2e_value_restriction_mut_not_generalized(self):
+        """mut 绑定绝对不泛化（Value Restriction 强制）"""
+        src = """
+fn main() {
+    mut counter = 0
+    let x = counter
+    counter = 99
+    0
+}
+"""
+        from nova.lexer import Lexer
+        from nova.parser import Parser
+        lex = Lexer(src)
+        parser = Parser(lex.tokenize(), source=src)
+        tc = TypeChecker(source=src)
+        tc.check_program(parser.parse())  # 不应抛错（mut 保持单态）
+
+
 class TestExprTypeChecking(unittest.TestCase):
     """表达式类型检查 (check_expr) 测试"""
 

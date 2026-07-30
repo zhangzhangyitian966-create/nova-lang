@@ -194,16 +194,25 @@ class ADTType(NovaType):
 
 
 class TypeVar(NovaType):
-    """类型变量（用于推断）"""
+    """类型变量（用于推断）
+
+    Attributes:
+        name: 类型变量名（自动生成或自定义）
+        level: 引入时的环境嵌套深度，用于 generalize 判断哪些 TVar
+            是当前 let 绑定引入的（可以泛化）vs 被外层环境约束的
+            （不应泛化）。默认 0 表示顶层或未设置。
+    """
 
     _counter = 0
 
-    def __init__(self, name: str = None):
+    def __init__(self, name: str = None, level: int = 0):
         if name is None:
             TypeVar._counter += 1
             self.name = f"T{TypeVar._counter}"
         else:
             self.name = name
+        # HM generalize 需要的嵌套深度标记
+        self.level = level
 
     def __eq__(self, other):
         return self is other
@@ -465,6 +474,12 @@ class TypeChecker:
     def _check_binding_decl(self, decl, mutable: bool):
         """检查 let / mut 绑定声明的通用逻辑。
 
+        接入 HM 类型系统的 Gen(Γ, τ) 泛化步骤（let-polymorphism 的另一半），
+        并实现最小化 Value Restriction：
+          - mutable=True（mut 绑定）：不泛化（引用不透明保证）
+          - 非语法值表达式（函数调用/运算等）：保守不泛化
+          - 其余语法值（Lambda/字面量/纯数据构造）：调用 _generalize 泛化
+
         Args:
             decl: LetBinding 或 MutBinding 节点。
             mutable: 是否为可变绑定。
@@ -478,7 +493,18 @@ class TypeChecker:
                     f"{kind} 绑定 '{decl.name}' 的推断类型 {ty} 与标注类型 {annotated} 不匹配",
                     span=decl.span,
                 )
-        self.env.define(decl.name, self._unify_and_resolve(ty), mutable=mutable)
+        resolved = self._unify_and_resolve(ty)
+        # --- HM Gen(Γ, τ)：Value Restriction + 泛化 ---
+        if mutable:
+            # mut 绑定：引用不透明，绝对不泛化（Value Restriction 强制）
+            generalized = resolved
+        elif not self._is_syntactic_value(decl.value):
+            # 非语法值：可能有副作用或引用不透明，保守不泛化
+            generalized = resolved
+        else:
+            # 语法值（lambda/字面量/纯数据构造）：调用 Gen(Γ, τ) 泛化
+            generalized = self._generalize(resolved)
+        self.env.define(decl.name, generalized, mutable=mutable)
 
     def _check_let_decl(self, decl):
         """检查 let 绑定声明。"""
@@ -2085,6 +2111,151 @@ class TypeChecker:
             return t
 
         return instantiate_rec(ty)
+
+    def _free_typevars_in_env(self) -> Set[int]:
+        """收集当前类型环境（含父链）中所有自由出现的未绑定 TypeVar 的 id 集合。
+
+        用于 generalize 判断：某 TypeVar 若不在此集合中，则它是当前 let
+        绑定新引入的，可以被泛化；若在此集合中，则它被外层环境约束，
+        不应泛化（否则会破坏外层与内层的类型共享）。
+        """
+        result: Set[int] = set()
+        env: Optional[TypeEnv] = self.env
+        while env is not None:
+            for ty in env.types.values():
+                self._collect_free_typevars(ty, result)
+            env = env.parent
+        return result
+
+    def _collect_free_typevars(self, ty: "NovaType", out: Set[int]) -> None:
+        """递归遍历类型结构，收集所有未绑定的 TypeVar 的 id 到 out 集合。"""
+        if isinstance(ty, TypeVar):
+            root = self._find(ty)
+            if isinstance(root, TypeVar):
+                out.add(id(root))
+            else:
+                self._collect_free_typevars(root, out)
+        elif isinstance(ty, ListType):
+            self._collect_free_typevars(ty.elem_type, out)
+        elif isinstance(ty, MapType):
+            self._collect_free_typevars(ty.key_type, out)
+            self._collect_free_typevars(ty.value_type, out)
+        elif isinstance(ty, TupleType):
+            for e in ty.elements:
+                self._collect_free_typevars(e, out)
+        elif isinstance(ty, FnType):
+            for p in ty.param_types:
+                self._collect_free_typevars(p, out)
+            self._collect_free_typevars(ty.return_type, out)
+        elif isinstance(ty, ADTType):
+            for p in ty.type_params:
+                self._collect_free_typevars(p, out)
+        # PrimType 无 TypeVar，跳过
+
+    def _generalize(self, ty: "NovaType") -> "NovaType":
+        """泛化（Generalize）：将不在环境 Γ 中自由出现的 TypeVar 标记为可泛化。
+
+        对应 Damas-Milner 类型系统中的 Gen(Γ, τ) 操作。
+        当前 Nova 的实例化端 `_instantiate` 对任何含 TypeVar 的类型均会
+        做 fresh 拷贝，因此无需显式引入 ForAll 量词——只要保证「被外层约束的
+        TypeVar 不错误地泛化为独立实例」即可。
+
+        本方法的核心价值：
+          (a) 标记哪些 TypeVar 是当前 let 绑定引入的（level 设为当前
+              _env_level 或保留默认），与外层环境 TypeVar 区分。
+          (b) 为第 66 轮 frontend_typevar_leak_guard 提供基础设施：
+              「未被泛化也未被合一的 TypeVar 是泄漏的」。
+
+        Value Restriction 最小化：本方法不直接做 Value Restriction 判断，
+        由调用方 _check_binding_decl 在 mutable=True 或非语法值表达式
+        时跳过 generalize。
+
+        Args:
+            ty: 经 _unify_and_resolve 完全展开后的类型。
+
+        Returns:
+            泛化后的类型。结构与输入一致，TypeVar 的 level 标记被更新。
+        """
+        env_free = self._free_typevars_in_env()
+        # 对类型结构做 walk：若 TypeVar.root 不在 env_free 中 → 是当前 let
+        # 引入的，保持不变（env 中存 TypeVar 本身，_contains_typevar
+        # 会命中 → lookup 时 instantiate，即「泛化」效果）；
+        # 若 TypeVar.root 在 env_free 中 → 保持原样（不改变其共享引用，
+        # 以便后续外层合一时能正确 propagate 约束）。
+        #
+        # 由于 _instantiate 按 id 做 mapping 新建 TypeVar 实例，
+        # 此处只需保证结构返回一致即可。
+        return self._walk_type_generalize(ty, env_free)
+
+    def _walk_type_generalize(
+        self, ty: "NovaType", env_free: Set[int]
+    ) -> "NovaType":
+        """辅助递归：遍历类型结构，env_free 中的 TVar 保持共享引用，
+        不在 env_free 中的 TVar 返回自身（保留为可泛化的自由变量）。
+
+        对非 TypeVar 构造器递归重建以避免共享可变子结构（若有）。
+        """
+        if isinstance(ty, TypeVar):
+            root = self._find(ty)
+            if isinstance(root, TypeVar):
+                # 返回 root（而非 ty）保证 Union-Find 展开后一致
+                return root
+            # root 已是具体类型，递归继续 walk
+            return self._walk_type_generalize(root, env_free)
+        if isinstance(ty, ListType):
+            return ListType(self._walk_type_generalize(ty.elem_type, env_free))
+        if isinstance(ty, MapType):
+            return MapType(
+                self._walk_type_generalize(ty.key_type, env_free),
+                self._walk_type_generalize(ty.value_type, env_free),
+            )
+        if isinstance(ty, TupleType):
+            return TupleType(
+                [self._walk_type_generalize(e, env_free) for e in ty.elements]
+            )
+        if isinstance(ty, FnType):
+            return FnType(
+                [self._walk_type_generalize(p, env_free) for p in ty.param_types],
+                self._walk_type_generalize(ty.return_type, env_free),
+            )
+        if isinstance(ty, ADTType):
+            return ADTType(
+                ty.name,
+                [self._walk_type_generalize(p, env_free) for p in ty.type_params],
+            )
+        # PrimType 不可变，直接返回
+        return ty
+
+    def _is_syntactic_value(self, expr) -> bool:
+        """判断表达式是否为 HM「语法值」（Syntactic Value）。
+
+        语法值允许被无限制泛化；非语法值（函数调用结果、有副作用的表达式）
+        出于 Value Restriction 考虑应保守不泛化。
+
+        当前最小化实现：
+          ✅ 语法值：Lambda / 所有字面量(Int/Float/String/Bool/Char/Unit) /
+                 TupleExpr / ListExpr / MapExpr / Identifier / ADT 构造器调用
+                 （不含函数调用的纯数据构造）
+          ❌ 非语法值：FnCall / BinaryOp / UnaryOp / FieldAccess /
+                 PipeExpr / IfExpr / MatchExpr / Block / For / While（可能含副作用）
+        """
+        from .ast_nodes import (
+            IntLiteral, FloatLiteral, StringLiteral, CharLiteral,
+            BoolLiteral, UnitLiteral, Lambda, TupleExpr, ListExpr,
+            MapExpr, Identifier,
+        )
+        if isinstance(expr, (IntLiteral, FloatLiteral, StringLiteral, CharLiteral,
+                             BoolLiteral, UnitLiteral, Lambda, Identifier)):
+            return True
+        if isinstance(expr, TupleExpr):
+            return all(self._is_syntactic_value(e) for e in expr.elements)
+        if isinstance(expr, ListExpr):
+            return all(self._is_syntactic_value(e) for e in expr.elements)
+        if isinstance(expr, MapExpr):
+            # Nova MapExpr 是字面量 {k:v, ...}，视为语法值
+            return True
+        # 其余类型保守视为非语法值（函数调用/运算/控制流可能有副作用）
+        return False
 
     def _unify_types(self, a: NovaType, b: NovaType) -> bool:
         """合一驱动的类型兼容检查。

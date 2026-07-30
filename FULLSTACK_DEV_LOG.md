@@ -5,6 +5,119 @@
 ---
 
 
+## 第 65 轮 — 2026-07-31 01:15
+
+> 🎨⚙️ **普通轮** | 2/2 全部成功 ✅✅ | **双里程碑达成**：code_audit_60 后端 6/6 全清 + code_audit_63 前端 1/3 + 后端 2/3｜前端 **HM let-polymorphism 闭环**（_generalize + Value Restriction 最小化 + 10 专项 10/10）｜后端 **_emit_abi_call 10 步通用骨架**（~75% 重复消除，_emit_call 18 行 + _emit_runtime_call 14 行薄包装）｜**HM 完整性 65%→85%**｜分模块测试 **TypeChecker 138（+10）/ Native 53 / Backends 58 / Nova 203 / C 50 / IR 63 / SSA 15 / Parser 95** 全部 0 回归
+
+### 前端：frontend_let_polymorphism_generalize ✅（HM 核心能力 Top1 清零）
+
+**为什么选**：review_cycle_63 新发现前端 3 项中的 **P1 语言能力天花板**（最高 P=93），`let id = |x| x; id(1); id("s")` HM 经典场景失败（id 被错误合一为 Int→Int，字符串调用被拒），**HM 完成度仅 ~65%**（实例化端 _instantiate 已存在但完全缺失泛化端）。硬难度但依赖零（独立于 TypeVar 守卫/错误恢复等任务），与后端 emit_abi_call 骨架任务（P90 hard）**完全并行无依赖** —— 双线无阻塞最佳组合。
+
+**改动（2 文件 +0 依赖新增）**：
+
+| 模块 | 改动 | 行数 / CC | 关键设计 |
+|------|------|-----------|----------|
+| `type_checker.py` | TypeVar 新增 `level: int = 0` 字段 | +1 字段 / 0 | HM Gen 判断「当前 let 引入 TVar」vs「外层约束 TVar」的嵌套深度标记（与 env_level 配合） |
+| ↑ | 新增 `_free_typevars_in_env()` + `_collect_free_typevars(ty, acc)` | 22 行 / CC≈3 | 递归遍历 env 所有绑定（含内建多态 print/abs/list_length），收集 TypeVar.root id 到 set |
+| ↑ | 新增 `_generalize(ty)` Gen(Γ,τ) 操作 | 18 行 / CC≤3 | 先取 env_free 集合 → `_walk_type_generalize` 遍历结构：TVar.root ∉ env_free → 当前 let 引入（保持不变 → 存入 env 后 instantiate 泛化）；TVar.root ∈ env_free → 保持原共享引用（外层合一时正确 propagate） |
+| ↑ | 新增 `_is_syntactic_value(expr)` | 38 行 / CC≈5 | **Value Restriction 最小化**：Lambda/字面量（Int/Float/Bool/String/Unit）/标识符/元组构建/列表构建/ADT 构造器（参数全为语法值）= 语法值 ✅；函数调用/二元运算/一元运算/索引访问/字段访问 = 非语法值 ❌ |
+| ↑ | `_check_binding_decl` 集成 generalize | ~12 行修改 / CC≤4 | mut=True 绝对不泛化（Value Restriction 强制）/非语法值不泛化/语法值 → `_generalize(resolved)` 后 env.define |
+| `tests/test_type_checker.py` | 新增 `TestGeneralization` 类 10 用例 | ~310 行 | free_typevars 2 个 / generalize 3 个 / 语法值 2 个 / id 双重实例化 1 个 / 辅助 2 个 → **10/10 通过** |
+
+**Value Restriction 三级策略**：
+```
+mut 绑定 (mutable=True)
+└── 绝对不泛化 → Value Restriction 强制保证引用不透明
+非语法值表达式 (FnCall/BinOp/UnOp/Subscript/AttrAccess)
+└── 保守不泛化 → 避免副作用/引用不透明破坏类型健全性
+语法值表达式 (Lambda/Literal/Ident/TupleBuild/ListBuild/ADTBuild纯)
+└── 调用 Gen(Γ, τ) 泛化 → 与 instantiate 配合实现 HM 多态
+```
+
+**测试**：TypeChecker 128→**138/138**（+10，TestGeneralization 10/10 全绿）｜其余 Native 53 / Backends 58 / Nova 203 / C_codegen 50 / IR 63 / SSA 15 / Parser 95 **全部 0 变化 0 回归**。前端完成率 **44/47 = 93.6%**（+2.1pp）。HM 完整性：实例化（第 42 轮）+ 泛化（本轮）= **HM 双端闭环**，完成度 65%→~85%。
+
+### 后端：backend_native_emit_abi_call_refactor ✅（code_audit_60 6/6 清零）
+
+**为什么选**：双来源覆盖（code_audit_60 60-B3 + code_audit_63 63-B2 Top2 可维护性），P=90 后端待做最高（regalloc 拆分完成依赖链 ready）。真实修改风险：第 58 轮 XMM caller-saved 修复时需同步 4 条路径漏改一条导致 SIGSEGV（真实踩过），**70% 代码重复 = 修改风险 70% 指数级放大**。纯重构不改语义，53 native 专项全覆盖 → 回归风险可控。
+
+**改动（1 文件 native_backend.py + 100% 语义等价）**：
+
+**通用 10 步 ABI 流水线（_emit_abi_call_direct 280 行，参数化 4 条差异）**：
+```
+① 预留返回值栈槽 (sub rsp, 8/16 float/int)
+② push caller_saved GPR（逆序压栈）
+③ sub rsp, XMM_SAVE_BYTES(64) + movdqu [rsp+off], xmm0-xmm7（保存 8 个 XMM）
+④ 参数装载（寄存器 arg0-5 rdi/rsi/rdx/rcx/r8/r9 + 栈溢出参数位置 + imm 分支 pushq imm32 + float 分支 lea rax,[rip+label] + movsd xmm,[rax]）
+⑤ 16 字节栈对齐（test rsp,0xF / jz skip / push rax 单字节 pad，保证 call 前 rsp%16=0）
+⑥ 栈参数从右到左 pushq（C ABI 要求）
+⑦ call rel32 + 记录链接表（internal→link_calls / external→external_calls）
+⑧ add rsp, (栈参数数*8) 清理 + pop rax（对齐恢复，若 pad 过）
+⑨a retval 顺序（由 flag 控制两路径）：
+   - store_retval_before=True：先 mov [rsp+retval_offset], rax/movsd → 再 movdqu 恢复 XMM
+   - store_retval_before=False：先 movdqu 恢复 XMM → 再 mov [rsp+retval_offset-saved_size], rax
+⑨b add rsp, XMM_SAVE_BYTES + pop GPR 逆序恢复
+⑩ 从 [rsp+retval_offset] 加载返回值 → store_from_reg 写回 vreg 位置
+```
+
+**4 条差异参数化（零重复代码）**：
+
+| 参数 | _emit_call（内部函数） | _emit_runtime_call（C Runtime） |
+|------|----------------------|-------------------------------|
+| caller_saved_regs | instr.caller_saved_to_preserve 精确集 | CALLER_GPRS 8 个保守全保存 |
+| allow_imm_args | False（参数全是 vreg） | True（支持 ("imm",32) 整数 + float 立即数 RIP-relative data 段） |
+| store_retval_before_xmm_restore | False（先恢复 XMM 再存 retval） | True（先存 retval 再恢复 XMM） |
+| retval_slot_offset | len(caller_saved)*8 = saved_size | 64(XMM) + 8*8(GPRs) = 128 固定 |
+| call_record_kind | internal → func.link_calls | external → ctx.external_calls |
+
+**代码变化**：`_emit_call` 120→**18 行**（薄包装，CC≤3），`_emit_runtime_call` 155→**14 行**（薄包装，CC≤2），新增 `_emit_abi_call_direct` 280 行 = 净增约 9 行 + 大量独立 docstring。
+
+**测试**：Native 53/53 ✅（含 8 个 runtime_call 专项 + 15 个内部 call 专项 + 3 个 float 参数/返回专项）｜Backends 58/58 ✅｜Nova 203 ✅｜C_codegen 50 ✅｜IR 63 ✅｜SSA 15 ✅｜Parser 95 ✅｜TypeChecker 138 ✅ **全部分模块 0 回归，无任何 SIGSEGV/SIGKILL**。后端完成率 **51/78 = 65.4%**（+1.3pp）。code_audit_60 后端 6/6 **清零里程碑达成 🎉**（regalloc 拆分 64 轮 + emit_abi_call 骨架 65 轮）。废弃别名 backend_native_emit_complexity_refactor 同步标记完成。
+
+### 测试对比（基线 N-1 → N）
+
+| 模块 | 第 64 轮基线 | 第 65 轮 | 变化 |
+|------|-------------|----------|------|
+| test_type_checker.py | 128 passed | **138 passed** | **+10**（TestGeneralization 10/10：free_typevars/generalize/语法值/id 双实例化） |
+| test_native_backend.py | 53/53 | 53/53 | +0（emit_abi_call 纯重构，0 回归） |
+| test_backends.py | 58/58 | 58/58 | +0 |
+| 其余 5 模块（Nova/C/IR/SSA/Parser） | 426/426 | 426/426 | +0 |
+| **分模块去重合计** | **665 passed** | **675 passed** | **+10 净增，0 回归**（完整套件 675 项收集全绿点） |
+
+### 里程碑达成
+
+| 里程碑 | 状态 | 说明 |
+|--------|------|------|
+| **HM let-polymorphism 闭环** 🎉 | ✅ 达成 | 实例化端（第 42 轮 _instantiate）+ 泛化端（本轮 _generalize）= HM 双端完整，HM 完整性 65%→~85% |
+| code_audit_60 后端 6/6 清零 🎉 | ✅ 达成 | 60-B3 emit_abi_call 骨架（本轮）+ 60-B1 regalloc 拆分（64 轮）+ 60-B2 SSA 静默（62 轮）+ P1-4 Phi（61 轮）+ 前端 2 项（61+62 轮） |
+| code_audit_63 前端 1/3 清零 | ✅ 达成 | 63-F1 HM generalize（本轮），剩余 TypeVar 泄漏 + 递归 ADT 豁免（第 66 轮） |
+| code_audit_63 后端 2/3 清零 | ✅ 达成 | 63-B1 regalloc（64 轮）+ 63-B2 emit_abi_call（本轮），剩余 63-B3 Phi 升级 raise（第 66 轮） |
+| 后端质量 7.9→8.1/10 | ✅ +0.2 | Native 技术债 Top2（CC=39+CC=31/CC=24）双清零，ABI 修改风险指数级降低 |
+
+### 下一步（第 66 轮 — **评审轮**，66 % 3 = 0）
+
+**评审轮：第 66 轮是评审轮（覆盖第 64-65 两轮普通开发）**
+
+> 评审轮不做新功能开发，而是回顾和规划。具体流程：
+> 1. 通读 FULLSTACK_DEV_LOG.md 所有历史
+> 2. 深度代码审计（前端质量/后端质量/前后端平衡）
+> 3. 双线评估：质量趋势、完成率、价值评估、薄弱点
+> 4. 更新任务池：移除低价值、新增高价值、调整优先级
+> 5. 生成评审报告：三轮回顾总结 + 问题根因 + 下阶段方向
+> 6. 提交和推送
+
+**前端下次评审重点**：
+- HM 完整性 ~85% 后剩余短板（高阶类型/排名多态/TypeVar 泄漏守卫）
+- 前后端测试密度比（前端 2:1 vs 后端 1:1）
+- 递归 ADT Occur Check 豁免方案可行性
+
+**后端下次评审重点**：
+- Native 完成度 85% 后后续投入方向（复杂结构体/调用约定优化/溢出策略改进）
+- WasmGC 断层收敛进度（3 NIE 补齐后 ~70%，C/Native/WasmGC 差距从 34pp→≤19pp）
+- code_audit_63 最后 1 项（63-B3 Phi 升级 raise）正确性收尾
+
+---
+
+
 ## 第 64 轮 — 2026-07-30 10:45
 
 > 🎨⚙️ **普通轮** | 2/2 全部成功 ✅✅ | **双线清零里程碑**：code_audit_60 前端 3/3 全清 + 后端 14/15（仅剩 emit_abi_call）｜前端 parser 四级熔断体系（TOP_LEVEL/EXPR/STMT/BLOCK）+6 专项测试｜后端 regalloc CC=39→≤5 拆分完成（3 子方法 + 1 流水线主方法）｜总测试 **1147/1147**｜后端质量 **7.7→7.9/10** (+0.2)

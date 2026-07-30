@@ -960,117 +960,208 @@ class NativeCodeGen:
             e.movzx_reg32_reg8(RAX, RAX)
             ctx.store_from_reg(dst_name, RAX)
 
-    def _emit_call(self, instr, ctx: "_EmitContext"):
-        """编译函数调用指令，实现 System V AMD64 ABI 调用约定。
+    # ============================================================
+    # 通用 ABI 调用骨架（第 65 轮 backend_native_emit_abi_call_refactor 新增）
+    # 消除 _emit_call / _emit_runtime_call 约 75% 的代码重复
+    # ============================================================
 
-        包含：
-        - 整数参数传递：RDI, RSI, RDX, RCX, R8, R9（前6个），其余栈传
-        - 浮点参数传递：XMM0-XMM7（前8个），其余栈传
-        - 返回值捕获：RAX（整数）/ XMM0（浮点）
-        - caller-saved GPR 保存/恢复（基于活跃区间分析的精确保存）
-        - 调用前 16 字节栈对齐
+    def _emit_abi_call_direct(
+        self,
+        ctx: "_EmitContext",
+        args,  # List[Tuple[ arg_spec, arg_type_ir ]]
+        # arg_spec = str (vreg_name)  |  ("imm", value)
+        dst_info,  # Tuple[dst_name: str, dst_type: IRType]  |  None
+        *,
+        caller_saved_regs,  # List[GPR_REG] — 精确集 (_emit_call) 或 保守 CALLER_GPRS 全集
+        call_target_name: str,  # 用于 link_calls / external_calls
+        call_record_kind: str,  # "internal" → link_calls ;  "external" → external_calls
+        allow_imm_args: bool,  # True → runtime_call 支持 ("imm", val)；False → _emit_call 仅 vreg
+        store_retval_before_xmm_restore: bool,
+        # True  → runtime_call: 先存 retval → 再恢复 XMM（偏移固定 xmm+gprs）
+        # False → _emit_call: 先恢复 XMM → 再存 retval（偏移 = gprs*8）
+        retval_slot_offset: int,
+        # 预计算的返回值槽偏移：
+        #   _emit_call:        saved_size = len(caller_saved_regs) * 8
+        #   _emit_runtime_call: xmm_saved + len(CALLER_GPRS)*8 = 64+64 = 128
+    ) -> None:
+        """System V AMD64 ABI 直接调用通用骨架。
+
+        10 步流水线：
+          1) 预留返回值栈槽    2) push caller_saved GPR
+          3) 保存 XMM0-XMM7    4) 参数装载（寄存器 + 栈溢出 + imm 分支）
+          5) 16 字节栈对齐      6) 栈参数从右到左压栈
+          7) emit call + 记录链接表  8) 清理栈参数 + 对齐
+          9a) 保存 retval + 恢复 XMM（顺序由 flag 控制）
+          9b) 恢复 GPR
+         10) 从 retval_slot 加载并 store_from_reg
+
+        参数说明见上方 docstring。三态 caller_saved_regs / imm 支持 / retval
+        顺序与偏移 / 链接记录 四条差异完全被参数化，零重复代码。
         """
         e = ctx.e
-        # ABI 常量已提升为模块级变量（见文件顶部）
 
-        has_return = instr.dst_loc is not None
-
-        # 判断返回值目标是否在 caller-saved 中或是否为浮点
+        has_return = dst_info is not None
+        dst_name = None
+        dst_type = None
         dst_in_caller_saved = False
         dst_is_float = False
         if has_return:
-            dst_name, dst_type = instr.dst_loc
+            dst_name, dst_type = dst_info
             dst_loc = ctx.get_loc(dst_name)
             dst_in_caller_saved = dst_loc[0] == "reg" and dst_loc[1] in CALLER_GPRS
             dst_is_float = dst_type.kind == IRType.FLOAT
 
-        # 获取需要保存的 caller-saved 寄存器（由寄存器分配器分析得出）
-        caller_saved = instr.caller_saved_to_preserve
-        saved_size = len(caller_saved) * 8
-        xmm_saved = XMM_SAVE_BYTES  # 统一保存所有 8 个 caller-saved XMM（保守策略）
+        xmm_saved = XMM_SAVE_BYTES  # = 64
+        gpr_count = len(caller_saved_regs)
+        saved_size = gpr_count * 8
 
-        # 1. 为返回值预留栈槽（如果目标在 caller-saved 中或浮点）
+        # ---- Step 1: 预留返回值栈槽（caller-saved reg 目标 or 浮点返回） ----
         need_retval_slot = has_return and (dst_in_caller_saved or dst_is_float)
         if need_retval_slot:
             e.sub_rsp_imm(8)
 
-        # 2. 保存 caller-saved GPR（精确保存，仅保存 call 后仍活跃的）
-        for reg in caller_saved:
+        # ---- Step 2: 保存 caller-saved GPR ----
+        for reg in caller_saved_regs:
             e.push_reg(reg)
 
-        # 2.5 P1-1 修复：保存 caller-saved XMM0-XMM7（System V ABI）
-        #     在 GPR 之后分配 64 字节 XMM 保存区，用 movsd 逐个存储
-        if xmm_saved > 0:
-            e.sub_rsp_imm(xmm_saved)
-            for i, xmm_reg in enumerate(CALLER_XMMS):
-                e.movsd_mem_reg(RSP, i * 8, xmm_reg)
+        # ---- Step 3: 保存 XMM0-XMM7（保守全 8 个，movsd 8 字节） ----
+        e.sub_rsp_imm(xmm_saved)
+        for i, xmm_reg in enumerate(CALLER_XMMS):
+            e.movsd_mem_reg(RSP, i * 8, xmm_reg)
 
-        # 3. 搬移参数到 ABI 寄存器/栈
+        # ---- Step 4: 参数装载（寄存器 + 栈溢出 + imm 分支） ----
         int_idx = 0
         float_idx = 0
-        stack_args = []  # [(vreg_name, is_float), ...]
+        stack_var_args = []  # 变量溢出 [(vname, is_float)]，步骤 6 统一压栈
+        stack_arg_count = 0  # 总溢出参数（变量 + imm 内联压栈）
 
-        for arg_vname, arg_type in instr.arg_locs:
+        for arg_spec, arg_type in args:
             is_float = arg_type.kind == IRType.FLOAT
-            if is_float:
-                if float_idx < len(FLOAT_ARG_REGS):
-                    ctx.load_to_reg(arg_vname, FLOAT_ARG_REGS[float_idx], is_float=True)
-                    float_idx += 1
-                else:
-                    stack_args.append((arg_vname, True))
+            is_imm = isinstance(arg_spec, tuple) and len(arg_spec) == 2 and arg_spec[0] == "imm"
+            if is_imm:
+                if not allow_imm_args:
+                    # _emit_call 路径不应该有 imm 参数
+                    raise ValueError(
+                        "_emit_call 不支持立即数参数，收到 imm=" + repr(arg_spec)
+                    )
+                imm_val = arg_spec[1]
+                if is_float:
+                    # Float imm → 写入 data 段 + RIP-relative movsd + data_fixups
+                    key = str(float(imm_val))
+                    if key not in self._float_const_map:
+                        value_bytes = struct.pack("<d", float(imm_val))
+                        offset = sum(len(v) for v, _ in self.float_constants)
+                        while offset % 8 != 0:
+                            offset += 1
+                        self.float_constants.append((value_bytes, offset))
+                        self._float_const_map[key] = offset
+                    data_off = self._float_const_map[key]
+                    if float_idx < len(FLOAT_ARG_REGS):
+                        fixup_offset = e.movsd_reg_imm(FLOAT_ARG_REGS[float_idx], 0)
+                        self.data_fixups.append(
+                            (ctx.func_name, fixup_offset, data_off, "float")
+                        )
+                        float_idx += 1
+                    else:
+                        # Float imm 溢出：XMM0 → movq RAX → push
+                        fixup_offset = e.movsd_reg_imm(XMM0, 0)
+                        self.data_fixups.append(
+                            (ctx.func_name, fixup_offset, data_off, "float")
+                        )
+                        e.movq_gpr_xmm(RAX, XMM0)
+                        e.push_reg(RAX)
+                        stack_arg_count += 1
+                # Int imm → mov_reg_imm64
+                if not is_float:
+                    if int_idx < len(INT_ARG_REGS):
+                        e.mov_reg_imm64(INT_ARG_REGS[int_idx], imm_val)
+                        int_idx += 1
+                    else:
+                        e.mov_reg_imm64(RAX, imm_val)
+                        e.push_reg(RAX)
+                        stack_arg_count += 1
             else:
-                if int_idx < len(INT_ARG_REGS):
-                    ctx.load_to_reg(arg_vname, INT_ARG_REGS[int_idx], is_float=False)
-                    int_idx += 1
+                # vreg 参数
+                arg_vname = arg_spec
+                if is_float:
+                    if float_idx < len(FLOAT_ARG_REGS):
+                        ctx.load_to_reg(arg_vname, FLOAT_ARG_REGS[float_idx], is_float=True)
+                        float_idx += 1
+                    else:
+                        stack_var_args.append((arg_vname, True))
+                        stack_arg_count += 1
                 else:
-                    stack_args.append((arg_vname, False))
+                    if int_idx < len(INT_ARG_REGS):
+                        ctx.load_to_reg(arg_vname, INT_ARG_REGS[int_idx], is_float=False)
+                        int_idx += 1
+                    else:
+                        stack_var_args.append((arg_vname, False))
+                        stack_arg_count += 1
 
-        # 4. 栈对齐：System V ABI 要求 call 前 RSP ≡ 0 (mod 16)
-        # 已调整：retval_slot(8) + saved_regs(8*k) + xmm_area(64) + stack_args(8*n)
-        # xmm_area(64) = 64 mod 16 = 0，不改变对齐奇偶性
+        # ---- Step 5: 16 字节栈对齐 ----
+        # xmm_area(64) mod 16 = 0 不改变对齐奇偶性
         retval_bit = 1 if need_retval_slot else 0
         xmm_qwords = xmm_saved // 8
-        needs_align = (retval_bit + len(stack_args) + len(caller_saved) + xmm_qwords) % 2 == 1
+        needs_align = (
+            retval_bit + stack_arg_count + xmm_qwords + gpr_count
+        ) % 2 == 1
         if needs_align:
             e.sub_rsp_imm(8)
 
-        # 5. 栈参数从右到左压栈
-        for arg_vname, is_float in reversed(stack_args):
+        # ---- Step 6: 变量栈参数从右到左压栈（imm 已在步骤 4 内联压完） ----
+        for arg_vname, is_float in reversed(stack_var_args):
             ctx.load_to_reg(arg_vname, RAX, is_float=is_float)
             e.push_reg(RAX)
 
-        # 6. 发射 call
+        # ---- Step 7: emit call + 记录链接表 ----
         call_offset = e.call_rel32()
-        self.link_calls.append((ctx.func_name, call_offset, instr.func_name))
+        if call_record_kind == "internal":
+            self.link_calls.append((ctx.func_name, call_offset, call_target_name))
+        else:
+            self.external_calls.append((ctx.func_name, call_offset, call_target_name))
 
-        # 7. 清理栈参数
-        if stack_args:
-            e.add_rsp_imm(len(stack_args) * 8)
+        # ---- Step 8: 清理栈参数 + 对齐 ----
+        if stack_arg_count > 0:
+            e.add_rsp_imm(stack_arg_count * 8)
         if needs_align:
             e.add_rsp_imm(8)
 
-        # 7.5 P1-1 修复：恢复 caller-saved XMM0-XMM7（先恢复 XMM 再释放其栈区）
-        if xmm_saved > 0:
+        # ---- Step 9a: 保存返回值 + 恢复 XMM（顺序由 flag 控制） ----
+        if store_retval_before_xmm_restore:
+            # RUNTIME 路径：先存 retval → 再恢复 XMM（偏移 = xmm + gprs）
+            if has_return and need_retval_slot:
+                if dst_is_float:
+                    e.movsd_mem_reg(RSP, retval_slot_offset, XMM0)
+                else:
+                    e.mov_mem_reg(RSP, retval_slot_offset, RAX)
+            # 恢复 XMM
             for i, xmm_reg in enumerate(CALLER_XMMS):
                 e.movsd_reg_mem(xmm_reg, RSP, i * 8)
             e.add_rsp_imm(xmm_saved)
-
-        # 8. 保存返回值到预留槽（如果需要）
-        if has_return:
-            if need_retval_slot:
+        else:
+            # INTERNAL 路径：先恢复 XMM → 再存 retval（偏移 = gprs*8）
+            for i, xmm_reg in enumerate(CALLER_XMMS):
+                e.movsd_reg_mem(xmm_reg, RSP, i * 8)
+            e.add_rsp_imm(xmm_saved)
+            if has_return and need_retval_slot:
                 if dst_is_float:
-                    e.movsd_mem_reg(RSP, saved_size, XMM0)
+                    e.movsd_mem_reg(RSP, retval_slot_offset, XMM0)
                 else:
-                    e.mov_mem_reg(RSP, saved_size, RAX)
-            else:
-                # 目标在栈或 callee-saved 中，直接存储
-                ctx.store_from_reg(dst_name, RAX if not dst_is_float else XMM0, is_float=dst_is_float)
+                    e.mov_mem_reg(RSP, retval_slot_offset, RAX)
 
-        # 9. 恢复 caller-saved GPR
-        for reg in reversed(caller_saved):
+        # 不需要 retval_slot 的情况：直接 store_from_reg 从 RAX/XMM0
+        if has_return and not need_retval_slot:
+            ctx.store_from_reg(
+                dst_name,
+                XMM0 if dst_is_float else RAX,
+                is_float=dst_is_float,
+            )
+
+        # ---- Step 9b: 恢复 caller-saved GPR ----
+        for reg in reversed(caller_saved_regs):
             e.pop_reg(reg)
 
-        # 10. 从预留槽加载返回值并清理
+        # ---- Step 10: 从预留的返回值槽加载 → store_from_reg ----
         if need_retval_slot:
             if dst_is_float:
                 e.movsd_reg_mem(XMM0, RSP, 0)
@@ -1079,6 +1170,33 @@ class NativeCodeGen:
                 e.mov_reg_mem(RAX, RSP, 0)
                 ctx.store_from_reg(dst_name, RAX, is_float=False)
             e.add_rsp_imm(8)
+
+    def _emit_call(self, instr, ctx: "_EmitContext"):
+        """内部函数→函数调用（Nova→Nova）。包装 _emit_abi_call_direct。
+
+        差异配置：
+          - caller_saved：寄存器分配分析的精确集（instr.caller_saved_to_preserve）
+          - allow_imm_args：False（参数全是 vreg）
+          - retval 顺序：先恢复 XMM 再存 retval
+          - retval 偏移：saved_size = len(caller_saved)*8
+          - link_calls（内部函数）
+        """
+        caller_saved = instr.caller_saved_to_preserve
+        # 组装统一的 args 格式：(vname, ir_type)
+        args = [(vname, ir_type) for vname, ir_type in instr.arg_locs]
+        # 保存/存储的偏移 = saved_size（步骤 9a 先释放了 xmm_saved）
+        retval_offset = len(caller_saved) * 8
+        self._emit_abi_call_direct(
+            ctx,
+            args,
+            instr.dst_loc,  # (dst_name, dst_type) | None
+            caller_saved_regs=caller_saved,
+            call_target_name=instr.func_name,
+            call_record_kind="internal",
+            allow_imm_args=False,
+            store_retval_before_xmm_restore=False,
+            retval_slot_offset=retval_offset,
+        )
 
     def _emit_return(self, instr, ctx: "_EmitContext"):
         """编译返回指令（加载返回值到 RAX/XMM0，ret 在函数尾声处理）。"""
@@ -1179,157 +1297,27 @@ class NativeCodeGen:
     def _emit_runtime_call(
         self, func_name: str, args: list, dst_loc_info, ctx: "_EmitContext"
     ):
-        """通用运行时函数调用发射器。
+        """通用运行时函数调用发射器（Nova→C Runtime）。包装 _emit_abi_call_direct。
 
-        通过 System V ABI 调用外部运行时函数（nova_list_new 等）。
-        调用链路：保存 caller-saved -> 设置参数 -> call -> 恢复 -> 取返回值。
-        外部函数的 call rel32 在链接阶段暂不回填（保持 0 偏移）。
-
-        参数格式：
-          - 变量参数: (vreg_name, arg_type)
-          - 立即数参数: (("imm", value), arg_type)
+        差异配置：
+          - caller_saved：CALLER_GPRS 全部 8 个（保守全保存）
+          - allow_imm_args：True（支持 ("imm", value) 立即数参数，含 float RIP-relative data 段）
+          - retval 顺序：先存 retval → 再恢复 XMM
+          - retval 偏移：xmm_saved(64) + len(CALLER_GPRS)*8(64) = 128
+          - external_calls（外部符号在 ld/gcc 链接阶段解析）
         """
-        e = ctx.e
-        has_return = dst_loc_info is not None
-        dst_name, dst_type = dst_loc_info if has_return else (None, None)
-        dst_in_caller_saved = False
-        dst_is_float = False
-        if has_return:
-            dst_loc = ctx.get_loc(dst_name)
-            dst_in_caller_saved = dst_loc[0] == "reg" and dst_loc[1] in CALLER_GPRS
-            dst_is_float = dst_type.kind == IRType.FLOAT
-
-        # 1. 预留返回值栈槽
-        need_retval_slot = has_return and (dst_in_caller_saved or dst_is_float)
-        if need_retval_slot:
-            e.sub_rsp_imm(8)
-
-        # 2. 保存 caller-saved GPR
-        for reg in CALLER_GPRS:
-            e.push_reg(reg)
-
-        # 2.5 P1-1 修复：保存 caller-saved XMM0-XMM7（System V ABI）
-        xmm_saved = XMM_SAVE_BYTES
-        e.sub_rsp_imm(xmm_saved)
-        for i, xmm_reg in enumerate(CALLER_XMMS):
-            e.movsd_mem_reg(RSP, i * 8, xmm_reg)
-
-        # 3. 设置参数（支持变量和立即数混合）
-        int_idx = 0
-        float_idx = 0
-        stack_var_args = []  # 变量溢出参数（从右到左压栈）
-        stack_arg_count = 0  # 总溢出参数数（含立即数）
-        for arg_spec, arg_type in args:
-            is_float = arg_type.kind == IRType.FLOAT
-            if isinstance(arg_spec, tuple) and arg_spec[0] == "imm":
-                imm_val = arg_spec[1]
-                if is_float:
-                    # 浮点立即数：写入数据段，通过 movsd 从 RIP 相对地址加载
-                    key = str(float(imm_val))
-                    if key not in self._float_const_map:
-                        value_bytes = struct.pack("<d", float(imm_val))
-                        # 计算偏移量（基于当前浮点常量区已有大小）
-                        offset = sum(len(v) for v, _ in self.float_constants)
-                        # 对齐到 8 字节
-                        while offset % 8 != 0:
-                            offset += 1
-                        self.float_constants.append((value_bytes, offset))
-                        self._float_const_map[key] = offset
-                    data_off = self._float_const_map[key]
-                    if float_idx < len(FLOAT_ARG_REGS):
-                        fixup_offset = e.movsd_reg_imm(FLOAT_ARG_REGS[float_idx], 0)
-                        self.data_fixups.append(
-                            (ctx.func_name, fixup_offset, data_off, "float")
-                        )
-                        float_idx += 1
-                    else:
-                        # 溢出到栈：先加载到 XMM0 再 movq 到 RAX 压栈
-                        fixup_offset = e.movsd_reg_imm(XMM0, 0)
-                        self.data_fixups.append(
-                            (ctx.func_name, fixup_offset, data_off, "float")
-                        )
-                        e.movq_gpr_xmm(RAX, XMM0)
-                        e.push_reg(RAX)
-                        stack_arg_count += 1
-                if int_idx < len(INT_ARG_REGS):
-                    e.mov_reg_imm64(INT_ARG_REGS[int_idx], imm_val)
-                    int_idx += 1
-                else:
-                    e.mov_reg_imm64(RAX, imm_val)
-                    e.push_reg(RAX)
-                    stack_arg_count += 1
-            else:
-                arg_vname = arg_spec
-                if is_float:
-                    if float_idx < len(FLOAT_ARG_REGS):
-                        ctx.load_to_reg(arg_vname, FLOAT_ARG_REGS[float_idx], is_float=True)
-                        float_idx += 1
-                    else:
-                        stack_var_args.append((arg_vname, True))
-                        stack_arg_count += 1
-                else:
-                    if int_idx < len(INT_ARG_REGS):
-                        ctx.load_to_reg(arg_vname, INT_ARG_REGS[int_idx], is_float=False)
-                        int_idx += 1
-                    else:
-                        stack_var_args.append((arg_vname, False))
-                        stack_arg_count += 1
-
-        # 4. 栈对齐（P1-1 修复：加入 xmm_qwords 使对齐奇偶正确）
-        retval_bit = 1 if need_retval_slot else 0
-        xmm_qwords = xmm_saved // 8  # = 8
-        needs_align = (retval_bit + stack_arg_count + xmm_qwords + len(CALLER_GPRS)) % 2 == 1
-        if needs_align:
-            e.sub_rsp_imm(8)
-
-        # 5. 变量栈参数压栈（从右到左）
-        for arg_vname, is_float in reversed(stack_var_args):
-            ctx.load_to_reg(arg_vname, RAX, is_float=is_float)
-            e.push_reg(RAX)
-
-        # 6. 发射 call（外部函数，暂用 0 偏移）
-        call_offset = e.call_rel32()
-        self.external_calls.append((ctx.func_name, call_offset, func_name))
-
-        # 7. 清理栈参数和对齐
-        if stack_arg_count > 0:
-            e.add_rsp_imm(stack_arg_count * 8)
-        if needs_align:
-            e.add_rsp_imm(8)
-
-        # 8. 保存返回值
-        # P1-1 修复：retval slot 距离 = xmm(64) + GPRs(64) = 128
-        if has_return:
-            if need_retval_slot:
-                if dst_is_float:
-                    e.movsd_mem_reg(RSP, xmm_saved + len(CALLER_GPRS) * 8, XMM0)
-                else:
-                    e.mov_mem_reg(RSP, xmm_saved + len(CALLER_GPRS) * 8, RAX)
-            else:
-                ctx.store_from_reg(
-                    dst_name,
-                    RAX if not dst_is_float else XMM0,
-                    is_float=dst_is_float,
-                )
-
-        # 8.5 P1-1 修复：恢复 caller-saved XMM0-XMM7
-        for i, xmm_reg in enumerate(CALLER_XMMS):
-            e.movsd_reg_mem(xmm_reg, RSP, i * 8)
-        e.add_rsp_imm(xmm_saved)
-
-        # 9. 恢复 caller-saved GPR
-        for reg in reversed(CALLER_GPRS):
-            e.pop_reg(reg)
-
-        # 10. 加载预留的返回值
-        if need_retval_slot:
-            if dst_is_float:
-                e.movsd_reg_mem(XMM0, RSP, 0)
-                ctx.store_from_reg(dst_name, XMM0, is_float=True)
-            else:
-                e.mov_reg_mem(RAX, RSP, 0)
-                ctx.store_from_reg(dst_name, RAX, is_float=False)
-            e.add_rsp_imm(8)
+        retval_offset = XMM_SAVE_BYTES + len(CALLER_GPRS) * 8  # = 64 + 64 = 128
+        self._emit_abi_call_direct(
+            ctx,
+            args,  # List[ ( (vname|("imm",val)), ir_type ) ] — 格式与骨架完全兼容
+            dst_loc_info,  # (dst_name, dst_type) | None
+            caller_saved_regs=list(CALLER_GPRS),
+            call_target_name=func_name,
+            call_record_kind="external",
+            allow_imm_args=True,
+            store_retval_before_xmm_restore=True,
+            retval_slot_offset=retval_offset,
+        )
 
     def _emit_build_list(self, instr, ctx: "_EmitContext"):
         """编译列表构建：调用 nova_list_new(count)，然后 nova_list_push 逐个添加元素。"""

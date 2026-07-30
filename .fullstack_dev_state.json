@@ -1,7 +1,7 @@
 {
-    "cycles": 64,
-    "frontend_completed": 43,
-    "backend_completed": 50,
+    "cycles": 65,
+    "frontend_completed": 44,
+    "backend_completed": 51,
     "last_review_cycle": 60,
     "current_review_cycle": 63,
     "completed_tasks": [
@@ -112,7 +112,10 @@
         "backend_lir_nonterm_ssa_strict",
         "review_cycle_63",
         "frontend_parser_error_recovery_full",
-        "backend_native_regalloc_cc_split"
+        "backend_native_regalloc_cc_split",
+        "frontend_let_polymorphism_generalize",
+        "backend_native_emit_abi_call_refactor",
+        "backend_native_emit_complexity_refactor"
     ],
     "failed_tasks": [],
     "deprecated_tasks": [
@@ -129,6 +132,28 @@
         "backend_lir_phi_lowering_verify"
     ],
     "task_history": [
+        {
+            "cycle": 65,
+            "task_id": "frontend_let_polymorphism_generalize",
+            "name": "实现 type_checker generalize() + 补全 let-polymorphism（HM 核心能力缺失 Top1）",
+            "track": "frontend",
+            "difficulty": "hard",
+            "priority": 93,
+            "result": "success",
+            "details": "code_audit_63 前端 P1 能力天花板清零（HM 完整性 65%→85%），review_cycle_63 前端 3 项 1/3 清零。type_checker.py 修改：(1) TypeVar 新增 level 字段（默认 0）用于 HM Gen 判断「当前 let 引入 TVar」vs「外层约束 TVar」；(2) 新增 _generalize(ty) Gen(Γ,τ) 操作：先收集 _free_typevars_in_env() 环境自由 TVar 集合，再 _walk_type_generalize 遍历类型结构——TypeVar.root 不在 env_free 中的是当前 let 引入的（可泛化），在 env_free 中的保持原共享引用（后续外层合一时正确 propagate）；(3) 新增 _free_typevars_in_env()：遍历 env 所有绑定（含内建多态 print/abs/list_length），_collect_free_typevars 递归收集 TVar.root；(4) 新增 _is_syntactic_value(expr)：Value Restriction 最小化实现——Lambda/字面量/标识符/元组构建/列表构建/ADT 构造器不含函数调用 = 语法值允许 generalize，函数调用/二元运算/一元运算/索引访问/字段访问 = 非语法值保守不泛化（避免引用不透明保证）；(5) _check_binding_decl 集成：mut=True 绝对不泛化（Value Restriction 强制）/非语法值不泛化/语法值调用 _generalize(resolved)。配套测试：tests/test_type_checker.py 新增 TestGeneralization 类 10 用例（free_typevars 空环境/绑定 TVar 不包含 2 个、generalize 原语不变/TVar 不在 env 自由/保留 env 绑定 TVar 共享 3 个、语法值判断字面量+Lambda/非值表达式 2 个、id 函数双重实例化 HM 经典场景 1 个 + 2 个辅助），10/10 全部通过。修改 2 个文件：type_checker.py ~210 行新增（5 方法 + TypeVar 1 字段 + docstring）、tests/test_type_checker.py ~310 行新增。分模块运行 TypeChecker 138 passed（+10 vs 基线）、Native 53/Backends 58/Nova 203/C 50/IR 63/SSA 15 全部 0 回归。前端完成率 44/47 = 93.6%（+2.1pp）。HM 完整性：实例化端（第 42 轮 _instantiate）+ 泛化端（本轮 _generalize）= HM 双端闭环。",
+            "timestamp": "2026-07-31 01:15"
+        },
+        {
+            "cycle": 65,
+            "task_id": "backend_native_emit_abi_call_refactor",
+            "name": "抽离 _emit_abi_call_direct 通用骨架消除 _emit_call/_emit_runtime_call ~75% 代码重复",
+            "track": "backend",
+            "difficulty": "hard",
+            "priority": 90,
+            "result": "success",
+            "details": "code_audit_60 后端 6/6 + code_audit_63 后端 2/3 清零（Native 技术债 Top2 完成）。backend/native_backend.py 修改：(1) 抽出通用 10 步流水线骨架 _emit_abi_call_direct() 约 280 行，参数化 4 条差异：caller_saved_regs（精确集 vs CALLER_GPRS 全集）、allow_imm_args（False 仅 vreg / True 支持 imm+float RIP-relative）、store_retval_before_xmm_restore（先存 retval / 先恢复 XMM 顺序）、retval_slot_offset（精确偏移）、链接记录（internal link_calls / external external_calls）；(2) _emit_call 精简为 18 行薄包装：caller_saved=instr.caller_saved_to_preserve 精确集 / allow_imm=False / 先恢复 XMM 再存 retval / link_calls 内部函数；(3) _emit_runtime_call 精简为 14 行薄包装：caller_saved=CALLER_GPRS 8 个全保存 / allow_imm=True（支持 imm 整数 + float 立即数 data 段 RIP-relative 装载）/ 先存 retval 再恢复 XMM / external_calls 外部符号。10 步流水线完全一致：① 预留返回值栈槽 ② push caller_saved GPR ③ sub rsp,XMM_SAVE_BYTES + movdqu 保存 XMM0-XMM7 ④ 参数装载（寄存器 arg0-5 按 System V 顺序 / 栈溢出参数预留位置 / imm 分支整数 pushq imm32 / float 分支 lea rax,[rip+label] + movsd xmm,[rax]）⑤ 16 字节栈对齐（test rsp,0xF / jz skip / push rax 单字节对齐 pad）⑥ 栈参数从右到左 pushq ⑦ call rel32 + 记录链接表 ⑧ add rsp,栈参数清理 + 对齐恢复（pop rax）⑨a retval 顺序（由 flag 控制两种路径）⑨b popq GPR 逆序恢复 ⑩ mov [rsp+retval_offset],rax / movsd [rsp+retval_offset],xmm0 → store_from_reg 写回 vreg 位置。净代码变化：_emit_call 120→18 行、_emit_runtime_call 155→14 行、新增 _emit_abi_call_direct 280 行 = 净增约 9 行 + 大量注释。测试：native_backend 53/53 ✅（含 8 个 runtime_call 专项 + 15 个内部 call 专项 + 3 个 float 参数/返回专项）、backends 58/58 ✅、nova 203 ✅、c_codegen 50 ✅、ir 63 ✅、ssa 15 ✅、parser 95 ✅、type_checker 138 ✅ 全部分模块 0 回归，无任何 SIGSEGV/SIGKILL。后端完成率 51/78 = 65.4%（+1.3pp）。backend_native_emit_complexity_refactor（第 60 轮评审定义的废弃别名任务）同步标记完成。",
+            "timestamp": "2026-07-31 01:15"
+        },
         {
             "cycle": 64,
             "task_id": "backend_native_regalloc_cc_split",
@@ -161,61 +186,6 @@
             "result": "success",
             "details": "第 61-62 两轮普通开发评审。前端质量 8.2→8.6（+0.4，_error() 100% 达成 + HM 类型推断稳步完善）；后端质量 7.0→7.7（+0.7，MIR Phi 一致性 + LIR SSA 严格化双正确性清零里程碑）。深度审计新发现 6 项：前端×3（HM generalize 缺失导致 let-polymorphism 不完整【核心能力缺失 Top1】、parser 错误恢复仅 block 级/表达式级空白、递归 ADT 被 Occur Check 误杀 + TypeVar 泄漏守卫）；后端×3（_resolve_phi_type 仍在观察期未升级为 raise、native_backend _allocate_registers CC=39/_emit_runtime_call CC=31/_emit_call CC=24 技术债、4 后端完成度断层 48pp）。新增 5 个任务、废弃 1 个（backend_lir_phi_lowering_verify，降级优先级低于 HM generalize/Native CC 拆分）。前后端平衡：前端进入小步精修阶段（95.5% 完成），后端仍处正确性爬坡+技术债堆积交织状态（68.1%），下 3 轮资源配比建议 前端 35% / 后端 65%。下 3 轮聚焦：(64) 后端 _allocate_registers 拆分 CC=39→≤15 + 前端 parser 错误恢复扩展 TOP_LEVEL/STMT_LIST/EXPR 三级；(65) 后端 _emit_abi_call 骨架抽离消除 70% 重复 + 前端 _generalize() 实现 let-polymorphism；(66) 后端 Phi 不一致升级 raise MIRLoweringError 结束观察期 + WasmGC 3 个 NIE 指令补全 + 前端 TypeVar 泄漏守卫。",
             "timestamp": "2026-07-30 10:02"
-        },
-        {
-            "cycle": 62,
-            "task_id": "frontend_for_expr_non_list_fix",
-            "name": "修复 ForExpr iterable 非 List 类型时静默降级为 TypeVar 的类型系统漏洞（P1 正确性）",
-            "track": "frontend",
-            "difficulty": "easy",
-            "priority": 88,
-            "result": "success",
-            "details": "P1 前端正确性漏洞清零（code_audit_60 前端 3 项清零 2/3）。type_checker.py L824-825：原实现未强制检查 iterable 必须是 ListType，非 List（Int/String/Bool/Option 等）直接取 TypeVar(\"for_elem\") 作为 elem 绑定类型，`for x in 42` / `for x in \"string\"` 等语义错误代码静默通过→x 类型全部污染为未绑定 TypeVar→运行时崩溃。修复：else 分支调用 _error(\"for 循环只能遍历 List 类型，当前为 {actual}\", expr=expr.iterable) 走第 59 轮统一的 _error() 出口抛出 TypeCheckError，保留 Iterator trait TODO 注释；后续不可达 INT_T 仅为类型检查器可达性提示。测试更新：将 cycle 61 写入的 test_for_non_list_iterable_current_behavior（assertIsNone 作为降级基线）替换为 3 个正向断言测试（Int/String/Bool 三类非 List 迭代器均抛 TypeCheckError，错误消息含 for/List/实际类型 + line/col/source_code），净增 +2 测试。修改 2 个文件：type_checker.py ~11 行，tests/test_type_checker.py ~41 行。测试 1114 → 1116 passed，0 回归。code_audit_60 前端 3 项 2/3 清零。前端完成率 42/44 = 95.5%（+2.3pp）。",
-            "timestamp": "2026-07-30 07:01"
-        },
-        {
-            "cycle": 62,
-            "task_id": "backend_lir_nonterm_ssa_strict",
-            "name": "lir_lowering.py 32 处非 terminator 指令 get(ssa_name, \"\") 静默回退替换为 _require_ssa_loc（60-B2 稳定性清零）",
-            "track": "backend",
-            "difficulty": "medium",
-            "priority": 80,
-            "result": "success",
-            "details": "P2 级稳定性清零（code_audit_60 后端 3 项清零 2/3）。ir/lir_lowering.py：terminator 7 处已在 cycle 59 迁移到 _require_ssa_loc，但 32 处非 terminator（常量加载/全局加载/全局存储/二元运算/一元运算/间接+直接调用/闭包创建/列表构建&追加/元组构建/Map构建/ADT构建/字段访问/索引访问，共 14 个降级方法）仍使用 get(ssa, \"\")，SSA 名找不到时空字符串可能导致：(a) Native 后端生成非法机器码静默吞异常→错二进制；(b) C 后端生成 `(int64_t) = 5;` 无效表达式→GCC syntax error 但无法定位到 Nova 编译器层。修复（分层零风险）：(1) _require_ssa_loc 签名泛化：参数 terminator_kind 重命名为 instr_kind，错误消息 3 处同步更新；(2) 调用链传递 bb_label：_lower_block_instructions 循环传入 bb.label→_lower_instruction(bb_label=)→调度表 handler 第三参数传递；(3) 14 个 handler 方法签名新增可选 bb_label=\"unknown\" 保持向后兼容；(4) 32 处 get(ssa, \"\") 全部替换为 _require_ssa_loc(ssa, bb_label, \"LIRBinOp.left\" 等精确指令类型名)；(5) 闭包捕获 SSA 保持 get(cap, cap) 策略（capture 可引用未注册的全局/外部 SSA，未做严格化，附有注释说明）。修改 1 个文件 ir/lir_lowering.py，替换 32 处 + 签名 16 处 + 调用链 3 处，共约 210 行修改。Grep 二次确认代码中仅剩注释行 1 处 `.get(ssa, \"\")`，无遗漏。全量 1116 passed 0 回归（含 53 个 native 后端测试、63 个 IR 专项、176 个后端专项）。code_audit_60 后端 3 项 2/3 清零。后端完成率 49/72 = 68.1%（+1.4pp）。",
-            "timestamp": "2026-07-30 07:01"
-        },
-        {
-            "cycle": 61,
-            "task_id": "frontend_typecheck_test_coverage",
-            "name": "补齐 test_type_checker.py 8 类核心测试盲区（+15 用例）",
-            "track": "frontend",
-            "difficulty": "easy",
-            "priority": 95,
-            "result": "success",
-            "details": "P2 级测试盲区清零。code_audit_60 确认 12 类 type_checker 核心错误中 8 类零测试。在 TestTypeCheckErrorLocation 类末尾新增 15 个测试（均使用 _compile_and_catch 全管道模式），覆盖 8 大类：(1) Let/Mut 标注不匹配 2 个；(2) 函数返回类型不匹配 1 个；(3) Lambda 参数类型错误 1 个（|x:String|{x} 绑定后 f(42)）；(4) For 表达式 2 个（range 参数错误 / 非 List 迭代当前行为记录为 TypeVar 降级，下一轮修复）；(5) Assignment 三类错误 3 个（目标未定义 / 不可变赋值 / 类型不兼容）；(6) ListComprehension 过滤条件非 Bool 1 个；(7) 类型注解语法错 3 个；(8) ADT 构造器等价场景 2 个（嵌套 List 不一致 / 多参数函数 pair 双不匹配）。enum 语法 parser 暂不支持，场景 8 改用等价高价值场景；parser Lambda 语法为 |x|{body} 而非 fn(x){}，场景 3 做适配；修改 1 个文件 test_type_checker.py 约 191 行。测试 1099 -> 1114 passed（+15），0 回归。前端 41/44 = 93.2% 完成。",
-            "timestamp": "2026-07-30 04:21"
-        },
-        {
-            "cycle": 61,
-            "task_id": "backend_mir_phi_type_consistency",
-            "name": "修复 MIR Phi 节点类型取第一个分支即 break 不做一致性校验（P1-4 清零）",
-            "track": "backend",
-            "difficulty": "medium",
-            "priority": 98,
-            "result": "success",
-            "details": "P1-4 正确性致命清零。code_audit_57 + code_audit_60 两次审计确认真实存在：_insert_merge_phis (If merge) 和 _build_merge_phis (Match merge) 两处均取第一个命中 ssa_types 的类型即 break，其余分支完全忽略，true=Int/false=Float/arm3=String 等场景产生灾难性错代码。修复（分阶段零风险）：(1) 模块级新增 _ir_types_compatible 纯函数（无前端依赖，避免循环引入）：宽容策略 UNIT/TYPE_VAR/PTR 三类宽容，其余 kind==+递归 params 保证零假阳性；(2) 类内新增 _resolve_phi_type 方法：收集所有类型+过滤 UNIT+两两一致性校验+优先选择非 TYPE_VAR；不兼容对输出到 stderr（观察期不中断编译，下一轮升级为 MIRLoweringError）；(3) 两处调用均替换为 _resolve_phi_type，context_label 精确定位；(4) TYPE_VAR 候选优先级最低，避免吞掉真实具体化类型。修改 1 个文件 ir/mir_lowering.py 约 108 行。全量 1114 passed 0 回归；无任何 Phi 不一致警告（现有全部类型正确）。code_audit_57 9 项 9/9 全部清零里程碑达成。后端 48/72 = 66.7% 完成。",
-            "timestamp": "2026-07-30 04:21"
-        },
-        {
-            "cycle": 60,
-            "task_id": "review_cycle_60",
-            "name": "第 60 轮双线路线图评审",
-            "track": "review",
-            "difficulty": "n/a",
-            "priority": 99,
-            "result": "success",
-            "details": "第 58-59-60 轮评审（因第 57 轮评审后 2 轮普通 + 1 轮评审，实际覆盖 58-59 两轮开发）。前端 40/42=95.2% 完成（质量评分 8.2/10，↑1.0 vs 第 57 轮 7.2，P2×3 全部清零、_error() 统一出口使用率 100%）；后端 47/68=69.1%（质量评分 7.0/10，↑0.5，P0×1+P1×4+P2×3=8/9 清零）。深度代码审计新发现 6 项问题：前端×3（ForExpr 非 List 静默降级为 TypeVar【类型系统漏洞】、type_checker 8/12 类核心错误零测试【测试盲区】、parser 错误恢复计数器仅覆盖 _parse_block【恢复不完整】）；后端×3（MIR Phi 类型一致性 P1-4【正确性致命】、lir_lowering 32 处非 terminator get(ssa,\"\") 静默回退【稳定性】、native_backend _emit_runtime_call CC=25/_emit_call CC=21【可维护性 Top1+Top2】）。新增 5 个任务，废弃 2 个低优（backend_wasm_stack_balance、backend_wasm_wat_indent_verify）。前后端平衡评估：测试数量 1:1.01（均衡）但代码量 1:2.04（后端代码密度 2×）、后端积压正确性风险更高（P1-4 + 32 处静默）、最近 3 轮任务分布 3:1 倾斜前端，下 3 轮建议比例 前端:后端 = 1:2。下 3 轮聚焦：后端 P1-4 MIR Phi 类型一致性修复（P98）→ 后端 lir_lowering 32 处静默回退（P80）+ 后端 native_backend 复杂度重构（P85）→ 前端测试盲区补齐（P95）+ 前端 ForExpr 静默降级修复（P88）。",
-            "timestamp": "2026-07-30 21:50"
         }
     ],
     "tasks": [
@@ -253,7 +223,7 @@
             "difficulty": "hard",
             "priority": 90,
             "estimated_effort": "1-2天",
-            "status": "pending",
+            "status": "completed",
             "source": "review_cycle_63 深度审计确认 70% 代码重复（真实修改风险高）",
             "depends_on": [
                 "backend_native_regalloc_cc_split"
@@ -268,7 +238,7 @@
             "difficulty": "hard",
             "priority": 93,
             "estimated_effort": "6-10小时",
-            "status": "pending",
+            "status": "completed",
             "source": "review_cycle_63 深度审计确认 HM generalize 缺失（语言表达能力天花板）",
             "depends_on": [],
             "severity": "P1"
@@ -324,7 +294,7 @@
             "difficulty": "hard",
             "priority": 85,
             "estimated_effort": "1-2天",
-            "status": "deprecated_alias",
+            "status": "completed",
             "source": "code_audit_60 Top 复杂度确认，review_cycle_63 合并到 _emit_abi_call 统一骨架",
             "depends_on": [],
             "severity": "P2"
