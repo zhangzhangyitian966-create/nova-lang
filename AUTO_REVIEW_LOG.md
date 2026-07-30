@@ -17632,3 +17632,262 @@ type_checker.py:413: in check_program
 ---
 
 *本报告由 Nova Auto Review v2.0 自动生成*
+
+---
+
+# 第 1513 轮 Nova 深度审查报告 (v2.0)
+
+> 生成时间: 2026-07-30 01:35:40
+> 审查版本: v0.3.0
+
+## 1. 审查概览
+
+| 指标 | 数值 |
+|------|------|
+| 扫描文件数 | 51 |
+| 代码行数 | 37,463 |
+| 函数总数 | 2391 |
+| 类总数 | 381 |
+| 发现问题数 | **1601** |
+| CRITICAL | 0 |
+| HIGH | 0 |
+| MEDIUM | 97 |
+| LOW | 1504 |
+
+### 严重程度分布
+
+- 🔴 **CRITICAL**: 0 个
+- 🟠 **HIGH**: 0 个
+- 🟡 **MEDIUM**: 97 个
+- 🟢 **LOW**: 1504 个
+
+## 2. 代码质量审查
+
+### 2.1 问题类型分布
+
+| 问题类型 | 数量 | 严重级别 |
+|----------|------|----------|
+| magic_number | 782 | LOW |
+| no_docstring | 603 | LOW |
+| print_debug | 105 | LOW |
+| unused_import | 58 | MEDIUM |
+| class_too_large | 22 | MEDIUM |
+| inconsistent_naming | 14 | LOW |
+| function_too_long | 9 | MEDIUM |
+| cyclomatic_complexity | 6 | MEDIUM |
+| too_broad_exception | 2 | MEDIUM |
+
+### 2.2 高优先级问题 (CRITICAL + HIGH)
+
+✅ 无高优先级问题
+
+### 2.3 各模块问题统计 (Top 10)
+
+| 模块 | 问题数 |
+|------|--------|
+| tests | 807 |
+| (root) | 363 |
+| backend | 314 |
+| ir | 116 |
+| tree-sitter-nova | 1 |
+
+## 3. 架构审查
+
+### 3.1 模块概览
+
+- 模块总数: **51**
+- 平均依赖数: **1.22**
+- 循环依赖: **0** 个
+- sys.path hack: **0** 处
+
+### 3.2 循环依赖
+
+✅ 未发现循环依赖
+
+### 3.3 耦合度分析
+
+#### 高被依赖模块 (入度 Top 10)
+
+| 模块 | 入度 (被依赖数) |
+|------|----------------|
+| ir.ir_nodes | 9 |
+| errors | 8 |
+| ast_nodes | 7 |
+| lexer | 5 |
+| type_checker | 4 |
+| parser | 4 |
+| environment | 3 |
+| compiler | 3 |
+| evaluator | 2 |
+| ir.cfg_utils | 2 |
+
+#### 高依赖模块 (出度 Top 10)
+
+| 模块 | 出度 (依赖数) |
+|------|--------------|
+|  | 10 |
+| backend.compiler_pipeline | 10 |
+| cli | 8 |
+| compiler_cli | 6 |
+| evaluator | 3 |
+| parser | 3 |
+| backend.lir_c_backend | 2 |
+| backend.native_backend | 2 |
+| ir.pass_manager | 2 |
+| type_checker | 2 |
+
+### 3.5 代码量分布
+
+| 目录 | 文件数 | 行数 | 占比 |
+|------|--------|------|------|
+| tests | 20 | 13,567 | 36.2% |
+| (root) | 14 | 10,307 | 27.5% |
+| ir | 8 | 7,326 | 19.6% |
+| backend | 8 | 6,184 | 16.5% |
+| tree-sitter-nova | 1 | 79 | 0.2% |
+
+## 4. 测试分析
+
+- 测试总数: **1099**
+- 通过数: ✅ 1093
+- 失败数: ❌ 0
+- 错误数: ⚠️  0
+- 跳过数: ⏭️  0
+- 通过率: **99.5%**
+- 耗时: 0s
+
+## 5. 复杂度分析
+
+- 函数总数: **2385**
+- 平均圈复杂度: **2.04**
+- 最高复杂度: **30**
+
+### 5.1 复杂度分布
+
+| 复杂度区间 | 函数数 |
+|------------|--------|
+| 1-5 (简单) | 2213 |
+| 6-10 (中等) | 138 |
+| 11-15 (复杂) | 28 |
+| 16-25 (高复杂) | 3 |
+| 25+ (极复杂) | 3 |
+
+### 5.2 Top 10 最复杂函数
+
+| 排名 | 函数 | 文件 | 圈复杂度 |
+|------|------|------|----------|
+| 1 | Parser._parse_block | `parser.py` | 14 |
+| 2 | LIRCBackend._compile_call_indirect | `backend/lir_c_backend.py` | 13 |
+| 3 | Evaluator._convert_nova_to_json | `evaluator.py` | 13 |
+| 4 | _iter_hir_children | `ir/ir_nodes.py` | 13 |
+| 5 | MIRLowering._lower_list_comprehension | `ir/mir_lowering.py` | 13 |
+| 6 | Parser._parse_primary_type | `parser.py` | 13 |
+| 7 | NovaCompiler.build | `compiler_cli.py` | 12 |
+| 8 | NovaCompiler._compile_c_to_binary | `compiler_cli.py` | 12 |
+| 9 | replace_terminator_operands | `ir/cfg_utils.py` | 12 |
+| 10 | HIRLowering._lower_pattern | `ir/hir_lowering.py` | 12 |
+
+## 7. 增量质量门禁
+
+❌ **门禁失败** — 发现 16 个增量质量问题
+
+- 检查文件数（有变更）: 5
+- 门禁问题数: 16
+
+### 7.1 门禁问题详情
+
+1. **[gate_new_magic_number]** `backend/__init__.py:14`
+   - 增量门禁：新增魔法数字 15，必须定义为命名常量
+   - 代码: `:widths: 15 28 28 29`
+
+2. **[gate_new_magic_number]** `backend/__init__.py:23`
+   - 增量门禁：新增魔法数字 64，必须定义为命名常量
+   - 代码: `- ELF 64-bit 可执行文件 / 重定位 .o`
+
+3. **[gate_new_magic_number]** `backend/__init__.py:36`
+   - 增量门禁：新增魔法数字 80，必须定义为命名常量
+   - 代码: `架构手术进度（M-ARCH 里程碑，cycles=80 前必须完成）：`
+
+4. **[gate_new_magic_number]** `backend/cranelift_backend.py:13`
+   - 增量门禁：新增魔法数字 2026，必须定义为命名常量
+   - 代码: `弃用原因（2026-07-29 架构战略决策）：`
+
+5. **[gate_no_docstring]** `ir/ir_types.py:98`
+   - 增量门禁：新增函数 '__eq__' 必须有 docstring
+   - 代码: `def __eq__(self, other: object) -> bool:`
+
+6. **[gate_no_docstring]** `ir/ir_types.py:107`
+   - 增量门禁：新增函数 '__hash__' 必须有 docstring
+   - 代码: `def __hash__(self) -> int:`
+
+7. **[gate_no_docstring]** `ir/ir_types.py:115`
+   - 增量门禁：新增函数 '__repr__' 必须有 docstring
+   - 代码: `def __repr__(self) -> str:`
+
+8. **[gate_new_magic_number]** `ir/ir_types.py:7`
+   - 增量门禁：新增魔法数字 2026，必须定义为命名常量
+   - 代码: `拆分背景（2026-07-29 ARCHITECTURE_VISION.md §2.1「立即架构手术 A」）：`
+
+9. **[gate_new_magic_number]** `ir/ir_types.py:8`
+   - 增量门禁：新增魔法数字 1413，必须定义为命名常量
+   - 代码: `原 ir/ir_nodes.py 累计 1413 行、112 个类，是 Nova 最大的单体模块，`
+
+10. **[gate_naming_violation]** `ir/ir_types.py:177`
+   - 增量门禁：公共函数 'ListType' 必须使用 snake_case 命名
+   - 代码: `def ListType(elem: NovaType) -> NovaType:`
+
+11. **[gate_naming_violation]** `ir/ir_types.py:186`
+   - 增量门禁：公共函数 'MapType' 必须使用 snake_case 命名
+   - 代码: `def MapType(key: NovaType, val: NovaType) -> NovaType:`
+
+12. **[gate_naming_violation]** `ir/ir_types.py:195`
+   - 增量门禁：公共函数 'TupleType' 必须使用 snake_case 命名
+   - 代码: `def TupleType(*elems: NovaType) -> NovaType:`
+
+13. **[gate_naming_violation]** `ir/ir_types.py:203`
+   - 增量门禁：公共函数 'FnType' 必须使用 snake_case 命名
+   - 代码: `def FnType(*params_and_ret: NovaType) -> NovaType:`
+
+14. **[gate_naming_violation]** `ir/ir_types.py:212`
+   - 增量门禁：公共函数 'ADTType' 必须使用 snake_case 命名
+   - 代码: `def ADTType(name: str, *params: NovaType) -> NovaType:`
+
+15. **[gate_naming_violation]** `ir/ir_types.py:223`
+   - 增量门禁：公共函数 'OptionType' 必须使用 snake_case 命名
+   - 代码: `def OptionType(elem: NovaType) -> NovaType:`
+
+16. **[gate_naming_violation]** `ir/ir_types.py:228`
+   - 增量门禁：公共函数 'ResultType' 必须使用 snake_case 命名
+   - 代码: `def ResultType(ok: NovaType, err: NovaType) -> NovaType:`
+
+### 7.2 门禁问题类型分布
+
+| 问题类型 | 数量 |
+|----------|------|
+| gate_naming_violation | 7 |
+| gate_new_magic_number | 6 |
+| gate_no_docstring | 3 |
+
+---
+
+## 8. 改进建议
+
+### P0 - 立即修复
+
+✅ 无 P0 级问题
+
+### P1 - 高优先级
+
+- 修复 16 个增量质量门禁问题（新增代码 docstring/魔法数字/命名规范）
+
+### P2 - 中优先级
+
+- 处理 97 个 MEDIUM 级别问题（函数过长、圈复杂度、未使用导入等）
+
+### P3 - 低优先级 / 优化
+
+- 清理 1504 个 LOW 级别问题（TODO、命名规范、魔法数字等）
+
+---
+
+*本报告由 Nova Auto Review v2.0 自动生成*
