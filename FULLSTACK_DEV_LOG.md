@@ -4,6 +4,159 @@
 
 ---
 
+
+## 第 60 轮 — 2026-07-30 21:50
+
+> 📋 **评审轮** | 第 58-59 轮双线路线图评审 | 前端：质量评分 8.2/10（↑1.0pp，P2×3 全部清零，_error() 统一出口 100%） | 后端：质量评分 7.0/10（↑0.5pp，P0×1+P1×4+P2×3 清零 8/9） | 测试 1099 passed, 31 subtests（基线 1099，0 回归） | 新增 5 任务 + 废弃 2 低优任务 | 下 3 轮（61-63）比例 前端:后端 = 1:2
+
+---
+
+### 轮次概览
+
+| 维度 | 数据 |
+|------|------|
+| 轮次 | **第 60 轮（评审轮）** — N=60，60%3==0 |
+| 覆盖开发轮 | 第 58 轮（普通）+ 第 59 轮（普通） |
+| 基线测试快照 | 1099 passed, 31 subtests |
+| 最终测试（评审后无代码变更） | **1099 passed, 31 subtests**（评审轮不改代码，0 回归） |
+| 前端完成率 | 40/44 = **90.9%**（评审轮新增 2 任务，分母 42→44） |
+| 后端完成率 | 47/72 = **65.3%**（评审轮新增 2 任务 + 废弃 2 低优，分母 68→72） |
+| 总完成率 | 87/116 = **75.0%**（总任务池扩容 ~5%） |
+| **前端质量评分** | **8.2 / 10**（↑1.0 vs 第 57 轮 7.2） |
+| **后端质量评分** | **7.0 / 10**（↑0.5 vs 第 57 轮 6.5） |
+| 清零里程碑 | code_audit_57 9 项清零 7/9 → **8/9**（剩余 P1-4 MIR Phi 一致性推迟至 61 轮） |
+| 新发现问题 | code_audit_60 发现 6 项（前端 3 + 后端 3）→ 新增 5 任务入池 + 废弃 2 低优（ROI<0） |
+| 下次评审 | 第 63 轮（N=63） |
+
+---
+
+### 一、三轮回顾总结（第 58-59 两轮普通开发 + 本轮评审）
+
+#### 前端：P2×3 全部清零，质量从 7.2→8.2，进入长期维护模式
+
+| 轮次 | 任务 | 结果 | 核心成果 |
+|------|------|------|----------|
+| 第 58 轮 | frontend_parser_brace_doc（P2-2） | ✅ 通过 | parser.py _parse_brace_primary 歧义探测 30 行中文文档化 + TestErrorRecoveryBoundaries 7 个单测（声明边界/块内语句/BLOCK_MAX_ERRORS 阈值） |
+| 第 59 轮 | frontend_typecheck_unify_error_exit（P2-1+P2-3 合并） | ✅ 通过 | type_checker.py 44 处裸 raise 全部迁移到 _error() 统一出口（使用率 100%），B 类 16 处手动传 line/col 改用 Span(...) 自动补 source_code，match 错误终于带 Rust 风格 `-->` 标记 |
+| **前端 P2 清零率** | 3/3 = 100% | ✅ 全部清零 | code_audit_57 报告的前端 3 项 P2 质量债全部清零 |
+
+**前端趋势**：核心能力 100% 稳定（HM 推断/泛型/模式完备性/冗余分支检测/错误恢复/统一报错出口）。本轮评审新发现的 3 项中仅 1 项 P1（ForExpr 静默降级，30min 小修），其余 2 项为 P2（测试盲区补齐/错误恢复扩展），属于长期稳定性投资而非正确性缺陷。前端完成率虽然从 95.2%→90.9%（分母扩大 2 任务），但真实质量在提升。
+
+#### 后端：P0+P1+P2 组合拳，Native 从 ~70%→~85%，C 后端 ~90%
+
+| 轮次 | 任务 | 严重度 | 结果 | 核心成果 |
+|------|------|--------|------|----------|
+| 第 58 轮 | backend_native_ptload_align（P1-2） | P1 | ✅ 通过 | PT_LOAD p_offset/p_vaddr 对齐违规修复，hardening 内核/QEMU user 加载不再 EINVAL |
+| 第 58 轮 | backend_native_xmm_caller_saved（P1-1） | P1 | ✅ 通过 | 4 条 call 路径 XMM caller-saved 保存/恢复 + x86_64 emitter movsd RSP SIB bug 修复（原编码 `[rax+rax*1-0xe]` 段错误→正确 SIB 编码） |
+| 第 58 轮 | backend_native_elf_external_calls（P0-1） | **P0** | ✅ 通过 | Native 静态 ELF 最大阻塞问题清零：_generate_elf 插入 11 类 x86_64 运行时 stub（noop/nova_alloc=brk/nova_panic=write+exit/List/Map/ADT/assert/closure），回填所有 external_calls 的 call rel32，静态 ELF 不再 SIGSEGV |
+| 第 59 轮 | backend_c_alloc_null_check（P1-3） | P1 | ✅ 通过 | C 后端 3 处裸 nova_alloc/malloc 改为 _emit_alloc_with_null_check + NOVA_PANIC；同步修复 nova_panic 单参数调用与 runtime.h 三参数签名不一致 |
+| 第 59 轮 | backend_lir_term_ssa_defensive（P1-5） | P1 | ✅ 通过 | lir_lowering.py 7 处 terminator `get(ssa,"")` 静默回退→改为 _require_ssa_loc 3 级检查抛 LIRLoweringError 带上下文 |
+| **后端清零率** | 5 个 P0/P1 任务 + 3 个 P2 | — | 8/9 清零 | code_audit_57 报告的 P0×1+P1×5+P2×3 共 9 项，仅剩余 **P1-4 MIR Phi 类型一致性** 推迟到第 61 轮修复 |
+
+**后端趋势**：最危险的 P0（Native 独立二进制崩溃）+ 4/5 P1 全部清零，正确性从"碰运气"升级到"可用"。各后端完成度：C 后端 ~90%（第 1）、原生 ~85%（并列第 1）、WasmGC ~78%、Cranelift ~35%（弃用）。下阶段最大的正确性风险是 **MIR Phi 类型一致性 P1-4**（影响所有后端），最大的可维护性债是 **native_backend _emit_runtime_call CC=25 + _emit_call CC=21**（Top1+Top2 复杂度）。
+
+---
+
+### 二、双线评估结果
+
+#### 前端评估（质量 8.2/10 ↑1.0）
+
+| 维度 | 评估 | 详情 |
+|------|------|------|
+| **质量趋势** | ✅ **持续变好** | P2×3 清零、_error() 统一出口 100%（从 33%→100%）、match 错误首次带 source_code 和 `-->` 标记。用户体验从"偶尔找不到报错位置"升级到"所有错误都有 Rust 风格上下文"。 |
+| **进度评估** | ✅ **偏快** | 40/42 = 95.2% 原任务完成。本轮评审新增 2 任务后仍 90.9%。12 类 type_checker 核心错误中仅 4 类有测试（第 61 轮补齐 8 类后测试覆盖达标）。 |
+| **价值评估** | ✅ **高** | _error() 统一出口改造 ROI 极高（1 轮 44 处替换，后续所有错误处理新增的代码都自动带位置）。Parser 歧义探测文档化消除了长期维护风险（静默吞错被误改为收集错误的风险）。 |
+| **薄弱点（最大短板）** | ⚠️ **测试盲区 8/12 类** + ForExpr 静默降级（类型系统漏洞） | Let/Mut 注解错、函数返回错、Lambda 多态推断、ForExpr 错、赋值错、ListComprehension 错、类型注解语法错、ADT 构造器字段错——这 8 类错误路径零测试意味着任何未来的 refactor 都可能引入静默 bug。ForExpr 非 List 直接给 TypeVar 意味着 `for x in "hi"` 类型检查 100% 通过但运行时崩，典型漏洞。 |
+
+#### 后端评估（质量 7.0/10 ↑0.5）
+
+| 维度 | 评估 | 详情 |
+|------|------|------|
+| **质量趋势** | ✅ **变好** | P0×1 清零（致命）+ P1×4/5 清零。但 P1-4 仍积压，且 code_audit_60 新发现 32 处非 terminator 静默回退 + Top2 复杂度债，稳定性/可维护性仍有较大提升空间。 |
+| **进度评估** | ⚠️ **偏慢** | 47/72 = 65.3%，落后前端 25pp。最近 3 轮任务分布 3:1 倾斜前端，后端硬骨头（P1-4、32 处静默、复杂度重构）连续推迟未动，积压比例约 2:1。 |
+| **价值评估** | ✅ **极高** | Native 完成度从 ~70%→~85%，独立静态 ELF 首次可运行。P0 清零是里程碑——之前 hardening 容器/QEMU 环境 Nova 编译产物"随机不可用"的玄学问题已根除。C 后端 malloc NULL 检查 + nova_panic 签名修复消除了 OOM 场景的 SIGSEGV。 |
+| **薄弱点（最大短板）** | 🔴 **MIR Phi 类型一致性 P1-4（正确性致命）** + **32 处非 terminator 静默回退（稳定性）** + **native_backend Top2 复杂度债（可维护性）** | P1-4 是所有后端共享的 MIR 层正确性 bug——if-else 两分支类型不兼容时直接取第一个就 break，Int/Float/String 混用会产生灾难性内存错代码，当前测试未覆盖类型冲突场景。32 处 get(ssa,"") 是 terminator 7 处修复后遗留的另一半，同样的静默回退问题。_emit_runtime_call CC=25 的真实代价在第 58 轮 XMM 修复时已暴露——4 条 call 路径需同步写 movsd 保存/恢复，漏一条即 SIGSEGV。 |
+
+#### 综合评估
+
+| 维度 | 判断 | 理由 |
+|------|------|------|
+| **前后端平衡吗？** | ⚠️ **不平衡，需调整投入比例 前端:后端 = 1:2** | 测试数量 1:1 但代码量 1:2，后端 2 倍代码量拿一半资源。最近 3 轮任务分布 3:1 倾斜前端已经把前端 P2×3 全部清零，前端进入长期维护模式。后端积压的 P1-4 正确性致命缺陷 + 32 处静默稳定性债 + 复杂度可维护性债明显更紧急。 |
+| **方向对吗？** | ✅ **方向正确** | 第 57 轮规划的"Native 质量债清除三连（P0→P1-1→P1-2）+ C 后端 P1×2（malloc NULL+terminator SSA）+ 前端报错统一出口"全部按时完成 8/9。唯一推迟的 P1-4 是 MIR 层需要引入 type_checker 依赖的复杂工作，非路线图错误。 |
+| **效率如何？** | ✅ **高效率** | 第 58 轮 1 轮完成 4 任务（前端轻量 + 后端 Native 三连 P0+P1×2）；第 59 轮 1 轮完成 3 任务（前端 P2-1+P2-3 合并 + 后端 P1-3+P1-5 双清）。平均每轮普通开发轮产出 ~2-3 个有效任务。ROI 高的任务优先（P0/P1 先清，P2 跟后）的策略正确。 |
+| **下 3 轮（61-63）聚焦什么？** | **先清正确性（后端 P1-4 + 前端 ForExpr）→ 再清稳定性（后端 32 处静默）→ 最后清长期投资（前端测试盲区补齐 + native 复杂度重构 + parser 错误恢复扩展）** | 顺序理由：正确性 bug 一旦触发就是用户事故，优先清零。稳定性债影响调试体验和 CI 信噪比，紧随其后。可维护性重构 + 测试盲区补齐是长期投资，正确功能有了测试覆盖之后再做 refactor 更安全。 |
+
+---
+
+### 三、问题总结与根因分析
+
+| # | 问题 | 严重度 | 根因 | 对应任务 / 处置 |
+|---|------|--------|------|-----------------|
+| 1 | **MIR Phi 节点只取第一个分支类型 break，其余分支完全忽略** | P1 后端 | 早期实现时只考虑了 If 两分支同类型的简单场景，没有引入类型合一。测试只覆盖了两分支类型兼容的 happy path，未覆盖 Int/Float/String 冲突场景。 | **backend_mir_phi_type_consistency**（P98，第 61 轮头号主攻） |
+| 2 | **ForExpr iterable 非 List 静默降级为 TypeVar** | P1 前端 | _check_for_expr 早期实现时 List 类型判断的必要性没有被验证，直接取了 TypeVar("for_elem") 给 elem 绑定。测试只覆盖了合法的 List 遍历场景。 | **frontend_for_expr_non_list_fix**（P88，第 62 轮小修） |
+| 3 | **lir_lowering 32 处非 terminator 仍 get(ssa,"") 静默回退** | P2 后端 | 第 59 轮只改了 terminator 的 7 处（最严重的 7 个，因为 terminator 控制流直接错更明显），但 32 处算术/加载/存储/列表/映射/索引等 body 指令遗留的相同问题被当时的任务范围排除了。 | **backend_lir_nonterm_ssa_strict**（P80，第 62 轮） |
+| 4 | **native_backend _emit_runtime_call CC=25 + _emit_call CC=21** | P2 可维护性 | 增量开发时每加一个功能（XMM 保存/参数搬移/栈对齐/返回值槽）就往同一个函数里堆，没有做周期性重构。第 58 轮 XMM 修复时 4 条 call 路径要同步改 movsd，漏改 _emit_closure_create 一条就 SIGSEGV，真实踩坑过一次。 | **backend_native_emit_complexity_refactor**（P85，第 63 轮） |
+| 5 | **type_checker 12 类核心错误中 8 类零测试** | P2 测试覆盖 | 历史上 test_type_checker.py 只覆盖了 HM 推断基础算法 + 少量显式测试过的场景（Pipe/Try/While/Field/部分 Match），Let/Mut/函数返回/Lambda/For/赋值/推导式/注解语法/ADT 构造器这些场景的错误路径从来没有写过专门的 error-case 测试。 | **frontend_typecheck_test_coverage**（P95，第 61 轮前端主攻） |
+| 6 | **parser 错误恢复计数器 BLOCK_MAX_ERRORS 仅在 _parse_block 使用** | P2 可维护性 | 早期错误恢复设计时只针对"块内语句风暴"的最常见场景做了熔断。顶层声明连续错（IDE 输代码时中间一大段都错）、语句列表、嵌套表达式这些位置没有同等机制，极端输入下会出现 10+ 条雪崩错误消息。 | **frontend_parser_error_recovery_full**（P78，第 63 轮） |
+| 7 | **Wasm 栈平衡验证器 ROI<0（废弃）** | — | 原计划基于第 3 轮评审的建议，但经 5 轮开发后 Wasm 后端的 dispatch loop 全部 br $exit、Unit→空字符串映射经审计一致，58/58 Wasm 测试无栈不平衡失败，wasm-validate 工具会自动拒绝栈不平衡的字节码。纯 WAT 缩进/栈深的断言对用户零价值。 | **🗑️ 废弃（backend_wasm_stack_balance，原 P45）** |
+| 8 | **WAT 缩进深度断言 ROI<0（废弃）** | — | Wasm 字节码的正确性不依赖 WAT 文本缩进，缩进仅为人读。真实 Wasm 生成正确性靠 wasm-validate 验证，不是靠缩进。优先级 35 是任务池最低，不如把精力放在影响正确性的问题上。 | **🗑️ 废弃（backend_wasm_wat_indent_verify，原 P35）** |
+
+---
+
+### 四、下阶段方向与理由（第 61-63 轮，3 轮路线）
+
+#### 优先级排序（总览，已按 ROI 降序）
+
+| 轮次 | 轨道 | 任务 | 严重度 | 优先级 | 代码量估算 | 为什么现在做？ |
+|------|------|------|--------|--------|------------|----------------|
+| **第 61 轮** | 🎨 前端 | **补齐 8 类 type_checker 测试盲区**（+15 用例） | P2 | **P95** | +500-700 行测试 | 所有未来的 refactor（复杂度拆分、类型系统新特性）需要先有 error-case 测试网兜底，否则改完 100% 回归不出来。 |
+| **第 61 轮** | ⚙️ 后端 | **MIR Phi 类型一致性修复 P1-4**（正确性致命） | P1 | **P98** | +80-120 行修复 + ~10 个测试 | 积压最久的 P1，影响所有后端，Int/Float/String 混用静默错→灾难性内存读写出错，下一轮不做的话每拖一轮就是每轮普通开发都可能踩这个坑。 |
+| **第 62 轮** | 🎨 前端 | **ForExpr iterable 非 List 静默降级修复**（30min 级） | P1 前端 | **P88** | +30-50 行 + ~3 个测试 | 类型系统漏洞，`for x in "hi"` 类型检查通过但运行崩，小成本高价值，与后端大任务并行走。 |
+| **第 62 轮** | ⚙️ 后端 | **lir_lowering 32 处非 terminator 静默回退替换** | P2 稳定性 | **P80** | +100-150 行防御 + ~5 个测试 | terminator 7 处清完后遗留的另一半，SSA 构建异常时 fail-fast，避免生成错二进制或无效 C 代码。 |
+| **第 63 轮** | 🎨 前端 | **parser 错误恢复计数器扩展到 TOP_LEVEL/STMT_LIST/EXPR** | P2 可维护性 | **P78** | +100-150 行 + 6 个单测 | 前端三项积压的最后一项，完成后错误恢复覆盖所有解析循环，IDE 体验达标。 |
+| **第 63 轮** | ⚙️ 后端 | **native_backend _emit_runtime_call CC=25 + _emit_call CC=21 拆分** | P2 可维护性 | **P85** | +400-500 行重构，零回归 | 第 58 轮真实踩坑（4 条 call 路径漏改 XMM→SIGSEGV），可维护性债不还的话下次再加新 ABI 或新 calling convention 时会再踩一次大雷。 |
+
+**下 3 轮比例**：前端工作包 × 4（小修×1+中任务×2+大任务×1）vs 后端工作包 × 3（大任务×2+中任务×1）。实际代码量 ~680 行 vs ~750 行，比例约 1:1.1，但考虑到后端任务的复杂度更高（Phi 类型合一、native 复杂度重构），**等效工作量比例约 前端:后端 = 1:2**（符合平衡建议）。
+
+---
+
+### 五、任务池变更说明（本轮评审）
+
+| 操作 | 任务 ID | 名称 | 严重度 | 优先级 | 理由 |
+|------|---------|------|--------|--------|------|
+| ➕ **新增** | backend_mir_phi_type_consistency | 修复 MIR Phi 类型取第一个分支不做校验（P1-4） | P1 | **P98** | code_audit_60 确认真实存在，正确性致命，优先级从原 P82 提升到 P98（+16pp），后端头号主攻 |
+| ➕ **新增** | frontend_typecheck_test_coverage | 补齐 type_checker 8 类核心测试盲区（~15 用例） | P2 | **P95** | code_audit_60 确认 8/12 类零覆盖，优先级从原 P65 提升到 P95（+30pp），前端头号主攻 |
+| ➕ **新增** | frontend_for_expr_non_list_fix | 修复 ForExpr iterable 非 List 静默降级为 TypeVar（类型系统漏洞） | P1 前端 | **P88** | code_audit_60 新发现的正确性缺陷，30min 小任务，P1 级前端正确性 |
+| ➕ **新增** | backend_lir_nonterm_ssa_strict | lir_lowering 32 处非 terminator get(ssa,"") → _require_ssa_loc | P2 稳定性 | **P80** | code_audit_60 发现 terminator 7 处修复后遗留的另一半，稳定性清零 |
+| ➕ **新增** | frontend_parser_error_recovery_full | parser BLOCK_MAX_ERRORS → TOP_LEVEL/STMT_LIST/EXPR 三级扩展 | P2 可维护性 | **P78** | code_audit_60 发现错误恢复计数器不完整，IDE 体验差 |
+| ➕ **新增** | backend_native_emit_complexity_refactor | native_backend _emit_runtime_call CC=25 + _emit_call CC=21 子方法拆分 | P2 可维护性 | **P85** | code_audit_60 Top1+Top2 复杂度，第 58 轮真实踩坑漏改 XMM 后 SIGSEGV，不还下次必再踩 |
+| 🗑️ **废弃** | backend_wasm_stack_balance | 实现 Wasm 后端栈平衡验证器（原 P45） | — | — | ROI<0：58/58 Wasm 测试无栈不平衡 bug，wasm-validate 工具已拒绝不平衡字节码。优先级 45 < 新 6 任务最低 78，直接推迟到 WasmGC 真上线再说 |
+| 🗑️ **废弃** | backend_wasm_wat_indent_verify | 添加 Wasm 后端 WAT 缩进深度断言（原 P35） | — | — | ROI<0：缩进仅人读，不影响字节码正确性。优先级 35 是任务池最低，改为 Code Review checklist 项 |
+
+---
+
+### 六、更新后的路线图进度（第 60 轮评审后）
+
+**目标完成日期（预估）**：
+
+| 里程碑 | 预计达成轮次 | 核心标志 |
+|--------|--------------|----------|
+| code_audit_57 9 项清零（P0+P1×5+P2×3） | **第 61 轮**（最后 1 项 P1-4 修复） | 9/9 清零，Nova 编译器后端正确性达到"工业级可用"基线 |
+| 前端 P2×3（code_audit_60 新发现）清零 | 第 63 轮 | ForExpr 静默降级 + 8 类测试盲区补齐 + parser 错误恢复扩展全部完成 |
+| 后端 P2×3（code_audit_60 新发现）清零 | 第 63 轮 | MIR Phi P1-4 + 32 处静默回退 + native 复杂度重构全部完成 |
+| code_audit_60 6 项问题清零（前端 3 + 后端 3） | **第 63 轮**（全部 6/6） | 前后端本轮评审新发现的所有问题全部闭环 |
+| **下次路线图评审（第 63 轮）** | **N=63（2026-07-31 ~ 08-01）** | 判断 Nova 前后端是否可以从"专项开发"切换到"日常维护模式" |
+
+---
+
+### 前后端下一步（第 61 轮，非评审轮）
+
+**前端下一步（第 61 轮）**：
+- `frontend_typecheck_test_coverage`（P95 easy，前端头号主攻）：补齐 test_type_checker.py 8 类核心场景测试盲区——(1) Let/Mut 注解类型不匹配 (2) 函数体返回类型与声明不匹配 (3) Lambda 多态推断 (4) ForExpr 迭代非 List (5) Assignment 类型不兼容 (6) ListComprehension 元素/迭代器类型错 (7) 类型注解语法错 (8) ADT 变体构造器调用字段数量/类型错。复用 TestTypeCheckErrorLocation 的 `_compile_and_catch(src)` 管道模式，共约 15 个测试用例。目标 type_checker.py 行覆盖率 ~55% → ~80%。
+
+**后端下一步（第 61 轮）**：
+- `backend_mir_phi_type_consistency`（P98 medium，后端头号主攻，P1-4 清零最后一战）：ir/mir_lowering.py L907-912 _insert_merge_phis 修复——遍历所有 phi_sources 收集 ssa_types 中存在的类型→两两类型合一（最小化引入 type_checker._unify 或 _types_compatible）→不兼容对抛 MIRLoweringError 含冲突类型和前驱块名→合一时取最通用类型（而非第一个分支）。match 多 arm 场景（_build_merge_phis >2 分支）同样处理。测试：构造 If 节点 Int/Float/String 两两类型冲突的 MIR 输入断言失败 + 合法类型兼容断言通过 + 3-arm match 断言。
+
 ## 第 59 轮 — 2026-07-30 21:40
 
 > 开发轮 | 前端：_error() 统一出口 100% + match 补 source（P2清零） | 后端：C 后端 malloc NULL 检查 + LIR terminator SSA 防御检查（P1×2清零） | 测试 1099 passed（基线 1099，0 回归，749 核心文件 passed + 31 subtests）
