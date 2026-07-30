@@ -41,7 +41,6 @@ from .ast_nodes import (
     MutBinding,
     PipeExpr,
     Program,
-    Span,
     StringLiteral,
     TryExpr,
     TupleExpr,

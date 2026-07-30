@@ -14,26 +14,18 @@ HIR 是 Nova 编译器的最上层中间表示，特点：
 """
 
 from dataclasses import dataclass, field, replace
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 # 共享类型系统（来自 A1 阶段抽取出的 ir_types.py）
 from .ir_types import (
-    ADTType,
     BOOL_TYPE,
     CHAR_TYPE,
-    CLOSURE_TYPE,
     FLOAT_TYPE,
-    FnType,
     INT_TYPE,
     IRType,
-    ListType,
-    MapType,
     NEVER_TYPE,
     NovaType,
-    OptionType,
-    ResultType,
     STRING_TYPE,
-    TupleType,
     UNIT_TYPE,
 )
 

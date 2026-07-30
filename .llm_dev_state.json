@@ -1,5 +1,5 @@
 {
-  "cycles": 81,
+  "cycles": 82,
   "architecture_strategy": {
     "document": "ARCHITECTURE_VISION.md",
     "effective_date": "2026-07-29",
@@ -304,13 +304,102 @@
       "cycle": 81,
       "source": "评审轮",
       "completed_at": "2026-07-30T08:11:45.440131"
-    }
+    },
+    "allocator_api_step1",
+    "fix_review_gate_false_positives",
+    "clean_unused_imports_v7"
   ],
   "failed_tasks": [
     "fix_native_test_import",
     "unify_c_backend_phase1"
   ],
   "task_history": [
+    {
+      "cycle": 82,
+      "type": "normal",
+      "date": "2026-07-30 12:26:02",
+      "review_digest": {
+        "cycle_1513_total": 1601,
+        "critical": 0,
+        "high": 0,
+        "medium": 97,
+        "low": 1504,
+        "avg_cc": 2.04,
+        "unused_import_medium": 58,
+        "gate_false_positive_pct": 81,
+        "top6_cc_tail": [
+          "Parser._parse_block CC=14",
+          "LIRCBackend._compile_call_indirect CC=13",
+          "Evaluator._convert_nova_to_json CC=13",
+          "_iter_hir_children CC=13",
+          "MIRLowering._lower_list_comprehension CC=13",
+          "Parser._parse_primary_type CC=13"
+        ]
+      },
+      "baseline_passed": 1116,
+      "final_passed": 1116,
+      "test_regression": false,
+      "tasks": [
+        {
+          "id": "allocator_api_step1",
+          "name": "Allocator API Step1（trait + Arena/Libc 实现 + 统计 + 错误）",
+          "source": "自主规划 · 架构战略 M-MEM",
+          "source_type": "自主规划",
+          "priority": 88,
+          "difficulty": "medium",
+          "why_chosen": "M-MEM 支柱 1️⃣，SH-1 前置最高阻塞项；cycles=87 截止仅剩 5 轮；先不侵入现有代码",
+          "status": "completed",
+          "result": "成功 · 1116 passed 零回归",
+          "notes": "新增 Allocator trait + LibcAllocator + ArenaAllocator + AllocStats + AllocError + 便捷工具；约 720 行",
+          "files_changed": [
+            "runtime/__init__.py",
+            "runtime/allocator.py"
+          ]
+        },
+        {
+          "id": "fix_review_gate_false_positives",
+          "name": "审查门禁校准（dunder 豁免 + 命名白名单 + noqa + 数字白名单 + 注释剥离）",
+          "source": "审查驱动 · Cycle-1513 门禁 81% 误报",
+          "source_type": "审查驱动",
+          "priority": 80,
+          "difficulty": "easy",
+          "why_chosen": "误报率 81% 时审查报告失去指导意义，审查驱动方法论基石",
+          "status": "completed",
+          "result": "成功 · 1116 passed 零回归",
+          "notes": "COMMON_NUMS 14→60+；_DUNDER_METHODS_WHITELIST 75+ 项；_NAMING_VIOLATION_FILE_WHITELIST；_line_has_noqa()；3 个 gate 各自加豁免机制",
+          "files_changed": [
+            "scripts/auto_review.py"
+          ]
+        },
+        {
+          "id": "clean_unused_imports_v7",
+          "name": "批量清理未使用导入 v7（17 处 · 6 文件）",
+          "source": "审查驱动 · MEDIUM unused_import 58→41",
+          "source_type": "审查驱动",
+          "priority": 62,
+          "difficulty": "easy",
+          "why_chosen": "MEDIUM 级 #1 钉子户（unused_import 占 60%），filler 并行清理",
+          "status": "completed",
+          "result": "成功 · 1116 passed 零回归",
+          "notes": "删 17 处，保 14 处（__init__.py 3 个测试导出 + ir/ir_nodes.py 11 个兼容导出带 noqa F401）",
+          "files_changed": [
+            "type_checker.py",
+            "runtime/allocator.py",
+            "ir/hir.py",
+            "ir/ir_types.py",
+            "ir/mir.py",
+            "ir/lir.py"
+          ]
+        }
+      ],
+      "review_driven_ratio_pct": 67,
+      "next_plan": [
+        "cycle=83：allocator_api_step2（List/Map/Tuple 接受 allocator 参数）",
+        "cycle=83：unify_c_backend_phase2（ADT/match 对齐 + 删除旧 c_codegen.py 1036 行）",
+        "cycle=83：syntax_freeze_declaration（语法冻结声明 v0.5 文档，SH-1 前置）",
+        "cycle=83 filler：refactor_convert_nova_to_json_cc13 + refactor_iter_hir_children_cc13（Top10 CC 长尾 2/6）"
+      ]
+    },
     {
       "cycle": 81,
       "type": "review",
@@ -1200,9 +1289,11 @@
       "priority": 88,
       "category": "architecture",
       "estimated": "1 天",
-      "status": "pending",
+      "status": "completed",
       "depends_on": [],
-      "reason": "[ARCHITECTURE_VISION.md §3.1 Step1 推荐选择A（Zig风格显式分配器API）] 内存模型是self-hosting的地基，最迟v0.5必须定板。Step1先落接口定义+两种默认实现，不侵入现有代码结构，风险可控。[架构战略强制·新增任务]"
+      "reason": "[ARCHITECTURE_VISION.md §3.1 Step1 推荐选择A（Zig风格显式分配器API）] 内存模型是self-hosting的地基，最迟v0.5必须定板。Step1先落接口定义+两种默认实现，不侵入现有代码结构，风险可控。[架构战略强制·新增任务]",
+      "completed_cycle": 82,
+      "completed_at": "2026-07-30 12:26:02"
     },
     {
       "id": "deprecate_cranelift_backend",
@@ -1881,10 +1972,12 @@
       "priority": 80,
       "category": "engineering",
       "estimated": "2-3 小时",
-      "status": "pending",
+      "status": "completed",
       "depends_on": [],
       "source": "review_driven",
-      "reason": "第81轮评审发现 Cycle-1513 16 个增量门禁问题中 13 个（81%）为误报：命名规范 7 + 魔法数字 6 + dunder docstring 3。误报泛滥降低审查数据可信度，挤占真正问题的注意力带宽，直接影响后续任务优先级判断的准确性。[来源：深度代码审计 §3 + AUTO_REVIEW_LOG.md Cycle-1513 §7]"
+      "reason": "第81轮评审发现 Cycle-1513 16 个增量门禁问题中 13 个（81%）为误报：命名规范 7 + 魔法数字 6 + dunder docstring 3。误报泛滥降低审查数据可信度，挤占真正问题的注意力带宽，直接影响后续任务优先级判断的准确性。[来源：深度代码审计 §3 + AUTO_REVIEW_LOG.md Cycle-1513 §7]",
+      "completed_cycle": 82,
+      "completed_at": "2026-07-30 12:26:02"
     },
     {
       "id": "clean_unused_imports_v7",
@@ -1894,10 +1987,12 @@
       "priority": 62,
       "category": "engineering",
       "estimated": "1-2 小时",
-      "status": "pending",
+      "status": "completed",
       "depends_on": [],
       "source": "review_driven",
-      "reason": "AUTO_REVIEW_LOG.md Cycle-1513 §2.1：unused_import 58 个，占全部 MEDIUM 问题（97）的 60%，是当前 MEDIUM 级 #1 类别。v5-v6 已清理 41 个验证可批量低风险修复。架构手术完成后 MEDIUM 清理窗口打开，目标一轮清理到 <20 个，直接推动 MEDIUM 总量从 97→<60。[来源：审查驱动]"
+      "reason": "AUTO_REVIEW_LOG.md Cycle-1513 §2.1：unused_import 58 个，占全部 MEDIUM 问题（97）的 60%，是当前 MEDIUM 级 #1 类别。v5-v6 已清理 41 个验证可批量低风险修复。架构手术完成后 MEDIUM 清理窗口打开，目标一轮清理到 <20 个，直接推动 MEDIUM 总量从 97→<60。[来源：审查驱动]",
+      "completed_cycle": 82,
+      "completed_at": "2026-07-30 12:26:02"
     },
     {
       "id": "syntax_freeze_declaration",
@@ -1914,5 +2009,6 @@
     }
   ],
   "current_subtests": 31,
-  "last_review_high_gate_violations": 0
+  "last_review_high_gate_violations": 0,
+  "last_updated": "2026-07-30 12:26:02"
 }

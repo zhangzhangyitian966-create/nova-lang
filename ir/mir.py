@@ -18,10 +18,8 @@ from typing import Any, Dict, List, Optional, Tuple
 
 # 共享类型系统
 from .ir_types import (
-    INT_TYPE,
     IRType,
     NovaType,
-    UNIT_TYPE,
 )
 
 # MIRModule.type_defs 引用了 HIRTypeDef（跨层依赖）

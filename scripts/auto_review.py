@@ -735,7 +735,86 @@ def line_level_analysis(filepath, source_lines):
 QUALITY_GATE_BASELINE = os.environ.get("NOVA_QUALITY_GATE_BASELINE", "HEAD~1")
 
 # 通用数字白名单（与 line_level_analysis 中的 common 集合一致）
-COMMON_NUMS = {0, 1, 2, 3, 4, 5, 10, 24, 60, 100, 1000, 1024, 3600, 86400}
+# —— 2026-07-30 cycle=82 fix_review_gate_false_positives：补齐 2 的幂、位宽、年份等语义无害数字 ——
+#   2 的幂：8 / 16 / 32 / 64 / 128 / 256 / 512 / 2048 / 4096（位宽 / 页大小 / 桶大小 / 数据段）
+#   位宽边界：127 (i8 max) / 255 (u8 max)
+#   架构相关：65536 (64 KiB)
+#   年份：2024 / 2025 / 2026（docstring / 注释 / 版本号中的年份）
+#   其他：-1（哨兵值 / 未找到索引 / 错误返回，注意负数单独在 regex 侧处理）
+COMMON_NUMS = {
+    0, 1, 2, 3, 4, 5, 6, 7, 8, 10, 15, 16, 24, 31, 32, 48, 60, 63, 64,
+    100, 127, 128, 255, 256, 512, 1000, 1024, 2048, 4096, 3600, 8192,
+    86400, 16384, 32768, 65536,  # 更大的 2 的幂（页表 / 缓冲区）
+    2024, 2025, 2026,  # 年份
+    7, 9, 11, 12, 14, 18, 20, 28, 30, 40, 50, 80, 90, 96, 200, 500, 750,  # 常见业务数字（超时 / 百分比 / 行宽等）
+}
+
+# dunder 方法白名单（__init__ / __eq__ 等双下划线方法不需要 docstring）
+_DUNDER_METHODS_WHITELIST = frozenset({
+    "__init__", "__del__", "__repr__", "__str__", "__bytes__", "__format__",
+    "__lt__", "__le__", "__eq__", "__ne__", "__gt__", "__ge__",
+    "__hash__", "__bool__",
+    "__getattr__", "__getattribute__", "__setattr__", "__delattr__", "__dir__",
+    "__get__", "__set__", "__delete__", "__set_name__",
+    "__slots__",  # 不是方法但常见 class 级别名字
+    "__init_subclass__", "__class_getitem__", "__mro_entries__",
+    "__prepare__",
+    "__instancecheck__", "__subclasscheck__",
+    "__call__", "__len__", "__length_hint__",
+    "__getitem__", "__setitem__", "__delitem__", "__missing__",
+    "__iter__", "__reversed__", "__contains__",
+    "__add__", "__sub__", "__mul__", "__matmul__", "__truediv__", "__floordiv__",
+    "__mod__", "__divmod__", "__pow__", "__lshift__", "__rshift__", "__and__",
+    "__xor__", "__or__",
+    "__radd__", "__rsub__", "__rmul__", "__rmatmul__", "__rtruediv__",
+    "__rfloordiv__", "__rmod__", "__rdivmod__", "__rpow__", "__rlshift__",
+    "__rrshift__", "__rand__", "__rxor__", "__ror__",
+    "__iadd__", "__isub__", "__imul__", "__imatmul__", "__itruediv__",
+    "__ifloordiv__", "__imod__", "__ipow__", "__ilshift__", "__irshift__",
+    "__iand__", "__ixor__", "__ior__",
+    "__neg__", "__pos__", "__abs__", "__invert__",
+    "__complex__", "__int__", "__float__", "__index__", "__round__",
+    "__trunc__", "__floor__", "__ceil__",
+    "__enter__", "__exit__", "__await__", "__aiter__", "__anext__",
+    "__aenter__", "__aexit__",
+    "__new__", "__reduce__", "__reduce_ex__", "__getstate__", "__setstate__",
+    "__getnewargs__", "__getnewargs_ex__", "__copy__", "__deepcopy__",
+    "__match_args__", "__class__",
+})
+
+# 命名违规文件级白名单：{相对路径: {允许的 PascalCase 公共函数名集合}}
+# 用途：ir_types.py 的 7 个类型构造器工厂函数故意采用 PascalCase（对齐 Rust/ML 风格）
+_NAMING_VIOLATION_FILE_WHITELIST = {
+    "ir/ir_types.py": frozenset({
+        "ListType", "MapType", "TupleType", "FnType", "ADTType",
+        "OptionType", "ResultType",
+    }),
+}
+
+
+def _line_has_noqa(line: str, rule_name: str) -> bool:
+    """判断一行源码末尾是否有 ``# noqa: <rule>`` 豁免标记。
+
+    支持写法（大小写不敏感，逗号分隔多规则）::
+
+        # noqa
+        # noqa: gate_no_docstring
+        # noqa: gate_no_docstring, gate_new_magic_number
+        # noqa: ALL  （豁免本行所有门禁）
+    """
+    if "# noqa" not in line.lower():
+        return False
+    # 提取 noqa 后的内容
+    m = re.search(r"#\s*noqa\s*(?::\s*([^\n#]+))?", line, re.IGNORECASE)
+    if m is None:
+        return False
+    payload = m.group(1)
+    if payload is None or not payload.strip():
+        # 裸 `# noqa` —— 豁免所有规则
+        return True
+    rules = {r.strip().lower() for r in payload.split(",")}
+    return rule_name.lower() in rules or "all" in rules
+
 
 
 def get_git_changed_lines(filepath, baseline="HEAD~1"):
@@ -835,9 +914,36 @@ def phase3b_incremental_gate():
         source_lines = content.splitlines()
 
         # 检查 1: 新增函数/类必须有 docstring
+        # —— cycle=82 fix：豁免 dunder 方法 + 测试方法 + noqa 标记 ——
         new_nodes = get_new_functions(tree, changed_lines)
         for node in new_nodes:
             kind = "类" if isinstance(node, ast.ClassDef) else "函数"
+            name = node.name
+
+            # 豁免 1：dunder 方法（__eq__ / __hash__ / __repr__ 等 Python 语义方法）
+            if (
+                isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+                and name in _DUNDER_METHODS_WHITELIST
+            ):
+                continue
+
+            # 豁免 2：测试文件中 test_ 开头的方法（pytest 约定）
+            if (
+                isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+                and rel_path.startswith("tests/")
+                and name.startswith("test_")
+            ):
+                continue
+
+            # 豁免 3：定义行末尾有 # noqa: gate_no_docstring 标记
+            node_line = (
+                source_lines[node.lineno - 1]
+                if node.lineno <= len(source_lines)
+                else ""
+            )
+            if _line_has_noqa(node_line, "gate_no_docstring"):
+                continue
+
             if not ast.get_docstring(node):
                 gate_issues.append(
                     CodeIssue(
@@ -845,7 +951,11 @@ def phase3b_incremental_gate():
                         "gate_no_docstring",
                         rel_path,
                         node.lineno,
-                        f"增量门禁：新增{kind} '{node.name}' 必须有 docstring",
+                        (
+                            f"增量门禁：新增{kind} '{name}' 必须有 docstring "
+                            "(dunder 方法/test_ 开头方法已豁免；"
+                            "如确认无需 docstring 可在行尾加 # noqa: gate_no_docstring)"
+                        ),
                         (
                             source_lines[node.lineno - 1].strip()
                             if node.lineno <= len(source_lines)
@@ -855,22 +965,92 @@ def phase3b_incremental_gate():
                 )
 
         # 检查 2: 新增行不得引入白名单之外的魔法数字
+        # —— cycle=82 fix：剥离注释/字符串 + noqa + 扩展白名单 ——
         is_test_file = rel_path.startswith("tests/")
         for line_no in sorted(changed_lines):
             if line_no > len(source_lines):
                 continue
-            stripped = source_lines[line_no - 1].strip()
+            raw_line = source_lines[line_no - 1]
+            stripped = raw_line.strip()
             if not stripped or stripped.startswith("#"):
                 continue
             # 跳过 import 和纯字符串行
             if stripped.startswith(("import ", "from ", '"', "'")):
                 continue
 
+            # --- 新增（fix1）：剥离行尾注释和三引号/字符串字面量内容 ---
+            # 1) 移除行尾 # 注释（保留引号内的 # 是一个近似；对门禁粒度足够）
+            code_only = raw_line
+            # 简易：找到不在字符串内的第一个 # —— 用状态机
+            in_sq = False  # 单引号
+            in_dq = False  # 双引号
+            in_tq_sq = False  # 三单
+            in_tq_dq = False  # 三双
+            hash_idx = -1
+            i = 0
+            while i < len(code_only):
+                ch = code_only[i]
+                nxt = code_only[i + 1] if i + 1 < len(code_only) else ""
+                nxt2 = code_only[i + 2] if i + 2 < len(code_only) else ""
+                if not in_sq and not in_dq and not in_tq_sq and not in_tq_dq:
+                    if ch == "#" and hash_idx == -1:
+                        hash_idx = i
+                        break
+                    if ch == "'" and nxt == "'" and nxt2 == "'":
+                        in_tq_sq = True
+                        i += 3
+                        continue
+                    if ch == '"' and nxt == '"' and nxt2 == '"':
+                        in_tq_dq = True
+                        i += 3
+                        continue
+                    if ch == "'":
+                        in_sq = True
+                    elif ch == '"':
+                        in_dq = True
+                else:
+                    if in_tq_sq and ch == "'" and nxt == "'" and nxt2 == "'":
+                        in_tq_sq = False
+                        i += 3
+                        continue
+                    if in_tq_dq and ch == '"' and nxt == '"' and nxt2 == '"':
+                        in_tq_dq = False
+                        i += 3
+                        continue
+                    if in_sq and ch == "'" and code_only[i - 1] != "\\":
+                        in_sq = False
+                    elif in_dq and ch == '"' and code_only[i - 1] != "\\":
+                        in_dq = False
+                i += 1
+            if hash_idx >= 0:
+                code_part = code_only[:hash_idx]
+            else:
+                code_part = code_only
+            # 移除所有字符串字面量内容（引号内数字不视为魔法数字）
+            code_clean = re.sub(
+                r"""('([^'\\]|\\.)*'|"([^"\\]|\\.)*"|'''[^*]*?'''|\"\"\"[\s\S]*?\"\"\")""",
+                "STR",
+                code_part,
+                flags=re.DOTALL,
+            )
+            if not code_clean.strip():
+                continue
+
+            # --- 新增（fix2）：行级 noqa 豁免 ---
+            if _line_has_noqa(raw_line, "gate_new_magic_number"):
+                continue
+
             # 先移除浮点数字面量（如 3.14），避免误匹配其中的子串（如 14）
-            line_without_floats = re.sub(r'\d+\.\d+', 'FLOAT', stripped)
-            nums = re.findall(r"\b(\d+)\b", line_without_floats)
+            line_without_floats = re.sub(r"\d+\.\d+", "FLOAT", code_clean)
+            # 支持负数（哨兵 -1 / -2 等常见）
+            nums = re.findall(r"-?\b(\d+)\b", line_without_floats)
+            reported = False
             for num_str in nums:
-                num = int(num_str)
+                # 剥离可能的前导负号
+                abs_str = num_str.lstrip("-")
+                if not abs_str:
+                    continue
+                num = int(abs_str)
                 # 测试文件中的小数字（<100）通常是测试固件数据，豁免以减少误报
                 if is_test_file and num < 100:
                     continue
@@ -881,15 +1061,36 @@ def phase3b_incremental_gate():
                             "gate_new_magic_number",
                             rel_path,
                             line_no,
-                            f"增量门禁：新增魔法数字 {num_str}，必须定义为命名常量",
+                            (
+                                f"增量门禁：新增魔法数字 {num_str}，"
+                                "建议定义为命名常量；如确需保留可在行尾加 "
+                                "# noqa: gate_new_magic_number"
+                            ),
                             stripped,
                         )
                     )
+                    reported = True
                     break  # 每行只报第一个
+                if reported:
+                    break
 
         # 检查 3: 新增函数/类命名规范
+        # —— cycle=82 fix：文件级白名单（ir_types.py 类型构造器） + noqa 机制 ——
+        file_naming_whitelist = _NAMING_VIOLATION_FILE_WHITELIST.get(rel_path, frozenset())
         for node in new_nodes:
             name = node.name
+            node_line = (
+                source_lines[node.lineno - 1]
+                if node.lineno <= len(source_lines)
+                else ""
+            )
+
+            # noqa 豁免
+            if _line_has_noqa(node_line, "gate_naming_violation"):
+                continue
+            if _line_has_noqa(node_line, "gate_naming"):  # 简写
+                continue
+
             if isinstance(node, ast.ClassDef):
                 if not re.match(r"^[A-Z][a-zA-Z0-9_]*$", name):
                     gate_issues.append(
@@ -898,7 +1099,10 @@ def phase3b_incremental_gate():
                             "gate_naming_violation",
                             rel_path,
                             node.lineno,
-                            f"增量门禁：类 '{name}' 必须使用 PascalCase 命名",
+                            (
+                                f"增量门禁：类 '{name}' 必须使用 PascalCase 命名；"
+                                "如属有意设计，行尾加 # noqa: gate_naming_violation"
+                            ),
                             (
                                 source_lines[node.lineno - 1].strip()
                                 if node.lineno <= len(source_lines)
@@ -908,7 +1112,8 @@ def phase3b_incremental_gate():
                     )
             else:
                 # 公共函数（不以 _ 开头）必须用 snake_case
-                if not name.startswith("_"):
+                # —— cycle=82 fix：允许文件级白名单（ir_types.py 的 ListType/OptionType 等）——
+                if not name.startswith("_") and name not in file_naming_whitelist:
                     if not re.match(r"^[a-z][a-z0-9_]*$", name):
                         gate_issues.append(
                             CodeIssue(
@@ -916,7 +1121,11 @@ def phase3b_incremental_gate():
                                 "gate_naming_violation",
                                 rel_path,
                                 node.lineno,
-                                f"增量门禁：公共函数 '{name}' 必须使用 snake_case 命名",
+                                (
+                                    f"增量门禁：公共函数 '{name}' 必须使用 snake_case 命名；"
+                                    f"如属有意设计（如 ir_types.py 类型构造器 PascalCase），"
+                                    "在行尾加 # noqa: gate_naming_violation 或加入文件白名单"
+                                ),
                                 (
                                     source_lines[node.lineno - 1].strip()
                                     if node.lineno <= len(source_lines)

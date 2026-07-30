@@ -19,7 +19,6 @@ from typing import Any, Dict, List, Optional, Tuple
 
 # 共享类型系统
 from .ir_types import (
-    IRType,
     NovaType,
 )
 

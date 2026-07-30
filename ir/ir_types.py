@@ -21,7 +21,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum, auto
-from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
+from typing import TYPE_CHECKING, List, Tuple
 
 if TYPE_CHECKING:
     # 防止循环导入 — 类型表示不直接依赖节点定义
