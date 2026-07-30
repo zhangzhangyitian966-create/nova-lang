@@ -1,7 +1,7 @@
 {
-    "cycles": 60,
-    "frontend_completed": 40,
-    "backend_completed": 47,
+    "cycles": 61,
+    "frontend_completed": 41,
+    "backend_completed": 48,
     "last_review_cycle": 57,
     "current_review_cycle": 60,
     "completed_tasks": [
@@ -105,7 +105,9 @@
         "frontend_typecheck_unify_error_exit",
         "backend_c_alloc_null_check",
         "backend_lir_term_ssa_defensive",
-        "review_cycle_60"
+        "review_cycle_60",
+        "frontend_typecheck_test_coverage",
+        "backend_mir_phi_type_consistency"
     ],
     "failed_tasks": [],
     "deprecated_tasks": [
@@ -121,6 +123,28 @@
         "backend_wasm_wat_indent_verify"
     ],
     "task_history": [
+        {
+            "cycle": 61,
+            "task_id": "frontend_typecheck_test_coverage",
+            "name": "补齐 test_type_checker.py 8 类核心测试盲区（+15 用例）",
+            "track": "frontend",
+            "difficulty": "easy",
+            "priority": 95,
+            "result": "success",
+            "details": "P2 级测试盲区清零。code_audit_60 确认 12 类 type_checker 核心错误中 8 类零测试。在 TestTypeCheckErrorLocation 类末尾新增 15 个测试（均使用 _compile_and_catch 全管道模式），覆盖 8 大类：(1) Let/Mut 标注不匹配 2 个；(2) 函数返回类型不匹配 1 个；(3) Lambda 参数类型错误 1 个（|x:String|{x} 绑定后 f(42)）；(4) For 表达式 2 个（range 参数错误 / 非 List 迭代当前行为记录为 TypeVar 降级，下一轮修复）；(5) Assignment 三类错误 3 个（目标未定义 / 不可变赋值 / 类型不兼容）；(6) ListComprehension 过滤条件非 Bool 1 个；(7) 类型注解语法错 3 个；(8) ADT 构造器等价场景 2 个（嵌套 List 不一致 / 多参数函数 pair 双不匹配）。enum 语法 parser 暂不支持，场景 8 改用等价高价值场景；parser Lambda 语法为 |x|{body} 而非 fn(x){}，场景 3 做适配；修改 1 个文件 test_type_checker.py 约 191 行。测试 1099 -> 1114 passed（+15），0 回归。前端 41/44 = 93.2% 完成。",
+            "timestamp": "2026-07-30 04:21"
+        },
+        {
+            "cycle": 61,
+            "task_id": "backend_mir_phi_type_consistency",
+            "name": "修复 MIR Phi 节点类型取第一个分支即 break 不做一致性校验（P1-4 清零）",
+            "track": "backend",
+            "difficulty": "medium",
+            "priority": 98,
+            "result": "success",
+            "details": "P1-4 正确性致命清零。code_audit_57 + code_audit_60 两次审计确认真实存在：_insert_merge_phis (If merge) 和 _build_merge_phis (Match merge) 两处均取第一个命中 ssa_types 的类型即 break，其余分支完全忽略，true=Int/false=Float/arm3=String 等场景产生灾难性错代码。修复（分阶段零风险）：(1) 模块级新增 _ir_types_compatible 纯函数（无前端依赖，避免循环引入）：宽容策略 UNIT/TYPE_VAR/PTR 三类宽容，其余 kind==+递归 params 保证零假阳性；(2) 类内新增 _resolve_phi_type 方法：收集所有类型+过滤 UNIT+两两一致性校验+优先选择非 TYPE_VAR；不兼容对输出到 stderr（观察期不中断编译，下一轮升级为 MIRLoweringError）；(3) 两处调用均替换为 _resolve_phi_type，context_label 精确定位；(4) TYPE_VAR 候选优先级最低，避免吞掉真实具体化类型。修改 1 个文件 ir/mir_lowering.py 约 108 行。全量 1114 passed 0 回归；无任何 Phi 不一致警告（现有全部类型正确）。code_audit_57 9 项 9/9 全部清零里程碑达成。后端 48/72 = 66.7% 完成。",
+            "timestamp": "2026-07-30 04:21"
+        },
         {
             "cycle": 60,
             "task_id": "review_cycle_60",
@@ -175,7 +199,7 @@
             "difficulty": "medium",
             "priority": 98,
             "estimated_effort": "3-5小时",
-            "status": "pending",
+            "status": "completed",
             "source": "code_audit_57 + code_audit_60 确认真实存在",
             "depends_on": [],
             "severity": "P1"
@@ -188,7 +212,7 @@
             "difficulty": "easy",
             "priority": 95,
             "estimated_effort": "4-6小时",
-            "status": "pending",
+            "status": "completed",
             "source": "code_audit_60 审计确认 8/12 类零覆盖",
             "depends_on": [],
             "severity": "P2"

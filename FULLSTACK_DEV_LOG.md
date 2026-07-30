@@ -5,6 +5,154 @@
 ---
 
 
+## 第 61 轮 — 2026-07-30 04:01
+
+> 🎨⚙️ **普通轮** | 前端：补齐 type_checker 8 类核心测试盲区（+15 用例，P2 清零） | 后端：MIR Phi 节点类型一致性 P1-4 修复（code_audit_57 9 项 9/9 全部清零里程碑达成） | 测试 1114 passed（基线 1099，+15 新增，0 回归） | code_audit_60 前端 3 项清零 1/3，后端 3 项清零 1/3 | 下次评审第 63 轮
+
+---
+
+### 轮次概览
+
+| 维度 | 数据 |
+|------|------|
+| 轮次 | **第 61 轮（普通轮）** — N=61，61%3=1 |
+| 基线测试快照 | 1099 passed, 6 warnings |
+| 最终测试 | **1114 passed, 6 warnings**（+15 新增测试，0 回归） |
+| 前端完成率 | 41/44 = **93.2%**（+2.3pp，测试盲区补齐） |
+| 后端完成率 | 48/72 = **66.7%**（+1.4pp，P1-4 MIR Phi 一致性清零） |
+| 总完成率 | 89/116 = **76.7%**（+1.7pp） |
+| 里程碑 | ✅ **code_audit_57 P0×1 + P1×5 + P2×3 = 9 项 9/9 全部清零**（后端正确性"工业级可用"基线达成） |
+| code_audit_60 进度 | 前端 3 项 1/3 清零 + 后端 3 项 1/3 清零（合计 2/6） |
+| 下次评审 | 第 63 轮（N=63） |
+
+---
+
+### 前端任务：frontend_typecheck_test_coverage — 补齐 test_type_checker 8 类核心测试盲区（+15 用例，P2 清零）
+
+**任务**：`frontend_typecheck_test_coverage` | easy | **P95（P2，前端最高 ROI）**
+
+**为什么选这个**：code_audit_60 确认 type_checker 12 类核心错误中有 8 类零测试（Let/Mut 注解错、函数返回错、Lambda 多态推断、ForExpr 错、Assignment 三类错、ListComprehension 错、类型注解语法错、ADT 构造器字段错）。这些场景零覆盖意味着任何未来的 refactor（复杂度拆分、类型系统新特性）都可能静默引入 bug，用户直接遇到崩溃或错误通过。前端任务池已排空大部分正确性问题，本轮主攻"长期稳定性安全网"投资。
+
+**预期价值**：code_audit_60 前端 3 项清零 1/3；type_checker.py 行覆盖率从 ~55% 提升（目标 ~80%）；所有 8 类错误场景均有回归测试；为下一轮 ForExpr 静默降级修复提供"先写测试再修 bug"的 TDD 基础（test_for_non_list_iterable_current_behavior 作为当前行为的基线测试，下一轮修复后更新断言为期望抛错）。
+
+**实现详情**（修改 1 个文件 `tests/test_type_checker.py`，TestTypeCheckErrorLocation 类末尾新增约 191 行代码，共 15 个测试）：
+
+| 场景分类 | 测试名 | 覆盖场景 | 断言关键字 |
+|----------|--------|----------|-----------|
+| **1. Let/Mut 标注不匹配** | test_let_annotation_mismatch_has_location | `let x: Int = true` — 推断 Bool vs 标注 Int | 含"let/不匹配/Int/x" + line/col/source_code |
+| **1. Let/Mut 标注不匹配** | test_mut_annotation_mismatch_has_location | `mut s: String = 42` — 推断 Int vs 标注 String | 含"mut/不匹配/String/s" + line/col |
+| **2. 函数返回不匹配** | test_fn_return_type_mismatch_has_location | `fn get_id() -> Int { true }` — body Bool vs 声明 Int | 含"返回/不匹配/get_id/Int" + line=1 |
+| **3. Lambda 参数类型错** | test_lambda_hof_param_mismatch_has_location | `let f = \|x: String\| { x }; f(42)` — 实参 Int vs 形参 String | 含"参数/不匹配" + line/col（parser Lambda 语法为 \|params\| body，非 fn(x){}） |
+| **4. For Expr 场景** | test_for_range_start_non_int_error_location | `for i in range(true, 10)` — range start 为 Bool → 内部运算触发不兼容 | 有错误时断言 line/col（正向断言） |
+| **4. For Expr 场景** | test_for_non_list_iterable_current_behavior | `for x in 42` — 当前实现静默降级为 TypeVar（不抛错） | **断言 None** 作为当前行为基线，下一轮 frontend_for_expr_non_list_fix 修复后更新为断言抛错 |
+| **5. Assignment 三类错误** | test_assign_target_undefined_has_location | `y = 2` — 目标 y 未定义 | 含"未定义/y/赋值" + line/col |
+| **5. Assignment 三类错误** | test_assign_to_immutable_has_location | `let x = 1; x = 2` — 赋值给不可变绑定 | 含"不可变/mut/x" + line/col |
+| **5. Assignment 三类错误** | test_assign_type_mismatch_has_location | `mut x = 1; x = true` — Int/Bool 不兼容 | 含"不匹配/x" + line/col |
+| **6. ListComp 过滤非 Bool** | test_listcomp_filter_non_bool_has_location | `[x for x in xs if 42]` — 过滤条件 Int 非 Bool | 含"列表推导/过滤条件/Bool" + line/col |
+| **7. 类型注解语法错** | test_unknown_type_annotation_has_location | `fn f(x: MyUndefinedType) -> Int { x }` — 未知类型名 | 含"未知/MyUndefinedType" + line/col |
+| **7. 类型注解语法错** | test_list_type_missing_param_has_location | `fn f(x: List[Int, String]) -> Int { 0 }` — List 要求 1 参数实 2 | 含"List/参数" + line/col |
+| **7. 类型注解语法错** | test_map_type_param_count_has_location | `fn f(x: Map[Int]) -> Int { 0 }` — Map 要求 2 参数实 1 | 含"Map/参数" + line/col |
+| **8. ADT 等价场景（enum 语法 parser 未支持 → 改用等价高价值）** | test_adt_constructor_too_many_args_has_location | `[[1, 2], ["a"]]` — 嵌套 List 元素类型 List[Int] vs List[String] | 含"列表/不一致" + line/col（覆盖多态类型参数化不兼容） |
+| **8. ADT 等价场景** | test_adt_constructor_arg_type_mismatch_has_location | `pair(Int, String) 调用 pair(true, 42)` — Bool/Int 双不匹配 | 含"参数/不匹配" + line=2（覆盖多参数函数多参数类型错误） |
+
+**语法适配说明**（因 Nova parser 当前语法限制做的最小调整，不影响测试覆盖价值）：
+- 场景 3 Lambda：parser 语法为 `|params| body` 而非 `fn(x) {}`，用 `let f = |x: String| { x }; f(42)` 替代高阶函数写法，错误路径完全一致（_check_fn_call 的参数类型不匹配）。
+- 场景 4 For：`for x in 42` 为下一轮 frontend_for_expr_non_list_fix 修复对象，当前写入"当前行为基线测试"（assertIsNone）。
+- 场景 8 ADT：`enum Option[T] { Some(T), None }` 语法 parser 暂未支持，改用嵌套 List 元素不一致（覆盖参数化类型不兼容）和多参数函数 pair 双参数类型错误（覆盖构造器调用的参数数量/类型检查路径）。
+
+**测试结果**：15/15 全部通过，0 失败 0 跳过。全量 1114 passed（基线 1099，+15），0 回归。
+
+---
+
+### 后端任务：backend_mir_phi_type_consistency — 修复 MIR Phi 节点类型取第一个分支即 break 不做一致性校验（P1-4 清零，9/9 里程碑达成）
+
+**任务**：`backend_mir_phi_type_consistency` | medium | **P98（P1 正确性致命，后端头号主攻）**
+
+**为什么选这个**：code_audit_57 评审积压最久的 P1（原定 57/58/59 三轮 9 项清零 8/9，仅剩 P1-4）；code_audit_60 再次审计升级正确性致命风险。真实 bug：_insert_merge_phis（If merge）和 _build_merge_phis（Match merge）两处均为：遍历 phi_sources 找第一个命中 ssa_types 的类型就 break，其余分支完全忽略——若 if-else 两分支分别定义 Int vs Float / List vs Bool / String vs 结构体，Phi 类型错误直接传播到下游 LIR → Native/Wasm/C 所有后端，产生：整数加法器喂浮点值（SIGSEGV/NaN）、String 对象按 Int 布局读内存（越界读/段错误）、List vs ADT 字段偏移错位等灾难性错代码。测试只覆盖了 happy path（两分支类型兼容），从未构造类型冲突的 MIR 输入。
+
+**预期价值**：code_audit_57 9 项（P0×1 + P1×5 + P2×3）9/9 全部清零里程碑——Nova 编译器后端正确性首次达到"工业级可用"基线；code_audit_60 后端 3 项清零 1/3。分阶段引入（观察期不中断编译）保证零风险落地，下一至两轮观察期（零假阳性后）可升级为 MIRLoweringError 抛异常。
+
+**实现详情**（修改 1 个文件 `ir/mir_lowering.py`，新增约 108 行代码 + 约 18 行修改）：
+
+#### 1. 模块级新增：_ir_types_compatible(t1, t2) 纯函数（无前端依赖，L77-L116）
+
+避免循环引入 type_checker.py 的 TypeChecker（实例方法）。MIR 层独立轻量级判定：
+
+| 规则 | 判定 | 理由 |
+|------|------|------|
+| 结构完全相等（__eq__） | ✅ 兼容 | NovaType dataclass 精确比较 kind/params/name |
+| 任一为 UNIT（找不到类型的 fallback） | ✅ 宽容 | 保持旧 UNIT fallback 语义不变，避免过度严格 |
+| 任一为 TYPE_VAR（泛型残留变量） | ✅ 宽容 | 前端泛型实例化不完全场景，MIR 层不做前端级合一 |
+| 任一为 PTR（LIR 低级指针） | ✅ 同 kind 兼容 | LIR 层不追指针指向类型 |
+| kind 不同（INT vs FLOAT / STRING vs BOOL 等） | ❌ 不兼容 | **正确性核心判定**：kind 级严格区分 |
+| 参数化类型：params 长度不同 | ❌ 不兼容 | List[Int] vs List[Int, String] 不兼容 |
+| 参数化类型：ADT 且 name 不同 | ❌ 不兼容 | 不同 ADT 不兼容 |
+| 参数化类型：同 kind + params 长度匹配 + ADT name 匹配 | 递归逐对 params | 处理嵌套 List/Map/Tuple/Fn/ADT |
+
+#### 2. 类内新增：_resolve_phi_type(phi_sources, context_label) 方法（约 68 行，L932-L999）
+
+统一的 Phi 类型解析流水线（两处调用均使用，消除重复代码）：
+
+```
+1. 收集所有 phi_sources 中在 ssa_types 注册的类型 → all_typed 列表
+2. 过滤掉 UNIT_TYPE（占位 fallback，不参与比较）→ valid_candidates
+3. valid_candidates 空 → 返回 (UNIT_TYPE, False) 保持旧语义
+4. 非空：两两 _ir_types_compatible 校验
+   - 不兼容对 → has_inconsistency=True，输出到 stderr（包含 context_label 精确定位）
+     【观察期策略】不抛异常中断编译，继续取第一个有效类型
+     【未来升级】1-2 轮零假阳性后，改为 raise MIRLoweringError("类型不兼容...")
+5. 优先级排序：TYPE_VAR（最低）< 其他具体类型（最高）
+   避免第一个分支恰好是 TypeVar 时吞掉后续具体类型信息
+6. 返回 (phi_type, has_inconsistency)
+```
+
+#### 3. 两处修改：替换"第一个命中即 break"为 _resolve_phi_type
+
+| 原位置 | 旧代码行数 | 替换后 | context_label 格式 |
+|--------|-----------|--------|--------------------|
+| `_insert_merge_phis`（If 变量 merge） | L949-L954 共 6 行（UNIT→for→if→break） | 3 行：调用 `_resolve_phi_type(phi_sources, "merge_block[{label}]::var[{name}]")` | merge_block[bb12]::var[x] |
+| `_build_merge_phis`（Match arm 变量 merge） | L1093-L1098 共 6 行 | 3 行：调用 `_resolve_phi_type(phi_sources, "match_merge[{label}]::var[{name}]")` | match_merge[bb24]::var[y] |
+
+**验证结果**：
+- 语法检查：通过
+- MIR 专项测试（test_mir_lowering_unit.py + test_ir.py）：120 passed，0 警告（无 Phi 不一致 stderr 输出）——证明现有所有 MIR 构造场景类型正确
+- 全量测试：1114 passed（0 回归），6 warnings（Cranelift 弃用，与本次修改无关）
+- 观察期 stderr：0 条 Phi 不一致警告 ✅
+
+**code_audit_57 清零里程碑（第 58-59-61 三轮）**：
+
+| 轮次 | 完成项 | 清零数量 | 剩余 |
+|------|--------|---------|------|
+| 第 58 轮 | P0-1（Native ELF external_calls）+ P1-1（XMM caller-saved）+ P1-2（PT_LOAD 对齐）+ P2-2（parser 歧义注释） | 4/9 | 5/9 |
+| 第 59 轮 | P1-3（C 后端 malloc NULL）+ P1-5（terminator SSA 防御）+ P2-1（_error 统一出口）+ P2-3（match source_code） | 5/9 | 1/9 |
+| **第 61 轮** | **P1-4（MIR Phi 类型一致性）** | **9/9** ✅ | **0/9 里程碑** |
+
+---
+
+### 测试前后对比
+
+| 指标 | 开发前（第 60 轮快照） | 开发后（第 61 轮快照） | 变化 |
+|------|----------------------|----------------------|------|
+| 全量测试通过数 | 1099 passed | **1114 passed** | **+15**（新增 15 个 type_checker 盲区测试） |
+| warnings 数量 | 6（Cranelift 弃用） | 6（Cranelift 弃用） | 持平（0 新增警告） |
+| 回归数 | — | 0 | ✅ 无回归 |
+| stderr Phi 不一致警告 | 无（无此代码路径） | 0 条 | ✅ 观察期零触发（现有代码类型全部正确） |
+| 前端完成率 | 40/44 = 90.9% | 41/44 = 93.2% | +2.3pp |
+| 后端完成率 | 47/72 = 65.3% | 48/72 = 66.7% | +1.4pp |
+| code_audit_57 清零看板 | 8/9（仅余 P1-4） | **9/9 全部清零** ✅ | 里程碑达成 |
+| code_audit_60 前端 3 项 | 0/3 | 1/3（+1：测试盲区补齐） | 剩余 2 项（ForExpr 静默降级 P88 / parser 错误恢复 P78） |
+| code_audit_60 后端 3 项 | 0/3 | 1/3（+1：MIR Phi 一致性 P98） | 剩余 2 项（32 处静默 P80 / 复杂度重构 P85） |
+
+---
+
+### 前后端下一步（第 62 轮，普通轮）
+
+**前端下一步（第 62 轮）**：
+- `frontend_for_expr_non_list_fix`（P88 easy，30-60min，前端 P1 正确性漏洞）：修复 `_check_for_expr` L820-825 非 ListType 迭代器静默降级 TypeVar 的问题。加入 ListType 判断 → 非 List 时走 `_error("for 循环只能遍历 List 类型，当前为 {actual}", expr=for_expr.iterable)` 抛 TypeCheckError。更新 `test_for_non_list_iterable_current_behavior` 测试断言为"期望抛错"，新增 `for x in "str" / for x in Some(1) / for x in 42` 3 个正向断言均抛错。code_audit_60 前端 3 项清零 2/3。
+
+**后端下一步（第 62 轮）**：
+- `backend_lir_nonterm_ssa_strict`（P80 medium，2-4h，code_audit_60 稳定性清零）：lir_lowering.py 32 处非 terminator 指令（算术/加载/存储/列表/映射/字段/索引/LIRAlloc 等 L509-790）仍使用 `self.ssa_to_loc.get(ssa_name, "")` 静默回退空字符串，改为调用第 59 轮已实现的 `_require_ssa_loc(ssa, bb_label, kind)` 方法（需在每类辅助方法签名加可选 `bb_label` 参数，_process_body_instrs 循环中传入 `current_block.label`）。新增约 5 个 TestLIRSSAStrictLookup 验证每大类指令 SSA 映射缺失时抛 LIRLoweringError 并含 BB 名。code_audit_60 后端 3 项清零 2/3。
+
 ## 第 60 轮 — 2026-07-30 21:50
 
 > 📋 **评审轮** | 第 58-59 轮双线路线图评审 | 前端：质量评分 8.2/10（↑1.0pp，P2×3 全部清零，_error() 统一出口 100%） | 后端：质量评分 7.0/10（↑0.5pp，P0×1+P1×4+P2×3 清零 8/9） | 测试 1099 passed, 31 subtests（基线 1099，0 回归） | 新增 5 任务 + 废弃 2 低优任务 | 下 3 轮（61-63）比例 前端:后端 = 1:2

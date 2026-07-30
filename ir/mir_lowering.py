@@ -72,6 +72,48 @@ from .ir_nodes import (
 from .cfg_utils import replace_instr_operands, replace_terminator_operands
 
 
+# ---------------------------------------------------------------------------
+# Phi 节点类型一致性（code_audit_60 P1-4 修复）
+# ---------------------------------------------------------------------------
+
+def _ir_types_compatible(t1: NovaType, t2: NovaType) -> bool:
+    """MIR 层轻量级类型兼容检查（不依赖前端 TypeChecker，避免循环引入。
+
+    判定规则（宽容策略，保证不出现假阳性）：
+    1. 结构完全相等（NovaType __eq__）→ 兼容
+    2. 任一方为 UNIT（找不到类型的占位）→ 视为兼容（保持原 UNIT fallback 语义）
+    3. 任一方为 TYPE_VAR（泛型实例化残留类型变量）→ 视为兼容（保持宽容性）
+    4. kind 不同（如 INT vs FLOAT / STRING vs BOOL）→ 不兼容（正确性核心判定）
+    5. 参数化类型（LIST / MAP / TUPLE / FUNCTION / ADT）：
+       - params 长度不同 → 不兼容
+       - ADT 要求 name 相同 → 否则不兼容
+       - 递归逐对 params 验证
+    6. PTR（LIR 层低级指针）→ 视为与任意 PTR 兼容（LIR 层不追具体类型）
+
+    返回 True 表示"在 MIR 层可以安全共用同一 Phi 槽位。
+    """
+    if t1 == t2:
+        return True
+    # UNIT 占位宽容：任一为找不到类型时的 fallback
+    if t1.kind == IRType.UNIT or t2.kind == IRType.UNIT:
+        return True
+    # TYPE_VAR 宽容：泛型实例化未完全的类型变量
+    if t1.kind == IRType.TYPE_VAR or t2.kind == IRType.TYPE_VAR:
+        return True
+    # PTR 宽容：LIR 层指针不追具体指向类型
+    if t1.kind == IRType.PTR or t2.kind == IRType.PTR:
+        return t1.kind == t2.kind
+    # kind 严格不同 → 不兼容
+    if t1.kind != t2.kind:
+        return False
+    # 参数化类型递归校验
+    if len(t1.params) != len(t2.params):
+        return False
+    if t1.kind == IRType.ADT and t1.name != t2.name:
+        return False
+    return all(_ir_types_compatible(p1, p2) for p1, p2 in zip(t1.params, t2.params))
+
+
 class MIRLoweringError(Exception):
     """HIR -> MIR 降级过程中的错误"""
     pass
@@ -886,6 +928,74 @@ class MIRLowering:
         self.current_block = old_block
         return result, modified
 
+    # ------------------------------------------------------------------
+    # Phi 节点类型一致性（code_audit_60 P1-4 修复）
+    # ------------------------------------------------------------------
+
+    def _resolve_phi_type(self, phi_sources, context_label=""):
+        """统一的 Phi 节点类型解析与一致性校验（修复 P1-4：第一个命中即 break 的 bug）。
+
+        处理流程：
+        1. 遍历所有 phi_sources，收集在 ssa_types 中注册的类型
+        2. 过滤掉 UNIT_TYPE（占位 fallback），得到"候选有效类型列表"
+        3. 若候选为空 → 返回 UNIT_TYPE（保持与旧行为一致的 fallback）
+        4. 候选非空：两两调用 _ir_types_compatible 做一致性校验
+           - 全部兼容 → 取第一个非 UNIT 非 TYPE_VAR 作为 phi_type（与旧行为最小化差异）
+           - 存在不兼容对 → 第一阶段发出警告但不抛异常，仍取第一个有效类型
+             （待 1-2 轮观察确认零假阳性后再升级为 raise MIRLoweringError）
+
+        Args:
+            phi_sources: [(block_label, ssa_name), ...] 待合并的前驱源列表
+            context_label: 可选的上下文标签（如 merge_block.label），用于错误消息定位
+
+        Returns:
+            (phi_type: NovaType, has_inconsistency: bool)
+            phi_type: 选定的最终 Phi 类型
+            has_inconsistency: 是否检测到类型不一致（未来升级 fatal 时使用）
+        """
+        # 1. 收集所有注册类型
+        all_typed = []
+        for src_block, src_ssa in phi_sources:
+            if src_ssa in self.ssa_types:
+                all_typed.append((src_block, self.ssa_types[src_ssa]))
+
+        # 2. 过滤 UNIT 占位 fallback
+        valid_candidates = [(b, t) for b, t in all_typed if t.kind != IRType.UNIT]
+
+        # 3. 无候选 → 保持 UNIT fallback
+        if not valid_candidates:
+            return UNIT_TYPE, False
+
+        # 4. 两两一致性校验
+        has_inconsistency = False
+        n = len(valid_candidates)
+        for i in range(n):
+            for j in range(i + 1, n):
+                b_i, t_i = valid_candidates[i]
+                b_j, t_j = valid_candidates[j]
+                if not _ir_types_compatible(t_i, t_j):
+                    has_inconsistency = True
+                    # 第一阶段（安全观察期）：仅记录到 stderr，不中断编译
+                    # 未来（零假阳性后）：升级为 raise MIRLoweringError(...)
+                    import sys
+                    print(
+                        f"[MIR Phi 类型不一致{(' @ ' + context_label) if context_label else ''}] "
+                        f"前驱块 {b_i} → 类型 {t_i} 与 前驱块 {b_j} → 类型 {t_j} 不兼容。"
+                        f"当前仍取第一个有效类型继续编译（观察期不中断）。",
+                        file=sys.stderr,
+                    )
+
+        # 5. 选取 phi_type：优先取第一个非 UNIT 非 TYPE_VAR 的候选；若全是 TYPE_VAR → 取第一个
+        def _priority_rank(item):
+            _, t = item
+            if t.kind == IRType.TYPE_VAR:
+                return 2  # 类型变量优先级最低
+            return 0  # 其他类型（INT/FLOAT/LIST/...）优先级最高
+
+        sorted_candidates = sorted(valid_candidates, key=_priority_rank)
+        phi_type = sorted_candidates[0][1]
+        return phi_type, has_inconsistency
+
     def _insert_merge_phis(self, pre_env, true_modified, false_modified,
                            true_block, false_block, merge_block):
         """为被修改的变量在 merge 块插入 Phi 节点。"""
@@ -905,11 +1015,11 @@ class MIRLowering:
                 phi_sources.append((false_block.label, pre_env[name]))
 
             if len(phi_sources) >= 2:
-                phi_type = UNIT_TYPE
-                for _, src_ssa in phi_sources:
-                    if src_ssa in self.ssa_types:
-                        phi_type = self.ssa_types[src_ssa]
-                        break
+                # 修复 P1-4：用统一的 _resolve_phi_type 替代"第一个命中即 break"
+                phi_type, _ = self._resolve_phi_type(
+                    phi_sources,
+                    context_label=f"merge_block[{merge_block.label}]::var[{name}]"
+                )
 
                 instr = MIRPhi(phi_type)
                 instr.sources = phi_sources
@@ -981,11 +1091,11 @@ class MIRLowering:
                     phi_sources.append((arm_block.label, pre_env[name]))
 
             if len(phi_sources) >= 2:
-                phi_type = UNIT_TYPE
-                for _, src_ssa in phi_sources:
-                    if src_ssa in self.ssa_types:
-                        phi_type = self.ssa_types[src_ssa]
-                        break
+                # 修复 P1-4：用统一的 _resolve_phi_type 替代"第一个命中即 break"
+                phi_type, _ = self._resolve_phi_type(
+                    phi_sources,
+                    context_label=f"match_merge[{merge_block.label}]::var[{name}]"
+                )
                 instr = MIRPhi(phi_type)
                 instr.sources = phi_sources
                 instr.result_name = self._new_ssa()
