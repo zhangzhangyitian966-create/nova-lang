@@ -90,6 +90,13 @@ CALLER_GPRS = [RCX, RDX, RSI, RDI, R8, R9, R10, R11]
 CALLER_XMMS = [XMM0, XMM1, XMM2, XMM3, XMM4, XMM5, XMM6, XMM7]
 XMM_SAVE_BYTES = len(CALLER_XMMS) * 8  # = 64
 
+# 寄存器分配器可用物理寄存器池（CC 拆分 Top1：从 _allocate_registers 方法内提升为模块级）
+# GPR: 前 8 个 caller-saved + 后 5 个 callee-saved = 共 13 个通用寄存器
+# XMM: 8 个标量双精度浮点寄存器（movsd 8 字节）
+_ALLOC_GPRS = [RCX, RDX, RSI, RDI, R8, R9, R10, R11,   # caller-saved
+               RBX, R12, R13, R14, R15]                 # callee-saved
+_ALLOC_XMMS = [XMM0, XMM1, XMM2, XMM3, XMM4, XMM5, XMM6, XMM7]
+
 # ============================================================
 # 指令发射上下文（传递寄存器分配结果和汇编状态）
 # ============================================================
@@ -524,22 +531,27 @@ class NativeCodeGen:
         e.add_rsp_imm(temp_size)
 
     # ============================================================
-    # 阶段 A: 线性扫描寄存器分配
+    # 阶段 A: 线性扫描寄存器分配（CC 拆分后：3 子方法 + 1 流水线主方法）
+    #
+    # 原 _allocate_registers CC≈39（134 行 4 子阶段内聚）。
+    # 拆分后：
+    #   (a) _analyze_vreg_liveness   — 纯函数，活跃分析   CC≈6
+    #   (b) _linear_scan_alloc       — 线性扫描+栈分配    CC≈12（保留 3 内部闭包不动）
+    #   (c) _mark_caller_saved_to_preserve — 副作用写指令  CC≈5
+    #   主方法 _allocate_registers   — 4 步流水线         CC≤5
     # ============================================================
 
-    def _allocate_registers(self, func: LIRFunction):
-        """线性扫描寄存器分配，返回 (vreg_alloc, label_offsets, jump_fixups)。
+    def _analyze_vreg_liveness(self, func: LIRFunction) -> Dict:
+        """阶段 A-1：vreg 活跃区间分析（纯函数，无副作用）。
 
-        vreg_alloc: 虚拟寄存器到物理位置的映射
-        label_offsets: 初始化为空 dict（供阶段 B 填充）
-        jump_fixups: 初始化为空 list（供阶段 B 填充）
+        遍历 func.body 全部指令，收集所有虚拟寄存器的首次/末次使用点
+        （first / last）及其是否为浮点类型（is_float）。
+
+        输入：func: LIRFunction（只读 body）
+        输出：Dict[str, dict] — vreg_name → {"is_float": bool, "first": int, "last": int}
+
+        对应原实现 L542-L577（_allocate_registers 步骤 1）。
         """
-        # 可用物理寄存器
-        ALL_GPRS = [RCX, RDX, RSI, RDI, R8, R9, R10, R11,  # caller-saved
-                    RBX, R12, R13, R14, R15]                # callee-saved
-        ALL_XMMS = [XMM0, XMM1, XMM2, XMM3, XMM4, XMM5, XMM6, XMM7]
-
-        # 步骤 1: 收集所有虚拟寄存器及其活跃区间
         vreg_info = {}
 
         def _note_vreg(vreg_name, is_float, instr_idx):
@@ -558,32 +570,54 @@ class NativeCodeGen:
                     info["last"] = instr_idx
 
         for idx, instr in enumerate(func.body):
+            # (1) 源寄存器：src_locs
             for loc_name, loc_type in instr.src_locs:
                 is_float = loc_type.kind == IRType.FLOAT
                 _note_vreg(loc_name, is_float, idx)
-            # LIRCall/LIRCallIndirect 的参数在 arg_locs 中，也需要扫描
+            # (2) LIRCall/LIRCallIndirect 的额外参数在 arg_locs 中
             if hasattr(instr, 'arg_locs'):
                 for loc_name, loc_type in instr.arg_locs:
                     is_float = loc_type.kind == IRType.FLOAT
                     _note_vreg(loc_name, is_float, idx)
+            # (3) 目标寄存器：dst_loc
             if instr.dst_loc:
                 dst_name, dst_type = instr.dst_loc
                 is_float = dst_type.kind == IRType.FLOAT
                 _note_vreg(dst_name, is_float, idx)
+            # (4) LIRLoadConst 无显式 dst_loc，虚拟寄存器名为 const_<value> / fconst_<value>
             elif isinstance(instr, LIRLoadConst):
                 is_float = instr.const_type == "float"
-                vname = f"const_{instr.value}" if not is_float else f"fconst_{instr.value}"
+                vname = (f"fconst_{instr.value}"
+                         if is_float
+                         else f"const_{instr.value}")
                 _note_vreg(vname, is_float, idx)
 
-        # 步骤 2: 线性扫描分配
+        return vreg_info
+
+    def _linear_scan_alloc(self, vreg_info: Dict, func: LIRFunction) -> Dict:
+        """阶段 A-2：线性扫描寄存器分配 + 栈溢出偏移分配（内嵌在同一方法，避免过度拆分）。
+
+        按 first 排序 vregs，维护 active/free 的 GPR/XMM 双池，
+        遍历过期回收 → 尝试分配 → 必要时选择最远活跃区间溢出。
+        栈偏移（stack_offset）在分配时即时计算，不独立拆阶段。
+
+        输入：
+          - vreg_info: _analyze_vreg_liveness() 的输出
+          - func: LIRFunction（仅读/写 stack_size 属性）
+        输出：Dict[str, Tuple] — vreg_name → ("reg", phys_reg) | ("stack", offset)
+
+        副作用：若需要的栈空间 > func.stack_size 则原地更新 func.stack_size。
+
+        对应原实现 L578-L638（步骤 2 + 步骤 c 栈偏移，内部 3 个闭包保留不动避免显式传 7 个共享状态）。
+        """
         vreg_alloc = {}
         stack_offset = 0
         sorted_vregs = sorted(vreg_info.items(), key=lambda x: x[1]["first"])
 
         active_gprs = {}  # phys_reg -> last_use
         active_xmms = {}  # xmm_reg -> last_use
-        free_gprs = list(ALL_GPRS)
-        free_xmms = list(ALL_XMMS)
+        free_gprs = list(_ALLOC_GPRS)
+        free_xmms = list(_ALLOC_XMMS)
 
         def _expire_old_intervals(current_idx, is_float):
             """回收已过期的寄存器（活跃区间结束点 < current_idx）"""
@@ -605,7 +639,8 @@ class NativeCodeGen:
             del active[victim_reg]
             free.insert(0, victim_reg)
             for vname, info in vreg_info.items():
-                if vreg_alloc.get(vname) == ("reg", victim_reg) and info["last"] == victim_last:
+                if (vreg_alloc.get(vname) == ("reg", victim_reg)
+                        and info["last"] == victim_last):
                     return vname
             return None
 
@@ -620,8 +655,9 @@ class NativeCodeGen:
                 active[reg] = last_use
             else:
                 victim = _spill_victim(is_float)
-                if victim is not None and (free_xmms if is_float else free_gprs):
-                    reg = (free_xmms if is_float else free_gprs).pop(0)
+                free_pool = free_xmms if is_float else free_gprs
+                if victim is not None and free_pool:
+                    reg = free_pool.pop(0)
                     vreg_alloc[vname] = ("reg", reg)
                     active[reg] = last_use
                     stack_offset += 8
@@ -634,27 +670,65 @@ class NativeCodeGen:
             _expire_old_intervals(info["first"], info["is_float"])
             _try_allocate(vname, info["is_float"], info["last"])
 
+        # 副作用：更新函数所需最小栈帧大小
         if stack_offset > func.stack_size:
             func.stack_size = stack_offset
 
-        # 步骤 3: 为调用点添加活跃区间切口
-        # 识别所有调用点指令，计算仅需要保存的 caller-saved 寄存器
-        # （替代保守的保存全部 caller-saved）
+        return vreg_alloc
+
+    def _mark_caller_saved_to_preserve(self, func: LIRFunction,
+                                        vreg_alloc: Dict, vreg_info: Dict) -> None:
+        """阶段 A-3：为每个调用点指令计算精确 caller-saved-to-preserve 集合（副作用写指令）。
+
+        遍历所有 LIRCall / LIRCallIndirect，找出：
+          - 分配到 CALLER_GPRS 寄存器（非 XMM——当前阶段 d 只处理 GPR 精确集，
+            XMM 仍由 _emit_call 保守保存全部 8 个）
+          - 在 call 指令之后仍活跃（info["last"] > call_idx）
+          - 且不是 call 本身的 dst 寄存器（call 结果寄存器不需要 call 前保存）
+        的寄存器集合，写入 instr.caller_saved_to_preserve。
+
+        输入：func（读 body）+ vreg_alloc（读分配结果）+ vreg_info（读 last 活跃点）
+        输出：无 — 原地修改 func.body 中 LIRCall/LIRCallIndirect 指令的 caller_saved_to_preserve 字段。
+
+        对应原实现 L640-L656（步骤 3 / 阶段 d）。
+        """
         for idx, instr in enumerate(func.body):
             if isinstance(instr, (LIRCall, LIRCallIndirect)):
                 regs_to_save = set()
-                dst_name = None
-                if instr.dst_loc:
-                    dst_name, _ = instr.dst_loc
+                dst_name = instr.dst_loc[0] if instr.dst_loc else None
                 for vname, info in vreg_info.items():
                     if vname == dst_name:
-                        continue  # call 的结果寄存器不需要在 call 前保存
+                        # call 的结果寄存器不需要在 call 前保存
+                        continue
                     alloc = vreg_alloc.get(vname)
-                    if alloc and alloc[0] == "reg" and alloc[1] in CALLER_GPRS:
-                        if info["last"] > idx:
-                            regs_to_save.add(alloc[1])
+                    if (alloc
+                            and alloc[0] == "reg"
+                            and alloc[1] in CALLER_GPRS
+                            and info["last"] > idx):
+                        regs_to_save.add(alloc[1])
                 instr.caller_saved_to_preserve = sorted(regs_to_save)
 
+    def _allocate_registers(self, func: LIRFunction):
+        """寄存器分配主方法：3 子阶段流水线（CC≤5）。
+
+        原 134 行 / CC≈39 的单体方法拆分为：
+          (a) 活跃分析    → _analyze_vreg_liveness（纯函数）
+          (b) 线性扫描+栈  → _linear_scan_alloc（含 3 个内部闭包）
+          (c) caller-saved → _mark_caller_saved_to_preserve（副作用写指令）
+        主方法仅负责串起 3 步 + 返回供阶段 B 填充的 label_offsets/jump_fixups 占位。
+
+        返回：(vreg_alloc, label_offsets, jump_fixups)
+          - vreg_alloc:     vname → ("reg", phys_reg) | ("stack", offset)
+          - label_offsets:  {} 空 dict（供阶段 B _emit_label 填充）
+          - jump_fixups:    [] 空 list（供阶段 B _emit_jump/_emit_branch 填充）
+        """
+        # (a) 阶段 1：活跃分析
+        vreg_info = self._analyze_vreg_liveness(func)
+        # (b) 阶段 2：线性扫描寄存器 + 栈溢出偏移分配
+        vreg_alloc = self._linear_scan_alloc(vreg_info, func)
+        # (c) 阶段 3：为每个调用点计算精确 caller-saved 集合
+        self._mark_caller_saved_to_preserve(func, vreg_alloc, vreg_info)
+        # 返回寄存器分配结果 + 供阶段 B 填充的占位容器
         return vreg_alloc, {}, []
 
     # ============================================================

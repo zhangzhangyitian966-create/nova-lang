@@ -3,7 +3,7 @@
 **更新时间**: 2026-07-30
 **上次评审**: 第 60 轮
 **当前评审**: 第 63 轮
-**当前轮次**: 第 63 轮
+**当前轮次**: 第 64 轮
 **下次评审**: 第 66 轮
 
 本路线图由前后端专项开发系统维护，专注于前端类型系统和后端代码生成的核心功能开发。
@@ -12,9 +12,9 @@
 
 | 轨道 | 总数 | 已完成 | 待做 | 废弃 | 完成率 |
 |------|------|--------|------|------|--------|
-| 前端 | 47 | 42 | 3 | 4 | **89.4%**（评审轮任务池扩充 3 个新方向，完成率分母更新） |
-| 后端 | 78 | 49 | 7 | 11 | **62.8%**（评审轮任务池扩充 5 个 + 废弃 1 个，完成率分母更新） |
-| **总计** | **125** | **91** | **10** | **15** | **72.8%**（评审轮后重新校准分母） |
+| 前端 | 47 | 43 | 2 | 4 | **91.5%**（第 64 轮 parser 三级错误恢复清零） |
+| 后端 | 78 | 50 | 6 | 11 | **64.1%**（第 64 轮 _allocate_registers CC=39 拆分清零） |
+| **总计** | **125** | **93** | **8** | **15** | **74.4%**（第 64 轮普通开发，2/2 任务全部成功） |
 
 > **评审轮校准说明**：第 63 轮评审新增 5 个高价值任务（前端 3：generalize/TypeVar 守卫/parser 错误恢复；后端 2：regalloc CC 拆分/emit_abi_call 骨架抽离/Phi 升级 raise/WasmGC 指令补齐 = 实际后端新增 4，废弃 backend_lir_phi_lowering_verify），分母从 116 调整为 125。
 
@@ -29,16 +29,16 @@
 | 任务 | 难度 | 优先级 | 严重度 | 状态 | 轮次计划 |
 |------|------|--------|--------|------|----------|
 | **实现 generalize() + 补全 let-polymorphism**（HM 核心能力缺失 Top1，id/const/compose 等多态函数） | hard | **93** | P1 | 待做 | **第 65 轮**（前端主攻，HM 完整性 65%→85%） |
-| **parser 错误恢复计数器扩展**（TOP_LEVEL/STMT_LIST/EXPR 三级 + 顶层熔断） | medium | **85** | P2 | 待做 | **第 64 轮**（前端主攻，code_audit_60 前端 3/3 清零） |
+| **parser 错误恢复计数器扩展**（TOP_LEVEL/STMT_LIST/EXPR 三级 + 顶层熔断） | medium | **85** | P2 | ✅ **已完成（第 64 轮，6/6 专项测试通过，0 回归）** | **第 64 轮 ✅**（前端主攻，code_audit_60 前端 3/3 清零） |
 | **TypeVar 泄漏守卫 + 递归 ADT Occur Check 豁免**（封堵后端未约束 TypeVar + 自定义链表/树 ADT 误杀） | medium | **80** | P2 | 待做 | **第 66 轮**（前端主攻） |
 
-### 第 60 轮评审新增 3 个前端任务进度（2/3 已清零）
+### 第 60 轮评审新增 3 个前端任务进度（3/3 已清零 🎉）
 
 | 任务 | 难度 | 优先级 | 严重度 | 状态 | 轮次计划 |
 |------|------|--------|--------|------|----------|
 | **补齐 type_checker 8 类核心测试盲区**（Let/Mut/函数返回/Lambda/For/赋值/推导式/注解语法 + ADT 构造器，+15 用例） | easy | **95** | P2 | ✅ **已完成（第 61 轮，+15 测试，0 回归）** | 第 61 轮 ✅ |
 | **修复 ForExpr iterable 非 List 静默降级为 TypeVar**（类型系统漏洞，for x in 42/"string"/true 三类场景） | easy | **88** | P1 | ✅ **已完成（第 62 轮，+3 测试净增 2，0 回归）** | 第 62 轮 ✅ |
-| **parser 错误恢复计数器扩展**（BLOCK_MAX_ERRORS → TOP_LEVEL/STMT_LIST/EXPR 三级，6 个单测） | medium | 78→**85**↑ | P2 | 🔴 **待做**（评审轮优先级提升，前端积压最后 1 项 legacy） | **第 64 轮**（前端主攻，与 TOP_LEVEL 版本合并执行） |
+| **parser 错误恢复计数器扩展**（BLOCK_MAX_ERRORS → TOP_LEVEL/STMT_LIST/EXPR 三级，6 个单测） | medium | 78→**85**↑ | P2 | ✅ **已完成（第 64 轮，+6 专项测试 6/6 通过，0 回归）** | **第 64 轮 ✅**（code_audit_60 前端 3 项 3/3 清零里程碑达成） |
 
 ### code_audit_63 深度审计发现（前端 3 项，0/3 已清零）
 
@@ -48,13 +48,13 @@
 | **TypeVar 静默泄漏到后端（空 List/Map、无注解参数、列表推导）** | type_checker.py 多处（L709 空列表/L730 空 Map/L508 无注解参数/L1126 LC 循环变量） | 未约束 TypeVar 被 _unify_and_resolve 保留，后端三后端 fallback 策略不一致（C void*/Native int/Wasm i32），行为不可预测 | **P2 稳定性 + 跨后端一致性** | 🔴 **待修复（第 66 轮，frontend_typevar_leak_guard, P80）** |
 | **递归 ADT 被 Occur Check 误杀** | type_checker.py _occur_check L1909-1931 + _from_ast_type ADT 变体字段 | `type List a = Nil \| Cons a (List a)` 的 Cons 字段 `List a` 与参数 `a` 合一时触发 occur check 返回 False，用户自定义链表/树 ADT 无法编译 | **P2 语言可用性** | 🔴 **待修复（第 66 轮，合并入 frontend_typevar_leak_guard 同一任务）** |
 
-### code_audit_60 遗留（前端 3 项，2/3 已清零）
+### code_audit_60 遗留（前端 3 项，3/3 已清零 🎉）
 
 | 发现 | 位置 | 影响 | 严重度 | 状态 |
 |------|------|------|--------|------|
 | **ForExpr iterable 非 List 静默降级为 TypeVar（不抛类型错）** | type_checker.py L820-825 | `for x in "string"` / `for x in 42` 等语义错误代码类型检查静默通过，后续 x 类型使用全部污染为 TypeVar | **P1 前端正确性** | ✅ **已清零（第 62 轮，三类场景断言抛错，line/col/source_code 位置正确）** |
 | **type_checker 12 类核心错误中 8 类零测试** | test_type_checker.py 全文件 | Let/Mut 注解错、函数返回错、Lambda 多态推断、ForExpr 错、赋值错、ListComprehension 错、类型注解语法错、ADT 构造器字段错——均无回归测试 | P2 测试覆盖 | ✅ **已清零（第 61 轮，+15 用例覆盖 8 大类）** |
-| **parser 错误恢复计数器 BLOCK_MAX_ERRORS 仅覆盖 _parse_block()** | parser.py 多处（L503 定义，仅 L564 使用） | 顶层声明/语句列表/表达式级的连续语法错误无熔断，产生雪崩式 10+ 条错误消息，IDE 体验差 | P2 可维护性 | 🔴 待修复（第 64 轮，frontend_parser_error_recovery_full, P85，合并 code_audit_60 + code_audit_63 双来源） |
+| **parser 错误恢复计数器 BLOCK_MAX_ERRORS 仅覆盖 _parse_block()** | parser.py 多处（L503 定义，仅 L564 使用） | 顶层声明/语句列表/表达式级的连续语法错误无熔断，产生雪崩式 10+ 条错误消息，IDE 体验差 | P2 可维护性 | ✅ **已清零（第 64 轮，TOP_LEVEL=5/EXPR=3/BLOCK=3 三级熔断 +6 专项测试 6/6）** |
 
 ### 核心能力清单（全部已稳定 + HM generalize 待补）
 
@@ -62,15 +62,15 @@
 - 泛型参数数量校验 + 参数化类型实例化
 - 模式匹配完备性检查（ADT / Bool / Tuple / List / 嵌套子模式 / 无限域判定）
 - 冗余分支检测（guard 通配符排除 / NaN 安全 / 字面量集合去重）
-- Parser Panic Mode 错误恢复（声明边界 + 语句边界双同步点，BLOCK_MAX_ERRORS=3 防风暴）
+- Parser Panic Mode 错误恢复（**TOP_LEVEL/STMT_LIST/EXPR/BLOCK 四级熔断** ✅，_TOP_LEVEL_MAX_ERRORS=5/_EXPR_MAX_NESTED_ERRORS=3/_BLOCK_MAX_ERRORS=3）
 - TypeCheckError 统一 _error() 出口（**100% 使用率**，44/44 已迁移，含 span→expr→属性三级回退）
 - Union-Find + 路径压缩 + Occur Check（递归 ADT 豁免待补）
 
 ## 后端开发线
 
-**状态：正确性爬坡 + 技术债堆积交织（质量 7.7/10，↑0.7 vs 第 60 轮）—— 结构性改造前置，正确性收尾并行**
+**状态：结构性改造启动（质量 7.7→7.9/10，↑0.2）—— Native 技术债 Top1 清零，下一步 Top2（_emit_abi_call 骨架）**
 
-### 紧急问题清零看板（P0/P1/P2，code_audit_57 9 项 + code_audit_60 6 项 = 15 项累计，13/15 已清零）
+### 紧急问题清零看板（P0/P1/P2，code_audit_57 9 项 + code_audit_60 6 项 = 15 项累计，14/15 已清零）
 
 #### code_audit_57 9 项里程碑（✅ 9/9 全部清零于第 61 轮达成）
 
@@ -86,29 +86,29 @@
 | P2 | P2-2 | Parser _parse_brace_primary 静默吞错无注释 | frontend_parser_brace_doc | 45 | 第 58 轮 | ✅ **已清零** |
 | P2 | P2-3 | match 错误缺 source_code（无 `-->` 标记） | （合并入 P2-1） | — | 第 59 轮 | ✅ **已清零** |
 
-#### code_audit_60 6 项进度（4/6 已清零，剩余 2 项可维护性债待下 2 轮攻坚）
+#### code_audit_60 6 项进度（5/6 已清零，剩余 1 项待第 65 轮攻坚）
 
 | 严重度 | 编号 | 问题 | 对应任务 | 优先级 | 计划轮次 | 状态 |
 |--------|------|------|----------|--------|----------|------|
 | P1 | P1-4（审计升级） | MIR Phi 类型取第一个分支即 break，其余分支类型完全忽略 | backend_mir_phi_type_consistency | **98**↑ | **第 61 轮** | ✅ **已清零** |
 | P2 | 60-B2 | lir_lowering.py 32 处非 terminator 指令仍 `get(ssa, "")` 静默回退空字符串 | backend_lir_nonterm_ssa_strict | 80 | **第 62 轮** | ✅ **已清零** |
-| P2 | 60-B3 | native_backend.py Top2 复杂度：_emit_runtime_call CC=25、_emit_call CC=21 → 4 条 call 路径需同步修改 | **backend_native_regalloc_cc_split + backend_native_emit_abi_call_refactor**（评审轮拆分为两阶段） | 85→**92/90**↑ | **第 64/65 轮**（拆分攻坚） | 🔴 **待修复（拆分为 2 个硬任务分两轮执行，见下节）** |
+| P2 | 60-B3 | native_backend.py Top2 复杂度：_emit_runtime_call CC=25、_emit_call CC=21 → 4 条 call 路径需同步修改 | **backend_native_regalloc_cc_split ✅ + backend_native_emit_abi_call_refactor**（评审轮拆分为两阶段） | 85→**92/90**↑ | **第 64/65 轮**（拆分攻坚） | 🔵 **1/2 已完成**（regalloc CC=39 拆分第 64 轮✅，emit_abi_call 骨架第 65 轮待做） |
 | 前端×2 | ForExpr 静默降级 + 测试盲区补齐 | （见前端线） | frontend_for_expr_non_list_fix + frontend_typecheck_test_coverage | 88/95 | 第 61/62 轮 | ✅ **2/2 已清零** |
 
-### code_audit_63 新发现（后端 3 项，0/3 已清零 —— 全部为结构性改进）
+### code_audit_63 新发现（后端 3 项，1/3 已清零 —— 结构性改造启动）
 
 | 严重度 | 编号 | 问题 | 对应任务 | 优先级 | 计划轮次 | 状态 |
 |--------|------|------|----------|--------|----------|------|
-| P2（可维护性 Top1） | 63-B1 | **_allocate_registers CC≈39（134 行 4 子阶段内聚，float/非 float 双路 8 份重复代码）** | **backend_native_regalloc_cc_split** | **92** | **第 64 轮（后端头号主攻）** | 🔴 待做（拆为 4 子方法：活跃分析/线性扫描/栈偏移/caller-saved 标记） |
-| P2（可维护性 Top2） | 63-B2 | **_emit_runtime_call CC≈31 + _emit_call CC≈24 两方法 70% 代码重复（10 步 ABI 流程几乎一致）** | **backend_native_emit_abi_call_refactor** | **90** | **第 65 轮（后端主攻）** | 🔴 待做（抽出 _emit_abi_call 通用骨架 + save_all_gprs/allow_imm 双 flag） |
-| P1（正确性收尾） | 63-B3 | **_resolve_phi_type 仍在观察期 stderr 警告，未升级 raise MIRLoweringError（has_inconsistency 标志未消费）** | **backend_mir_phi_type_upgrade_raise** | **88** | **第 66 轮（后端主攻）** | 🔴 待做（已历 2 轮观察期 0 次警告，可安全升级） |
+| P2（可维护性 Top1） | 63-B1 | **_allocate_registers CC≈39（134 行 4 子阶段内聚，float/非 float 双路 8 份重复代码）** | **backend_native_regalloc_cc_split** | **92** | **第 64 轮（后端头号主攻）** | ✅ **已清零**（拆 3 子方法 + 1 流水线主方法，CC≤5 达成，53/53 native 测试通过） |
+| P2（可维护性 Top2） | 63-B2 | **_emit_runtime_call CC≈31 + _emit_call CC≈24 两方法 70% 代码重复（10 步 ABI 流程几乎一致）** | **backend_native_emit_abi_call_refactor** | **90** | **第 65 轮（后端主攻）** | 🔴 待做（抽出 _emit_abi_call 通用骨架 + save_all_gprs/allow_imm 双 flag；depends_on regalloc 拆分已完成 ✅） |
+| P1（正确性收尾） | 63-B3 | **_resolve_phi_type 仍在观察期 stderr 警告，未升级 raise MIRLoweringError（has_inconsistency 标志未消费）** | **backend_mir_phi_type_upgrade_raise** | **88** | **第 66 轮（后端主攻）** | 🔴 待做（已历 3 轮观察期 0 次警告，可安全升级） |
 
-### 高优先级任务（下 3 轮 = 第 64-65-66 轮，按优先级排序 — 共 8 个任务 前端 3 + 后端 5）
+### 高优先级任务（下 2 轮 = 第 65-66 轮，按优先级排序 — 共 6 个任务 前端 2 + 后端 4）
 
 | 状态 | 轮次 | 任务 | 严重度 | 难度 | 优先级 | 估算工作量 |
 |------|------|------|--------|------|--------|------------|
-| 🔴 **第 64 轮后端头号主攻** | **64** | **_allocate_registers CC=39 拆分 4 子方法（活跃分析/线性扫描/栈偏移/caller-saved）** | P2 | hard | **92** | 1-2 天 |
-| 🔴 **第 64 轮前端主攻** | **64** | **parser 错误恢复扩展 TOP_LEVEL/STMT_LIST/EXPR 三级 + 顶层熔断（code_audit_60+63 合并，前端积压最后 1 项）** | P2 | medium | **85** | 2-3 小时 |
+| ✅ **第 64 轮完成** | **64** | **_allocate_registers CC=39 拆分 3 子方法（活跃分析/线性扫描+栈/caller-saved 标记 + 主方法流水线 CC≤5）** | P2 | hard | **92** | 1-2 天 |
+| ✅ **第 64 轮完成** | **64** | **parser 错误恢复扩展 TOP_LEVEL/EXPR 两级 + BLOCK 复用（code_audit_60 前端 3/3 清零，+6 专项测试 6/6）** | P2 | medium | **85** | 2-3 小时 |
 | 🔴 **第 65 轮后端主攻** | **65** | **抽离 _emit_abi_call 骨架消除 70% 重复（_emit_runtime_call/_emit_call/_emit_call_indirect 三调用点复用）** | P2 | hard | **90** | 1-2 天 |
 | 🔴 **第 65 轮前端主攻** | **65** | **实现 generalize() + let-polymorphism（id/const/compose 等多态函数，HM 完成度 65%→85%）** | P1 | hard | **93** | 6-10 小时 |
 | 🔴 **第 66 轮后端主攻** | **66** | **升级 _resolve_phi_type 从 stderr→raise MIRLoweringError（结束观察期，MIR 正确性强保证）** | P1 | medium | **88** | 2-4 小时 |

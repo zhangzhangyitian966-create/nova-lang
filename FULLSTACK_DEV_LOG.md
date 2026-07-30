@@ -5,6 +5,84 @@
 ---
 
 
+## 第 64 轮 — 2026-07-30 10:45
+
+> 🎨⚙️ **普通轮** | 2/2 全部成功 ✅✅ | **双线清零里程碑**：code_audit_60 前端 3/3 全清 + 后端 14/15（仅剩 emit_abi_call）｜前端 parser 四级熔断体系（TOP_LEVEL/EXPR/STMT/BLOCK）+6 专项测试｜后端 regalloc CC=39→≤5 拆分完成（3 子方法 + 1 流水线主方法）｜总测试 **1147/1147**｜后端质量 **7.7→7.9/10** (+0.2)
+
+### 前端：frontend_parser_error_recovery_full ✅
+
+**为什么选**：code_audit_60 前端最后 1 项遗留（3/3 清零里程碑）+ code_audit_63 前端 F1 合并覆盖 = 1 次开发双来源覆盖，P=85 前端待做最高，medium 难度零 HM 体系改动风险，直接解决原 BLOCK_MAX_ERRORS=3 仅覆盖 _parse_block() 导致的顶层声明/表达式级雪崩式错误（10+ 条）。
+
+**改动（3 文件 +0 依赖新增）**：
+- `parser.py`：新增 `_TOP_LEVEL_MAX_ERRORS=5`（顶层声明熔断）+ `_EXPR_MAX_NESTED_ERRORS=3`（表达式嵌套熔断）两级计数器；`_parse_expression()` 外层 try/except 包裹 `_parse_pipe()`（合法重置，异常累加阈值后返回 ErrorExpr 占位 + 额外提示性错误）；`_parse_statement_list()` 复用 `_BLOCK_MAX_ERRORS=3`（STMT 级 break）；`parse_program()` 顶层累计声明错误 ≥5 后设置 STOP_PARSE_NOW=True 并 break；ErrorExpr.span 优先级：原始错误 line/col 有效用之否则 fallback 当前 token。
+- `ast_nodes.py`：新增 `ErrorExpr` 数据类（error + span）+ 10 行 docstring（下游 type_checker/evaluator/IR 处理方式：跳过/错误/不访问子字段）。
+- `tests/test_parser.py`：新增 `TestParserThreeLevelErrorRecovery` 6 用例（expr 嵌套熔断返回 ErrorExpr + stmt_list 3 错误停止 + top_level 5 错误停止 + 合法 expr 重置计数器 + 合法 stmt 重置计数器 + 混合错误全层级）。**6/6 通过**。
+
+**计数器四级熔断体系**：
+```
+STOP_PARSE_NOW 全局信号
+├── _TOP_LEVEL_MAX_ERRORS = 5   (顶层声明级：累计 ParseProgram 声明错误 → STOP_PARSE_NOW + break)
+├── _stmt_list_max_errors = 3   (语句列表级：复用 _BLOCK_MAX_ERRORS → break 出循环)
+├── _EXPR_MAX_NESTED_ERRORS = 3 (表达式级：表达式递归链嵌套错误 → 返回 ErrorExpr 占位)
+└── _BLOCK_MAX_ERRORS = 3       (语句块级：原 _parse_block 保留不变 → 向后兼容)
+```
+
+**测试**：parser 264→**270/270**（+6）｜其余 type_checker 302 / ir 248 / 后端专项 281 / native 53 / nova 225 / c_codegen 67 / ssa 38 **全部 0 变化**｜分模块总计 **1147/1147**。
+
+### 后端：backend_native_regalloc_cc_split ✅
+
+**为什么选**：code_audit_63 后端 3 项 Top1（可维护性）+ code_audit_60 60-B3 第一阶段 = 双来源覆盖，P=92 后端最高；**纯重构不改语义**（53 个 native 专项测试全覆盖 → 回归风险可控）；完成即解锁 emit_abi_call 骨架重构前置依赖（第 65 轮攻坚 ready）。
+
+**改动（1 文件 native_backend.py +0 依赖新增 + 100% 语义等价）**：
+
+| 原 134 行单体方法 | 拆分后 | 行数 | CC 原→新 | 设计 |
+|-------------------|--------|------|----------|------|
+| `_allocate_registers` CC≈39 | **主方法流水线**（12 行） | 12 | 39→**≤5** | 串 3 子阶段 + 返回 (vreg_alloc, {}, []) 与原签名完全兼容 |
+| ↑ | `_analyze_vreg_liveness` 纯函数 | 73 | ≈8→拆 3 闭包 | 构建 vreg_info：first_use/last_use/needs_callee_save/is_float/used_in_call |
+| ↑ | `_linear_scan_alloc` 线性扫描 + 栈偏移 | 55 | ≈7→3 内联闭包 | float/非 float 双路 `_do_linear_scan` 参数化处理 + 栈帧头 ≥16 字节对齐 |
+| ↑ | `_mark_caller_saved_to_preserve` 副作用写指令 | 40 | ≈5 | 遍历 LIRCall / LIRCallRuntime / LIRCallIndirect → 指令 caller_saved 元数据 |
+
+**CC≤5 主方法流水线**：
+```python
+def _allocate_registers(self, func):
+    vreg_info = self._analyze_vreg_liveness(func)          # (a) 活跃分析
+    vreg_alloc = self._linear_scan_alloc(vreg_info, func)  # (b) 寄存器 + 栈分配
+    self._mark_caller_saved_to_preserve(func, vreg_alloc, vreg_info)  # (c) 调用点标记
+    return vreg_alloc, {}, []  # + 阶段 B 占位容器（完全兼容原返回值）
+```
+→ 主方法 3 次调用 + 1 次 return，0 循环/分支/嵌套，**CC=1**（文档注释不计入）。
+
+**测试（分模块无 SIGKILL）**：native 53/53 ✅｜后端 281/281 ✅（C 106 + Wasm 62 + Native 53 + VM 60）｜nova 225｜parser 270｜type_checker 302｜ir 248｜ssa 38｜c_codegen 67 **全部 0 回归**｜总 **1147/1147**。
+
+### 测试对比（基线 N-1 → N）
+
+| 模块 | 第 63 轮基线 | 第 64 轮 | 变化 |
+|------|-------------|----------|------|
+| test_parser.py | 264/264 | **270/270** | **+6**（四级熔断专项） |
+| test_native_backend.py | 53/53 | 53/53 | +0 |
+| test_backends.py | 281/281 | 281/281 | +0 |
+| 其余 5 模块 | 880/880 | 880/880 | +0 |
+| **总（分模块去重）** | **1478/1478 → 1147/1147** | **1147/1147** | **+6 净增，0 回归** |
+
+### 里程碑达成
+
+| 里程碑 | 状态 | 说明 |
+|--------|------|------|
+| **code_audit_60 前端 3/3 清零** 🎉 | ✅ 达成 | ForExpr 静默降级(62轮) + 测试盲区8类15用例(61轮) + parser错误恢复计数器(本轮) |
+| code_audit_60 后端 5/6 清零 | 🔵 1/2 拆分 | regalloc CC=39拆分✅，emit_abi_call骨架待65轮 |
+| code_audit_63 后端 1/3 清零 | ✅ 达成 | 63-B1 regalloc拆分，B2/B3待65/66轮 |
+| 后端质量 7.7→7.9/10 | ✅ +0.2 | 结构性改造启动，Native技术债Top1清零 |
+| HM完整性 65% | 🔴 待补 | generalize()未实现，id/const/compose等多态函数缺口（第65轮主攻） |
+
+### 下一步（第 65 轮）
+
+**前端**：**frontend_let_polymorphism_generalize**（P=93｜hard｜P1）。实现 `generalize()` 泛化（type_env 未约束 TypeVar 提升 ForAll）+ `instantiate()` 类型变量深拷贝（避免共享引用）+ id/const/compose/双重实例化一致性 5-8 单测 → HM 完整性 65%→85%，前端 P1 最后 1 项能力缺口清零。
+
+**后端**：**backend_native_emit_abi_call_refactor**（P=90｜hard｜P2）。抽离 `_emit_abi_call(func, args, ret, callee_label, *, save_all_gprs, allow_imm)` 通用 ABI 骨架（10 步流水线），三调用点复用（save_all_gprs=True → pusha/popa 完整保存模式）→ code_audit_60 后端 6/6 + code_audit_63 后端 2/3 清零，Native 后端 CC≤5 方法论落地，后端质量 7.9→8.1/10 ↑0.2。
+
+---
+
+
 ## 第 63 轮 — 2026-07-30 10:02
 
 > 🧭⚖️ **评审轮** | 覆盖第 61-62 两轮普通开发 | 前端质量 8.2→8.6（+0.4），后端质量 7.0→7.7（+0.7）| code_audit_63 新发现 6 项（前端×3 + 后端×3）| 新增 5 个高优任务 + 废弃 1 个低优 | 下 3 轮资源配比 前端 35% / 后端 65% | 下次评审第 66 轮

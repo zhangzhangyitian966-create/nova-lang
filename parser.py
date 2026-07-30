@@ -19,6 +19,7 @@ from .ast_nodes import (
     BreakExpr,
     CharLiteral,
     ContinueExpr,
+    ErrorExpr,
     ExportDecl,
     FieldAccess,
     FloatLiteral,
@@ -89,6 +90,10 @@ class Parser:
         TokenType.IF, TokenType.MATCH, TokenType.RBRACE, TokenType.EOF,
         TokenType.PIPE,  # lambda 表达式起始符
     })
+    # 顶层声明级最大连续错误数（超过则停止解析，防止雪崩式错误）
+    _TOP_LEVEL_MAX_ERRORS = 5
+    # 表达式递归链中最大嵌套错误数（超过则返回 ErrorExpr 占位符）
+    _EXPR_MAX_NESTED_ERRORS = 3
 
     def __init__(self, tokens: List[Token], source: str = ""):
         self.tokens = tokens
@@ -96,6 +101,7 @@ class Parser:
         self._source = source
         self._errors: List[ParseError] = []  # 收集的所有解析错误
         self._primary_dispatch = self._build_primary_dispatch()
+        self._expr_nested_errors: int = 0  # 表达式递归链嵌套错误计数（实例级跨调用传递）
 
     # ----------------------------------------------------------
     # 工具方法
@@ -186,15 +192,32 @@ class Parser:
         """解析整个程序（带错误恢复，收集多个错误）"""
         decls = []
         self._errors = []
+        top_level_errors = 0  # 顶层声明级连续错误计数（三级熔断之 TOP_LEVEL）
 
         while self._peek_type() != TokenType.EOF:
             try:
                 decl = self._parse_top_level()
                 if decl is not None:
                     decls.append(decl)
+                # 合法声明/表达式语句解析成功 → 重置顶层错误计数器
+                # （与 _parse_block 的 block_errors = 0 重置机制一致）
+                top_level_errors = 0
             except ParseError as e:
                 # 记录错误并同步到下一个声明边界
                 self._errors.append(e)
+                top_level_errors += 1
+                # 若顶层错误过多，放弃剩余内容（防止雪崩式错误）
+                if top_level_errors >= self._TOP_LEVEL_MAX_ERRORS:
+                    last_err_line = getattr(e, "line", -1)
+                    last_err_col = getattr(e, "column", -1)
+                    self._errors.append(ParseError(
+                        f"已达到顶层错误阈值（{self._TOP_LEVEL_MAX_ERRORS} 个），停止解析剩余内容。"
+                        "请先修复上述语法错误后重试。",
+                        line=last_err_line,
+                        column=last_err_col,
+                        source=self._source,
+                    ))
+                    break
                 self._synchronize_to_declaration_boundary()
 
         # 保存部分解析结果（错误恢复场景下已成功解析的声明）
@@ -585,8 +608,34 @@ class Parser:
     # ----------------------------------------------------------
 
     def _parse_expression(self):
-        """表达式入口"""
-        return self._parse_pipe()
+        """表达式入口（带嵌套错误熔断，超过阈值时返回 ErrorExpr 占位符）
+
+        三级熔断之 EXPR 级：表达式递归链中如果嵌套解析失败时累计计数，
+        连续/嵌套错误达到 _EXPR_MAX_NESTED_ERRORS 时，不再抛出
+        ErrorExpr 占位节点，阻止更深层级的雪崩式错误。
+        """
+        try:
+            result = self._parse_pipe()
+            # 合法表达式解析成功 → 重置表达式嵌套错误计数器
+            self._expr_nested_errors = 0
+            return result
+        except ParseError as e:
+            self._expr_nested_errors += 1
+            if self._expr_nested_errors >= self._EXPR_MAX_NESTED_ERRORS:
+                # 达到阈值：将当前错误记录到 self._errors，返回 ErrorExpr 占位
+                self._errors.append(e)
+                # 超阈值提示：附带位置来自原始错误位置（若不可用则 fallback 到当前 token）
+                span = Span(e.line, e.column) if e.line >= 0 and e.column >= 0 else self._span(self._cur())
+                # 添加"熔断提示性错误：让用户知道此表达式级的解析已被熔断
+                self._errors.append(ParseError(
+                    f"表达式嵌套错误过多（阈值 {self._EXPR_MAX_NESTED_ERRORS}），已在表达式级熔断停止解析更深子表达式。",
+                    line=span.line,
+                    column=span.column,
+                    source=self._source,
+                ))
+                return ErrorExpr(error=e, span=span)
+            # 未达阈值：继续向上抛出（让外层语句级/块级错误恢复继续处理）
+            raise
 
     def _parse_pipe(self):
         """管道操作符 |> (优先级最低)"""

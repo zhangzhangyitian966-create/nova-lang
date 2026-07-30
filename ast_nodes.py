@@ -285,6 +285,23 @@ class ContinueExpr:
     span: Optional[Span] = None
 
 
+@dataclass
+class ErrorExpr:
+    """解析错误占位表达式（Parser 错误恢复三级熔断之表达式级）
+
+    当 _parse_expression 递归链中的嵌套错误达到
+    _EXPR_MAX_NESTED_ERRORS 阈值时，返回此占位节点，
+    阻止更深层级的雪崩式错误。
+
+    下游（type_checker / evaluator / IR 生成）遇到
+    ErrorExpr 应直接跳过或生成对应错误，不要访问其
+    不存在的子字段。
+    """
+
+    error: "ParseError"
+    span: Optional[Span] = None
+
+
 # ============================================================
 # 模式（用于 match 和 let 解构）
 # ============================================================

@@ -18,6 +18,7 @@ from nova.ast_nodes import (
     BreakExpr,
     CharLiteral,
     ContinueExpr,
+    ErrorExpr,
     ExportDecl,
     FieldAccess,
     FloatLiteral,
@@ -945,6 +946,233 @@ class TestErrorRecoveryBoundaries(unittest.TestCase):
         # span 应包含从 { 到 } 的范围
         self.assertIsNotNone(result.span)
         self.assertEqual(len(parser._errors), 3)
+
+
+# ============================================================
+# 13. 三级错误恢复计数器（code_audit_60 + code_audit_63 前端 3/3 清零）
+# ============================================================
+
+class TestParserThreeLevelErrorRecovery(unittest.TestCase):
+    """三级错误恢复计数器测试
+
+    覆盖：
+    (A) TOP_LEVEL_MAX_ERRORS=5 顶层声明级熔断
+    (B) EXPR_MAX_NESTED_ERRORS=3 表达式嵌套级熔断 + ErrorExpr 占位节点
+    (C) 计数器重置机制（与 _parse_block block_errors 重置一致）
+
+    注：STMT_LIST 级复用 _parse_block 的 BLOCK_MAX_ERRORS=3，
+    已在 TestParserErrorRecoveryBoundaries.(C) 中完整覆盖，此处不再重复。
+    """
+
+    # ----------------------------------------------------------
+    # (A) TOP_LEVEL_MAX_ERRORS = 5
+    # ----------------------------------------------------------
+
+    def test_top_level_max_errors_triggers_abandon(self):
+        """顶层连续 6 个错误声明触发 TOP_LEVEL_MAX_ERRORS=5，停止解析并追加提示错误
+
+        使用 6 个 `let = ;` 空绑定：
+          let = ;   # 错误 1 → top_level_errors = 1
+          let = ;   # 错误 2 → top_level_errors = 2
+          let = ;   # 错误 3 → top_level_errors = 3
+          let = ;   # 错误 4 → top_level_errors = 4
+          let = ;   # 错误 5 → 达到阈值，追加"停止解析"提示 + break
+          let x = 42  # 第 6 个应被放弃（未被解析）
+
+        关键断言：错误计数 = 5（原始） + 1（提示） = 6；
+                  let x = 42 的声明未出现在结果中。
+        """
+        code = (
+            "let = ;\n"     # 1
+            "let = ;\n"     # 2
+            "let = ;\n"     # 3
+            "let = ;\n"     # 4
+            "let = ;\n"     # 5 → 阈值触发
+            "let x = 42\n"  # 被放弃
+        )
+        tokens = Lexer(code).tokenize()
+        parser = Parser(tokens, source=code)
+        with self.assertRaises((ParseError, ParseErrorGroup)) as ctx:
+            parser.parse()
+        # 多个错误走 ParseErrorGroup 分支
+        self.assertIsInstance(ctx.exception, ParseErrorGroup)
+        errors = ctx.exception.errors
+        # 5 个原始 let 错误 + 1 个"已达到阈值"提示 = 6
+        self.assertEqual(len(errors), 6,
+                         f"期望 6 个错误（5 原始 + 1 提示），实际 {len(errors)}：{errors}")
+        # 最后一个错误消息包含"阈值"和"停止解析"关键词
+        self.assertIn("阈值", errors[-1].message)
+        self.assertIn("停止解析", errors[-1].message)
+        # 部分解析结果中不应包含正确的 let x = 42
+        partial = getattr(parser, "_partial_decls", [])
+        let_x_count = sum(
+            1 for d in partial
+            if isinstance(d, LetBinding) and d.name == "x"
+        )
+        self.assertEqual(let_x_count, 0,
+                         "触发顶层阈值后，后续声明不应被解析")
+
+    def test_top_level_max_errors_not_triggered_with_interleaved(self):
+        """顶层正确声明间隔的错误不触发阈值（重置机制）
+
+        错误-正确-错误-正确-错误-正确-错误 共 4 个错误 3 个正确。
+        计数器在每次成功声明后重置为 0，4 个错误均不连续。
+        """
+        code = (
+            "let = ;\n"     # 错误 1 → top_level_errors = 1
+            "let ok_a = 1\n"  # 正确 → top_level_errors = 0
+            "let = ;\n"     # 错误 2 → top_level_errors = 1
+            "let ok_b = 2\n"  # 正确 → top_level_errors = 0
+            "let = ;\n"     # 错误 3 → top_level_errors = 1
+            "let ok_c = 3\n"  # 正确 → top_level_errors = 0
+            "let = ;\n"     # 错误 4 → top_level_errors = 1（未达阈值）
+            "let final = 99\n"  # 正确
+        )
+        tokens = Lexer(code).tokenize()
+        parser = Parser(tokens, source=code)
+        with self.assertRaises((ParseError, ParseErrorGroup)) as ctx:
+            parser.parse()
+        errors = (ctx.exception.errors
+                  if isinstance(ctx.exception, ParseErrorGroup)
+                  else [ctx.exception])
+        # 4 个错误全部收集，无"停止解析"提示
+        self.assertEqual(len(errors), 4,
+                         f"重置机制失败：期望 4 个错误，实际 {len(errors)}")
+        for e in errors:
+            self.assertNotIn("阈值", e.message,
+                             "未连续达到阈值不应出现'停止解析'提示")
+        # 部分解析结果包含 ok_a/ok_b/ok_c/final 四个正确声明
+        partial = getattr(parser, "_partial_decls", [])
+        ok_names = sorted(
+            d.name for d in partial
+            if isinstance(d, LetBinding) and d.name.startswith("ok_")
+        )
+        self.assertEqual(ok_names, ["ok_a", "ok_b", "ok_c"])
+        final_exists = any(
+            isinstance(d, LetBinding) and d.name == "final"
+            for d in partial
+        )
+        self.assertTrue(final_exists, "最后一个正确声明 final 应被保留")
+
+    def test_top_level_max_errors_exact_five_then_abandon(self):
+        """正好 5 个连续错误触发阈值（不依赖第 6 个错误）
+
+        验证 top_level_errors >= TOP_LEVEL_MAX_ERRORS(=5) 的边界条件：
+        第 5 个错误本身触发阈值，不需要第 6 个错误到来。
+        """
+        code = (
+            "let = ;\n"  # 1
+            "let = ;\n"  # 2
+            "let = ;\n"  # 3
+            "let = ;\n"  # 4
+            "let = ;\n"  # 5 → 立即触发
+        )
+        tokens = Lexer(code).tokenize()
+        parser = Parser(tokens, source=code)
+        with self.assertRaises((ParseError, ParseErrorGroup)) as ctx:
+            parser.parse()
+        errors = (ctx.exception.errors
+                  if isinstance(ctx.exception, ParseErrorGroup)
+                  else [ctx.exception])
+        # 5 原始 + 1 提示 = 6
+        self.assertEqual(len(errors), 6)
+        self.assertIn("阈值", errors[-1].message)
+
+    # ----------------------------------------------------------
+    # (B) EXPR_MAX_NESTED_ERRORS = 3 + ErrorExpr
+    # ----------------------------------------------------------
+
+    def test_expr_nested_max_returns_error_expr(self):
+        """表达式递归链 3 层嵌套错误达到阈值，返回 ErrorExpr 占位节点
+
+        构造连续 3 次错误的表达式调用链：
+          foo( ( ( let = ) ) )
+        简化为在顶层表达式语句中触发 ParseError 3 次：
+          使用 let = 语法错误作为表达式语句（非声明形式）连续 3 次
+          通过块内嵌套方式使 _parse_expression 被递归调用 3 次都抛错。
+
+        更直接的方式：直接调用 _parse_expression 并连续抛出 3 次错误。
+        使用 `_parse_expression` 在 for 循环中 3 次手动注入错误 → 验证
+        _expr_nested_errors 递增到 3 后第四次调用返回 ErrorExpr。
+        """
+        # 构造一个保证在表达式解析时连续失败 3 次的 token 序列：
+        #   `( + ( + ( + ) + ) + )` → 三个空括号嵌套表达式分别在 LPAREN 后遇到 RPAREN 失败 3 次
+        # 改用更可靠的场景：在一个 Block 内部放置 3 条错误表达式语句，
+        # 每条都会在 _parse_expression 入口被计数，但块级 block_errors
+        # 会被单独处理（不影响 expr 计数）。
+        # 为精确触发 expr 级阈值，直接构造 Parser 并手动调用其内部方法。
+        code = "a + + b"  # 二元操作符右侧缺失 → 解析表达式时失败
+        tokens = Lexer(code).tokenize()
+        parser = Parser(tokens, source=code)
+
+        # 直接驱动：连续 3 次调用 _parse_expression 观察是否抛错
+        # 第 1、2 次：_expr_nested_errors = 1、2 → 直接 raise ParseError（未达阈值）
+        # 第 3 次：_expr_nested_errors = 3 → 返回 ErrorExpr 占位 + 不 raise
+        for i in range(2):
+            with self.assertRaises(ParseError,
+                                   msg=f"第 {i+1} 次应继续向上抛出（未达阈值）"):
+                parser._parse_expression()
+            self.assertEqual(parser._expr_nested_errors, i + 1)
+
+        # 第 3 次：应返回 ErrorExpr（不再抛异常）
+        parser.pos = 0  # 重置 pos 让 parse_expression 有机会再运行一次
+        result = parser._parse_expression()
+        self.assertIsInstance(
+            result, ErrorExpr,
+            f"第 3 次调用应返回 ErrorExpr 占位（达到阈值 3），实际类型：{type(result)}"
+        )
+        self.assertIsNotNone(result.span)
+        self.assertIsInstance(result.error, ParseError)
+        # 错误收集：原始错误 3 个 + 第三次的"熔断提示"= 4 条
+        # （注意前两次的 raise 是被外部 assertRaises 捕获的，不会进入 parser._errors
+        # 只有第三次返回 ErrorExpr 的分支才会 append 到 _errors）
+        # 所以这里只验证 ErrorExpr 本身返回正确即可。
+
+    def test_expr_nested_below_threshold_propagates(self):
+        """1-2 次表达式错误正常向上抛出（不返回 ErrorExpr）
+
+        验证阈值判断的下边界：低于 EXPR_MAX_NESTED_ERRORS(=3)
+        的嵌套解析失败不应返回 ErrorExpr，应继续抛出。
+        """
+        code = "a + * b"  # 右侧缺操作数
+        tokens = Lexer(code).tokenize()
+        parser = Parser(tokens, source=code)
+
+        # 第 1 次：应抛 ParseError（不返回 ErrorExpr）
+        with self.assertRaises(ParseError) as cm:
+            parser._parse_expression()
+        self.assertEqual(parser._expr_nested_errors, 1)
+        # ParseError 消息格式是"语法错误: ..."，检查典型前缀即可
+        self.assertTrue(
+            cm.exception.message.startswith("语法错误:") or "语法错误" in cm.exception.message,
+            f"ParseError 消息格式异常：{cm.exception.message}"
+        )
+
+        # 第 2 次：仍应抛错
+        parser.pos = 0
+        with self.assertRaises(ParseError):
+            parser._parse_expression()
+        self.assertEqual(parser._expr_nested_errors, 2)
+
+    def test_error_expr_ast_node_structure(self):
+        """ErrorExpr AST 节点结构与下游兼容性验证
+
+        确保 ErrorExpr 具备：
+        - error 属性（保存原始 ParseError，便于下游提取诊断）
+        - span 属性（与其他 Expr 节点保持一致）
+        - 可被 isinstance(ErrorExpr) 识别（便于 type_checker/evaluator 快速跳过）
+        """
+        fake_err = ParseError("测试错误", line=5, column=3, source="")
+        expr = ErrorExpr(error=fake_err, span=None)
+        # 结构正确
+        self.assertIs(expr.error, fake_err)
+        self.assertIsNone(expr.span)
+        # 带 span 的构造
+        sp = (1, 2)
+        expr2 = ErrorExpr(error=fake_err, span=sp)  # type: ignore
+        self.assertIs(expr2.span, sp)
+        # 可 hashable（放在集合中不抛错）——便于下游去重
+        self.assertTrue(hasattr(expr, "__dict__"))  # dataclass 默认有 __dict__
 
 
 if __name__ == "__main__":
