@@ -1119,7 +1119,7 @@ class TestTypeCheckErrorLocation(unittest.TestCase):
                                 f"期望报错在第1行（f(42) 调用处），实际 line={err.line}")
         self.assertGreaterEqual(err.column, 1)
 
-    # ---------- 场景 4：For 表达式（range 参数类型错误 + 记录当前非 List 降级行为）----------
+    # ---------- 场景 4：For 表达式（range 参数类型错误 + 非 List 迭代器类型错误修复验证）----------
 
     def test_for_range_start_non_int_error_location(self):
         """for i in range(true, 10)：range start 为 Bool，
@@ -1131,14 +1131,43 @@ class TestTypeCheckErrorLocation(unittest.TestCase):
             self.assertGreaterEqual(err.line, 1)
             self.assertGreaterEqual(err.column, 1)
 
-    def test_for_non_list_iterable_current_behavior(self):
-        """for x in 42（非 List 迭代器）：当前实现降级为 TypeVar 不报错，
-        本测试记录当前行为作为回归基线；下一轮 frontend_for_expr_non_list_fix 修复后应改为抛错。"""
+    # ===== frontend_for_expr_non_list_fix（P1 类型系统漏洞修复，第 62 轮）：以下 3 个测试覆盖 =====
+
+    def test_for_non_list_iterable_int_raises_error(self):
+        """【修复验证】for x in 42（Int 非 List）：应抛 TypeCheckError，
+        错误消息包含 'for'、'List'、实际类型，位置落在 iterable 表达式处。"""
         src = "fn main() { for x in 42 { x }; 0 }"
         err = self._compile_and_catch(src)
-        # 记录：当前无错误（降级为 TypeVar），这是已知的类型系统漏洞
-        self.assertIsNone(err,
-            "当前 for 非 List 迭代器静默降级为 TypeVar（已知行为，下一轮修复后此断言需更新）")
+        self.assertIsNotNone(err, "修复后 for x in Int 必须抛出类型错误（原静默降级为 TypeVar 的漏洞）")
+        self.assertIn("for", str(err))
+        self.assertIn("List", str(err))
+        self.assertIn("Int", str(err))
+        self.assertGreaterEqual(err.line, 1)
+        self.assertGreaterEqual(err.column, 1)
+
+    def test_for_non_list_iterable_string_raises_error(self):
+        """【修复验证】for x in \"hello\"（String 非 List）：应抛 TypeCheckError，
+        错误消息包含 'for'、'List'、String，防止误以为 String 可按字符迭代。"""
+        src = 'fn main() { for x in "hello" { x }; 0 }'
+        err = self._compile_and_catch(src)
+        self.assertIsNotNone(err, "修复后 for x in String 必须抛出类型错误")
+        self.assertIn("for", str(err))
+        self.assertIn("List", str(err))
+        self.assertIn("String", str(err))
+        self.assertGreaterEqual(err.line, 1)
+        self.assertGreaterEqual(err.column, 1)
+
+    def test_for_non_list_iterable_bool_raises_error(self):
+        """【修复验证】for x in true（Bool 非 List）：应抛 TypeCheckError，
+        覆盖 Bool 等基础非 List 类型的完备性。"""
+        src = "fn main() { for x in true { x }; 0 }"
+        err = self._compile_and_catch(src)
+        self.assertIsNotNone(err, "修复后 for x in Bool 必须抛出类型错误")
+        self.assertIn("for", str(err))
+        self.assertIn("List", str(err))
+        self.assertIn("Bool", str(err))
+        self.assertGreaterEqual(err.line, 1)
+        self.assertGreaterEqual(err.column, 1)
 
     # ---------- 场景 5：Assignment 三类错误（未定义 / 不可变 / 类型不匹配）----------
 

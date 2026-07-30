@@ -98,17 +98,19 @@ class LIRLowering:
             MIRIndexAccess: self._lower_index_access,
         }
 
-    def _require_ssa_loc(self, ssa_name: str, bb_label: str, terminator_kind: str) -> str:
-        """查找 SSA 名对应的 LIR 位置，找不到时抛出 LIRLoweringError（P1-5 防御性检查）。
+    def _require_ssa_loc(self, ssa_name: str, bb_label: str, instr_kind: str) -> str:
+        """查找 SSA 名对应的 LIR 位置，找不到时抛出 LIRLoweringError（P1-5 + 60-B2 防御性检查）。
 
-        原实现使用 self.ssa_to_loc.get(ssa_name, "") 静默回退为空字符串，
+        原实现使用 self.ssa_to_loc.get(ssa_name, "") 静默回退为空字符串：
+        - Terminator 路径（7 处）：P1-5 已在第 59 轮修复
+        - 非 Terminator 路径（32 处）：60-B2 本轮修复（算术/加载/存储/数据结构/访问等）
         当 SSA 构建异常（前向引用、Phi 循环依赖、降级顺序错）时下游生成
-        `if () goto` / `switch ((int64_t))` 等无效代码或空键崩溃。
+        `if () goto` / `switch ((int64_t))` / `(int64_t) = 5;` 等无效代码或空键崩溃。
 
         Args:
             ssa_name: 待查找的 SSA 变量名
             bb_label: 当前基本块标签（用于错误定位）
-            terminator_kind: 终结指令类型（如 "MIRBranch"、"MIRSwitch"）
+            instr_kind: 指令类型名（如 "MIRBranch"、"LIRBinOp"、"LIRBuildList"）
 
         Returns:
             对应的 LIR 位置名（寄存器/栈槽）
@@ -118,19 +120,19 @@ class LIRLowering:
         """
         if ssa_name is None:
             raise LIRLoweringError(
-                f"[{terminator_kind}] 块 '{bb_label}': SSA 名为 None（前驱 Phi 或降级顺序错误），"
+                f"[{instr_kind}] 块 '{bb_label}': SSA 名为 None（前驱 Phi 或降级顺序错误），"
                 f"当前已注册 SSA 位置数={len(self.ssa_to_loc)}"
             )
         loc = self.ssa_to_loc.get(ssa_name)
         if loc is None:
             raise LIRLoweringError(
-                f"[{terminator_kind}] 块 '{bb_label}': SSA '{ssa_name}' 未在 ssa_to_loc 注册"
+                f"[{instr_kind}] 块 '{bb_label}': SSA '{ssa_name}' 未在 ssa_to_loc 注册"
                 f"（可能是前向引用、Phi 循环依赖或降级顺序错误），"
                 f"当前已注册 SSA 位置数={len(self.ssa_to_loc)}"
             )
         if not loc:
             raise LIRLoweringError(
-                f"[{terminator_kind}] 块 '{bb_label}': SSA '{ssa_name}' 映射到空字符串位置"
+                f"[{instr_kind}] 块 '{bb_label}': SSA '{ssa_name}' 映射到空字符串位置"
                 f"（寄存器分配器异常）"
             )
         return loc
@@ -241,6 +243,9 @@ class LIRLowering:
     def _lower_block_instructions(self, bb, final_body):
         """将基本块中的非终结指令降级为 LIR 指令。
 
+        P2（60-B2）稳定性修复：传递 bb.label 到 _lower_instruction，
+        使 32 处非 terminator 指令的 _require_ssa_loc 能精确定位到块。
+
         参数:
             bb: MIRBasicBlock 实例
             final_body: LIR 指令列表，降级后的指令直接追加到此列表
@@ -248,7 +253,7 @@ class LIRLowering:
         for instr in bb.instructions:
             if isinstance(instr, MIRPhi):
                 continue
-            lir_instrs = self._lower_instruction(instr)
+            lir_instrs = self._lower_instruction(instr, bb_label=bb.label)
             final_body.extend(lir_instrs)
 
     def _process_terminator(self, bb, final_body, phi_info, edge_counter):
@@ -473,11 +478,14 @@ class LIRLowering:
             return []
         return []
 
-    def _lower_instruction(self, instr):
+    def _lower_instruction(self, instr, bb_label="unknown"):
         """
         降级一条 MIR 指令为 LIR 指令（调度表模式）。
 
         先分配结果位置，再通过调度表调用对应的降级方法。
+
+        P2（60-B2）稳定性修复：新增 bb_label 参数，供非 terminator 指令的
+        _require_ssa_loc 错误定位使用（对应 32 处 get(ssa,"") 替换）。
         """
         result = []
 
@@ -489,7 +497,7 @@ class LIRLowering:
         # 通过调度表查找对应的降级方法
         handler = self._instr_dispatch.get(type(instr))
         if handler is not None:
-            handler(instr, result)
+            handler(instr, result, bb_label)
 
         return result
 
@@ -499,40 +507,42 @@ class LIRLowering:
 
     # ---- 常量与加载 ----
 
-    def _lower_const(self, instr, result):
-        """降级常量加载"""
+    def _lower_const(self, instr, result, bb_label="unknown"):
+        """降级常量加载（60-B2 修复：result_name 位置严格化）"""
         lir = LIRLoadConst()
         lir.value = instr.value
         lir.const_type = instr.const_type
         if instr.result_name:
             lir.dst_loc = (
-                self.ssa_to_loc.get(instr.result_name, ""),
+                self._require_ssa_loc(instr.result_name, bb_label, "LIRLoadConst"),
                 instr.result_type,
             )
         result.append(lir)
 
-    def _lower_load_global(self, instr, result):
-        """降级全局变量加载"""
+    def _lower_load_global(self, instr, result, bb_label="unknown"):
+        """降级全局变量加载（60-B2 修复：result_name 位置严格化）"""
         lir = LIRLoadGlobal()
         lir.global_name = instr.name
         if instr.result_name:
             lir.dst_loc = (
-                self.ssa_to_loc.get(instr.result_name, ""),
+                self._require_ssa_loc(instr.result_name, bb_label, "LIRLoadGlobal"),
                 instr.result_type,
             )
         result.append(lir)
 
-    def _lower_store_global(self, instr, result):
+    def _lower_store_global(self, instr, result, bb_label="unknown"):
         """降级全局变量存储
 
         MIRStore 的 result_name 语义上等于存储的值，
         因此将其 LIR 位置覆盖为 value 的位置，
         以便 Phi 节点能正确引用。
+
+        60-B2 修复：value SSA 位置严格化（result_name 赋值前校验）。
         """
         lir = LIRStoreGlobal()
         lir.global_name = instr.name
         if instr.value:
-            value_loc = self.ssa_to_loc.get(instr.value, "")
+            value_loc = self._require_ssa_loc(instr.value, bb_label, "LIRStoreGlobal")
             lir.src_locs = [
                 (value_loc, instr.result_type)
             ]
@@ -545,49 +555,51 @@ class LIRLowering:
 
     # ---- 运算 ----
 
-    def _lower_binop(self, instr, result):
-        """降级二元运算"""
+    def _lower_binop(self, instr, result, bb_label="unknown"):
+        """降级二元运算（60-B2 修复：left/right/dst 三处 SSA 位置严格化）"""
         lir = LIRBinOp()
         lir.op = instr.op
         if instr.left:
             lir.src_locs = [
-                (self.ssa_to_loc.get(instr.left, ""), instr.result_type)
+                (self._require_ssa_loc(instr.left, bb_label, "LIRBinOp.left"), instr.result_type)
             ]
         if instr.right:
             lir.src_locs.append(
-                (self.ssa_to_loc.get(instr.right, ""), instr.result_type)
+                (self._require_ssa_loc(instr.right, bb_label, "LIRBinOp.right"), instr.result_type)
             )
         if instr.result_name:
             lir.dst_loc = (
-                self.ssa_to_loc.get(instr.result_name, ""),
+                self._require_ssa_loc(instr.result_name, bb_label, "LIRBinOp.dst"),
                 instr.result_type,
             )
         result.append(lir)
 
-    def _lower_unaryop(self, instr, result):
-        """降级一元运算"""
+    def _lower_unaryop(self, instr, result, bb_label="unknown"):
+        """降级一元运算（60-B2 修复：operand/dst 两处 SSA 位置严格化）"""
         lir = LIRUnaryOp()
         lir.op = instr.op
         if instr.operand:
             lir.src_locs = [
-                (self.ssa_to_loc.get(instr.operand, ""), instr.result_type)
+                (self._require_ssa_loc(instr.operand, bb_label, "LIRUnaryOp.operand"), instr.result_type)
             ]
         if instr.result_name:
             lir.dst_loc = (
-                self.ssa_to_loc.get(instr.result_name, ""),
+                self._require_ssa_loc(instr.result_name, bb_label, "LIRUnaryOp.dst"),
                 instr.result_type,
             )
         result.append(lir)
 
     # ---- 函数调用 ----
 
-    def _lower_call(self, instr, result):
+    def _lower_call(self, instr, result, bb_label="unknown"):
         """降级函数调用
 
         区分两种情况：
         1. callee 是函数字符串（如 "nova_fn_add"）-> 降级为 LIRCall（直接调用）
         2. callee 是 SSA 值（如 "v12"，代表闭包对象）-> 降级为 LIRCallIndirect
            此时 src_locs[0] 为闭包对象，src_locs[1:] 为实际参数
+
+        60-B2 修复：闭包 callee / 参数 / dst 所有 SSA 位置严格化（共 5 处 get→_require）。
         """
         # 判断 callee 是否为 SSA 值：SSA 值会在 ssa_to_loc 中有映射
         if instr.callee in self.ssa_to_loc:
@@ -597,20 +609,20 @@ class LIRLowering:
             # src_locs[0] = 被调用的闭包对象；[1:] = 实际参数
             lir.src_locs = [
                 (
-                    self.ssa_to_loc.get(instr.callee, ""),
+                    self._require_ssa_loc(instr.callee, bb_label, "LIRCallIndirect.callee"),
                     self.ssa_types.get(instr.callee, UNIT_TYPE),
                 )
             ]
             for arg_ssa in instr.args:
                 lir.src_locs.append(
                     (
-                        self.ssa_to_loc.get(arg_ssa, ""),
+                        self._require_ssa_loc(arg_ssa, bb_label, "LIRCallIndirect.arg"),
                         self.ssa_types.get(arg_ssa, UNIT_TYPE),
                     )
                 )
             if instr.result_name:
                 lir.dst_loc = (
-                    self.ssa_to_loc.get(instr.result_name, ""),
+                    self._require_ssa_loc(instr.result_name, bb_label, "LIRCallIndirect.dst"),
                     instr.result_type,
                 )
             result.append(lir)
@@ -619,127 +631,140 @@ class LIRLowering:
             lir = LIRCall()
             lir.callee = instr.callee
             lir.arg_locs = [
-                (self.ssa_to_loc.get(arg_ssa, ""), self.ssa_types.get(arg_ssa, UNIT_TYPE))
+                (self._require_ssa_loc(arg_ssa, bb_label, "LIRCall.arg"), self.ssa_types.get(arg_ssa, UNIT_TYPE))
                 for arg_ssa in instr.args
             ]
             lir.arg_count = len(instr.args)
             if instr.result_name:
                 lir.dst_loc = (
-                    self.ssa_to_loc.get(instr.result_name, ""),
+                    self._require_ssa_loc(instr.result_name, bb_label, "LIRCall.dst"),
                     instr.result_type,
                 )
             result.append(lir)
 
-    def _lower_closure_create(self, instr, result):
+    def _lower_closure_create(self, instr, result, bb_label="unknown"):
         """降级闭包创建
 
         将 MIRClosureCreate 降级为 LIRClosureCreate。
         传递函数名、捕获数量，并通过 src_locs 传递所有捕获变量的位置，
         使 C 后端能够生成环境数组填充代码。
+
+        60-B2 修复：result_name SSA 位置严格化（capture 位置使用 get(cap, cap)
+        策略：未注册时使用 SSA 名本身，支持外部全局变量引用，不做严格化）。
         """
         lir = LIRClosureCreate()
         lir.fn_name = instr.fn_name
         lir.capture_count = len(instr.captures) if hasattr(instr, "captures") else 0
         # 通过 src_locs 传递捕获变量的位置，供后端生成环境数组
         for cap_ssa in instr.captures:
+            # NOTE：capture 可能引用全局/外部 SSA（未在当前 ssa_to_loc 注册）
+            # 保持 get(cap, cap) 策略：未注册时使用 SSA 名本身（C 后端直接作为标识符使用）
             loc = self.ssa_to_loc.get(cap_ssa, cap_ssa)
             cap_type = self.ssa_types.get(cap_ssa, INT_TYPE)
             lir.src_locs.append((loc, cap_type))
         if instr.result_name:
             lir.dst_loc = (
-                self.ssa_to_loc.get(instr.result_name, ""),
+                self._require_ssa_loc(instr.result_name, bb_label, "LIRClosureCreate.dst"),
                 instr.result_type,
             )
         result.append(lir)
 
     # ---- 数据结构构建 ----
 
-    def _lower_list_build(self, instr, result):
+    def _lower_list_build(self, instr, result, bb_label="unknown"):
         """降级列表构建
 
         将所有元素通过 src_locs 传递，后端负责循环填充。
         每个元素的类型从 ssa_types 中查找，找不到则用 INT_TYPE 占位。
+
+        60-B2 修复：所有元素 SSA 位置 + dst 严格化（共 1+len(elements) 处）。
         """
         lir = LIRBuildList()
         lir.count = len(instr.elements)
         # 传递所有元素的位置和类型
         for elem_ssa in instr.elements:
-            elem_loc = self.ssa_to_loc.get(elem_ssa, "")
+            elem_loc = self._require_ssa_loc(elem_ssa, bb_label, "LIRBuildList.elem")
             elem_type = self.ssa_types.get(elem_ssa, INT_TYPE)
             lir.src_locs.append((elem_loc, elem_type))
         if instr.result_name:
             lir.dst_loc = (
-                self.ssa_to_loc.get(instr.result_name, ""),
+                self._require_ssa_loc(instr.result_name, bb_label, "LIRBuildList.dst"),
                 instr.result_type,
             )
         result.append(lir)
 
-    def _lower_list_append(self, instr, result):
-        """降级列表追加元素"""
+    def _lower_list_append(self, instr, result, bb_label="unknown"):
+        """降级列表追加元素（60-B2 修复：list/element/dst 三处 SSA 位置严格化）"""
         lir = LIRListAppend()
         if instr.list_ssa:
             lir.src_locs = [
-                (self.ssa_to_loc.get(instr.list_ssa, ""), instr.result_type)
+                (self._require_ssa_loc(instr.list_ssa, bb_label, "LIRListAppend.list"), instr.result_type)
             ]
         if instr.element_ssa:
             lir.src_locs.append(
-                (self.ssa_to_loc.get(instr.element_ssa, ""), instr.result_type)
+                (self._require_ssa_loc(instr.element_ssa, bb_label, "LIRListAppend.element"), instr.result_type)
             )
         if instr.result_name:
             lir.dst_loc = (
-                self.ssa_to_loc.get(instr.result_name, ""),
+                self._require_ssa_loc(instr.result_name, bb_label, "LIRListAppend.dst"),
                 instr.result_type,
             )
         result.append(lir)
 
-    def _lower_tuple_build(self, instr, result):
+    def _lower_tuple_build(self, instr, result, bb_label="unknown"):
         """降级元组构建
 
         将所有元素通过 src_locs 传递，后端负责循环填充。
+
+        60-B2 修复：元素 SSA 位置 + dst 严格化。
         """
         lir = LIRBuildTuple()
         lir.count = len(instr.elements)
         # 传递所有元素的位置和类型
         for elem_ssa in instr.elements:
-            elem_loc = self.ssa_to_loc.get(elem_ssa, "")
+            elem_loc = self._require_ssa_loc(elem_ssa, bb_label, "LIRBuildTuple.elem")
             elem_type = self.ssa_types.get(elem_ssa, INT_TYPE)
             lir.src_locs.append((elem_loc, elem_type))
         if instr.result_name:
             lir.dst_loc = (
-                self.ssa_to_loc.get(instr.result_name, ""),
+                self._require_ssa_loc(instr.result_name, bb_label, "LIRBuildTuple.dst"),
                 instr.result_type,
             )
         result.append(lir)
 
-    def _lower_map_build(self, instr, result):
+    def _lower_map_build(self, instr, result, bb_label="unknown"):
         """降级 Map 构建
 
         将键值对通过 src_locs 传递（key, value, key, value... 交替排列），
         后端负责循环插入。
+
+        60-B2 修复：key/val SSA 位置 + dst 严格化（每 entry 2 处 + 1 dst）。
         """
         lir = LIRBuildMap()
         lir.entry_count = len(instr.entries)
         # 交替传递 key 和 value
         for key_ssa, val_ssa in instr.entries:
-            key_loc = self.ssa_to_loc.get(key_ssa, "")
+            key_loc = self._require_ssa_loc(key_ssa, bb_label, "LIRBuildMap.key")
             key_type = self.ssa_types.get(key_ssa, INT_TYPE)
             lir.src_locs.append((key_loc, key_type))
-            val_loc = self.ssa_to_loc.get(val_ssa, "")
+            val_loc = self._require_ssa_loc(val_ssa, bb_label, "LIRBuildMap.val")
             val_type = self.ssa_types.get(val_ssa, INT_TYPE)
             lir.src_locs.append((val_loc, val_type))
         if instr.result_name:
             lir.dst_loc = (
-                self.ssa_to_loc.get(instr.result_name, ""),
+                self._require_ssa_loc(instr.result_name, bb_label, "LIRBuildMap.dst"),
                 instr.result_type,
             )
         result.append(lir)
 
-    def _lower_adt_build(self, instr, result):
+    def _lower_adt_build(self, instr, result, bb_label="unknown"):
         """降级 ADT 构建
 
         将所有字段通过 src_locs 传递，后端负责循环填充。
         type_name 和 variant_name 作为附加信息通过 type_tag 暂存
         （后端可通过类型表查询）。
+
+        60-B2 修复：fields SSA 位置 + dst 严格化。
         """
         lir = LIRBuildADT()
         lir.field_count = len(instr.fields)
@@ -747,47 +772,47 @@ class LIRLowering:
         lir.variant_name = instr.variant_name
         # 传递所有字段的位置和类型
         for field_ssa in instr.fields:
-            field_loc = self.ssa_to_loc.get(field_ssa, "")
+            field_loc = self._require_ssa_loc(field_ssa, bb_label, "LIRBuildADT.field")
             field_type = self.ssa_types.get(field_ssa, INT_TYPE)
             lir.src_locs.append((field_loc, field_type))
         if instr.result_name:
             lir.dst_loc = (
-                self.ssa_to_loc.get(instr.result_name, ""),
+                self._require_ssa_loc(instr.result_name, bb_label, "LIRBuildADT.dst"),
                 instr.result_type,
             )
         result.append(lir)
 
     # ---- 访问操作 ----
 
-    def _lower_field_access(self, instr, result):
-        """降级字段访问"""
+    def _lower_field_access(self, instr, result, bb_label="unknown"):
+        """降级字段访问（60-B2 修复：object/dst 两处 SSA 位置严格化）"""
         lir = LIRFieldAccess()
         lir.offset = instr.field_index
         if instr.object:
             lir.src_locs = [
-                (self.ssa_to_loc.get(instr.object, ""), instr.result_type)
+                (self._require_ssa_loc(instr.object, bb_label, "LIRFieldAccess.object"), instr.result_type)
             ]
         if instr.result_name:
             lir.dst_loc = (
-                self.ssa_to_loc.get(instr.result_name, ""),
+                self._require_ssa_loc(instr.result_name, bb_label, "LIRFieldAccess.dst"),
                 instr.result_type,
             )
         result.append(lir)
 
-    def _lower_index_access(self, instr, result):
-        """降级索引访问"""
+    def _lower_index_access(self, instr, result, bb_label="unknown"):
+        """降级索引访问（60-B2 修复：object/index/dst 三处 SSA 位置严格化）"""
         lir = LIRIndex()
         if instr.object:
             lir.src_locs = [
-                (self.ssa_to_loc.get(instr.object, ""), instr.result_type)
+                (self._require_ssa_loc(instr.object, bb_label, "LIRIndex.object"), instr.result_type)
             ]
         if instr.index:
             lir.src_locs.append(
-                (self.ssa_to_loc.get(instr.index, ""), instr.result_type)
+                (self._require_ssa_loc(instr.index, bb_label, "LIRIndex.index"), instr.result_type)
             )
         if instr.result_name:
             lir.dst_loc = (
-                self.ssa_to_loc.get(instr.result_name, ""),
+                self._require_ssa_loc(instr.result_name, bb_label, "LIRIndex.dst"),
                 instr.result_type,
             )
         result.append(lir)

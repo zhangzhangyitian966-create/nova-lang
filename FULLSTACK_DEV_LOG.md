@@ -5,6 +5,171 @@
 ---
 
 
+## 第 62 轮 — 2026-07-30 07:01
+
+> 🎨⚙️ **普通轮** | 前端：ForExpr 非 List 迭代器静默降级修复（P1 正确性漏洞，code_audit_60 前端 2/3 清零） | 后端：lir_lowering 32 处非 terminator SSA 静默回退清零（60-B2 稳定性，code_audit_60 后端 2/3 清零） | 测试 1116 passed（基线 1114，+2 新增，0 回归） | code_audit_60 合计 4/6 清零 | 下次评审第 63 轮（评审轮）
+
+---
+
+### 轮次概览
+
+| 维度 | 数据 |
+|------|------|
+| 轮次 | **第 62 轮（普通轮）** — N=62，62%3=2 |
+| 基线测试快照 | 1114 passed, 97 warnings |
+| 最终测试 | **1116 passed, 97 warnings**（+2 新增测试，0 回归） |
+| 前端完成率 | 42/44 = **95.5%**（+2.3pp，ForExpr 静默降级漏洞清零） |
+| 后端完成率 | 49/72 = **68.1%**（+1.4pp，32 处 SSA 静默回退清零） |
+| 总完成率 | 91/116 = **78.4%**（+1.7pp） |
+| code_audit_60 进度 | 前端 3 项 2/3 清零 + 后端 3 项 2/3 清零（合计 4/6，↑2/6） |
+| 下次评审 | 第 63 轮（N=63，63%3=0，评审轮） |
+
+---
+
+### 前端任务：frontend_for_expr_non_list_fix — 修复 ForExpr 非 List 迭代器静默降级为 TypeVar 的类型系统漏洞（P1 正确性）
+
+**任务**：`frontend_for_expr_non_list_fix` | easy | **P88（P1 前端正确性漏洞，code_audit_60 3 项最高优先级）**
+
+**为什么选这个**：code_audit_60 前端 3 项清零进度 1/3（仅测试盲区补齐完成），剩余 2 项中 ForExpr 静默降级为 P1 级正确性缺陷（严重度高于 parser 错误恢复 P2），路线图明确第 62 轮前端主攻此任务。真实 bug：type_checker.py L820-825 未强制检查 iterable 必须是 ListType，`for x in 42` / `for x in "string"` / `for x in true` / `for x in Some(1)` 等语义错误代码**悄无声息地通过类型检查**，循环变量 x 的类型被污染为未绑定 TypeVar("for_elem")，后续 x 的所有使用都无类型错误信息，直接运行时崩溃。依赖全部满足：第 59 轮已完成 `_error()` 统一出口，错误抛出基础设施就绪，风险极低（仅新增守卫逻辑，不影响 ListType 分支的现有正确路径）。
+
+**预期价值**：code_audit_60 前端 3 项清零 2/3；前端完成率从 93.2% → 95.5%（+2.3pp）；前端积压仅剩 parser 错误恢复扩展 1 项（P78）。
+
+**实现详情**（修改 2 个文件：`type_checker.py` ~11 行 + `tests/test_type_checker.py` ~41 行）：
+
+#### 1. type_checker.py — _check_for_expr 守卫逻辑修复（L820-832）
+
+原实现：
+```python
+else:  # 非 range 路径
+    iter_ty = self.check_expr(expr.iterable)
+    if isinstance(iter_ty, ListType):
+        elem_ty = iter_ty.elem_type
+    else:
+        elem_ty = TypeVar("for_elem")  # ← 漏洞点：静默降级
+```
+
+修复后（7 行替换为 12 行）：
+```python
+else:  # 非 range 路径
+    iter_ty = self.check_expr(expr.iterable)
+    if isinstance(iter_ty, ListType):
+        elem_ty = iter_ty.elem_type
+    else:
+        # 非 List 迭代器：类型系统漏洞修复 — 不再静默降级为 TypeVar
+        # TODO: 未来支持 Iterator trait 时，此处可扩展为检查 has_iter 协议
+        self._error(
+            f"for 循环只能遍历 List 类型，当前为 {iter_ty}",
+            expr=expr.iterable,
+        )
+        # _error 内部会 raise；此处仅为类型检查器可达性提示
+        elem_ty = INT_T
+```
+
+**关键设计**：
+- 错误消息格式与 `_check_while_expr`（L839）保持一致：`"for 循环只能遍历 List 类型，当前为 {actual}"`
+- 错误位置精确落在 `expr.iterable` 而非整个 for_expr（`expr=expr.iterable`），IDE 下划线正好标在 `42` / `"hello"` / `true` 等错误值上
+- 走第 59 轮统一的 `_error()` 出口：自动包含 `source_code` + line/col + `-->` 标记（无需手动传参数）
+- 保留 Iterator trait TODO 注释，未来扩展不破坏现有设计
+
+#### 2. tests/test_type_checker.py — 测试更新（净增 +2）
+
+Cycle 61 写入的 **test_for_non_list_iterable_current_behavior**（assertIsNone 作为当前行为基线）→ 替换为 3 个正向断言测试：
+
+| 测试名 | 覆盖场景 | 断言关键字 |
+|--------|----------|-----------|
+| `test_for_non_list_iterable_int_raises_error` | `for x in 42`（Int 非 List） | 含 "for" + "List" + "Int" + line/col ≥1 |
+| `test_for_non_list_iterable_string_raises_error` | `for x in "hello"`（String 非 List） | 含 "for" + "List" + "String" + line/col ≥1 |
+| `test_for_non_list_iterable_bool_raises_error` | `for x in true`（Bool 非 List） | 含 "for" + "List" + "Bool" + line/col ≥1 |
+
+**测试设计理由**：
+- 3 个场景覆盖基础类型三大类（数值/字符串/布尔），保证完备性
+- 每个场景 5 项断言（非 None + for/List/实际类型 + 位置双 ≥1），15 个断言全量验证错误质量
+- 命名与场景 1-7 风格对齐（`test_<场景>_has_location` 系列前缀）
+
+**净增 +2 测试**：原 1 个基线测试替换为 3 个正向测试，净增 2。
+
+---
+
+### 后端任务：backend_lir_nonterm_ssa_strict — lir_lowering.py 32 处非 terminator 指令 get(ssa,"") 静默回退替换为 _require_ssa_loc（60-B2 稳定性清零）
+
+**任务**：`backend_lir_nonterm_ssa_strict` | medium | **P80（P2 级稳定性，code_audit_60 后端 3 项次高优先级）**
+
+**为什么选这个**：code_audit_60 后端 3 项清零进度 1/3（仅 MIR Phi 一致性完成），剩余 2 项中 60-B2（32 处静默回退 P80 medium）明显先于 60-B3（native 复杂度重构 P85 hard）。真实风险：ir/lir_lowering.py terminator 7 处已在 cycle 59 迁移到 `_require_ssa_loc()`，但 14 个降级方法的 32 处非 terminator 指令（常量加载/全局加载/全局存储/二元运算/一元运算/间接+直接调用/闭包创建/列表构建&追加/元组构建/Map 构建/ADT 构建/字段访问/索引访问）仍使用 `self.ssa_to_loc.get(ssa_name, "")`，当 SSA 构建异常（前向引用、Phi 循环依赖、降级顺序错）时下游可能：(a) Native 后端生成非法机器码并被后端吞异常 → **错二进制静默运行时崩溃**；(b) C 后端生成 `(int64_t) = 5;` 无效表达式 → GCC syntax error 但**无法定位到 Nova 编译器哪一层出错**。模式已验证：第 59 轮 terminator 7 处迁移零回归；依赖全部满足：`_require_ssa_loc()` 方法已存在（L101-136）。
+
+**预期价值**：code_audit_60 后端 3 项清零 2/3；lir_lowering.py SSA 位置查找防御性检查覆盖率从 7/39 = 17.9% → 39/39 = **100%**；后端完成率 66.7% → 68.1%（+1.4pp）。
+
+**实现详情**（修改 1 个文件 `ir/lir_lowering.py`，约 210 行修改：32 处替换 + 16 处签名扩展 + 3 处调用链传递）：
+
+#### 改动分层（零风险增量）
+
+| 层级 | 改动内容 | 行数 | 风险 |
+|------|----------|------|------|
+| **L1. 签名泛化** | `_require_ssa_loc` 参数 `terminator_kind` → `instr_kind`，错误消息 3 处同步更新；文档扩展说明两轮清零背景 | ~18 行 | 极低（仅参数名/字符串变更，terminator 7 处调用语义仍成立） |
+| **L2. 调用链传递** | `_lower_block_instructions` → `_lower_instruction(bb_label=)` → 调度表 handler 第三参数传递；三处文档注释说明 60-B2 修复 | ~12 行 | 低（bb_label 仅用于错误消息，不参与控制流） |
+| **L3. Handler 签名扩展** | 14 个降级方法签名统一加第三参数 `bb_label="unknown"`（保持向后兼容：旧调用方式不传参即可工作）；每个方法 docstring 追加 60-B2 修复说明 | ~14 处签名 + ~30 行注释 | 极低（仅新增可选参数，默认值=旧行为） |
+| **L4. 32 处核心替换** | 所有 `.get(ssa, "")` → `_require_ssa_loc(ssa, bb_label, "<精确指令类型>")`；instr_kind 精确到子字段（如 `LIRBinOp.left` / `LIRCall.arg` / `LIRBuildMap.key`），错误消息可直接定位到哪条指令的哪个字段 | 32 处替换 | 中（数量多但模式机械重复，已与 terminator 路径对齐） |
+| **L5. 例外处理** | `_lower_closure_create` 的 capture SSA 保持 `get(cap, cap)` 策略（capture 可引用未注册的全局/外部 SSA，未做严格化），附带注释说明理由 | ~4 行注释 | —（显式保留） |
+
+#### 32 处替换覆盖明细（按指令类别 × src/dst）
+
+| 类别 | 方法 | 替换位置数 | instr_kind 命名示例 |
+|------|------|-----------|---------------------|
+| 常量加载 | `_lower_const` | 1（dst） | `LIRLoadConst` |
+| 全局加载 | `_lower_load_global` | 1（dst） | `LIRLoadGlobal` |
+| 全局存储 | `_lower_store_global` | 1（value src） | `LIRStoreGlobal` |
+| 二元运算 | `_lower_binop` | 3（left / right / dst） | `LIRBinOp.left`、`.right`、`.dst` |
+| 一元运算 | `_lower_unaryop` | 2（operand / dst） | `LIRUnaryOp.operand` |
+| 间接调用 | `_lower_call` 分支 1 | 3（callee / arg / dst） | `LIRCallIndirect.callee`、`.arg`、`.dst` |
+| 直接调用 | `_lower_call` 分支 2 | 2（arg / dst） | `LIRCall.arg`、`.dst` |
+| 闭包创建 | `_lower_closure_create` | 1（dst） | `LIRClosureCreate.dst` |
+| 列表构建 | `_lower_list_build` | 1+N（elem / dst） | `LIRBuildList.elem`、`.dst` |
+| 列表追加 | `_lower_list_append` | 3（list / element / dst） | `LIRListAppend.list`、`.element` |
+| 元组构建 | `_lower_tuple_build` | 1+N（elem / dst） | `LIRBuildTuple.elem`、`.dst` |
+| Map 构建 | `_lower_map_build` | 2×N+1（key / val / dst） | `LIRBuildMap.key`、`.val`、`.dst` |
+| ADT 构建 | `_lower_adt_build` | 1+N（field / dst） | `LIRBuildADT.field`、`.dst` |
+| 字段访问 | `_lower_field_access` | 2（object / dst） | `LIRFieldAccess.object`、`.dst` |
+| 索引访问 | `_lower_index_access` | 3（object / index / dst） | `LIRIndex.object`、`.index`、`.dst` |
+| **合计** | **14 个方法** | **32 处**（不含 elem/field 循环内的可变数量） | 错误消息粒度到"指令类型+字段名" |
+
+#### 二次确认（无遗漏）
+
+Grep `.get([^)]+, "")` 全文件仅剩 **L104 注释行** 1 处（说明文档字符串中的引用，非代码），32 处生产代码全部清零。
+
+---
+
+### 测试前后对比
+
+| 指标 | 开发前（第 61 轮快照） | 开发后（第 62 轮快照） | 变化 |
+|------|----------------------|----------------------|------|
+| 全量测试通过数 | 1114 passed | **1116 passed** | **+2**（前端 3 个测试替换原 1 个基线，净增 2） |
+| warnings 数量 | 97（Cranelift 弃用 + CCodeGen 弃用） | 97（同上） | 持平（0 新增警告） |
+| 回归数 | — | 0 | ✅ 无回归 |
+| stderr Phi 不一致警告 | 0 条 | 0 条 | ✅ 观察期零触发 |
+| `_require_ssa_loc` 覆盖率（SSA 查找） | 7/39 = 17.9%（仅 terminator） | **39/39 = 100%** | ✅ 全路径防御性检查 |
+| 前端完成率 | 41/44 = 93.2% | 42/44 = **95.5%** | +2.3pp |
+| 后端完成率 | 48/72 = 66.7% | 49/72 = **68.1%** | +1.4pp |
+| 总完成率 | 89/116 = 76.7% | 91/116 = **78.4%** | +1.7pp |
+| code_audit_60 前端 3 项 | 1/3 清零 | **2/3 清零**（+1：ForExpr 静默降级） | 剩余 1 项：parser 错误恢复扩展 P78 |
+| code_audit_60 后端 3 项 | 1/3 清零 | **2/3 清零**（+1：32 处静默回退） | 剩余 1 项：native 复杂度重构 P85 hard |
+
+---
+
+### 前后端下一步（第 63 轮，评审轮）
+
+**第 63 轮 = 评审轮（N=63，63%3=0）**：不做新功能开发，执行双线路线图评审。
+
+**评审范围**：第 61-62 两轮普通开发（第 60 轮评审后 2 轮）。
+
+**评审关注点（预）**：
+1. **code_audit_60 终局**：剩余 2 项（前端 parser 错误恢复 P78 + 后端 native 复杂度 P85 hard）→ 第 63 轮评审后定在第 64/65 轮执行
+2. **前后端平衡再评估**：前端 42/44=95.5%（仅剩 1 项，几乎排空） vs 后端 49/72=68.1%（仍有 8 项积压）→ 是否继续维持 前端:后端 = 1:2 的任务比例（第 60 轮评审建议）
+3. **Native 后端质量**：_emit_runtime_call CC=25 + _emit_call CC=21 重构作为可维护性 Top1+Top2，硬拆分风险高→评审时确定分阶段提取策略（先抽公共子方法再拆主体）
+4. **Phi 不一致升级**：cycle 61 + 62 两轮观察期零 stderr 警告，可在第 64/65 轮升级为 `raise MIRLoweringError` 并新增类型冲突 MIR 输入测试
+5. **任务池更新**：前端排空后是否补充新方向（LSP 语义错误、type_checker 行覆盖率目标 90% 等），后端 8 项积压是否需要新增高优（如 native 后端 SIMD / DWARF 调试符号）
+
+---
+
+
 ## 第 61 轮 — 2026-07-30 04:01
 
 > 🎨⚙️ **普通轮** | 前端：补齐 type_checker 8 类核心测试盲区（+15 用例，P2 清零） | 后端：MIR Phi 节点类型一致性 P1-4 修复（code_audit_57 9 项 9/9 全部清零里程碑达成） | 测试 1114 passed（基线 1099，+15 新增，0 回归） | code_audit_60 前端 3 项清零 1/3，后端 3 项清零 1/3 | 下次评审第 63 轮

@@ -1,7 +1,7 @@
 {
-    "cycles": 61,
-    "frontend_completed": 41,
-    "backend_completed": 48,
+    "cycles": 62,
+    "frontend_completed": 42,
+    "backend_completed": 49,
     "last_review_cycle": 57,
     "current_review_cycle": 60,
     "completed_tasks": [
@@ -107,7 +107,9 @@
         "backend_lir_term_ssa_defensive",
         "review_cycle_60",
         "frontend_typecheck_test_coverage",
-        "backend_mir_phi_type_consistency"
+        "backend_mir_phi_type_consistency",
+        "frontend_for_expr_non_list_fix",
+        "backend_lir_nonterm_ssa_strict"
     ],
     "failed_tasks": [],
     "deprecated_tasks": [
@@ -123,6 +125,28 @@
         "backend_wasm_wat_indent_verify"
     ],
     "task_history": [
+        {
+            "cycle": 62,
+            "task_id": "frontend_for_expr_non_list_fix",
+            "name": "修复 ForExpr iterable 非 List 类型时静默降级为 TypeVar 的类型系统漏洞（P1 正确性）",
+            "track": "frontend",
+            "difficulty": "easy",
+            "priority": 88,
+            "result": "success",
+            "details": "P1 前端正确性漏洞清零（code_audit_60 前端 3 项清零 2/3）。type_checker.py L824-825：原实现未强制检查 iterable 必须是 ListType，非 List（Int/String/Bool/Option 等）直接取 TypeVar(\"for_elem\") 作为 elem 绑定类型，`for x in 42` / `for x in \"string\"` 等语义错误代码静默通过→x 类型全部污染为未绑定 TypeVar→运行时崩溃。修复：else 分支调用 _error(\"for 循环只能遍历 List 类型，当前为 {actual}\", expr=expr.iterable) 走第 59 轮统一的 _error() 出口抛出 TypeCheckError，保留 Iterator trait TODO 注释；后续不可达 INT_T 仅为类型检查器可达性提示。测试更新：将 cycle 61 写入的 test_for_non_list_iterable_current_behavior（assertIsNone 作为降级基线）替换为 3 个正向断言测试（Int/String/Bool 三类非 List 迭代器均抛 TypeCheckError，错误消息含 for/List/实际类型 + line/col/source_code），净增 +2 测试。修改 2 个文件：type_checker.py ~11 行，tests/test_type_checker.py ~41 行。测试 1114 → 1116 passed，0 回归。code_audit_60 前端 3 项 2/3 清零。前端完成率 42/44 = 95.5%（+2.3pp）。",
+            "timestamp": "2026-07-30 07:01"
+        },
+        {
+            "cycle": 62,
+            "task_id": "backend_lir_nonterm_ssa_strict",
+            "name": "lir_lowering.py 32 处非 terminator 指令 get(ssa_name, \"\") 静默回退替换为 _require_ssa_loc（60-B2 稳定性清零）",
+            "track": "backend",
+            "difficulty": "medium",
+            "priority": 80,
+            "result": "success",
+            "details": "P2 级稳定性清零（code_audit_60 后端 3 项清零 2/3）。ir/lir_lowering.py：terminator 7 处已在 cycle 59 迁移到 _require_ssa_loc，但 32 处非 terminator（常量加载/全局加载/全局存储/二元运算/一元运算/间接+直接调用/闭包创建/列表构建&追加/元组构建/Map构建/ADT构建/字段访问/索引访问，共 14 个降级方法）仍使用 get(ssa, \"\")，SSA 名找不到时空字符串可能导致：(a) Native 后端生成非法机器码静默吞异常→错二进制；(b) C 后端生成 `(int64_t) = 5;` 无效表达式→GCC syntax error 但无法定位到 Nova 编译器层。修复（分层零风险）：(1) _require_ssa_loc 签名泛化：参数 terminator_kind 重命名为 instr_kind，错误消息 3 处同步更新；(2) 调用链传递 bb_label：_lower_block_instructions 循环传入 bb.label→_lower_instruction(bb_label=)→调度表 handler 第三参数传递；(3) 14 个 handler 方法签名新增可选 bb_label=\"unknown\" 保持向后兼容；(4) 32 处 get(ssa, \"\") 全部替换为 _require_ssa_loc(ssa, bb_label, \"LIRBinOp.left\" 等精确指令类型名)；(5) 闭包捕获 SSA 保持 get(cap, cap) 策略（capture 可引用未注册的全局/外部 SSA，未做严格化，附有注释说明）。修改 1 个文件 ir/lir_lowering.py，替换 32 处 + 签名 16 处 + 调用链 3 处，共约 210 行修改。Grep 二次确认代码中仅剩注释行 1 处 `.get(ssa, \"\")`，无遗漏。全量 1116 passed 0 回归（含 53 个 native 后端测试、63 个 IR 专项、176 个后端专项）。code_audit_60 后端 3 项 2/3 清零。后端完成率 49/72 = 68.1%（+1.4pp）。",
+            "timestamp": "2026-07-30 07:01"
+        },
         {
             "cycle": 61,
             "task_id": "frontend_typecheck_test_coverage",
@@ -225,7 +249,7 @@
             "difficulty": "medium",
             "priority": 80,
             "estimated_effort": "2-4小时",
-            "status": "pending",
+            "status": "completed",
             "source": "code_audit_60 确认 32 处剩余",
             "depends_on": [],
             "severity": "P2"
@@ -251,7 +275,7 @@
             "difficulty": "easy",
             "priority": 88,
             "estimated_effort": "30-60分钟",
-            "status": "pending",
+            "status": "completed",
             "source": "code_audit_60 发现的正确性缺陷",
             "depends_on": [],
             "severity": "P1"

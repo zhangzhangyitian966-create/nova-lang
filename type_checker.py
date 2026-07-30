@@ -822,7 +822,14 @@ class TypeChecker:
             if isinstance(iter_ty, ListType):
                 elem_ty = iter_ty.elem_type
             else:
-                elem_ty = TypeVar("for_elem")
+                # 非 List 迭代器：类型系统漏洞修复 — 不再静默降级为 TypeVar
+                # TODO: 未来支持 Iterator trait 时，此处可扩展为检查 has_iter 协议
+                self._error(
+                    f"for 循环只能遍历 List 类型，当前为 {iter_ty}",
+                    expr=expr.iterable,
+                )
+                # _error 内部会 raise；此处仅为类型检查器可达性提示
+                elem_ty = INT_T
 
         # 检查循环体类型
         child_env = self.env.child()
