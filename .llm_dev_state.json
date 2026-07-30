@@ -1,11 +1,11 @@
 {
-  "cycles": 78,
+  "cycles": 79,
   "architecture_strategy": {
     "document": "ARCHITECTURE_VISION.md",
     "effective_date": "2026-07-29",
     "backup_tag": "llm-dev-arch-decision-20260729-1658",
     "immediate_surgeries_deadline": 2,
-    "note": "架构战略正式生效。三项立即手术（拆ir_nodes/隔离旧C后端/弃用Cranelift）必须在cycles=80前完成。剩余2轮（79、80）必须完成5个子任务（a1/a2/a3/phase1/deprecate_cranelift）。"
+    "note": "架构战略正式生效。三项立即手术（拆ir_nodes/隔离旧C后端/弃用Cranelift）必须在cycles=80前完成。已推进手术C（100%）+手术A1（100%），剩余1轮（80轮）需完成a2/a3/phase1（3个子任务）。"
   },
   "task_selection_rules": [
     "1. 审查驱动任务 ≥1 个/轮（来自 AUTO_REVIEW_LOG.md CRITICAL+HIGH+TOP10 MEDIUM）",
@@ -29,7 +29,11 @@
         "unify_c_backend_phase1",
         "deprecate_cranelift_backend"
       ],
-      "progress": "0/5"
+      "progress": "2/5",
+      "sub_tasks_done": [
+        "deprecate_cranelift_backend",
+        "split_ir_nodes_a1"
+      ]
     },
     {
       "id": "M-MEM",
@@ -261,14 +265,46 @@
     "wasm_backend_fill_instructions",
     "wasm_control_flow_rewrite",
     "wasm_global_vars_fix",
-    "wasmgc_storereg"
+    "wasmgc_storereg",
+    "deprecate_cranelift_backend",
+    "split_ir_nodes_a1"
   ],
   "failed_tasks": [
     "fix_native_test_import",
-    "split_ir_nodes_a1",
     "unify_c_backend_phase1"
   ],
   "task_history": [
+    {
+      "cycle": 79,
+      "date": "2026-07-30 00:47",
+      "tasks": [
+        {
+          "name": "deprecate_cranelift_backend",
+          "task_id": "deprecate_cranelift_backend",
+          "source": "review_driven + arch_surgery_C",
+          "source_label": "【审查驱动/架构债务】手术C",
+          "status": "success",
+          "description": "弃用Cranelift后端（DeprecationWarning + 文档 + 推荐替代）",
+          "reason": "第1512轮审查 + 第78轮评审最高优先级任务：ARCHITECTURE_VISION.md §2.3「立即架构手术C」强制执行。Cranelift后端功能严重残缺（_compile_index stub/闭包iconst 0）、0端到端测试、无法自举（需外部Rust工具链）。为Self-Hosting扫清架构债务。",
+          "details": "1. backend/cranelift_backend.py：模块级+类级+方法级docstring统一标记deprecated v0.3.x，移除时间表v0.5.0；__init__挂DeprecationWarning含4条弃用原因+3条替代后端推荐+§2.3文档引用；CRANELIFT_TYPE_MAP补docstring+deprecated标记。2. backend/__init__.py：重写模块docstring，列出三条活跃后端管线对比表，M-ARCH里程碑手术进度面板（手术C完成打勾），补__all__导出。3. 5处实例化CraneliftBackend的测试点正确触发DeprecationWarning但行为完全保留。"
+        },
+        {
+          "name": "split_ir_nodes_a1",
+          "task_id": "split_ir_nodes_a1",
+          "source": "review_driven + arch_surgery_A-1",
+          "source_label": "【审查驱动/架构债务】手术A-1",
+          "status": "success",
+          "description": "拆分ir_nodes A1：抽 ir_types.py（通用类型系统）",
+          "reason": "第78轮评审明确第79轮首选任务 + ARCHITECTURE_VISION.md §2.1「立即架构手术A」强制执行。ir/ir_nodes.py 1413行112类，连续10+轮审查MEDIUM级class_too_large钉子户，Self-Hosting前必须分拆为可管理的子模块。A1为零破坏性迁移第一步：仅移动类型定义（约105行）+ 兼容re-export层。之前第78轮失败是因为改动过大（尝试一次性拆HIR节点），本轮严格限制A1范围只动类型。",
+          "details": "1. 新建 ir/ir_types.py（258行）：IRType枚举（15种）、NovaType统一类型表示（kind/params/name三字段+__eq__/__hash__/__repr__）、8个零参类型单例（INT_TYPE…CLOSURE_TYPE）、7个参数化工厂函数（ListType/MapType/TupleType/FnType/ADTType/OptionType/ResultType），模块级docstring说明拆分背景+A1/A2/A3三步时间表。2. 改造 ir/ir_nodes.py（1413→1358行，约省55行）：L18-L126原类型定义段替换为from .ir_types import (...) 兼容re-export，补显式__all__导出18个类型符号，模块docstring加M-ARCH手术A进度面板。3. 升级 ir/__init__.py：从空docstring升级为含M-ARCH手术进度+推荐导入路径，新增顶层re-export让`from nova.ir import IRType`旧用法继续工作。4. 身份一致性验证通过：from ir_types / ir_nodes / nova.ir 三条路径导入的IRType/NovaType/INT_TYPE/ListType 全部 is 同一对象。"
+        }
+      ],
+      "test_before": "427 passed, 20 subtests passed (5 核心文件 baseline)",
+      "test_after": "1099 passed, 6 warnings (all DeprecationWarning · expected), 31 subtests passed (all test files)",
+      "review_alignment": "100% (2/2) — 两个任务均为审查驱动（class_too_large钉子户/Cranelift stub问题）+ 架构战略强制",
+      "arch_surgery_count": "2/2 (架构债务占比 100%，远超≥50%硬约束)",
+      "next_plan": "第80轮（M-ARCH截止轮）必须完成剩余3/5子任务：① unify_c_backend_phase1（手术B，P90，medium，旧C路径deprecated标记+入口点清理）② split_ir_nodes_a2（手术A-2，P90，medium，按层拆hir.py/mir.py/lir.py+兼容re-export）③ split_ir_nodes_a3（手术A-3，P88，easy，确认无外部依赖后ir_nodes变薄为纯re-export）审查对齐filler（如有余力）：refactor_convert_nova_to_json_cc13、refactor_iter_hir_children_cc13"
+    },
     {
       "cycle": 78,
       "task_id": "review_cycle_78",
@@ -887,12 +923,14 @@
       "priority": 90,
       "category": "architecture",
       "estimated": "2-3 小时",
-      "status": "pending",
+      "status": "completed",
       "depends_on": [],
       "reason": "来自 ARCHITECTURE_VISION.md §2.1 手术 A-1（三项立即架构手术） [ARCHITECTURE_VISION.md §2.1]",
       "source": "architecture_mandatory",
       "fail_count": 1,
-      "last_fail_cycle": 78
+      "last_fail_cycle": 78,
+      "completed_cycle": 79,
+      "completed_at": "2026-07-30T00:47:22.485799"
     },
     {
       "id": "low_quality_issues_cleanup",
@@ -955,9 +993,11 @@
       "priority": 85,
       "category": "architecture",
       "estimated": "1-2 小时",
-      "status": "pending",
+      "status": "completed",
       "depends_on": [],
-      "reason": "[ARCHITECTURE_VISION.md §2.3 强制] 立即瘦身手术。Cranelift后端调度表仅17条指令（Wasm24/Native29），_compile_store_reg是空实现pass，0独立测试，ADT/Map/List构建只调_new不填充元素。价值与Wasm后端高度重叠，但Wasm后端已完整端到端可用。[自主发现→架构战略强制]"
+      "reason": "[ARCHITECTURE_VISION.md §2.3 强制] 立即瘦身手术。Cranelift后端调度表仅17条指令（Wasm24/Native29），_compile_store_reg是空实现pass，0独立测试，ADT/Map/List构建只调_new不填充元素。价值与Wasm后端高度重叠，但Wasm后端已完整端到端可用。[自主发现→架构战略强制]",
+      "completed_cycle": 79,
+      "completed_at": "2026-07-30T00:47:22.485873"
     },
     {
       "id": "allocator_api_step2",

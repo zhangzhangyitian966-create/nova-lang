@@ -1,8 +1,24 @@
 """
-Nova Cranelift 后端
-将 LIR 转换为 Cranelift IR（.clif 格式），然后编译为原生机器码。
+Nova Cranelift 后端（已弃用）
 
-Cranelift 本身是 Rust 库，Python 无法直接调用。我们采用两种策略：
+.. deprecated:: v0.3.x
+    根据 ARCHITECTURE_VISION.md 第 2.3 节「立即架构手术 C」，
+    Cranelift 后端已正式弃用，将在 v0.5.0 版本中移除。
+
+    **推荐替代方案：**
+    - Native x86_64 后端（`backend/native_backend.py`）：直接生成 ELF
+    - C 后端（`backend/lir_c_backend.py`）：LIR → C → GCC/Clang 编译
+    - WasmGC 后端（`backend/wasm_backend.py`）：输出 WasmGC 字节码
+
+弃用原因（2026-07-29 架构战略决策）：
+1. 功能严重残缺：_compile_index 硬编码 v0+0、闭包支持仅 iconst 0 占位
+2. 0 端到端测试覆盖：仅 4 个存在性测试，无算术/控制流/数据结构断言
+3. 无法自举：Python 侧无法直接调用 Rust 库（clif-util 外部依赖）
+4. 维护成本 > 收益：3 条活跃后端路径已足够覆盖编译目标
+
+原功能简述（仅供历史参考）：
+将 LIR 转换为 Cranelift IR（.clif 格式），然后编译为原生机器码。
+Cranelift 本身是 Rust 库，Python 无法直接调用。原采用两种策略：
 1. 生成 Cranelift IR 文本（.clif 格式），然后调用 clif-util 编译
 2. 作为 fallback，保存 .clif 文件供后续使用
 """
@@ -11,6 +27,7 @@ import os
 import platform
 import subprocess
 import tempfile
+import warnings
 from typing import Dict, List
 
 from ..ir.ir_nodes import (
@@ -40,8 +57,16 @@ from ..ir.ir_nodes import (
     NovaType,
 )
 
-# Cranelift IR 类型映射
-CRANELIFT_TYPE_MAP = {
+# ---------------------------------------------------------------------------
+# Cranelift IR 类型映射（已弃用，保留至 v0.5.0 以兼容旧代码）
+# ---------------------------------------------------------------------------
+
+#: Cranelift IR 类型映射表（Nova IRType → Cranelift 类型字符串）
+#:
+#: .. deprecated:: v0.3.x
+#:     整个 Cranelift 后端已弃用，此常量将随其后端一同移除。
+#:     请使用 Native/C/WasmGC 后端的对应类型映射。
+CRANELIFT_TYPE_MAP: Dict = {
     IRType.INT: "i64",
     IRType.FLOAT: "f64",
     IRType.BOOL: "i8",
@@ -60,9 +85,35 @@ CRANELIFT_TYPE_MAP = {
 
 
 class CraneliftBackend:
-    """将 Nova LIR 转换为 Cranelift IR"""
+    """将 Nova LIR 转换为 Cranelift IR（已弃用）
+
+    .. deprecated:: v0.3.x
+        根据 ARCHITECTURE_VISION.md 第 2.3 节立即架构手术 C，
+        本类已正式弃用，将在 v0.5.0 版本中移除。
+
+        请迁移至以下受支持的后端之一：
+        - :class:`nova.backend.native_backend.NativeCodeGen` — x86_64 ELF 原生
+        - :class:`nova.backend.lir_c_backend.LIRCBackend` — C 源码生成（GCC/Clang）
+        - :class:`nova.backend.wasm_backend.WasmGCBackend` — WasmGC 字节码
+
+    实例化时会触发 :exc:`DeprecationWarning`。
+    """
 
     def __init__(self):
+        # 立即架构手术 C：Cranelift 后端已弃用，v0.5.0 移除
+        # 参考：ARCHITECTURE_VISION.md §2.3
+        warnings.warn(
+            "CraneliftBackend 已弃用（Nova v0.3.x → v0.5.0 移除）。\n"
+            "  弃用原因：功能残缺（索引/闭包 stub）、0 端到端测试、\n"
+            "          无法自举（需外部 Rust clif-util）、维护成本 > 收益。\n"
+            "  推荐替代：\n"
+            "    • Native x86_64  → nova.backend.native_backend.NativeCodeGen\n"
+            "    • C 源码编译    → nova.backend.lir_c_backend.LIRCBackend\n"
+            "    • WasmGC 字节码 → nova.backend.wasm_backend.WasmGCBackend\n"
+            "  参考文档：ARCHITECTURE_VISION.md §2.3「立即架构手术 C」",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         self.output_lines: List[str] = []
         self.indent_level = 0
         self.temp_counter = 0
@@ -70,7 +121,11 @@ class CraneliftBackend:
         self._instr_dispatch = self._build_instr_dispatch_table()
 
     def compile(self, lir_module: LIRModule) -> str:
-        """将 LIR Module 编译为 Cranelift IR 文本"""
+        """将 LIR Module 编译为 Cranelift IR 文本（已弃用方法）
+
+        .. deprecated:: v0.3.x
+            请使用受支持后端的对应编译方法。
+        """
         self.output_lines = []
         self.temp_counter = 0
         self.clif_types = {}
@@ -368,7 +423,11 @@ class CraneliftBackend:
     def compile_to_object(
         self, lir_module: LIRModule, output_path: str, optimize: str = "speed"
     ) -> str:
-        """编译 LIR 为目标文件"""
+        """编译 LIR 为目标文件（已弃用方法）
+
+        .. deprecated:: v0.3.x
+            请使用受支持后端的对应编译方法。
+        """
         clif_ir = self.compile(lir_module)
 
         # 写入临时 .clif 文件

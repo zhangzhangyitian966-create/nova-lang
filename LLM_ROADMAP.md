@@ -4,7 +4,7 @@
 **上次评审**: 第 78 轮（路线图评审）
 **上次开发**: 第 77 轮（普通轮）
 **架构战略文档**: [ARCHITECTURE_VISION.md](./ARCHITECTURE_VISION.md) — 架构决策最高参考，如与本路线图冲突以其为准，本文件同步更新
-**总完成度**: ~163/180 ≈ **90.6%**（上一评审：84.3%，+6.3pp）
+**总完成度**: ~165/180 ≈ **91.7%**（上一评审：84.3%，+7.4pp · 本轮 +2：手术C+手术A1）
 
 本路线图由 LLM 智能开发系统动态维护。
 
@@ -14,7 +14,7 @@
 
 | 里程碑 | 内容 | 目标版本 | 预计轮次 | 状态 | 说明 |
 |--------|------|---------|---------|------|------|
-| M-ARCH | 三项立即架构手术（拆ir_nodes/隔离旧C后端/弃用Cranelift） | v0.3.x | 3 轮内 | ⏳ 进行中 | **self-hosting 前置条件，强制执行** |
+| M-ARCH | 三项立即架构手术（拆ir_nodes/隔离旧C后端/弃用Cranelift） | v0.3.x | 3 轮内 | ⏳ 进行中（2/5） | **self-hosting 前置条件，强制执行 · 手术C+A1本轮完成** |
 | M-MEM  | Allocator API 落地（Step1-2）+ 栈/堆语义明确 | v0.4.0 | 第 84-87 轮前 | ⏳ 未启动 | **v0.5 前必须定板** |
 | M-SH1  | Self-Hosting SH-1：lexer + parser 用 Nova 写出 + 字节级一致性 | v0.4.0 | 约 8 轮 | ⏳ 未启动 | 前置：M-ARCH 完成 + 测试连续 3 轮零失败 |
 | M-SH2  | Self-Hosting SH-2：type_checker + 三层 IR lowering 移植 | v0.5.0 | 约 12 轮 | ⏳ 未启动 | 前置：M-MEM 定板 |
@@ -34,10 +34,10 @@
 | ❌ | 统一 C 后端（LIR 路径功能对齐）总任务 | hard | 70 | 2-3 天 | - | 已拆分 phase1/phase2 |
 | ⏳ | **统一 C 后端 Phase1（路径隔离+弃用标记）** · 手术B | medium | **90** | 1-2 天 | - | **ARCHITECTURE_VISION §2.2 强制** |
 | ⏳ | 统一 C 后端 Phase2（ADT/match 功能迁移 + 删除旧c_codegen.py） | hard | 70 | 2-3 天 | unify_c_backend_phase1 | 架构战略 |
-| ⏳ | **拆分 ir/ir_nodes.py 上帝模块 A1（抽 ir_types.py）** · 手术A-1 | easy | **90** | 2-3 小时 | - | **ARCHITECTURE_VISION §2.1 强制** |
+| ✅ | **拆分 ir/ir_nodes.py 上帝模块 A1（抽 ir_types.py）** · 手术A-1 | easy | **90** | 2-3 小时 | - | **ARCHITECTURE_VISION §2.1 强制 · 第79轮完成** |
 | ⏳ | 拆分 ir/ir_nodes.py A2（抽 hir.py / mir.py / lir.py + 兼容层） | medium | **90** | 1 天 | split_ir_nodes_a1 | 架构战略 |
 | ⏳ | 拆分 ir/ir_nodes.py A3（确认无外部依赖后删冗余、ir_nodes 变薄 re-export） | easy | **88** | 2-3 小时 | split_ir_nodes_a2 | 架构战略 |
-| ⏳ | **弃用 Cranelift 后端** · 手术C | easy | **85** | 1-2 小时 | - | **ARCHITECTURE_VISION §2.3 强制** |
+| ✅ | **弃用 Cranelift 后端** · 手术C | easy | **85** | 1-2 小时 | - | **ARCHITECTURE_VISION §2.3 强制 · 第79轮完成** |
 | ⏳ | Allocator API Step1（定义 trait + ArenaAllocator + LibcAllocator 实现） | medium | **88** | 1 天 | - | **ARCHITECTURE_VISION §3.1 Step1** |
 | ⏳ | Allocator API Step2（List/Map/Tuple 数据结构接受 allocator 参数） | hard | 82 | 2-3 天 | allocator_api_step1 | 架构战略 |
 | ⏳ | Allocator API Step3（栈/堆语法明确 + Box 语义） | medium | 80 | 1-2 天 | allocator_api_step2 | 架构战略 |

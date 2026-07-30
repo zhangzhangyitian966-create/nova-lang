@@ -1,5 +1,5 @@
 """
-Nova IR 节点定义 - 三层中间表示
+Nova IR 节点定义 - 三层中间表示（立即架构手术 A · 拆分进行中）
 
 HIR (High-Level IR): 接近源码语义，用于高级优化
 MIR (Mid-Level IR):   SSA + CFG，用于经典优化
@@ -9,121 +9,66 @@ LIR (Low-Level IR):   接近机器码，用于代码生成
 - HIR: 保留大部分语法结构，经过语义分析（类型已确定，变量已解析）
 - MIR: 控制流图 (CFG) + SSA (静态单赋值) 形式
 - LIR: 接近机器码表示，寄存器分配、指令选择
+
+模块拆分进度（ARCHITECTURE_VISION.md §2.1 立即架构手术 A）：
+  - ✅ **A1（本轮）**：通用类型系统已移至 `ir/ir_types.py`（本文件保留 re-export 兼容层）
+  - ⏳  A2：按 IR 层拆分 hir.py / mir.py / lir.py（下一轮）
+  - ⏳  A3：两轮观察期后删除冗余定义，保留薄 re-export（A2 完成后两轮）
+
+所有外部 ``from nova.ir.ir_nodes import IRType`` 等导入继续工作，
+新代码建议直接从 ``nova.ir.ir_types`` 导入类型相关符号。
 """
 
 from dataclasses import dataclass, field, replace
-from enum import Enum, auto
+from enum import Enum, auto  # noqa: F401 （下游模块可能通过 ir_nodes 间接访问）
 from typing import Any, Dict, List, Optional, Tuple
 
 # ============================================================
 # 通用类型系统（三层共享）
+# 立即架构手术 A1：定义已迁移至 ir/ir_types.py，本处为零破坏性兼容 re-export
 # ============================================================
 
+from .ir_types import (  # noqa: E402 （模块级 re-export 放在头部区域之后符合风格）
+    ADTType,
+    BOOL_TYPE,
+    CHAR_TYPE,
+    CLOSURE_TYPE,
+    FLOAT_TYPE,
+    FnType,
+    INT_TYPE,
+    IRType,
+    ListType,
+    MapType,
+    NEVER_TYPE,
+    NovaType,
+    OptionType,
+    ResultType,
+    STRING_TYPE,
+    TupleType,
+    UNIT_TYPE,
+)
 
-class IRType(Enum):
-    """IR 类型种类枚举"""
-
-    INT = auto()
-    FLOAT = auto()
-    STRING = auto()
-    BOOL = auto()
-    CHAR = auto()
-    UNIT = auto()
-    NEVER = auto()
-    LIST = auto()
-    MAP = auto()
-    TUPLE = auto()
-    FUNCTION = auto()
-    ADT = auto()
-    TYPE_VAR = auto()
-    PTR = auto()  # LIR 层新增
-
-
-@dataclass
-class NovaType:
-    """Nova 统一类型表示（三层 IR 共享）"""
-
-    kind: IRType
-    params: List["NovaType"] = field(default_factory=list)
-    name: str = ""  # 用于 ADT、类型变量等
-
-    def __eq__(self, other):
-        if not isinstance(other, NovaType):
-            return False
-        return (
-            self.kind == other.kind
-            and self.params == other.params
-            and self.name == other.name
-        )
-
-    def __hash__(self):
-        return hash((self.kind, tuple(self.params), self.name))
-
-    def __repr__(self):
-        if self.kind == IRType.LIST and self.params:
-            return f"List[{self.params[0]}]"
-        if self.kind == IRType.MAP and len(self.params) >= 2:
-            return f"Map[{self.params[0]}, {self.params[1]}]"
-        if self.kind == IRType.FUNCTION and len(self.params) >= 1:
-            ret = self.params[-1]
-            args = ", ".join(str(p) for p in self.params[:-1])
-            return f"({args}) -> {ret}"
-        if self.kind == IRType.TUPLE:
-            elems = ", ".join(str(p) for p in self.params)
-            return f"({elems})"
-        if self.kind == IRType.ADT and self.params:
-            params = ", ".join(str(p) for p in self.params)
-            return f"{self.name}[{params}]"
-        if self.name:
-            return self.name
-        return self.kind.name
-
-
-# 常用类型快捷构造
-INT_TYPE = NovaType(IRType.INT)
-FLOAT_TYPE = NovaType(IRType.FLOAT)
-STRING_TYPE = NovaType(IRType.STRING)
-BOOL_TYPE = NovaType(IRType.BOOL)
-CHAR_TYPE = NovaType(IRType.CHAR)
-UNIT_TYPE = NovaType(IRType.UNIT)
-NEVER_TYPE = NovaType(IRType.NEVER)
-CLOSURE_TYPE = NovaType(IRType.FUNCTION, name="Closure")
-
-
-def ListType(elem: NovaType) -> NovaType:
-    """构造列表类型 List[T]"""
-    return NovaType(IRType.LIST, [elem])
-
-
-def MapType(key: NovaType, val: NovaType) -> NovaType:
-    """构造 Map 类型 Map[K, V]"""
-    return NovaType(IRType.MAP, [key, val])
-
-
-def TupleType(*elems: NovaType) -> NovaType:
-    """构造元组类型 (T1, T2, ...)"""
-    return NovaType(IRType.TUPLE, list(elems))
-
-
-def FnType(*params_and_ret: NovaType) -> NovaType:
-    """构造函数类型，最后一个参数为返回类型"""
-    return NovaType(IRType.FUNCTION, list(params_and_ret))
-
-
-def ADTType(name: str, *params: NovaType) -> NovaType:
-    """构造 ADT 类型"""
-    return NovaType(IRType.ADT, list(params), name)
-
-
-def OptionType(elem: NovaType) -> NovaType:
-    """构造 Option[T] 类型"""
-    return ADTType("Option", elem)
-
-
-def ResultType(ok: NovaType, err: NovaType) -> NovaType:
-    """构造 Result[T, E] 类型"""
-    return ADTType("Result", ok, err)
-
+# 显式 re-export 清单（供 `from nova.ir.ir_nodes import *` 与 IDE 静态分析使用）
+__all__ = [
+    # --- 来自 ir_types.py 的类型系统符号 ---
+    "IRType",
+    "NovaType",
+    "INT_TYPE",
+    "FLOAT_TYPE",
+    "STRING_TYPE",
+    "BOOL_TYPE",
+    "CHAR_TYPE",
+    "UNIT_TYPE",
+    "NEVER_TYPE",
+    "CLOSURE_TYPE",
+    "ListType",
+    "MapType",
+    "TupleType",
+    "FnType",
+    "ADTType",
+    "OptionType",
+    "ResultType",
+]
 
 # ============================================================
 # HIR (High-Level IR) 节点

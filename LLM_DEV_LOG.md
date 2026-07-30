@@ -1,3 +1,118 @@
+## 2026-07-30 00:55 第79轮开发
+
+> 开发轮：第 79 轮（79 % 3 = 1 → 普通轮）
+> 基线测试：427 passed, 20 subtests passed（5 核心文件）
+> 全量测试：1099 passed, 31 subtests passed, 6 warnings（全为预期 DeprecationWarning）
+> 完成任务：2 个 / 全部成功（2/2）
+> 审查对齐率：100%（2/2 任务均为审查驱动 + 架构战略强制）
+> 架构债务占比：100%（2/2 · 远超 ≥50% 硬约束）
+> M-ARCH 里程碑：0/5 → **2/5**（手术C ✅ + 手术A-1 ✅）
+
+---
+
+### 一、本轮任务
+
+#### 任务 1：`deprecate_cranelift_backend` 【审查驱动/架构债务】手术 C
+- **来源**: 【审查驱动】第1512轮审查发现 Cranelift 后端 0 端到端测试覆盖 / 功能严重残缺（_compile_index stub、闭包 iconst 0 占位），与 class_too_large MEDIUM 钉子户间接关联；【架构债务】第78轮评审明确第79轮首选任务；ARCHITECTURE_VISION.md §2.3「立即架构手术 C」强制执行（cycles=80 前必须完成）。
+- **为什么选这个**：
+  1. 三项立即架构手术中**最容易的一项**（easy，1-2 小时），成功率 100% 预期
+  2. 为第80轮更重的 A2/Phase1 手术释放时间窗口、建立信心
+  3. 从任务池消除一个高优先级（P85）低风险任务，审查驱动对齐率提升
+  4. 之前 cycles=80 仅剩 2 轮，时间紧迫
+- **实现内容**：
+  1. **backend/cranelift_backend.py（412→444 行）**：
+     - 模块级 docstring 重写：deprecation 公告 + 4 条弃用原因 + 3 条替代后端推荐 + 时间表（v0.3.x → v0.5.0 移除）
+     - 类 `CraneliftBackend` docstring 加 deprecated 标记与跨引用
+     - 构造函数 `__init__` 挂接 `warnings.warn(..., DeprecationWarning, stacklevel=2)`，消息含弃用原因/替代方案/文档引用
+     - `compile()`、`compile_to_object()` 方法 docstring 加 deprecated
+     - 常量 `CRANELIFT_TYPE_MAP` 补 docstring + Sphinx deprecated 标记
+  2. **backend/__init__.py（1→53 行）**：
+     - 从空 docstring 升级为：架构手术进度面板 + 三条活跃后端对比表（Native/C/WasmGC）+ 统一管道推荐
+     - 手术进度面板（M-ARCH）显式打勾：手术 C ✅ 本轮完成
+     - 补 `__all__` 导出清单（保留 cranelift_backend 兼容导出）
+- **验证结果**：1099 passed + 31 subtests 零回归，5 处 CraneliftBackend 实例化正确触发 DeprecationWarning（共 6 条警告），行为 100% 向后兼容。
+
+#### 任务 2：`split_ir_nodes_a1` 【审查驱动/架构债务】手术 A-1（抽 `ir_types.py`）
+- **来源**: 【审查驱动】连续 10+ 轮审查报告 MEDIUM 级 `class_too_large` 钉子户 #1（ir/ir_nodes.py 1413 行 112 类）；【架构债务】第78轮评审明确第79轮首选任务；ARCHITECTURE_VISION.md §2.1「立即架构手术 A」强制执行（cycles=80 前必须完成 A1/A2/A3）。
+- **为什么选这个**：
+  1. 三项手术中**第二容易的子任务**（easy，2-3 小时），严格限制范围仅抽类型定义，避免之前第78轮失败的「一次性拆太大」问题
+  2. 三步零破坏性迁移战略（A1类型 → A2按层 → A3瘦身）的**第一步**，完成后 unlock A2（依赖已满足）
+  3. 类型定义是所有 IR 节点共享的基础子系统，边界清晰，0 回归风险
+  4. 消除 ir_nodes.py 约 55 行（后续 A2/A3 再减约 1200 行）
+- **实现内容**：
+  1. **新建 ir/ir_types.py（258 行）**，包含：
+     - 完整模块 docstring：拆分背景（1413 行上帝模块 / 112 类 / class_too_large 钉子户）+ A1/A2/A3 三步时间表
+     - `IRType` 枚举（15 种 kind）+ 详细 docstring（标量/容器/函数/代数/LIR扩展四大分类）
+     - `NovaType` dataclass（kind/params/name 三字段），显式实现 `__eq__` / `__hash__` / `__repr__`，补 8 种格式分支 docstring
+     - 8 个零参类型单例（INT_TYPE / FLOAT_TYPE / STRING_TYPE / BOOL_TYPE / CHAR_TYPE / UNIT_TYPE / NEVER_TYPE / CLOSURE_TYPE），每个补 `#:` 注释
+     - 7 个参数化工厂函数（ListType / MapType / TupleType / FnType / ADTType / OptionType / ResultType），每个补 docstring + doctest 示例
+     - 显式 `__all__` 导出清单（18 项）
+  2. **改造 ir/ir_nodes.py（1413 → 1358 行，约省 55 行）**：
+     - 模块 docstring 加 M-ARCH 手术 A 进度面板（A1 ✅ / A2 ⏳ / A3 ⏳）
+     - 原 L18-L126 类型定义段（IRType/NovaType/8常量/7工厂）整体替换为 `from .ir_types import (...)` 兼容 re-export
+     - 补显式 `__all__` 导出 18 个类型符号，避免 IDE / `import *` 不识别
+     - `Enum/auto` 导入加 `# noqa: F401` 防止下游间接依赖被误删
+  3. **升级 ir/__init__.py（1 → 70 行）**：
+     - 补完整 docstring + M-ARCH 手术进度面板 + 推荐导入路径分层说明
+     - 新增顶层 re-export：`from nova.ir import IRType, INT_TYPE, ListType` 等旧用法继续可用
+     - 补 `__all__` 分类清单（18 类型符号 + 7 个子模块）
+- **验证结果**：
+  1. 身份一致性（`is`）检查全通过：ir_types / ir_nodes / nova.ir 三条路径导入的 IRType / NovaType / INT_TYPE / ListType 完全是同一对象
+  2. 1099 passed + 31 subtests **零回归**（涵盖所有依赖 ir_nodes 的 33 处导入点的下游模块）
+  3. 从 `.llm_dev_state.json` 的 `failed_tasks` 列表移除 split_ir_nodes_a1（本轮成功修复之前失败记录）
+
+---
+
+### 二、审查日志研读摘要（最新 5 轮 v2.0：1508 → 1512）
+
+#### 2.1 问题总览（最新第 1512 轮）
+- 总问题数：**1401**（代码 32,667 行 / 48 文件 / 2032 函数 / 347 类）
+- 严重度：🔴 CRITICAL 0 · 🟠 HIGH 1 · 🟡 MEDIUM 66 · 🟢 LOW 1334
+- HIGH 1 项：`sys_path_hack`（tests/test_mir_lowering_unit.py，第74轮已修复）
+- MEDIUM 类型分布：unused_import 32 · class_too_large 20 · function_too_long 8 · cyclomatic_complexity 5 · too_broad_exception 1
+- 模块问题数 Top：tests 692 · (root) 362 · backend 264 · ir 82
+
+#### 2.2 本轮采纳的审查问题
+| 审查问题 | 关联任务 | 效果 |
+|----------|----------|------|
+| class_too_large ir_nodes 112 类（MEDIUM 钉子户 #1） | split_ir_nodes_a1 | 拆分第一步完成，ir_nodes 从 1413→1358 行，后续 A2/A3 再减约 1200 行 |
+| class_too_large cranelift_backend 412 行（MEDIUM）+ 功能残缺 stub | deprecate_cranelift_backend | 正式弃用，挂 DeprecationWarning，v0.5.0 移除消除 400+ 行技术债 |
+| Top10 复杂度未处理 CC=13 函数残余（Evaluator/ir_nodes） | 下一轮 filler 候选 | 本轮全投架构债务（≥50% 约束），下一轮优先收尾 |
+
+#### 2.3 趋势分析（1508 → 1512）
+- HIGH/CRITICAL：1508-1511 连续 4 轮 0/0，1512 轮出现 1 HIGH sys_path_hack（第74轮已修复）→ **整体稳定**
+- MEDIUM：从 1508 轮约 77 → 1512 轮 66（**-14.3%**），unused_import 治理持续生效，但 class_too_large 钉子户（ir_nodes/native_backend/type_checker）未动，直接触发本轮手术
+
+---
+
+### 三、测试前后对比
+
+| 指标 | 开发前（基线） | 开发后（全量） | 变化 |
+|------|---------------|---------------|------|
+| 5 核心文件（nova/c_codegen/ir/backends/native） | 427 passed, 20 subtests | 427 passed, 20 subtests | 持平 ✅ |
+| 全量测试（所有 test_*.py） | 未测（≥1099 预期） | **1099 passed, 31 subtests** | 零失败 ✅ |
+| 警告数 | N/A | 6 warnings | **全部为预期的 Cranelift DeprecationWarning** |
+| 失败测试 | 0 | 0 | 零回归 ✅ |
+
+---
+
+### 四、下一步计划（第 80 轮：M-ARCH 截止轮 · cycles=80 前必须 5/5）
+
+> 🔴 **硬截止**：architecture_strategy immediate_surgeries_deadline = 1，只剩 1 轮。第 80 轮 **100% 架构债务**。
+
+| 优先级 | 任务（架构手术子任务） | 难度 | 依赖 | 来源 |
+|--------|------------------------|------|------|------|
+| **P90** | `unify_c_backend_phase1` · **手术 B**（旧 c_codegen.py 路径 deprecated 标记 + 入口点清理） | medium | - | ARCHITECTURE_VISION §2.2 强制 |
+| **P90** | `split_ir_nodes_a2` · **手术 A-2**（按层拆 hir.py / mir.py / lir.py + ir_nodes 兼容 re-export） | medium | split_ir_nodes_a1 ✅ 已解锁 | ARCHITECTURE_VISION §2.1 强制 |
+| **P88** | `split_ir_nodes_a3` · **手术 A-3**（确认无外部依赖后 ir_nodes 瘦身 re-export，删冗余定义） | easy | split_ir_nodes_a2 | ARCHITECTURE_VISION §2.1 强制 |
+| P68 | `refactor_convert_nova_to_json_cc13`（Evaluator._convert_nova_to_json CC=13 → 调度表化） | medium | - | 审查 Top10 钉子户（filler） |
+
+- 架构债务占比目标：**≥75%**（3/4），争取 100%
+- 完成后 M-ARCH 里程碑 5/5 达成，立即启动 M-MEM Allocator API Step1（cycles=81）
+
+---
+
+
 ## 2026-07-29 20:05 第78轮评审（路线图评审）
 
 > 评审轮：第 78 轮（78 % 3 == 0 → 评审轮）
