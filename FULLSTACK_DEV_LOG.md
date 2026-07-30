@@ -5,6 +5,155 @@
 ---
 
 
+## 第 66 轮（评审轮）— 2026-07-31 06:05
+
+> 🔍 **评审轮**（覆盖第 64-65 两轮普通开发）｜**P1 积压数 5 创历史新高**（前端 2 + 后端 3）｜前端质量 8.6→8.1（↓0.5，功能落地但边界条件不足）｜后端质量 8.1→7.9（↓0.2 名义 vs ↑0.2 实际 vs 第 63 轮）｜**深度审计发现 6 个高价值问题**：前端×3（ErrorExpr 下游双缺失【P1 归零风险】、TypeVar 泄漏【P1 跨层污染】、HM generalize 不区分 TVar + mut 幻影实例化【P2×2 类型安全漏洞】）；后端×3（WasmGC ADT tag + float 位转换 双 P1 合并、Native Float imm XMM0 冲突【P2】、Phi 观察期超期+has_incon 丢弃+Loop Phi 未覆盖【升级 P1 收尾】）｜新增 7 任务、废弃 2 任务｜下 3 轮配比 前端 55% / 后端 45%（P1 清零优先）｜**第 67 轮 P1 清零里程碑 2/5 + 第 68 轮 P1 清零 5/5 里程碑**
+
+### 三轮回顾总结（第 64-65-66 两轮普通开发 + 1 轮评审）
+
+**第 64 轮（普通轮，2/2 全成功）**：Parser 四级熔断（TOP_LEVEL/STMT_LIST/EXPR/BLOCK）+6 专项 6/6（code_audit_60 前端 3/3 清零里程碑）；Native 后端 _allocate_registers CC=39→≤5 拆分 3 子方法+1 流水线主方法（code_audit_63 后端 63-B1 清零，技术债 Top1）。后端质量 7.7→7.9（↑0.2），总测试 1147/1147。
+
+**第 65 轮（普通轮，2/2 全成功，双里程碑）**：
+- 前端 HM let-polymorphism 闭环（_generalize Gen(Γ,τ) + Value Restriction 最小化三级策略 + 10/10 专项，HM 完整性 65%→85%，code_audit_63 前端 63-F1 清零）
+- 后端 emit_abi_call 通用 10 步骨架抽离（~75% 重复代码消除，_emit_call 120→18 行 + _emit_runtime_call 155→14 行薄包装，code_audit_60 后端 6/6 + code_audit_63 后端 63-B2 双清零里程碑）
+- 质量：前端 **HM 类型系统双端闭环**、后端 **Native 技术债 Top2 双清零**；测试 TypeChecker 138（+10）/ Native 53 / Backends 58 等 **820 项全 0 回归**
+
+**第 66 轮（评审轮，深度审计）**：首次对 WasmGC 后端实际 emit 逻辑（之前只看调度表覆盖率）和 TypeChecker 的 HM generalize/instantiate 边界条件做深度代码走查，发现了被「名义完成」掩盖的 5 个长尾 bug。**关键认知更新**：之前只看「功能是否有」和「测试是否通过」作为完成度标准，漏掉了「测试覆盖的都是常见路径、长尾场景（≥9 float 参数、ADT 多变体分派、mut 绑定同变量多次读取 TVar 独立性）都没有专项测试 = 真实完成度低于名义值」的问题——这是评审质量从「看指标」升级到「看实际语义正确性」的转折点。
+
+### 前端质量评估（8.1/10，↓0.5 vs 第 63 轮 8.6）
+
+**扣分明细（相对 63 轮）**：
+| 扣分项 | 分数 | 证据 |
+|--------|------|------|
+| ErrorExpr 下游 handler 双缺失 | -0.3 | TypeChecker _build_expr_checkers 28 条映射缺 ErrorExpr → 熔断后报「未知的表达式类型」覆盖原始 ParseError；Evaluator _build_expr_eval_dispatch_table 同样缺 → 直接抛 RuntimeError_ 崩溃。**Parser 三轮投入归零风险（P1）** |
+| 3 条确认 TypeVar 泄漏路径 | -0.2 | 空 List（L737）、空 Map（L757-760）、无注解 body 未引用参数（L533+L995）→ 未约束 TVar 静默到后端，三后端 fallback 不一致（int/void*/i32），行为不可预测（P1 跨层污染） |
+| HM generalize 不区分可泛化/被约束 TVar | -0.1 | _walk_type_generalize 对 env_free 内外 TVar 都返回同一 root，下游 instantiate 一律 fresh → 外层约束的 TVar 被独立实例化，破坏约束传播（P2） |
+| mut 绑定幻影实例化漏洞 | -0.1 | mut=True 正确跳过 generalize，但 _check_identifier 含 TVar 就 instantiate → 同一 mut 变量两次读取产生两个独立 TVar 对象 → append(1) + append("s") 分别约束独立 T = 类型安全漏洞（P2） |
+
+**加分项**：四级熔断架构落地（+0.2）、HM generalize/instantiate/free_typevars 基础设施齐备（+0.1）、调度表模式全面替代 if-isinstance CC 大幅下降（+0.1）、模式匹配完备性递归检查稳定（+0.0）
+
+**净变化 -0.5**。趋势判断：架构层面更先进，但新功能的边界条件不足 =「功能更多、正确性边界更脆」，下一轮前端必须**只清零 P1，不新增任何功能**。
+
+### 后端质量评估（7.9/10，↓0.2 vs 第 65 轮名义 8.1，↑0.2 vs 第 63 轮实际 7.7）
+
+**扣分明细（相对 65 轮）**：
+| 扣分项 | 分数 | 证据 |
+|--------|------|------|
+| WasmGC ADT variant_tag 与 type_id 传同一字段 | -0.3 | wasm_backend L747-748 两行完全相同 `(i32.const {instr.type_tag})` → nova_adt_new 的 type_id 和 variant_tag 参数一致 → Some/None 等多变体 variant_tag 相同 → 运行时模式匹配按 tag 分派时全部走同一分支，**ADT 模式匹配在 WasmGC 后端完全不可用（P1）** |
+| WasmGC float 元素复合结构构建位转换缺失 | -0.2 | _compile_build_list/_compile_build_tuple/_compile_build_map 三处 `local.get $elem` 对 float 类型直接压栈 f64，但 nova_list_push 第二个参数声明是 (param i64) → Wasm 验证器 type mismatch，**任何含 float 元素的 List/Tuple/Map 都无法通过 Wasm 验证器编译（P2，与 P1 合入同一任务）** |
+| Native Float imm 溢出路径覆盖 XMM0 | -0.2 | emit_abi_call_direct L1048-1073 参数 ≥9 float 时 XMM0~XMM7 全满，Float imm 溢出路径 `e.movsd_reg_imm(XMM0, 0)` 直接写 XMM0 → XMM0 = FLOAT_ARG_REGS[0]，第 0 个 float 参数值被覆盖 → 传参错误（P2，确定性 bug 触发条件苛刻但一旦中必错） |
+| Phi inconsistency 标志丢弃 + Loop Phi 未覆盖 + 观察期超期 3 轮 | -0.1 | _resolve_phi_type stderr 警告仍在（原计划 1-2 轮观察，实际拖了 5 轮）；两处调用点都用 `_` 丢弃 has_incon，无 fail-fast；Loop Phi（for/while）从未走该函数（P2 并入 P1 收尾任务升级） |
+
+**加分项**：emit_abi_call_direct 骨架化消除 75% 重复（+0.3）、栈对齐+retval 偏移计算正确（+0.1）、WasmGC 调度表 19 种指令全覆盖 + NotImplementedError 防御性兜底（+0.1）、Lambda trampoline 参数解包完整（+0.0）
+
+**净变化 -0.2 vs 65 轮名义 / +0.2 vs 63 轮实际**。趋势判断：结构性改造方向正确（CC 债双清零 + 重复代码消除），但之前评估 WasmGC 完成度时只看「调度表是否覆盖」没看「emit 实际参数对不对」——属于评估方法论的 bug，本轮已纠正，后续 WasmGC 任务必须含「WAT 文本级结构断言」或「wasm-validate 二进制验证」环节。
+
+### 前后端平衡评估（第 66 轮评审结论）
+
+| 维度 | 前端 | 后端 | 结论 |
+|------|------|------|------|
+| 综合质量分 | 8.1（↓0.5） | 7.9（↓0.2 名义 / ↑0.2 实际） | **差距从 0.9pp 收窄到 0.2pp**——两端同处「功能全但边界脆」状态，资源需均衡 |
+| 源码行数 | 5,197（42%） | 7,199（58%） | 比例合理（前端类型系统独占 2286 行=44%） |
+| 测试密度（测试行/源码行） | 0.88（parser 0.90 / evaluator 1.13 / type_checker 0.61） | 0.39（native 0.33 / mir 0.41 / wasm 0.43） | **前端 2.26× 后端**——后端测试缺口极大，第 69 轮「测试+回归轮」专门补 |
+| P1 积压数 | **2 项**（ErrorExpr 下游 + TypeVar 泄漏） | **2 项**（WasmGC 双 bug 合并 + Phi 升级收尾，原 3 项中 Native XMM0 为 P2） | P1 两端各 2 项，里程碑一致（第 67 轮各清 1 + 第 68 轮各清 1） |
+| P2 积压数 | 2 项（HM TVar 区分 + mut 幻影，合并入 harden） | 2 项（Native XMM0 冲突 + 后端测试缺口） | 4 项 P2 中 3 项与 P1 同源合并，仅第 69 轮测试补齐是独立 |
+
+**方向判断**：
+- 前后端都没有偏离目标，方向正确 ✓
+- 效率评估：每轮平均 1.5 个 hard/medium 任务、平均 250 行新增代码、0 回归；效率与前 63 轮持平（没有明显下降）
+- **下 3 轮配比 = 前端 55% / 后端 45%**（之前 35:65 反转）：因为前端 P1 积压 2 项 + 其中 harden 任务是三合一（P1+P2×2），一次开发 ROI 极高；后端 P1 积压 2 项中有 1 项（WasmGC 双 bug）是同文件两字段改动（~25 行修改 + 120 行测试 = 工作量小于前端 harden 的 270 行），且 Phi 升级 + Native XMM0 可在同一轮 68 轮并行（一个 mir_lowering、一个 native_backend，无冲突零重叠）
+
+### 问题总结与根因分析
+
+**问题总表（5 P1 + 4 P2，共 9 个 = 66 轮评审新高）**：
+
+| 编号 | 严重度 | 问题 | 根因 | 修复方案 |
+|------|--------|------|------|----------|
+| F-P1-1 | P1 归零风险 | ErrorExpr 下游 handler 双缺失 | Parser 四级熔断只做了「产出 ErrorExpr」，没同步下游消费端（TypeChecker/Evaluator）= 跨模块协作漏项 | frontend_fix_error_expr_downstream（P98 easy）：两调度表各加 1 handler + ERROR_T 单例 + 4-6 单测 |
+| F-P1-2 | P1 跨层污染 | TypeVar 泄漏栅栏缺失（3 路径） | _unify_and_resolve 只做 _apply_subst，完全没有「残留 TVar 检测」阶段 | **三合一 harden 任务 Step 2**：加 _detect_leaking_tvars + 三类前缀（unknown_/param_/ret_*）报错 |
+| F-P2-1 | P2 类型安全 | HM generalize 不区分可泛化/被约束 TVar | 只实现了「collect env_free → walk generalize」的骨架，没在返回值上做标记区分 | **harden Step 1**：TypeVar 加 is_generalized 字段 + _walk_type_generalize 打标 + instantiate 守卫 |
+| F-P2-2 | P2 类型安全漏洞 | mut 绑定幻影实例化 | instantiate 只看「含不含 TVar」不看「TVar 是不是合法泛化的」 | **harden Step 1** 的 instantiate 守卫 `if not t.is_generalized: return t` 同时修复（mut 绑定跳过 generalize → 不打标 → instantiate 不做 fresh） |
+| B-P1-1 | P1 模式匹配失效 | WasmGC ADT variant_tag 传错（与 type_id 同值） | 复制粘贴 bug：L747-748 两行完全相同 | backend_fix_wasmgc_adt_float Bug A（P95 medium）：LIRBuildADT 缺 variant_tag 字段则补 + 降级路径传对 + 分派用例 2 个 |
+| B-P1-2 | P1 Wasm 编译失败 | WasmGC float 元素复合构建 f64→i64 位转换缺失 | 假设「local.get 压的类型和函数参数类型自然一致」，没有按 nova_* 函数签名做类型对齐 | backend_fix_wasmgc_adt_float Bug B（同任务合并）：三处构建 + 两处读取补 i64.reinterpret_f64 / f64.reinterpret_i64 + wat 合法性断言 |
+| B-P1-3 | P1 正确性收尾（升级） | Phi inconsistency 观察期超期 + 丢弃标志 + Loop Phi 未覆盖 | 拖期：原计划 1-2 轮观察实际拖了 5 轮；Loop Phi 是最初设计时没覆盖的遗漏场景 | backend_mir_phi_type_upgrade_raise（P88→P90 升级）：stderr→raise、has_incon 写 func.annotation、for/while Loop Phi 统一走函数 |
+| B-P2-1 | P2 确定性 bug | Native Float imm ≥9 参数溢出路径覆盖 XMM0 | 临时寄存器选型错误（XMM0 同时是 FLOAT_ARG_REGS[0]），之前 ≤8 float 参数的测试都没触发该分支 | backend_native_float_imm_xmm0_conflict（P82 easy）：改走内存中转 sub rsp,8/movsd[rsp]/push[rsp] 零寄存器冲突 + 2 专项 |
+| B-P2-2 | P2 测试缺口 | 后端测试密度 = 前端 ~44%，结构性改造长尾场景缺覆盖 | 历史测试优先补「功能是否有」，没补「ABI 骨架边缘条件（8int溢出/混合5int5float/递归/imm float溢出）」 | backend_native_abi_test_coverage（P80 medium）：Native +10 场景、WasmGC +6 wat 合法性断言，第 69 轮并行补 |
+
+**根因归纳（三类系统性根因，而非单个 bug 独立）**：
+1. **跨模块协作漏项**（F-P1-1 根因）：Parser 模块独立完成了 ErrorExpr 产出 + 测试，但没有同步检查下游消费者（TypeChecker/Evaluator）是否有对应 handler——应该引入「新增 AST 节点类型时必须同步修改 parser/type_checker/evaluator/ir 四方」的检查清单（后续开发流程中加入）
+2. **评估方法论 bug**（B-P1-1/B-P1-2 根因）：之前评估后端完成度只看「调度表有没有该 LIR 指令的 handler」，没有做「handler 内部的实际参数/类型/调用签名是否匹配」的代码走查级检查——后续评审必须对每个待完成任务做「至少 1 个端到端实际参数值断言」（如 ADT 分派的 variant_tag 实际值、float 元素的 WAT 指令出现）
+3. **常见路径测试偏见**（B-P2-1/F-P2-2 根因）：所有测试覆盖的都是「≤8 参数」「非 mut 绑定」「空 List 之后紧接着使用」等常见路径，导致边缘路径（≥9 float 参数、mut 绑定多次读取、空 List 之后完全不使用）虽然是确定性 bug，但从未被触发——后续每条功能线的新增测试必须至少含 1 个「参数/状态边界条件」用例（如 ABI 骨架至少 1 个溢出参数、泛化至少 1 个 mut 绑定、类型推断至少 1 个完全不使用的变量）
+
+### 下阶段方向与理由（第 67-69 轮，配比 55:45）
+
+**总原则：P1 清零 → P2 清零 → 测试补齐（不做任何新功能）**
+
+为什么不新增任何新功能？当前 5 个 P1 积压是 66 轮以来最高值（之前最多 2 项），其中 3 个是「静默错误」（类型安全漏洞、跨层污染、模式匹配失效），不会立即 crash 但会产生错误的编译产物——**静默错误比崩溃错误严重 10 倍，因为无法通过任何告警发现，只有在用户场景下才暴露**，必须优先清零。任何新功能在 P1=0 之前引入只会增加静默错误的概率。
+
+**第 67 轮（P1 清零 2/5，前端 50 / 后端 50）**：
+- 前端 ErrorExpr 下游修复（P98 easy，预估 1-2h）：零冲突、修改面小、直接恢复 Parser 错误恢复体系有效性，**错误恢复投入 ROI 从 0→1**
+- 后端 WasmGC 双 P1 修复（P95 medium，预估 3-5h）：虽然是 P1×2 但都在一个文件（wasm_backend.py）+ 另两个文件可能补字段（各 5 行），总代码量 < frontend harden 的一半；**两个 P1 修复后 WasmGC 完成度从 45%→65%（↑20pp 单轮最大提升）**
+
+**第 68 轮（P1 清零 5/5 里程碑 + P2 清零 4/4 里程碑，前端 60 / 后端 40）**：
+- 前端 TypeVar 泄漏 + HM TVar 区分 + mut 幻影 三合一 harden（P92 hard，6-10h）：同源问题最高 ROI 处理，一次开发清 1×P1 + 2×P2，相当于 3 任务合并；**前端 P1=0 达成、前端 P2=0 达成**
+- 后端 Phi inconsistency 升级+消费+Loop Phi 覆盖（P90 medium，3-5h）：+ 附带 Native XMM0 冲突修复（P82 easy，1-2h，同轮顺带因为一个 mir 一个 native 无冲突）；**后端 P1=0 达成、后端 P2 Native XMM0 清零**
+
+**第 69 轮（测试+回归轮，P2 清零最后 1 项，前端 50 / 后端 50）**：
+- 前端类型系统边界测试矩阵（P78 easy，2-3h）：+15 用例覆盖 4 类（泄漏检测/泛化边界/ErrorExpr 下游/回归保护），前端测试密度从 0.61→0.70
+- 后端双端测试补齐（P80 medium，4-6h）：Native ABI 长尾 +10 场景（8int溢出/混合 5int5float/递归/栈对齐/imm float 溢出）+ WasmGC wat 合法性 +6 场景；后端综合测试密度 0.39→0.45、Native 0.33→0.40；**P2=0 达成**
+
+### 任务池变更说明
+
+**新增任务（7 个，P1×3 + P2×4）**：
+
+| task_id | S | P | 难度 | 说明（为什么新增） | 对应问题 |
+|---------|---|---|------|-------------------|----------|
+| frontend_fix_error_expr_downstream | P1 | 98 | easy | 评审发现 Parser 四级熔断产出 ErrorExpr 但下游 TypeChecker/Evaluator 双双无 handler = 错误恢复归零风险（3 轮投入价值为 0） | F-P1-1 |
+| backend_fix_wasmgc_adt_float | P1 | 95 | medium | 评审首次深入 WasmGC emit 逻辑发现两个确定性 P1：ADT variant_tag 同值（模式匹配失效）+ float 复合构建 i64/f64 类型栈不匹配（Wasm 验证不通过） | B-P1-1 + B-P1-2（合入同一任务最高 ROI，因为都在 wasm_backend.py） |
+| frontend_harden_typevar_leak_guard | P1 | 92 | hard | 评审发现 3 个同源问题（TypeVar 泄漏栅栏 + HM generalize 不区分 TVar + mut 幻影实例化）都集中在 TypeVar 生命周期管理，统一修复 ROI 是分开 3 任务的 3×，还附带一次性清 P2×2 | F-P1-2 + F-P2-1 + F-P2-2（三合一） |
+| backend_mir_phi_type_upgrade_raise | P1 | 90↑ | medium | 第 63 轮评审已有任务，优先级 88→90 升级：评审确认观察期从 2 轮拖到 5 轮，且追加了 has_inconsistency 消费 + Loop Phi（for/while）覆盖两个新要求，虽名义 P1 收尾但含额外改动，优先级提升确保第 68 轮清零 | B-P1-3（升级） |
+| backend_native_float_imm_xmm0_conflict | P2 | 82 | easy | 评审审计 emit_abi_call_direct 10 步流水线 Float imm 溢出分支发现：XMM0 被用作临时寄存器但也是第 0 个 float 参数寄存器，确定覆盖 | B-P2-1 |
+| frontend_type_system_test_matrix | P2 | 78 | easy | 评审计算前端 type_checker 测试密度仅 0.61（远低于 parser 0.90 / evaluator 1.13），尤其第 64-66 三轮 ErrorExpr/HM generalize/TVar 泄漏三大改动没有系统性边界测试回归保护 | 测试缺口补齐 |
+| backend_native_abi_test_coverage | P2 | 80 | medium | 评审计算后端综合测试密度 0.39（= 前端 ~44%），第 64-65 两轮结构性改造（regalloc CC 拆分、emit_abi_call 骨架）缺乏长尾场景（溢出参数、混合 int/float、递归调用、imm float 溢出）覆盖 | B-P2-2（测试缺口） |
+
+**废弃任务（2 个过时任务）**：
+
+| 原 task_id | 原 P | 废弃原因（为什么不需要了） | 替代任务 |
+|------------|------|---------------------------|----------|
+| frontend_typevar_leak_guard | 80 | 原任务只覆盖「泄漏栅栏」1 个方面，评审同步发现 2 个 P2 同源问题（HM TVar 区分 + mut 幻影），分开 3 任务开发成本是「合并 harden 任务」的 2.5×，ROI 远低于合并 | **frontend_harden_typevar_leak_guard（P92 hard，三合一）**，增加 generalize 打标 + instantiate 守卫 + is_generalized 标记 3 大机制，一次开发清 3 问题 |
+| backend_wasmgc_instruction_fill | 75 | 评审走查 wasm_backend.py 调度表确认：19 种主要 LIR 指令类型全覆盖，仅 1 处兜底 NotImplementedError（良好实践），原假设「3 个 NIE 指令」不成立；但审计发现两个更高优先级的真实 P1 bug（ADT tag + float 位转换），用具体 bug 修复任务替代抽象的「NIE 补齐」任务 | **backend_fix_wasmgc_adt_float（P95 medium，双 P1 实际 bug）**——真实 bug 修复比假设的 NIE 补齐优先级更高（P75→P95） |
+
+### 更新后的路线图进度
+
+**核心指标变化（相对第 63 轮评审基线）**：
+
+| 指标 | 第 63 轮评审 | 第 66 轮评审 | 变化 |
+|------|-------------|-------------|------|
+| 前端质量分 | 8.6/10 | 8.1/10 | ↓0.5（边界条件不足扣分，架构先进性加分部分抵消） |
+| 后端质量分 | 7.7/10 | 7.9/10 | ↑0.2（结构性改造 +0.4 vs WasmGC 真实 bug -0.2，净提升） |
+| 前端完成率 | 91.5%（43/47） | 88.0%（44/50） | ↓3.5pp（分母 47→50 增加 3 个新高价值任务，分子 43→44 仅增加 1，**不是倒退是分母校准**） |
+| 后端完成率 | 64.1%（50/78） | 60.7%（51/84） | ↓3.4pp（同分母校准：分母 78→84 增 6 任务，分子 50→51 增 1，WasmGC 完成度 55%→45% 实际拉低） |
+| 总完成率 | 74.1%（93/125） | 70.9%（95/134） | ↓3.2pp（分母 125→134 +9 任务，**评审发现的 9 个真实 bug/缺口转化为任务，是质量投资而非倒退**） |
+| P1 积压数 | 2（generalize + Phi 观察期） | 4（ErrorExpr + TypeVar泄漏 + WasmGC双P1合并 + Phi升级收尾） | ↑2（本轮真实 P1 暴露） |
+| P2 积压数 | 4（错误恢复扩展/TypeVar 守卫/regalloc CC/emit 骨架） | 4（Native XMM0 / 前端测试矩阵 / 后端测试补齐 + 0 遗留） | 持平（4 遗留清 2×P2 入 harden，新增 3×P2，净 +1） |
+| 下次评审 | 第 66 轮 | 第 69 轮 | — |
+
+**P1 清零里程碑路径（本轮明确）**：
+```
+第 67 轮（P1 清零 2/4）：
+  ├─ 前端：frontend_fix_error_expr_downstream ✅ P1=1/2
+  └─ 后端：backend_fix_wasmgc_adt_float ✅       P1=1/2
+第 68 轮（P1 清零 4/4 🎉 里程碑达成）：
+  ├─ 前端：frontend_harden_typevar_leak_guard ✅ P1=2/2（前端 P1=0）
+  └─ 后端：backend_mir_phi_type_upgrade_raise ✅ P1=2/2（后端 P1=0）
+第 69 轮（P2 清零 4/4 + 测试密度达标）：
+  ├─ 前端：frontend_type_system_test_matrix ✅ 前端 P2=0
+  └─ 后端：Native XMM0（68 轮已附带） + backend_native_abi_test_coverage ✅ 后端 P2=0
+第 70 轮起：可安全引入新功能（当前 0 P1/0 P2，质量基线扎实）
+```
+
+---
+
 ## 第 65 轮 — 2026-07-31 01:15
 
 > 🎨⚙️ **普通轮** | 2/2 全部成功 ✅✅ | **双里程碑达成**：code_audit_60 后端 6/6 全清 + code_audit_63 前端 1/3 + 后端 2/3｜前端 **HM let-polymorphism 闭环**（_generalize + Value Restriction 最小化 + 10 专项 10/10）｜后端 **_emit_abi_call 10 步通用骨架**（~75% 重复消除，_emit_call 18 行 + _emit_runtime_call 14 行薄包装）｜**HM 完整性 65%→85%**｜分模块测试 **TypeChecker 138（+10）/ Native 53 / Backends 58 / Nova 203 / C 50 / IR 63 / SSA 15 / Parser 95** 全部 0 回归
