@@ -260,6 +260,26 @@ class MIRLowering:
         self.ssa_types[ssa] = instr.result_type
         return ssa
 
+    def _emit_idx_increment(self, idx_ssa: str) -> str:
+        """生成索引自增指令 ``idx_ssa + 1``，返回结果 SSA 名。
+
+        从 :meth:`_lower_list_comprehension` 三处重复的索引递增代码
+        （filter_true / filter_false / 无filter 分支）中提取，
+        原单处 8 行 → 调用 1 行，三处合计消除约 21 行重复代码并降低圈复杂度。
+
+        :param idx_ssa: 要递增的索引 SSA 名（类型为 INT_TYPE）
+        :return: 递增结果的 SSA 名（INT_TYPE）
+        """
+        inc_instr = MIRBinOp(INT_TYPE)
+        inc_instr.op = "+"
+        inc_instr.left = idx_ssa
+        inc_const = MIRConst(INT_TYPE)
+        inc_const.value = 1
+        inc_const.const_type = "int"
+        inc_const_ssa = self._emit(inc_const)
+        inc_instr.right = inc_const_ssa
+        return self._emit(inc_instr)
+
     def _replace_ssa_in_block(self, block, old_ssa, new_ssa, skip_phi=False):
         """
         替换一个基本块中所有的 SSA 引用。
@@ -1741,16 +1761,8 @@ class MIRLowering:
             append_instr.element_ssa = result_ssa or ""
             new_list_ssa = self._emit(append_instr)
 
-            # 索引递增
-            inc_instr_t = MIRBinOp(INT_TYPE)  # 索引递增结果为整数
-            inc_instr_t.op = "+"
-            inc_instr_t.left = idx_phi_ssa
-            inc_const_t = MIRConst(INT_TYPE)  # 常量 1 是整数
-            inc_const_t.value = 1
-            inc_const_t.const_type = "int"
-            inc_const_ssa_t = self._emit(inc_const_t)
-            inc_instr_t.right = inc_const_ssa_t
-            inc_ssa_t = self._emit(inc_instr_t)
+            # 索引递增（复用 helper，原 8 行内联 → 1 行调用）
+            inc_ssa_t = self._emit_idx_increment(idx_phi_ssa)
 
             filter_block.terminator = MIRJump(header_block.label)
 
@@ -1762,15 +1774,7 @@ class MIRLowering:
             # --- filter 为假：跳过 append，索引仍然递增 ---
             self.current_block = filter_false_block
 
-            inc_instr_f = MIRBinOp(INT_TYPE)  # 索引递增结果为整数
-            inc_instr_f.op = "+"
-            inc_instr_f.left = idx_phi_ssa
-            inc_const_f = MIRConst(INT_TYPE)  # 常量 1 是整数
-            inc_const_f.value = 1
-            inc_const_f.const_type = "int"
-            inc_const_ssa_f = self._emit(inc_const_f)
-            inc_instr_f.right = inc_const_ssa_f
-            inc_ssa_f = self._emit(inc_instr_f)
+            inc_ssa_f = self._emit_idx_increment(idx_phi_ssa)
 
             filter_false_block.terminator = MIRJump(header_block.label)
 
@@ -1789,16 +1793,8 @@ class MIRLowering:
             append_instr.element_ssa = result_ssa or ""
             new_list_ssa = self._emit(append_instr)
 
-            # 索引递增
-            inc_instr = MIRBinOp(INT_TYPE)  # 索引递增结果为整数
-            inc_instr.op = "+"
-            inc_instr.left = idx_phi_ssa
-            inc_const = MIRConst(INT_TYPE)  # 常量 1 是整数
-            inc_const.value = 1
-            inc_const.const_type = "int"
-            inc_const_ssa = self._emit(inc_const)
-            inc_instr.right = inc_const_ssa
-            inc_ssa = self._emit(inc_instr)
+            # 索引递增（复用 helper，原 8 行内联 → 1 行调用）
+            inc_ssa = self._emit_idx_increment(idx_phi_ssa)
 
             if body_block.terminator is None:
                 body_block.terminator = MIRJump(header_block.label)

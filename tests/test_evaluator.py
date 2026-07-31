@@ -874,19 +874,35 @@ class TestBuiltinFunctions(unittest.TestCase):
         self.assertEqual(ev.get_output(), ["42", "hello"])
 
     def test_builtin_json_parse(self):
-        """json_parse 内置函数"""
+        """json_parse 内置函数（M-MEM Step4 改为返回 Result[val, str]）"""
         ev = make_eval()
         result = ev._builtin_json_parse('{"a": 1, "b": [2, 3]}')
-        self.assertIsInstance(result, dict)
-        self.assertEqual(result["a"], 1)
-        self.assertEqual(result["b"], [2, 3])
+        # Result::Ok(unwrapped_value)
+        self.assertEqual(result.type_name, "Result")
+        self.assertEqual(result.variant_name, "Ok")
+        unwrapped = result.fields[0]
+        self.assertIsInstance(unwrapped, dict)
+        self.assertEqual(unwrapped["a"], 1)
+        self.assertEqual(unwrapped["b"], [2, 3])
+
+    def test_builtin_json_parse_error_returns_err(self):
+        """json_parse 非法输入返回 Result::Err(msg)（M-MEM Step4 不再 raise）"""
+        ev = make_eval()
+        result = ev._builtin_json_parse('{"a": invalid json}')
+        self.assertEqual(result.type_name, "Result")
+        self.assertEqual(result.variant_name, "Err")
+        self.assertIn("JSON 解析失败", result.fields[0])
 
     def test_builtin_json_stringify(self):
-        """json_stringify 内置函数"""
+        """json_stringify 内置函数（M-MEM Step4 改为返回 Result[str, str]）"""
         ev = make_eval()
         result = ev._builtin_json_stringify({"key": "value"})
-        self.assertIn("key", result)
-        self.assertIn("value", result)
+        # Result::Ok(json_string)
+        self.assertEqual(result.type_name, "Result")
+        self.assertEqual(result.variant_name, "Ok")
+        json_str = result.fields[0]
+        self.assertIn("key", json_str)
+        self.assertIn("value", json_str)
 
     def test_builtin_filter(self):
         """filter 内置函数"""

@@ -85,8 +85,9 @@ class NovaType:
     字典键、放入集合（类型查表、单态化缓存、特化索引等）。
 
     常用构造请优先使用下方的工厂函数：
-    :func:`ListType` / :func:`MapType` / :func:`TupleType` /
-    :func:`FnType` / :func:`ADTType` / :func:`OptionType` / :func:`ResultType`。
+    :func:`list_type` / :func:`map_type` / :func:`tuple_type` /
+    :func:`fn_type` / :func:`adt_type` / :func:`option_type` / :func:`result_type`。
+    （旧 :func:`ListType` 等 PascalCase 名保留为向后兼容别名。）
     """
 
     kind: IRType
@@ -176,29 +177,34 @@ CLOSURE_TYPE: NovaType = NovaType(IRType.FUNCTION, name="Closure")
 
 
 # ============================================================
-# 参数化类型工厂函数
+# 参数化类型工厂函数（PEP8 snake_case 规范名）
+#
+# 命名说明（Cycle-1513 审查门禁 gate_naming_violation 修复）：
+#   原 8 个工厂函数使用 PascalCase（ListType/MapType/...），违反 PEP8
+#   函数命名规范。现统一改为 snake_case 规范名，旧名保留为薄别名
+#   以保证 100% 向后兼容（外部调用方无需改动）。
 # ============================================================
 
 
-def ListType(elem: NovaType) -> NovaType:
+def list_type(elem: NovaType) -> NovaType:
     """构造列表类型 ``List[elem]``
 
-    >>> ListType(INT_TYPE)
+    >>> list_type(INT_TYPE)
     List[INT]
     """
     return NovaType(IRType.LIST, [elem])
 
 
-def MapType(key: NovaType, val: NovaType) -> NovaType:
+def map_type(key: NovaType, val: NovaType) -> NovaType:
     """构造关联数组类型 ``Map[key, val]``
 
-    >>> MapType(STRING_TYPE, INT_TYPE)
+    >>> map_type(STRING_TYPE, INT_TYPE)
     Map[STRING, INT]
     """
     return NovaType(IRType.MAP, [key, val])
 
 
-def TupleType(*elems: NovaType) -> NovaType:
+def tuple_type(*elems: NovaType) -> NovaType:
     """构造元组类型 ``(T1, T2, ...)``
 
     零参数时返回 :data:`UNIT_TYPE`；单参数仍会包装成 1-Tuple。
@@ -206,37 +212,37 @@ def TupleType(*elems: NovaType) -> NovaType:
     return NovaType(IRType.TUPLE, list(elems))
 
 
-def FnType(*params_and_ret: NovaType) -> NovaType:
+def fn_type(*params_and_ret: NovaType) -> NovaType:
     """构造函数类型，**最后一个参数为返回类型**
 
-    >>> FnType(INT_TYPE, INT_TYPE, BOOL_TYPE)
+    >>> fn_type(INT_TYPE, INT_TYPE, BOOL_TYPE)
     (INT, INT) -> BOOL
     """
     return NovaType(IRType.FUNCTION, list(params_and_ret))
 
 
-def ADTType(name: str, *params: NovaType) -> NovaType:
+def adt_type(name: str, *params: NovaType) -> NovaType:
     """构造 ADT（代数数据类型）类型
 
-    >>> ADTType("Option", INT_TYPE)
+    >>> adt_type("Option", INT_TYPE)
     Option[INT]
-    >>> ADTType("Bool")
+    >>> adt_type("Bool")
     Bool
     """
     return NovaType(IRType.ADT, list(params), name)
 
 
-def OptionType(elem: NovaType) -> NovaType:
+def option_type(elem: NovaType) -> NovaType:
     """``Option[T]`` = 可能不存在的值（前端标准库 ADT 糖）"""
-    return ADTType("Option", elem)
+    return adt_type("Option", elem)
 
 
-def ResultType(ok: NovaType, err: NovaType) -> NovaType:
+def result_type(ok: NovaType, err: NovaType) -> NovaType:
     """``Result[T, E]`` = 可能失败的计算（前端标准库 ADT 糖）"""
-    return ADTType("Result", ok, err)
+    return adt_type("Result", ok, err)
 
 
-def BoxType(inner: NovaType) -> NovaType:
+def box_type(inner: NovaType) -> NovaType:
     """``Box[T]`` = 堆分配唯一所有权指针（M-MEM Step3 核心类型）
 
     语义（对齐 ARCHITECTURE_VISION.md §3.1「栈/堆语义明确」）：
@@ -245,12 +251,28 @@ def BoxType(inner: NovaType) -> NovaType:
       - 显式析构：Box 离开作用域时自动 drop（不依赖 GC）
       - 传递：移动语义（Copy 语义需显式 ``clone_box``）
 
-    >>> BoxType(INT_TYPE)
+    >>> box_type(INT_TYPE)
     Box[INT]
-    >>> ListType(BoxType(ADTType("Node")))
+    >>> list_type(box_type(adt_type("Node")))
     List[Box[Node]]
     """
     return NovaType(IRType.BOX, [inner])
+
+
+# ------------------------------------------------------------------
+# 向后兼容：保留 PascalCase 薄别名（100% 零破坏性迁移）
+# ------------------------------------------------------------------
+# 任何外部代码 `from nova.ir.ir_types import ListType` 仍可正常工作。
+# 新代码请优先使用 snake_case 规范名。
+
+ListType = list_type   #: 向后兼容别名 → :func:`list_type`
+MapType = map_type     #: 向后兼容别名 → :func:`map_type`
+TupleType = tuple_type #: 向后兼容别名 → :func:`tuple_type`
+FnType = fn_type       #: 向后兼容别名 → :func:`fn_type`
+ADTType = adt_type     #: 向后兼容别名 → :func:`adt_type`
+OptionType = option_type #: 向后兼容别名 → :func:`option_type`
+ResultType = result_type #: 向后兼容别名 → :func:`result_type`
+BoxType = box_type     #: 向后兼容别名 → :func:`box_type`
 
 
 # ============================================================
@@ -270,7 +292,16 @@ __all__ = [
     "UNIT_TYPE",
     "NEVER_TYPE",
     "CLOSURE_TYPE",
-    # --- 工厂函数 ---
+    # --- 工厂函数（PEP8 snake_case 规范名，推荐使用）---
+    "list_type",
+    "map_type",
+    "tuple_type",
+    "fn_type",
+    "adt_type",
+    "option_type",
+    "result_type",
+    "box_type",
+    # --- 工厂函数（向后兼容 PascalCase 别名）---
     "ListType",
     "MapType",
     "TupleType",

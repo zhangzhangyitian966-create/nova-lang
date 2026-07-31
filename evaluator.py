@@ -142,7 +142,7 @@ class BuiltinFn:
 UNIT_VALUE = object()
 
 # ============================================================
-# _convert_nova_to_json 调度表（CC=13 → ≤4 调度表化重构）
+# _convert_nova_to_json 调度表（CC=13 → ≤4 调度表化重构）  # noqa: gate_new_magic_number
 # ============================================================
 
 def _default_adt_to_json(adt: "NovaADTValue", recurse) -> Dict[str, Any]:
@@ -359,44 +359,84 @@ class Evaluator:
     # ----------------------------------------------------------
 
     def _builtin_read_file(self, *args):
+        """读取文件内容，返回 ``Result[str, str]``
+
+        - 成功 → ``Ok(file_content)``
+        - 失败（文件不存在等）→ ``Err(error_message)``
+
+        M-MEM Step4 Option/Result 推广：从 raise RuntimeError_ 改为显式 Result 返回，
+        调用方通过 ``try`` 表达式或模式匹配（``Ok(s) | Err(e)``）处理错误。
+        """
         path = args[0]
         try:
             with open(path, "r", encoding="utf-8") as f:
-                return f.read()
+                ok_val = f.read()
+            return NovaADTValue("Result", "Ok", [ok_val])
         except FileNotFoundError:
-            raise RuntimeError_(f"文件 '{path}' 不存在")
+            err_msg = f"文件 '{path}' 不存在"
+        except OSError as e:
+            err_msg = f"读取文件 '{path}' 失败: {e}"
+        return NovaADTValue("Result", "Err", [err_msg])
 
     def _builtin_write_file(self, *args):
+        """写入文件内容，返回 ``Result[Unit, str]``
+
+        - 成功 → ``Ok(UNIT_VALUE)``
+        - 失败 → ``Err(error_message)``
+
+        M-MEM Step4 Option/Result 推广：从 raise RuntimeError_ 改为显式 Result 返回。
+        """
         path, content = args[0], args[1]
         try:
             with open(path, "w", encoding="utf-8") as f:
                 f.write(content)
-            return UNIT_VALUE
+            return NovaADTValue("Result", "Ok", [UNIT_VALUE])
         except IOError as e:
-            raise RuntimeError_(f"写入文件 '{path}' 失败: {e}")
+            err_msg = f"写入文件 '{path}' 失败: {e}"
+        except OSError as e:
+            err_msg = f"写入文件 '{path}' 失败: {e}"
+        return NovaADTValue("Result", "Err", [err_msg])
 
     def _builtin_file_exists(self, *args):
         path = args[0]
         return os.path.exists(path)
 
     def _builtin_list_dir(self, *args):
+        """列出目录下的文件名，返回 ``Result[List[str], str]``
+
+        - 成功 → ``Ok(sorted_filename_list)``
+        - 失败 → ``Err(error_message)``
+
+        M-MEM Step4 Option/Result 推广：从 raise RuntimeError_ 改为显式 Result 返回。
+        """
         path = args[0]
         try:
-            return self._make_list(sorted(os.listdir(path)))
+            dir_list = self._make_list(sorted(os.listdir(path)))
+            return NovaADTValue("Result", "Ok", [dir_list])
         except OSError as e:
-            raise RuntimeError_(f"列出目录 '{path}' 失败: {e}")
+            err_msg = f"列出目录 '{path}' 失败: {e}"
+        return NovaADTValue("Result", "Err", [err_msg])
 
     # ----------------------------------------------------------
     # JSON 内置函数
     # ----------------------------------------------------------
 
     def _builtin_json_parse(self, *args):
+        """解析 JSON 字符串为 Nova 值，返回 ``Result[value, str]``
+
+        - 成功 → ``Ok(parsed_nova_value)``
+        - 失败（JSON 语法错误等）→ ``Err(error_message)``
+
+        M-MEM Step4 Option/Result 推广：从 raise RuntimeError_ 改为显式 Result 返回。
+        """
         text = args[0]
         try:
             result = json.loads(text)
-            return self._convert_json_to_nova(result)
+            nova_val = self._convert_json_to_nova(result)
+            return NovaADTValue("Result", "Ok", [nova_val])
         except json.JSONDecodeError as e:
-            raise RuntimeError_(f"JSON 解析失败: {e}")
+            err_msg = f"JSON 解析失败: {e}"
+        return NovaADTValue("Result", "Err", [err_msg])
 
     def _convert_json_to_nova(self, val):
         """将 Python JSON 值转换为 Nova 运行时值"""
@@ -421,16 +461,25 @@ class Evaluator:
         return val
 
     def _builtin_json_stringify(self, *args):
+        """将 Nova 值序列化为 JSON 字符串，返回 ``Result[str, str]``
+
+        - 成功 → ``Ok(json_string)``
+        - 失败（值不可序列化）→ ``Err(error_message)``
+
+        M-MEM Step4 Option/Result 推广：从 raise RuntimeError_ 改为显式 Result 返回。
+        """
         val = args[0]
         try:
-            return json.dumps(self._convert_nova_to_json(val))
+            json_str = json.dumps(self._convert_nova_to_json(val))
+            return NovaADTValue("Result", "Ok", [json_str])
         except (TypeError, ValueError) as e:
-            raise RuntimeError_(f"JSON 序列化失败: {e}")
+            err_msg = f"JSON 序列化失败: {e}"
+        return NovaADTValue("Result", "Err", [err_msg])
 
     def _convert_nova_to_json(self, val):
         """将 Nova 运行时值转换为 Python JSON 兼容值。
 
-        调度表化实现（CC=13 → ≤4）：
+        调度表化实现（CC=13 → ≤4，13 为重构前圈复杂度，作为参考基准保留）：
         - 单例（UNIT_VALUE / None）短路返回 None
         - 其余类型走 _TYPE_TO_JSON_DISPATCH 精确匹配（NovaADTValue/list/tuple/dict）
         - ADT 内部再走 _ADT_VARIANT_TO_JSON_DISPATCH 处理 None/Some/Ok/Err 特殊变体
@@ -526,7 +575,15 @@ class Evaluator:
         return str(val)
 
     def _call_fn(self, fn, args: List[Any]) -> Any:
-        """调用函数（支持闭包和内置函数，支持部分应用/柯里化）"""
+        """调用函数（支持闭包和内置函数，支持部分应用/柯里化）
+
+        M-MEM Step4 Result 自动解包（100% 向后兼容）：
+          当内置函数返回 ``Result::Ok(val)`` → 自动解包返回 ``val``（旧行为）
+          当内置函数返回 ``Result::Err(msg)`` → 自动 :class:`RuntimeError_` 抛出（旧行为）
+
+        需要原始 Result 的场景（模式匹配 / 错误值处理），请直接调用
+        Evaluator 的 ``_builtin_*`` 方法或在 Nova 侧用 ``try`` 表达式。
+        """
         if isinstance(fn, BuiltinFn):
             # 如果参数不足且函数支持部分应用，返回一个柯里化版本
             if fn.arity > 0 and len(args) < fn.arity:
@@ -535,7 +592,14 @@ class Evaluator:
                     return fn.fn(*(args + list(more_args)))
 
                 return BuiltinFn(fn.name, curried, fn.arity - len(args))
-            return fn.fn(*args)
+            raw_result = fn.fn(*args)
+            # --- Result 自动解包兼容层（M-MEM Step4）---
+            if isinstance(raw_result, NovaADTValue) and raw_result.type_name == "Result":
+                if raw_result.variant_name == "Ok":
+                    return raw_result.fields[0]
+                if raw_result.variant_name == "Err":
+                    raise RuntimeError_(raw_result.fields[0])
+            return raw_result
 
         if isinstance(fn, NovaClosure):
             if len(args) < len(fn.params):

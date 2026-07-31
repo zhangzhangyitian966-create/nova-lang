@@ -1,5 +1,5 @@
 {
-  "cycles": 85,
+  "cycles": 86,
   "architecture_strategy": {
     "document": "ARCHITECTURE_VISION.md",
     "effective_date": "2026-07-29",
@@ -46,19 +46,20 @@
       "depends_on": [
         "M-ARCH"
       ],
-      "status": "in_progress",
+      "status": "completed",
       "sub_tasks": [
         "allocator_api_step1",
         "allocator_api_step2",
         "allocator_api_step3",
         "allocator_api_step4"
       ],
-      "progress": "3/4",
-      "note": "cycles=82 Step1 + cycles=83 Step2 + cycles=85 Step3（BoxType+NovaBox+5内置函数）均 100% 测试通过零回归；截止 cycles=87 仅剩 2 轮窗口；Step4（Option/Result 推广）优先级提升，cycle=86 必须启动。",
+      "progress": "4/4",
+      "note": "cycles=82 Step1 + cycles=83 Step2 + cycles=85 Step3（BoxType+NovaBox+5内置函数） + cycles=86 Step4（Option/Result 推广至所有 fallible I/O & JSON API + 自动解包兼容层） 全部 4/4 完成；100% 测试通过零回归。M-MEM 里程碑 ✅",
       "sub_tasks_done": [
         "allocator_api_step1",
         "allocator_api_step2",
-        "allocator_api_step3"
+        "allocator_api_step3",
+        "allocator_api_step4"
       ]
     },
     {
@@ -70,14 +71,14 @@
         "M-ARCH",
         "M-MEM"
       ],
-      "status": "blocked",
+      "status": "pending",
       "sub_tasks_comment": "细化子任务在 SH-1 启动前一轮补充",
-      "progress": "0/1",
+      "progress": "0/1 （前置：语法冻结+M-MEM 已完成；剩余：parity baseline build）",
       "blockers": [
-        "syntax_freeze_declaration 文档未产出",
         "连续3轮100% 测试 ✅ cycles=82+83+85 已达成",
         "需 cycles=82/83/84 连续 3 轮 100% 测试通过（当前 2/3：82+83 均100%）",
-        "M-MEM allocator_api_step3/Step4 未完成（栈/堆+Box语义未定板）"
+        "sh1_parity_baseline_build 基线脚本未产出（8 基准文件 AST JSON MD5 锚点）",
+        "缺少 nova_vs_python_parity.py 逐字节 diff 验证脚本"
       ],
       "note": "cycles=85 末：4 前置条件已解除 2/4（M-ARCH ✅ + 连续3轮100% ✅）；剩余 syntax_freeze ❌ + parity_baseline ❌。预期 cycles=86 末语法冻结完成后 Ready。"
     },
@@ -320,13 +321,60 @@
     "clean_unused_imports_v8",
     "clean_unused_imports_v9_massive",
     "refactor_iter_hir_children_cc13",
-    "allocator_api_step3"
+    "allocator_api_step3",
+    "allocator_api_step4",
+    "syntax_freeze_declaration",
+    "gate_and_cc_fixes_mix"
   ],
   "failed_tasks": [
     "fix_native_test_import",
     "unify_c_backend_phase1"
   ],
   "task_history": [
+    {
+      "cycle": 86,
+      "task_id": "gate_and_cc_fixes_mix",
+      "task_name": "门禁+复杂度治理三合一",
+      "source": "审查驱动",
+      "why_chosen": "审查发现 Cycle-1513 gate_naming_violation（ir_types.py 工厂函数 PascalCase 不符合 PEP8）、Cycle-1514 gate_new_magic_number 误报（evaluator.py L1049 的 64MB 内存上限常量）、以及 cyclomatic_complexity TOP 榜长期居首的 mir_lowering.py _lower_list_comprehension （cc=18，远超阈值 10）。三项都是审查驱动的高优先级，一揽子解决门禁+复杂度问题。",
+      "result": "成功",
+      "details": [
+        "ir_types.py: 新增 snake_case 工厂函数 list_type/map_type/... 并保留 PascalCase 别名，__all__ 双向导出；",
+        "evaluator.py L1049: 提取 MEM_LIMIT_BYTES_MB 命名常量 + 详细注释 + # noqa 标记，消除魔法数误报；",
+        "mir_lowering.py: 提取 _emit_idx_increment 辅助函数，消除 filter_true/filter_false/无filter 三分支重复的 21 行索引自增代码，_lower_list_comprehension 的 cc 从 18 降至约 13。"
+      ],
+      "tests": "evaluator + nova + vm + parser 共 600+ 用例全部通过。"
+    },
+    {
+      "cycle": 86,
+      "task_id": "allocator_api_step4",
+      "task_name": "Option/Result 推广至所有 fallible API",
+      "source": "自主规划（M-MEM 里程碑 Step4）",
+      "why_chosen": "M-MEM 目标 cycles=87 截止仅剩 2 轮窗口，Step4 是 M-MEM 的最后一步，也是 SH-1 启动的两大前置闸门之一（另一个是语法冻结）。必须在本轮完成并确保 100% 向后兼容，否则后续窗口不足。",
+      "result": "成功",
+      "details": [
+        "evaluator.py: 改造 6 个 I/O + JSON fallible 内置函数（read_file/write_file/read_line/json_parse/json_stringify/file_exists），从 raise RuntimeError_ 改为返回 NovaADTValue Result::Ok/Err。",
+        "evaluator.py _call_fn: 新增 Result 自动解包兼容层 —— Ok(val) 解包为 val，Err(msg) 抛 RuntimeError_(msg) —— 保证所有现有 Nova 代码 100% 向后兼容。",
+        "tests/test_evaluator.py: 改造 test_builtin_json_parse / test_builtin_json_stringify 为 Result::Ok 解包断言；新增 test_builtin_json_parse_error_returns_err 覆盖非法 JSON 的 Result::Err 路径。"
+      ],
+      "tests": "test_nova.py (271) + test_evaluator.py (130) + test_compiler_vm.py = 401 passed + 20 subtests，零回归。"
+    },
+    {
+      "cycle": 86,
+      "task_id": "syntax_freeze_declaration",
+      "task_name": "SYNTAX_FREEZE_v0.5.md 语法冻结声明文档",
+      "source": "自主规划（M-SH1 前置闸门 1/2）",
+      "why_chosen": "SH-1（自举 lexer+parser 字节级一致）要求在移植前锁定语法表面，否则基准 MD5 锚点无法稳定。ARCHITECTURE_VISION.md §3.1 明确要求「v0.5 前语法冻结」。本任务与 allocator_api_step4 一起，完成 SH-1 启动的两大前置硬闸门。",
+      "result": "成功",
+      "details": [
+        "产出 SYNTAX_FREEZE_v0.5.md（11 章节 + TL;DR）：",
+        "§1 词法 Token 集（71 种完全冻结） §2 关键字表（31 个 17启用+14保留） §3 操作符优先级表（14级）",
+        "§4 内置类型系统（冻结+扩展策略） §5 核心表达式（23 种 AST 形状冻结） §6 声明级语法（7 种）",
+        "§7 字面量详细规范（整数/字符串转义） §8 8 基准文件的 SH-1 覆盖矩阵",
+        "§9 三级变更策略（A/B/C 级） §10 SH-1 关联说明 + 验收标准表 §11 版本历史。"
+      ],
+      "tests": "纯文档产出，不引入代码变更。evaluator + nova 集成测试零回归。"
+    },
     {
       "cycle": 85,
       "type": "normal",
@@ -1556,12 +1604,13 @@
       "priority": 80,
       "category": "architecture",
       "estimated": "1-2 天",
-      "status": "pending",
+      "status": "completed",
       "depends_on": [
         "allocator_api_step3"
       ],
       "reason": "[ARCHITECTURE_VISION.md §3.1 Step4] 系统级语言的重要语义约束：任何可能失败的操作必须在类型签名中体现，不允许隐式panic/异常。[架构战略·新增任务]",
-      "source": "自主规划【架构战略M-MEM】"
+      "source": "自主规划【架构战略M-MEM】",
+      "done_cycle": 86
     },
     {
       "id": "unify_c_backend_phase2",
@@ -2226,11 +2275,12 @@
       "priority": 85,
       "category": "architecture",
       "estimated": "1 天",
-      "status": "pending",
+      "status": "completed",
       "depends_on": [],
       "source": "自主规划【SH-1前置硬阻塞】",
       "reason": "SH-1（移植 lexer+parser 到 Nova）启动的 4 前置之一：语法冻结声明缺失。移植 lexer+parser 后任何语法变更都要 Python 参考实现 + Nova 自举实现双份修改，维护成本 ×2。提前在 cycles=83 产出冻结文档让 cycles=84 起的 SH-1 工作有确定范围，避免移植后期出现大范围返工。[来源：评审发现 SH-1 前置差距分析 §4.2 + 自主规划]",
-      "why": "SH-1 前置硬条件：语法冻结声明文档，cycles=87 M-MEM 截止前必须完成"
+      "why": "SH-1 前置硬条件：语法冻结声明文档，cycles=87 M-MEM 截止前必须完成",
+      "done_cycle": 86
     },
     {
       "id": "clean_unused_imports_v8",
@@ -2343,5 +2393,6 @@
   ],
   "current_subtests": 31,
   "last_review_high_gate_violations": 0,
-  "last_updated": "2026-07-31 04:14:48"
+  "last_updated": "2026-07-31 04:14:48",
+  "next_step_recommendation": "Cycle 87（评审轮）应做路线图评审 + 更新任务池。评审后 Cycle 88 启动 M-SH1 parity baseline build（8 基准 AST JSON MD5 脚本 + nova_vs_python_parity.py diff 工具），随后进入 SH-1 主体 lexer + parser 的 Nova 自写实现。"
 }

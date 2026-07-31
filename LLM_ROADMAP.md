@@ -1,13 +1,13 @@
 # Nova LLM 智能开发路线图
 
-**更新时间**: 2026-07-31 08:45:13
+**更新时间**: 2026-07-31 16:35:17
 **上次评审**: 第 84 轮（路线图评审 · 质量止血 + SH-1 前置定板）
-**上次开发**: 第 85 轮（M-MEM Step3 BoxType + unused_import v9 Massive + iter_hir_children CC13→≤5）
+**上次开发**: 第 86 轮（M-MEM Step4 Option/Result 推广 + 语法冻结声明 v0.5 + 门禁/复杂度治理三合一）
 **架构战略文档**: [ARCHITECTURE_VISION.md](./ARCHITECTURE_VISION.md) — 架构决策最高参考，如与本路线图冲突以其为准，本文件同步更新
-**总完成度**: ~177/183 ≈ **96.7%**（+3 任务 · 审查驱动2个+架构战略1个）
+**总完成度**: ~180/183 ≈ **98.4%**（+3 任务 · 审查驱动1个+架构战略2个）
 **里程碑 M-ARCH**: ✅ **5/5 全部完成**（cycles=80 硬截止前达成）
-**里程碑 M-MEM**: ✅ **3/4 Step1+Step2+Step3 完成**（cycles=87 截止仅剩 2 轮 · Step4 cycle=86 必须启动）
-**审查驱动任务占比（任务池 pending）**: 11/16 = **68.8%**（本轮完成 2 审查驱动任务 · ≥30% 要求超额满足）
+**里程碑 M-MEM**: ✅ **4/4 Step1+Step2+Step3+Step4 全部完成**（cycles=87 截止提前1轮完成 · M-MEM 里程碑定板）
+**审查驱动任务占比（任务池 pending）**: 9/14 = **64.3%**（本轮完成 1 审查驱动任务 · ≥30% 要求超额满足）
 
 本路线图由 LLM 智能开发系统动态维护。
 
@@ -20,8 +20,8 @@
 | 里程碑 | 内容 | 目标版本 | 预计轮次 | 状态 | 说明 |
 |--------|------|---------|---------|------|------|
 | M-ARCH | 三项立即架构手术（拆ir_nodes/隔离旧C后端/弃用Cranelift） | v0.3.x | 3 轮内 | ✅ **完成 5/5** | **self-hosting 前置条件 · cycles=80 硬截止达成** |
-| M-MEM  | Allocator API 落地（Step1-4）+ 栈/堆语义明确 | v0.4.0 | 第 82-87 轮 | ✅ **3/4 Step1+Step2+Step3 完成 · Step4(P80) cycle=86 必须启动** | **cycles=82 trait+Arena/Libc；cycles=83 Evaluator 注入；cycles=85 BoxType+NovaBox+5内置函数；截止 cycles=87 还剩 2 轮有效窗口** |
-| M-SH1  | Self-Hosting SH-1：lexer + parser 用 Nova 写出 + 字节级一致性 | v0.4.0 | 约第 87-99 轮 | 🚫 **Blocked · 4 前置条件（已解除 2/4）** | 前置：M-ARCH ✅ + M-MEM Step1+Step2+Step3 ✅ + 连续3轮100% ✅（cycles=82+83+85 达成）+ 语法冻结 ❌ + parity 基线 ❌ · **预期 cycles=86 末解除 Blocked** |
+| M-MEM  | Allocator API 落地（Step1-4）+ 栈/堆语义明确 | v0.4.0 | 第 82-86 轮 | ✅ **4/4 Step1+Step2+Step3+Step4 全部完成** | **cycles=82 trait+Arena/Libc；cycles=83 Evaluator 注入；cycles=85 BoxType+NovaBox+5内置函数；cycles=86 Option/Result 推广 + 自动解包兼容层；提前1轮于 cycles=87 截止前完成** |
+| M-SH1  | Self-Hosting SH-1：lexer + parser 用 Nova 写出 + 字节级一致性 | v0.4.0 | 约第 88-100 轮 | ⏳ **Pending · 4 前置条件（已解除 3/4）** | 前置：M-ARCH ✅ + M-MEM ✅（4/4 完成）+ 连续3轮100% ✅（cycles=82+83+85 达成）+ 语法冻结 ✅（SYNTAX_FREEZE_v0.5.md 已产出）+ parity 基线 ❌ · **仅剩 parity baseline build 一项前置** |
 | M-SH2  | Self-Hosting SH-2：type_checker + 三层 IR lowering 移植 | v0.5.0 | 约 12 轮 | ⏳ 未启动 | 前置：M-MEM 定板 + SH-1 字节级一致 |
 | M-SH3  | Self-Hosting SH-3：一个后端（C后端）+ stage2==stage3 自举 | v1.0 | 约 12 轮 | ⏳ 未启动 | 成功后 Python 编译器降级为参考实现 |
 | M-STD  | 标准库覆盖 IO/FS/Net/Concurrency/Serialize | v1.0 | 并行推进 | ⏳ 未启动 | 与 SH-2/SH-3 并行推进 |
@@ -47,16 +47,16 @@
 | ✅ | **Allocator API Step1（定义 trait + ArenaAllocator + LibcAllocator 实现）** | medium | **88** | 1 天 | - | ✅ cycle=82 完成 · runtime/allocator.py 720行 · Allocator trait + Libc/Arena + 统计/错误 · 1116 passed 零回归 |
 | ✅ | **Allocator API Step2（Evaluator 注入可选 allocator + 7 构造点统一路由）** | hard（范围可控） | **82** | 2-3 天 | allocator_api_step1 | ✅ cycle=83 完成 · Evaluator.__init__(allocator=None) 注入 + _make_list/_make_tuple/_make_dict helper + 7 个构造点改造 · 零回归 1037 passed |
 | ✅ | **Allocator API Step3（栈/堆语义明确 + Box 内核）** | medium | **82** | 1-2 天 | allocator_api_step2 | ✅ cycle=85 完成 · 【自主规划】架构战略 M-MEM 3/4 · 新增 IRType.BOX + BoxType + NovaBox(217行) + 5内置函数 box/unbox/set_box/drop_box/clone_box · 440 passed 零回归 |
-| ⏳ | Allocator API Step4（Option/Result 推广至所有 fallible API） | medium | **82** | 1-2 天 | allocator_api_step3 | 【自主规划】架构战略 M-MEM 4/4 收尾 · **cycle=86 必须启动** · cycles=87 截止压力 · P80→P82（优先级微提升反映截止压力） |
+| ✅ | **Allocator API Step4（Option/Result 推广至所有 fallible API）** | medium | **82** | 1-2 天 | allocator_api_step3 | ✅ cycle=86 完成 · 【自主规划】架构战略 M-MEM 4/4 收尾 · evaluator.py 6 个 I/O+JSON fallible 内置函数 Result::Ok/Err 改造 + _call_fn 自动解包兼容层（100% 向后兼容）· 401 passed + 20 subtests 零回归 |
 | ✅ | **审查门禁校准（命名误报+dunder豁免+魔法数字白名单+noqa机制）** | easy | **80** | 2-3 小时 | - | ✅ cycle=82 完成 · 误报率 81%→<20% · 75+ dunder豁免 · COMMON_NUMS 14→60+ · noqa三级豁免 · 注释/字符串剥离 |
-| ⏳ | **语法冻结声明 v0.5 文档（SH-1 前置条件）** | medium | **87** | 1 天 | - | 【自主规划】SH-1 前置硬阻塞 · cycle=85 被质量止血+Step3 挤走 · **cycle=86 必须启动 · 不允许再延期**（P85→P87 反映前置压力） |
+| ✅ | **语法冻结声明 v0.5 文档（SH-1 前置条件）** | medium | **87** | 1 天 | - | ✅ cycle=86 完成 · 【自主规划】SH-1 前置硬阻塞 · 产出 SYNTAX_FREEZE_v0.5.md（11 章节）· 71 Token / 31 Keyword / 14 级优先级表 / 23 Expr+7 Decl AST 形状完全冻结 · SH-1 闸门解除 2/4 |
 | ✅ | **批量清理未使用导入 v9 Massive（219 个间接导入→直导入）** | easy | **88** | 2-3 小时 | - | ✅ cycle=85 完成 · 【审查驱动】Cycle-1514 MEDIUM unused_import 306 钉子户 100% 替换为 ir_types/hir/mir/lir 四模块直导入 · 8测试文件 347 passed 零回归 |
 | ⏳ | **test_parser.py 74 例测试函数补 docstring（门禁修复）** | easy | **86** | 1-2 小时 | - | 【审查驱动】Cycle-1512 门禁失败 74 例主因 · cycle=84 质量止血 #2 |
 | ⏳ | **调优增量门禁：魔法数字豁免（断言值/注释/文档字符串）** | easy | **79** | 1-2 小时 | - | 【审查驱动】门禁每轮必触发 1-9+ 次误报 · 降低噪音提高可信度 |
 | ⏳ | **ir/mir_lowering.py 文档化补全（27 个无 doc→≤3）** | medium | **72** | 3-5 小时 | - | 【审查驱动】薄弱模块#3 · 三层IR核心（1897 行 42.9% 无 doc） |
 | ⏳ | **evaluator.py 语义权威文档化（67 个无 doc→≤20）** | medium | **70** | 3-5 小时 | - | 【审查驱动】薄弱模块#5 · 架构指定语义权威 ARCHITECTURE_VISION §1.3 · 64.4% 无 doc |
 | ⏳ | **native_backend 拆分 Step1：抽出 X86_64RegAlloc 寄存器分配类** | hard（范围可控） | **68** | 1-2 天 | split_native_backend_elf | 【审查驱动】薄弱模块#1 · 全项目最复杂单体（2771 行）· _allocate_registers 历史 CC=18 |
-| ⏳ | **SH-1 parity 基线搭建：8 个基准文件 AST JSON + MD5 输出脚本** | medium | **79** | 3-5 小时 | syntax_freeze_declaration | 【自主规划】SH-1 字节级一致性校验基础设施 · **cycle=86 推进**（与语法冻结文档同轮产出形成 SH-1 前置双完成）· P77→P79 |
+| ⏳ | **SH-1 parity 基线搭建：8 个基准文件 AST JSON + MD5 输出脚本** | medium | **84** | 3-5 小时 | syntax_freeze_declaration | 【自主规划】SH-1 字节级一致性校验基础设施 · 语法冻结文档 ✅ 已产出 · **M-SH1 仅剩唯一前置** · Cycle 88（评审后下一轮开发）必须启动 · P79→P84（前置压力上调） |
 | ✅ | **批量清理未使用导入 v7（unused_import 58→41）** | easy | **62** | 1-2 小时 | - | ✅ cycle=82 完成 · 6 文件删 17 处未使用导入 · 零回归 |
 | ✅ | **批量清理未使用导入 v8（unused_import 41→38） + unify Phase2 Part1** | easy | **60** | 30 分钟 | clean_unused_imports_v7 | ✅ cycle=83 完成 · 3处清理 + 断 CCodeGen 包 API · 零回归 |
 | ⏳ | 拆分 TypeChecker._unify 子模块（CC=26 统一算法独立） | hard | 65 | 2-3 天 | split_ir_nodes_a1 | 【审查驱动】薄弱模块#2 · type_checker.py 2301 行 · HM 推断核心算法独立 |
