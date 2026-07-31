@@ -16,28 +16,35 @@ from nova.ir.hir_lowering import HIRLowering
 from nova.ir.mir_lowering import MIRLowering
 from nova.ir.lir_lowering import LIRLowering
 
-from nova.ir.ir_nodes import (
-    INT_TYPE,
-    HIRModule,
+from nova.ir.ir_types import INT_TYPE
+
+from nova.ir.hir import (
+    HIRBinaryOp,
+    HIRBlockExpr,
     HIRFnDecl,
     HIRFunction,
-    HIRIntLiteral,
-    HIRBinaryOp,
     HIRIdentifier,
-    HIRBlockExpr,
+    HIRIntLiteral,
     HIRLetDecl,
-    MIRModule,
+    HIRModule,
+)
+
+from nova.ir.mir import (
     MIRBasicBlock,
-    MIRConst,
     MIRBinOp,
-    MIRReturn,
+    MIRConst,
     MIRJump,
-    LIRModule,
-    LIRFunction,
-    LIRLoadConst,
+    MIRModule,
+    MIRReturn,
+)
+
+from nova.ir.lir import (
     LIRBinOp,
-    LIRReturn,
+    LIRFunction,
     LIRLabel,
+    LIRLoadConst,
+    LIRModule,
+    LIRReturn,
     LIRStoreGlobal,
 )
 from nova.ir.pass_manager import (

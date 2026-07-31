@@ -13,15 +13,16 @@ SSA 验证器专项测试
 
 import unittest
 
-from nova.ir.ir_nodes import (
-    INT_TYPE,
-    MIRModule,
-    MIRFunction,
+from nova.ir.ir_types import INT_TYPE
+
+from nova.ir.mir import (
     MIRBasicBlock,
-    MIRConst,
     MIRBinOp,
-    MIRPhi,
+    MIRConst,
+    MIRFunction,
     MIRJump,
+    MIRModule,
+    MIRPhi,
     MIRReturn,
 )
 from nova.ir.pass_manager import SSAVerifier

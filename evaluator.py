@@ -21,7 +21,16 @@ import math
 import os
 from typing import Any, Callable, Dict, List, Optional
 
-from .runtime import Allocator, get_global_libc_allocator  # Allocator API Step2 注入
+from .runtime import (
+    Allocator,
+    get_global_libc_allocator,
+    # --- M-MEM Step3 新增：Box<T> 运行时值 + 便捷函数 ---
+    NovaBox,
+    box_value,
+    unbox_value,
+    set_box_value,
+    drop_box,
+)
 
 from .ast_nodes import (
     AliasDef,
@@ -264,6 +273,28 @@ class Evaluator:
             BuiltinFn(
                 "Err", lambda *args: NovaADTValue("Result", "Err", list(args)), 1
             ),
+        )
+
+        # ====== M-MEM Step3：Box<T> 堆分配唯一所有权（box/unbox/set_box/drop_box） ======
+        self.env.define(
+            "box",
+            BuiltinFn("box", self._builtin_box, 1),
+        )
+        self.env.define(
+            "unbox",
+            BuiltinFn("unbox", self._builtin_unbox, 1),
+        )
+        self.env.define(
+            "set_box",
+            BuiltinFn("set_box", self._builtin_set_box, 2),
+        )
+        self.env.define(
+            "drop_box",
+            BuiltinFn("drop_box", self._builtin_drop_box, 1),
+        )
+        self.env.define(
+            "clone_box",
+            BuiltinFn("clone_box", self._builtin_clone_box, 1),
         )
 
     # ----------------------------------------------------------
@@ -1026,6 +1057,68 @@ class Evaluator:
     def _make_dict(self, pairs=None) -> Dict[Any, Any]:
         """构造 Nova Map（Step2 默认仍走 Python dict，Step3 再接入 allocator）。"""
         return dict(pairs) if pairs is not None else {}
+
+    # Allocator API Step3：Box<T> 堆分配唯一所有权 helper
+    # ================================================================
+
+    def _make_box(self, value: Any, *, size: int = 8, align: int = 8) -> NovaBox:
+        """构造 Nova Box<T>（Step3 新增：堆分配唯一所有权值）。
+
+        默认使用 Evaluator 注入的 allocator：
+        - 默认分配：LibcAllocator → 全局 libc 单例
+        - 自定义分配：调用方构造 Evaluator(allocator=MyArena) 则使用自定义 arena
+        """
+        return box_value(self.allocator, value, size=size, align=align)
+
+    def _builtin_box(self, *args) -> NovaBox:
+        """``box(value)`` — 在堆上分配一个唯一所有权的 Box[T]。
+
+        Args:
+            args[0]: 要放入 Box 的任意值 T
+
+        Returns:
+            NovaBox[T]: 包装了 value 的堆分配唯一所有权指针
+        """
+        return self._make_box(args[0])
+
+    def _builtin_unbox(self, *args):
+        """``unbox(b)`` — 读取 Box[T] 内部值（等价于 ``*b`` 解引用）。
+
+        Raises:
+            RuntimeError: Box 已被 drop/move（use-after-drop）
+            TypeError: 参数不是 Box[T]
+        """
+        return unbox_value(args[0])
+
+    def _builtin_set_box(self, *args):
+        """``set_box(b, new_value)`` — 覆写 Box[T] 内部值，返回 unit。
+
+        不改变 Box 的分配大小/对齐（Box<T> 的 T 在生命周期内固定），
+        只替换内部内容。
+
+        Returns:
+            UNIT_VALUE 总是
+        """
+        set_box_value(args[0], args[1])
+        return UNIT_VALUE
+
+    def _builtin_drop_box(self, *args):
+        """``drop_box(b)`` — 显式析构 Box，归还堆内存。
+
+        多次调用是安全的（幂等）。drop 之后再 unbox 会报 use-after-drop。
+        """
+        drop_box(args[0])
+        return UNIT_VALUE
+
+    def _builtin_clone_box(self, *args) -> NovaBox:
+        """``clone_box(b)`` — 显式克隆 Box（默认禁止 Copy，必须手动 clone）。
+
+        新 Box 分配在同一个 allocator 上。返回新的 Box 对象。
+        """
+        b = args[0]
+        if not isinstance(b, NovaBox):
+            raise TypeError(f"clone_box: 期望 Box[T]，得到 {type(b).__name__}")
+        return b.clone()
 
     def _match_pattern(self, pattern, value, bindings: Dict[str, Any]) -> bool:
         """尝试匹配模式，成功则填充 bindings

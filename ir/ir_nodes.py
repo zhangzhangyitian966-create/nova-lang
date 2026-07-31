@@ -30,6 +30,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from .ir_types import (  # noqa: E402
     ADTType,
     BOOL_TYPE,
+    BoxType,
     CHAR_TYPE,
     CLOSURE_TYPE,
     FLOAT_TYPE,
@@ -215,6 +216,7 @@ __all__ = [
     "ADTType",
     "OptionType",
     "ResultType",
+    "BoxType",
     # --- 来自 hir.py 的 HIR 节点 ---
     # 顶层：模块 / 函数 / 类型定义
     "HIRModule",

@@ -578,7 +578,9 @@ def _iter_hir_children(expr):
     """遍历 HIR 节点的所有子表达式（生成器）。
 
     用于 generic_visit/generic_rewrite 的数据驱动遍历。
-    产生 (字段类型, 字段名, 值) 元组。
+    统一产出 4 元组格式: (kind, fname, idx_or_None, child_expr)
+    - child_expr 始终位于 index=3，调用方可直接 item[3] 或 item[-1] 取值，
+      无需按 kind 分支解包，降低调用方圈复杂度。
     """
     schema = _HIR_CHILD_FIELDS.get(type(expr))
     if schema is None:
@@ -586,24 +588,35 @@ def _iter_hir_children(expr):
     for field_desc in schema:
         if isinstance(field_desc, tuple):
             kind, fname = field_desc
-            if kind == "list":
-                for i, child in enumerate(getattr(expr, fname)):
-                    yield ("list_item", fname, i, child)
-            elif kind == "optional":
-                val = getattr(expr, fname)
-                if val is not None:
-                    yield ("optional", fname, val)
-            elif kind == "pair_list":
-                for i, (k, v) in enumerate(getattr(expr, fname)):
-                    yield ("pair_key", fname, i, k)
-                    yield ("pair_val", fname, i, v)
-            elif kind == "arm_list":
-                for i, arm in enumerate(getattr(expr, fname)):
-                    if arm.guard is not None:
-                        yield ("arm_guard", fname, i, arm.guard)
-                    yield ("arm_body", fname, i, arm.body)
+            _yield_field_children(expr, kind, fname)
         else:
-            yield ("single", field_desc, getattr(expr, field_desc))
+            # 单值子表达式：idx 填 None
+            yield ("single", field_desc, None, getattr(expr, field_desc))
+
+
+def _yield_field_children(expr, kind, fname):
+    """按字段 kind 分发产出子表达式（_iter_hir_children 的子 helper）。
+
+    将 4 种 tuple 类型字段的分支从主函数剥离，使 _iter_hir_children 本体
+    圈复杂度从 13 降至 ≤5，同时保持所有 yield 统一为 4 元组。
+    """
+    items = getattr(expr, fname)
+    if kind == "list":
+        for i, child in enumerate(items):
+            yield ("list_item", fname, i, child)
+    elif kind == "optional":
+        if items is not None:
+            yield ("optional", fname, None, items)
+    elif kind == "pair_list":
+        for i, (k, v) in enumerate(items):
+            yield ("pair_key", fname, i, k)
+            yield ("pair_val", fname, i, v)
+    elif kind == "arm_list":
+        for i, arm in enumerate(items):
+            if arm.guard is not None:
+                yield ("arm_guard", fname, i, arm.guard)
+            yield ("arm_body", fname, i, arm.body)
+    # 未知 kind：静默忽略（_HIR_CHILD_FIELDS 保证不会出现）
 
 
 class HIRVisitor:
@@ -625,15 +638,13 @@ class HIRVisitor:
         return visitor(expr)
 
     def generic_visit(self, expr):
-        """默认访问：递归访问所有子表达式（数据驱动实现）"""
+        """默认访问：递归访问所有子表达式（数据驱动实现）
+
+        利用 _iter_hir_children 统一 4 元组输出，child_expr 恒为 item[3]，
+        无需按 kind 分支解包，圈复杂度 6→1。
+        """
         for item in _iter_hir_children(expr):
-            kind = item[0]
-            if kind in ("single", "optional"):
-                self.visit(item[2])
-            elif kind == "list_item":
-                self.visit(item[3])
-            elif kind in ("pair_key", "pair_val", "arm_guard", "arm_body"):
-                self.visit(item[3])
+            self.visit(item[3])
 
 
 class HIRRewriter:

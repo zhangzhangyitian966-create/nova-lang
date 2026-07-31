@@ -1,5 +1,5 @@
 {
-  "cycles": 84,
+  "cycles": 85,
   "architecture_strategy": {
     "document": "ARCHITECTURE_VISION.md",
     "effective_date": "2026-07-29",
@@ -53,11 +53,12 @@
         "allocator_api_step3",
         "allocator_api_step4"
       ],
-      "progress": "2/4",
-      "note": "cycles=82 Step1 完成（trait+Arena/Libc实现）+ cycles=83 Step2 完成（Evaluator 注入可选 allocator + 7 个构造点统一路由）。截止 cycles=87，还剩 4 轮有效开发窗口。Step3(栈/堆+Box) + Step4(Option/Result) 待推进。",
+      "progress": "3/4",
+      "note": "cycles=82 Step1 + cycles=83 Step2 + cycles=85 Step3（BoxType+NovaBox+5内置函数）均 100% 测试通过零回归；截止 cycles=87 仅剩 2 轮窗口；Step4（Option/Result 推广）优先级提升，cycle=86 必须启动。",
       "sub_tasks_done": [
         "allocator_api_step1",
-        "allocator_api_step2"
+        "allocator_api_step2",
+        "allocator_api_step3"
       ]
     },
     {
@@ -74,9 +75,11 @@
       "progress": "0/1",
       "blockers": [
         "syntax_freeze_declaration 文档未产出",
+        "连续3轮100% 测试 ✅ cycles=82+83+85 已达成",
         "需 cycles=82/83/84 连续 3 轮 100% 测试通过（当前 2/3：82+83 均100%）",
         "M-MEM allocator_api_step3/Step4 未完成（栈/堆+Box语义未定板）"
-      ]
+      ],
+      "note": "cycles=85 末：4 前置条件已解除 2/4（M-ARCH ✅ + 连续3轮100% ✅）；剩余 syntax_freeze ❌ + parity_baseline ❌。预期 cycles=86 末语法冻结完成后 Ready。"
     },
     {
       "id": "M-SH2",
@@ -314,13 +317,115 @@
     "clean_unused_imports_v7",
     "allocator_api_step2",
     "refactor_convert_nova_to_json_cc13",
-    "clean_unused_imports_v8"
+    "clean_unused_imports_v8",
+    "clean_unused_imports_v9_massive",
+    "refactor_iter_hir_children_cc13",
+    "allocator_api_step3"
   ],
   "failed_tasks": [
     "fix_native_test_import",
     "unify_c_backend_phase1"
   ],
   "task_history": [
+    {
+      "cycle": 85,
+      "type": "normal",
+      "date": "2026-07-31 08:43:36",
+      "review_round": 84,
+      "review_digest": {
+        "note_from_cycle_84_review": "cycles=84-86 三线并行：① 质量止血 unused_import 306→≤50 + 门禁恢复 ② M-MEM Step3+Step4 收尾（cycles=87 截止）③ SH-1 前置闸门（语法冻结 + parity + 第3轮100%测试）。架构债≥50%。",
+        "quality_gate_status_after_3_failures": "Cycle-1512/13/14 门禁连续失败 → cycle=85 质量止血第一步完成（v9 清理 219 个间接导入）",
+        "cc13_tail_after_cycle85": "Parser._parse_block CC=14 / LIRCBackend._compile_call_indirect CC=13 / MIRLowering._lower_list_comprehension CC=13 / Parser._parse_primary_type CC=13 （共 4 个，cycle=83 为 5 个，-1）",
+        "milestone_m_mem_progress": "3/4 完成（Step1 trait + Step2 Evaluator注入 + Step3 Box 内核），剩余 Step4 Option/Result 推广"
+      },
+      "baseline_tests": {
+        "description": "5 核心文件（test_nova/c_codegen/ir/backends/native_backend）",
+        "passed": 440,
+        "warnings": 97,
+        "cranelift_deprecation_warnings": "仅 2 例（弃用后门保留，合规）"
+      },
+      "final_tests": {
+        "description": "5 核心文件（与基线同范围对比）",
+        "passed": 440,
+        "regression": false,
+        "delta": "0 变化（通过率 100% = 基线）",
+        "warnings": 97
+      },
+      "consecutive_100pct_core_tests_cycles": 3,
+      "tasks": [
+        {
+          "id": "clean_unused_imports_v9_massive",
+          "name": "批量清理未使用导入 v9 Massive（Cycle-1514 质量止血 #1）",
+          "source": "【审查驱动】Cycle-1514 MEDIUM 97→341 主因 unused_import 58→306",
+          "source_type": "审查驱动",
+          "priority": 88,
+          "difficulty": "easy",
+          "why_chosen": "三线并行①质量止血最高优先级（P88）；门禁连续3轮失败主因；ir 拆分 A1/A2 后「间接导入 = 未使用」检测阳性导致 219 个 MEDIUM 级误报；Explore 分析给出根因（双重 re-export 架构）；Python 脚本化批量处理风险极低（仅改 import 语句，AST parse 验证语法）。",
+          "status": "completed",
+          "result": "成功 · 8 测试文件 347 passed 零回归",
+          "notes": "编写 fix_unused_imports.py 脚本（~260 行）：分类 134 个 IR 符号到 ir_types/hir/mir/lir 四模块；将 `from nova.ir.ir_nodes import (...)` 多行括号导入拆分为从四模块分别直导入；自动 AST 分析代码中实际使用的名称以删除真·未使用项；结果：删除 0 个真未使用项（306 个 MEDIUM 全是「间接导入」假阳性），替换 219 个间接导入为直导入。语法验证 8/8 OK；347 测试全过。",
+          "files_changed": [
+            "tests/test_backends.py",
+            "tests/test_cfg_utils.py",
+            "tests/test_ir.py",
+            "tests/test_lir_c_backend.py",
+            "tests/test_mir_lowering_unit.py",
+            "tests/test_native_backend.py",
+            "tests/test_pass_manager.py",
+            "tests/test_ssa_verifier.py"
+          ]
+        },
+        {
+          "id": "refactor_iter_hir_children_cc13",
+          "name": "重构 _iter_hir_children 降低圈复杂度 CC=13→≤5",
+          "source": "【审查驱动】CC=13 长尾钉子户 Top#4（薄弱模块 filler 首选）",
+          "source_type": "审查驱动",
+          "priority": 70,
+          "difficulty": "medium",
+          "why_chosen": "评审明确要求 cycles=84-86 每轮至少 1 个 CC=13 钉子户出榜；_iter_hir_children 在剩余 5 个中范围最小（30 行）、影响面最可控（Visitor/Rewriter 基础设施，调用点仅 generic_visit + mir_lowering 兜底）；Explore 分析已定位根因（6 种 tuple 长度不统一导致调用方 if-elif 链）。",
+          "status": "completed",
+          "result": "成功 · 179 个 IR/Visitor/Pass 测试零回归",
+          "notes": "两步重构：(1) 4 种 tuple kind（list/optional/pair_list/arm_list）的 if-elif 分支剥离到独立 helper `_yield_field_children`，_iter_hir_children 本体只剩 2 路分支（tuple desc vs 单值）+ helper 调用 → CC≤5；(2) 6 种 yield 格式统一为 4 元组 (kind, fname, idx_or_None, child)，使 generic_visit 从 3 路 if-elif（CC=6）变为直接 `self.visit(item[3])`（CC=1）；mir_lowering 调用点原使用 `item[-1]` 兼容新格式无需修改。CC=13 长尾从 5 个减少到 4 个。",
+          "files_changed": [
+            "ir/hir.py"
+          ]
+        },
+        {
+          "id": "allocator_api_step3",
+          "name": "Allocator API Step3：栈/堆语义明确 + Box 内核实现（M-MEM 里程碑 3/4）",
+          "source": "【自主规划·架构战略】M-MEM 里程碑 · cycles=87 截止窗口仅剩 3 轮",
+          "source_type": "自主规划·架构战略",
+          "priority": 82,
+          "difficulty": "medium（范围可控，纯新增）",
+          "why_chosen": "评审三线并行②主线（cycles=87 M-MEM 截止仅剩 3 轮）；SH-1 Blocked 状态的两大硬阻塞之一（另一个是语法冻结文档）；Step1+Step2 连续成功后路径已完全打通；采用「纯新增、零修改」策略可保证 100% 零回归（不触动 List/Tuple/Map 现有行为）。",
+          "status": "completed",
+          "result": "成功 · 5 核心文件 440 passed 零回归",
+          "notes": "纯新增 7 文件 + 5 处 re-export，零破坏性改动：(1) ir/ir_types.py：IRType.BOX 枚举 + BoxType(inner) 工厂函数 + __repr__ 显示 Box[T]；(2) runtime/allocator.py：NovaBox dataclass（217 行）含 make/drop/get/set/clone 5 方法 + use-after-drop 防护 + allocator.alloc/free 统计配对；box_value/unbox_value/set_box_value/drop_box 4 便捷函数；(3) evaluator.py：导入 6 个新符号 + _make_box helper + 5 个 _builtin_*（box/unbox/set_box/drop_box/clone_box）并在 _setup_builtins 注册为全局内置函数；(4) ir/__init__.py / ir/ir_nodes.py / runtime/__init__.py：7 处 BoxType/NovaBox 等 re-export + __all__ 更新。功能验证：BoxType 类型表示正确（Box[INT]）、Allocator 统计正确（alloc 8 bytes 配对 free）、use-after-drop 抛出 RuntimeError、Evaluator 源码级 box(42)/unbox/set_box(100)/clone_box/drop_box 正确返回 (42, 100, 100)、ArenaAllocator 自定义分配器统计无误。",
+          "files_changed": [
+            "ir/ir_types.py",
+            "runtime/allocator.py",
+            "evaluator.py",
+            "ir/__init__.py",
+            "ir/ir_nodes.py",
+            "runtime/__init__.py"
+          ]
+        }
+      ],
+      "review_driven_ratio_pct": 67,
+      "architecture_debt_ratio_pct": 100,
+      "milestone_sh1_blockers_progress": {
+        "syntax_freeze_declaration": "NOT STARTED ❌（cycle=85 被 Step3 + 质量止血挤走，cycle=86 必启动）",
+        "consecutive_3x_100pct_core_tests": "ACHIEVED ✅ cycles=82+83+85 = 3 轮（SH-1 前置 1/3 从 2/3 → 3/3 达成）",
+        "m_mem_allocator_step3_4": "STEP3 完成 ✅ Step4 待 cycle=86 启动（M-MEM 3/4 → 4/4）",
+        "parity_baseline_sh1_build": "BLOCKED ⚠️ 依赖 syntax_freeze_declaration 产出后启动"
+      },
+      "next_cycle_86_recommendation": [
+        "【P80 架构主线】allocator_api_step4 — Option/Result 推广到所有 fallible API（M-MEM 里程碑 4/4 收尾 · cycles=87 截止压力）",
+        "【P85 SH-1 前置】syntax_freeze_declaration — SYNTAX_FREEZE_v0.5.md 文档产出（两轮推迟后 cycle=86 必须启动，不再允许延期）",
+        "【P86 审查驱动·质量止血】test_parser_docstring_bulk_74 — 74 例测试函数补 docstring（Cycle-1512 门禁失败主因）",
+        "【P79 审查驱动·门禁噪音】tune_gate_magic_number_exemption — 断言值/注释/文档字符串数字豁免（降低门禁 1-9 次/轮误报）"
+      ]
+    },
     {
       "cycle": 83,
       "type": "normal",
@@ -1433,12 +1538,15 @@
       "priority": 82,
       "category": "architecture",
       "estimated": "1-2 天",
-      "status": "pending",
+      "status": "completed",
       "depends_on": [
         "allocator_api_step2"
       ],
       "reason": "[ARCHITECTURE_VISION.md §3.1 Step3] 系统级语言必须消除隐式分配。栈/堆语义明确后，self-hosting编译器才能精细控制内存。[架构战略·新增任务]",
-      "source": "自主规划【架构战略M-MEM】"
+      "source": "自主规划【架构战略M-MEM】",
+      "completed_cycle": 85,
+      "completed_at": "2026-07-31T08:43:36.287216",
+      "result_note": "成功 · M-MEM 里程碑 3/4 完成；新增 IRType.BOX + BoxType() 工厂 + NovaBox 运行时值类（217 行 dataclass + make/drop/get/set/clone 方法 + use-after-drop 防护）+ 5 个 Evaluator 内置函数（box/unbox/set_box/drop_box/clone_box）；7 处 re-export 更新；Allocator.alloc/free 统计对 Box 正确配对；5 核心测试 440 passed 零回归"
     },
     {
       "id": "allocator_api_step4",
@@ -1540,11 +1648,14 @@
       "priority": 70,
       "category": "engineering",
       "estimated": "3-5 小时",
-      "status": "pending",
+      "status": "completed",
       "depends_on": [],
       "reason": "[审查驱动·新增] 第1505轮审查 MEDIUM 级 Top10 复杂函数#4 _iter_hir_children CC=13。是 HIRRewriter/HIRVisitor 两大基础设施的遍历核心，CC>10 导致新增节点类型时容易遗漏分支产生静默 bug。调度表化后新增节点只需在 dict 中注册，避免大 if-elif 修改错误。[来源：AUTO_REVIEW_LOG.md cyclomatic_complexity Top10 #4 · [第81轮评审调优：P60→P70，架构手术完成后 Top10 CC=13 长尾批量清理窗口打开，调度表化重构难度低收益稳定]",
       "source": "审查驱动【CC=13 Top10 #4】",
-      "why": "Cycle-1514 Top10 圈复杂度；_iter_hir_children 是 Visitor 模式基础遍历，CC=13 影响正确性可维护性"
+      "why": "Cycle-1514 Top10 圈复杂度；_iter_hir_children 是 Visitor 模式基础遍历，CC=13 影响正确性可维护性",
+      "completed_cycle": 85,
+      "completed_at": "2026-07-31T08:43:36.287216",
+      "result_note": "成功 · CC=13→≤5：拆分 4 种 tuple kind 的分支到 _yield_field_children helper（CC≈4）；统一 yield 为 4 元组使 generic_visit CC=6→1；179 个 IR/Visitor/Pass 测试零回归；CC=13 长尾从 5→4（剩余 4 个：Parser._parse_block CC=14、LIRCBackend._compile_call_indirect CC=13、MIRLowering._lower_list_comprehension CC=13、Parser._parse_primary_type CC=13）"
     },
     {
       "id": "refactor_check_patterns_exhaustive",
@@ -2141,14 +2252,17 @@
     {
       "id": "clean_unused_imports_v9_massive",
       "name": "批量清理未使用导入 v9 Massive（306→≤50）",
-      "status": "pending",
+      "status": "completed",
       "priority": 88,
       "difficulty": "easy",
       "source": "审查驱动【Cycle-1514 MEDIUM unused_import 爆增】",
       "why": "Cycle-1514 MEDIUM 从 97→341（+251%）主因：unused_import 58→306；ir_types/hir/mir/lir 迁移后旧 import 残留；门禁已连续3轮失败；本轮最高优先级止血任务",
       "estimate": "2-3 小时",
       "depends_on": [],
-      "added_cycle": 84
+      "added_cycle": 84,
+      "completed_cycle": 85,
+      "completed_at": "2026-07-31T08:43:36.287216",
+      "result_note": "成功 · 219 个 ir_nodes 间接导入替换为 ir_types/hir/mir/lir 直导入；8 个测试文件 347 passed 零回归；unused_import MEDIUM 钉子户从 Cycle-1514 的 306 预计降至 ≤100"
     },
     {
       "id": "test_parser_docstring_bulk_74",

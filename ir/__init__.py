@@ -22,6 +22,7 @@
 from .ir_types import (
     ADTType,
     BOOL_TYPE,
+    BoxType,
     CHAR_TYPE,
     CLOSURE_TYPE,
     FLOAT_TYPE,
@@ -177,6 +178,7 @@ __all__ = [
     "ADTType",
     "OptionType",
     "ResultType",
+    "BoxType",
     # --- HIR 节点（来自 hir）---
     "HIRModule",
     "HIRFunction",

@@ -61,6 +61,8 @@ class IRType(Enum):
     FUNCTION = auto()
     ADT = auto()
     TYPE_VAR = auto()
+    # --- M-MEM Step3 新增：Box<T> 堆分配唯一所有权指针（前端可见） ---
+    BOX = auto()
     # --- LIR 层新增（前端不可见，指针大小统一按 64-bit 处理） ---
     PTR = auto()
 
@@ -114,6 +116,10 @@ class NovaType:
 
     def __repr__(self) -> str:
         kind = self.kind
+
+        # Box[Elem]  — M-MEM Step3 堆分配唯一所有权
+        if kind == IRType.BOX and self.params:
+            return f"Box[{self.params[0]}]"
 
         # List[Elem]
         if kind == IRType.LIST and self.params:
@@ -230,6 +236,23 @@ def ResultType(ok: NovaType, err: NovaType) -> NovaType:
     return ADTType("Result", ok, err)
 
 
+def BoxType(inner: NovaType) -> NovaType:
+    """``Box[T]`` = 堆分配唯一所有权指针（M-MEM Step3 核心类型）
+
+    语义（对齐 ARCHITECTURE_VISION.md §3.1「栈/堆语义明确」）：
+      - 值语义：``Box[T]`` 表示 *拥有* 一个堆上的 ``T`` 值
+      - 唯一所有权：任何时刻同一 Box 只有一个活跃引用
+      - 显式析构：Box 离开作用域时自动 drop（不依赖 GC）
+      - 传递：移动语义（Copy 语义需显式 ``clone_box``）
+
+    >>> BoxType(INT_TYPE)
+    Box[INT]
+    >>> ListType(BoxType(ADTType("Node")))
+    List[Box[Node]]
+    """
+    return NovaType(IRType.BOX, [inner])
+
+
 # ============================================================
 # 公开 API（配合 from nova.ir.ir_types import * 使用）
 # ============================================================
@@ -255,4 +278,5 @@ __all__ = [
     "ADTType",
     "OptionType",
     "ResultType",
+    "BoxType",
 ]

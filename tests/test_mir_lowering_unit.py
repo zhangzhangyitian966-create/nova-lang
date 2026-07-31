@@ -10,13 +10,16 @@
 
 import unittest
 
-from nova.ir.ir_nodes import (
+from nova.ir.ir_types import (
     BOOL_TYPE,
     FLOAT_TYPE,
     INT_TYPE,
-    STRING_TYPE,
     IRType,
     NovaType,
+    STRING_TYPE,
+)
+
+from nova.ir.hir import (
     HIRBinaryOp,
     HIRBindPattern,
     HIRBlockExpr,
@@ -37,8 +40,11 @@ from nova.ir.ir_nodes import (
     HIRMatchExpr,
     HIRStringLiteral,
     HIRTuplePattern,
-    HIRUnitLiteral,
     HIRUnaryOp,
+    HIRUnitLiteral,
+)
+
+from nova.ir.mir import (
     MIRBasicBlock,
     MIRBinOp,
     MIRCall,

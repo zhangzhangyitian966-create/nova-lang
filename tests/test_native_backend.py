@@ -22,15 +22,15 @@ from nova.backend.native_backend import (
 )
 
 # 直接导入 IR 节点
-from nova.ir.ir_nodes import (
-    LIRModule,
+from nova.ir.ir_types import FLOAT_TYPE, INT_TYPE
+
+from nova.ir.lir import (
+    LIRCall,
     LIRFunction,
     LIRLoadConst,
+    LIRModule,
     LIRReturn,
-    LIRCall,
     LIRStoreGlobal,
-    INT_TYPE,
-    FLOAT_TYPE,
 )
 
 
@@ -684,8 +684,11 @@ class TestFloatImmAndRetval(unittest.TestCase):
 
     def test_float_immediate_no_notimplementederror(self):
         """浮点立即数参数不再抛出 NotImplementedError"""
-        from nova.ir.ir_nodes import (
-            LIRModule, LIRFunction, LIRLoadConst, LIRReturn,
+        from nova.ir.lir import (
+            LIRFunction,
+            LIRLoadConst,
+            LIRModule,
+            LIRReturn,
         )
         codegen = NativeCodeGen()
         lir = LIRModule(name="test_float_imm")
@@ -702,9 +705,13 @@ class TestFloatImmAndRetval(unittest.TestCase):
 
     def test_emit_call_float_retval_uses_xmm0(self):
         """验证 _emit_call 的返回值分支使用正确的源寄存器"""
-        from nova.ir.ir_nodes import (
-            LIRModule, LIRFunction, LIRLoadConst, LIRReturn,
-            FLOAT_TYPE,
+        from nova.ir.ir_types import FLOAT_TYPE
+
+        from nova.ir.lir import (
+            LIRFunction,
+            LIRLoadConst,
+            LIRModule,
+            LIRReturn,
         )
         codegen = NativeCodeGen()
         lir = LIRModule(name="test_float_ret")

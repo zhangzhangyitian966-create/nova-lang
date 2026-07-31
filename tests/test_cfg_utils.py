@@ -10,14 +10,14 @@ CFG 基础设施单元测试
 
 import unittest
 
-from nova.ir.ir_nodes import (
-    IRType,
+from nova.ir.ir_types import IRType, NovaType
+
+from nova.ir.mir import (
     MIRBasicBlock,
     MIRBranch,
     MIRFunction,
     MIRJump,
     MIRReturn,
-    NovaType,
 )
 from nova.ir.cfg_utils import (
     BackEdge,

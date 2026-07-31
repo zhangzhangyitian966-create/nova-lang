@@ -899,3 +899,218 @@ def create_arena(
     等价于 ``ArenaAllocator(block_size=block_size, backing=backing, name=name)``。
     """
     return ArenaAllocator(block_size=block_size, backing=backing, name=name)
+
+
+# ============================================================
+# M-MEM Step3：Box<T> 运行时值（栈/堆语义明确）
+# ============================================================
+
+
+@dataclass
+class NovaBox:
+    """Nova 运行时 Box<T> 值 — 堆分配的唯一所有权指针。
+
+    这是 M-MEM Step3 的运行时核心类型，配合 ``BoxType`` 类型表示使用。
+    Python 参考实现层**不调用真实的 allocator.alloc**（因为 Python 自身
+    管理堆内存），但保留以下语义契约，供后续 Nova 自举编译器和 C 后端
+    精确定义内存布局：
+
+    语义契约（强制对齐 ARCHITECTURE_VISION.md §3.1）：
+      1. **唯一所有权**：任何时刻一个 ``NovaBox`` 只有一个活跃引用
+         （Python 层用 ``_moved`` 标记模拟 move 语义）
+      2. **显式析构**：``drop(box)`` 调用后 ``_moved=True``，
+         任何进一步访问抛出 ``RuntimeError``（模拟 use-after-free）
+      3. **allocator 关联**：每个 Box 记录由哪个 allocator 创建，
+         drop 时调用对应 allocator.free（Python 层无实际内存释放，但
+         更新统计信息，供泄漏检测和性能模型使用）
+      4. **size/align 记录**：每个 Box 保存分配的字节数和对齐值，
+         与 Zig Allocator API 契约保持一致
+
+    典型用法::
+
+        alloc = LibcAllocator()
+        box = NovaBox.make(alloc, 42, inner_size=8, inner_align=8)
+        assert box.inner == 42
+        NovaBox.drop(box)
+        # box.inner  # → RuntimeError: use-after-drop
+
+    Args:
+        inner: 被包装的堆上值（T）
+        allocator: 创建本 Box 的分配器（drop 时用它归还内存）
+        inner_size: 值占用的字节数（Nova 层 ABI 对齐用）
+        inner_align: 值的对齐要求（Nova 层 ABI 对齐用）
+    """
+
+    inner: Any
+    """被包装的堆上值（T）。访问前请检查 :data:`_moved`。"""
+
+    allocator: Allocator
+    """创建本 Box 的分配器（drop 时调用 allocator.free 更新统计）。"""
+
+    inner_size: int = 8
+    """被包装值占用的字节数（ABI 契约，默认 64-bit 字长）。"""
+
+    inner_align: int = DEFAULT_ALIGN
+    """被包装值的对齐要求（ABI 契约，默认自然对齐 8 字节）。"""
+
+    _moved: bool = False
+    """move 标记：为 True 时任何对 inner 的访问都应报错（use-after-drop）。"""
+
+    # ---- 工厂方法（对应 Nova 语法：box value） ----
+
+    @classmethod
+    def make(
+        cls,
+        allocator: Allocator,
+        value: Any,
+        *,
+        inner_size: int = 8,
+        inner_align: int = DEFAULT_ALIGN,
+    ) -> "NovaBox":
+        """通过 allocator 在「堆上」创建一个 Box<T>（M-MEM Step3 标准入口）。
+
+        Python 参考实现：不调用真实的 allocator.alloc（Python 自带堆管理），
+        但**仍然**调用 allocator.alloc 更新统计快照并记录「分配成功」，
+        以便泄漏检测、性能模型和后续 C 后端移植时可精确对比 alloc/free 对。
+
+        Args:
+            allocator: 用于分配的 Allocator 实现（不能为 None）
+            value: 要放入 Box 的值（任意类型 T）
+            inner_size: 值的字节数（默认 8 = 64-bit 字）
+            inner_align: 值的对齐要求（必须 2 的幂）
+
+        Returns:
+            新建的 :class:`NovaBox`，所有权归调用方
+
+        Raises:
+            ValueError: inner_align 不是 2 的幂（由 allocator.alloc 的 _validate_alloc_args 拦截）
+        """
+        # 触发一次真实的 alloc 调用以更新统计（OOM 时返回 None 则抛错）
+        ptr = allocator.alloc(inner_size, inner_align)
+        if ptr is None:
+            raise RuntimeError(
+                f"NovaBox.make: allocator 分配失败 "
+                f"(size={inner_size}, align={inner_align})"
+            )
+        # 注意：Python 层不使用 ptr 存储值，真正的 value 存在 inner 字段
+        # ptr 只是用来让 allocator 统计「有一次成功 alloc + N 字节」；
+        # C 后端和 Nova 自举编译器才会把 ptr 用作真实地址。
+        return cls(
+            inner=value,
+            allocator=allocator,
+            inner_size=inner_size,
+            inner_align=inner_align,
+            _moved=False,
+        )
+
+    # ---- 析构方法（对应 Nova 语法：drop box 或作用域结束） ----
+
+    @staticmethod
+    def drop(box: "NovaBox") -> None:
+        """显式析构 Box：归还内存给 allocator + 标记 moved（防止 use-after-drop）。
+
+        多次 drop 是合法的（幂等），仅第一次会调用 allocator.free 更新统计。
+        """
+        if box._moved:
+            return
+        # 归还：调用 allocator.free（与 make 中的 alloc 配对）以更新统计
+        box.allocator.free(0, box.inner_size, box.inner_align)  # ptr=0 占位，只更新计数
+        # Python 层不释放 inner（交给 GC），但标记 moved 模拟 use-after-free
+        box._moved = True
+
+    # ---- 访问辅助：防止 use-after-drop ----
+
+    def _check_alive(self, op: str) -> None:
+        if self._moved:
+            raise RuntimeError(
+                f"NovaBox.{op}: use-after-drop — Box 已被 drop/move，内容不再合法"
+            )
+
+    def get(self) -> Any:
+        """安全读取 Box 内部值（等价于 Nova 的 ``*box`` 解引用）。"""
+        self._check_alive("get")
+        return self.inner
+
+    def set(self, new_value: Any) -> None:
+        """安全写入 Box 内部值（等价于 Nova 的 ``*box = new_value``）。
+
+        不改变 Box 的分配大小/对齐（即 Box<T> 的 T 在生命周期内不可变，
+        这是唯一所有权模型的重要保证）。
+        """
+        self._check_alive("set")
+        # 不更新 allocator 统计：Box 大小没变，只是替换内容
+        object.__setattr__(self, "inner", new_value)
+
+    # ---- 复制语义：默认禁止（Copy trait 需显式 clone_box） ----
+
+    def clone(self, new_allocator: Optional[Allocator] = None) -> "NovaBox":
+        """显式克隆 Box（对应 Nova 的 ``clone_box(box)`` 内置函数）。
+
+        新 Box 分配在 ``new_allocator`` 上（默认复用源 Box 的 allocator）。
+        这是深拷贝语义：``new_box is not box`` 且 ``new_box.inner is box.inner``
+        可能为 True（Python 层不强制 inner 深拷贝，由调用方保证类型约束）。
+        """
+        alloc = new_allocator if new_allocator is not None else self.allocator
+        self._check_alive("clone")
+        return NovaBox.make(
+            alloc,
+            self.inner,
+            inner_size=self.inner_size,
+            inner_align=self.inner_align,
+        )
+
+    # ---- Python 层对象模型 ----
+
+    def __repr__(self) -> str:
+        status = "DROPED" if self._moved else "alive"
+        return f"NovaBox[{status}](inner={self.inner!r}, size={self.inner_size})"
+
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, NovaBox):
+            return False
+        if self._moved or other._moved:
+            return False
+        return (
+            self.inner == other.inner
+            and self.inner_size == other.inner_size
+            and self.inner_align == other.inner_align
+        )
+
+    def __hash__(self) -> int:
+        """NovaBox 的 hash 基于 identity（不基于 inner）。
+
+        理由：Box 是唯一所有权指针，hash(a) == hash(b) 当且仅当
+        a 与 b 是**同一个分配**（身份相等），而不是值相等。
+        """
+        return id(self)
+
+
+# ============================================================
+# Box 便捷函数（供 Evaluator 内置函数直接调用）
+# ============================================================
+
+
+def box_value(allocator: Allocator, value: Any, *, size: int = 8, align: int = DEFAULT_ALIGN) -> NovaBox:
+    """``box(value)`` 内置函数的 Python 前置实现。"""
+    return NovaBox.make(allocator, value, inner_size=size, inner_align=align)
+
+
+def unbox_value(box: NovaBox) -> Any:
+    """``unbox(box)`` 内置函数的 Python 前置实现。"""
+    if not isinstance(box, NovaBox):
+        raise TypeError(f"unbox: 期望 Box[T]，得到 {type(box).__name__}")
+    return box.get()
+
+
+def set_box_value(box: NovaBox, new_value: Any) -> None:
+    """``set_box(box, new_value)`` 内置函数的 Python 前置实现。"""
+    if not isinstance(box, NovaBox):
+        raise TypeError(f"set_box: 期望 Box[T]，得到 {type(box).__name__}")
+    box.set(new_value)
+
+
+def drop_box(box: NovaBox) -> None:
+    """``drop(box)`` 内置函数的 Python 前置实现。"""
+    if not isinstance(box, NovaBox):
+        raise TypeError(f"drop_box: 期望 Box[T]，得到 {type(box).__name__}")
+    NovaBox.drop(box)

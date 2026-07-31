@@ -6,24 +6,29 @@ import unittest
 import os
 import tempfile
 
-from nova.ir.ir_nodes import (
+from nova.ir.ir_types import (
+    BOOL_TYPE,
+    FLOAT_TYPE,
+    INT_TYPE,
     IRType,
     NovaType,
-    INT_TYPE,
-    FLOAT_TYPE,
     STRING_TYPE,
-    BOOL_TYPE,
     UNIT_TYPE,
-    LIRModule,
-    LIRFunction,
-    LIRLoadConst,
+)
+
+from nova.ir.hir import HIRModule
+
+from nova.ir.mir import MIRModule
+
+from nova.ir.lir import (
     LIRBinOp,
     LIRCall,
-    LIRReturn,
-    LIRLabel,
-    HIRModule,
-    MIRModule,
+    LIRFunction,
     LIRInstr,
+    LIRLabel,
+    LIRLoadConst,
+    LIRModule,
+    LIRReturn,
 )
 from nova.backend.cranelift_backend import CraneliftBackend
 from nova.backend.wasm_backend import WasmGCBackend
@@ -367,9 +372,9 @@ class TestWasmBackendClosure(unittest.TestCase):
 
     def _make_closure_lir_module(self):
         """创建包含闭包创建和调用的 LIR Module 用于测试"""
-        from nova.ir.ir_nodes import (
-            LIRClosureCreate, LIRCallIndirect, CLOSURE_TYPE,
-        )
+        from nova.ir.ir_types import CLOSURE_TYPE
+
+        from nova.ir.lir import LIRCallIndirect, LIRClosureCreate
 
         module = LIRModule(name="test_wasm_closure")
 
@@ -660,9 +665,16 @@ class TestCBackendClosure(unittest.TestCase):
 
     def _make_closure_lir_module(self):
         """创建包含闭包创建和调用的 LIR Module 用于测试"""
-        from nova.ir.ir_nodes import (
-            LIRModule, LIRFunction, LIRClosureCreate, LIRCallIndirect,
-            LIRLabel, LIRLoadConst, LIRReturn, INT_TYPE, CLOSURE_TYPE,
+        from nova.ir.ir_types import CLOSURE_TYPE, INT_TYPE
+
+        from nova.ir.lir import (
+            LIRCallIndirect,
+            LIRClosureCreate,
+            LIRFunction,
+            LIRLabel,
+            LIRLoadConst,
+            LIRModule,
+            LIRReturn,
         )
 
         module = LIRModule(name="test_closure")
@@ -809,9 +821,16 @@ class TestCBackendClosure(unittest.TestCase):
 
     def test_closure_trampoline_double_return(self):
         """double 返回值的 trampoline 应使用 malloc+memcpy，而非 intptr_t 强转"""
-        from nova.ir.ir_nodes import (
-            LIRModule, LIRFunction, LIRClosureCreate, LIRCallIndirect,
-            LIRLabel, LIRLoadConst, LIRReturn, FLOAT_TYPE, CLOSURE_TYPE,
+        from nova.ir.ir_types import CLOSURE_TYPE, FLOAT_TYPE
+
+        from nova.ir.lir import (
+            LIRCallIndirect,
+            LIRClosureCreate,
+            LIRFunction,
+            LIRLabel,
+            LIRLoadConst,
+            LIRModule,
+            LIRReturn,
         )
         from nova.backend.lir_c_backend import LIRCBackend
 
@@ -1092,8 +1111,12 @@ class TestWasmGCADTVariantTag(unittest.TestCase):
 
     def test_build_adt_emits_distinct_type_tag_and_variant_tag(self):
         """手动构造含两个不同变体值的 LIRBuildADT，验证 WAT 中两者 i32.const 值不同。"""
-        from nova.ir.ir_nodes import (
-            LIRBuildADT, LIRReturn, LIRFunction, LIRModule, LIRLabel,
+        from nova.ir.lir import (
+            LIRBuildADT,
+            LIRFunction,
+            LIRLabel,
+            LIRModule,
+            LIRReturn,
         )
 
         module = LIRModule(name="test_adt_vt")
@@ -1161,9 +1184,15 @@ class TestWasmGCFloatReinterpret(unittest.TestCase):
 
     def _build_list_with_float(self) -> str:
         """构造含 Float 元素列表构建的 LIR，返回 WAT。"""
-        from nova.ir.ir_nodes import (
-            LIRBuildList, LIRLoadConst, LIRReturn, LIRFunction,
-            LIRModule, LIRLabel, ListType,
+        from nova.ir.ir_types import ListType
+
+        from nova.ir.lir import (
+            LIRBuildList,
+            LIRFunction,
+            LIRLabel,
+            LIRLoadConst,
+            LIRModule,
+            LIRReturn,
         )
         from nova.ir.ir_nodes import FLOAT_TYPE
 
@@ -1203,9 +1232,15 @@ class TestWasmGCFloatReinterpret(unittest.TestCase):
 
     def test_build_list_int_no_unnecessary_reinterpret(self):
         """Int 元素列表构建不应生成 i64.reinterpret_f64（位转换仅对 Float 生效）。"""
-        from nova.ir.ir_nodes import (
-            LIRBuildList, LIRLoadConst, LIRReturn, LIRFunction,
-            LIRModule, LIRLabel, ListType,
+        from nova.ir.ir_types import ListType
+
+        from nova.ir.lir import (
+            LIRBuildList,
+            LIRFunction,
+            LIRLabel,
+            LIRLoadConst,
+            LIRModule,
+            LIRReturn,
         )
 
         module = LIRModule(name="test_int_list")

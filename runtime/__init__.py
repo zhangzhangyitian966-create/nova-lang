@@ -32,6 +32,12 @@ from .allocator import (
     # 导出常量
     DEFAULT_ALIGN,
     MAX_ALLOC_SIZE,
+    # --- M-MEM Step3 新增：Box<T> 运行时值 + 便捷函数 ---
+    NovaBox,
+    box_value,
+    unbox_value,
+    set_box_value,
+    drop_box,
 )
 
 __all__ = [
@@ -46,4 +52,10 @@ __all__ = [
     "align_forward",
     "DEFAULT_ALIGN",
     "MAX_ALLOC_SIZE",
+    # --- M-MEM Step3 新增 ---
+    "NovaBox",
+    "box_value",
+    "unbox_value",
+    "set_box_value",
+    "drop_box",
 ]

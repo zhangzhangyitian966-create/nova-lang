@@ -9,44 +9,44 @@ import unittest
 from nova.lexer import Lexer
 from nova.parser import Parser
 
-from nova.ir.ir_nodes import (
-    IRType,
-    NovaType,
-    INT_TYPE,
-    FLOAT_TYPE,
-    STRING_TYPE,
+from nova.ir.ir_types import (
     BOOL_TYPE,
+    FLOAT_TYPE,
+    INT_TYPE,
+    IRType,
     ListType,
     MapType,
+    NovaType,
+    STRING_TYPE,
     TupleType,
-    FnType,
-    OptionType,
-    ResultType,
-    HIRModule,
-    HIRFnDecl,
-    HIRLetDecl,
-    HIRTypeDecl,
-    HIRIntLiteral,
-    HIRFloatLiteral,
-    HIRStringLiteral,
-    HIRBoolLiteral,
-    HIRBinaryOp,
-    HIRUnaryOp,
-    HIRIfExpr,
-    HIRMatchExpr,
-    HIRLambda,
-    HIRPipeExpr,
-    HIRListExpr,
-    HIRBlockExpr,
-    HIRImportDecl,
-    HIRExportDecl,
-    MIRModule,
-    MIRBinOp,
-    MIRReturn,
-    LIRModule,
-    LIRLabel,
-    LIRReturn,
 )
+
+from nova.ir.hir import (
+    HIRBinaryOp,
+    HIRBlockExpr,
+    HIRBoolLiteral,
+    HIRExportDecl,
+    HIRFloatLiteral,
+    HIRFnDecl,
+    HIRIfExpr,
+    HIRImportDecl,
+    HIRIntLiteral,
+    HIRLambda,
+    HIRLetDecl,
+    HIRListExpr,
+    HIRMatchExpr,
+    HIRModule,
+    HIRPipeExpr,
+    HIRStringLiteral,
+    HIRTypeDecl,
+    HIRUnaryOp,
+)
+
+from nova.ir.mir import MIRBinOp, MIRModule, MIRReturn
+
+from nova.ir.lir import LIRLabel, LIRModule, LIRReturn
+
+from nova.ir.ir_nodes import FnType, OptionType, ResultType
 from nova.ir.hir_lowering import HIRLowering
 from nova.ir.mir_lowering import MIRLowering
 from nova.ir.lir_lowering import LIRLowering
