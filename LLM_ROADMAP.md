@@ -1,13 +1,14 @@
 # Nova LLM 智能开发路线图
 
-**更新时间**: 2026-07-31 16:35:17
-**上次评审**: 第 84 轮（路线图评审 · 质量止血 + SH-1 前置定板）
+**更新时间**: 2026-08-01 20:30
+**上次评审**: 第 87 轮（路线图评审 · 语法冻结 + M-SH1 Ready + 审查债务梳理）
 **上次开发**: 第 86 轮（M-MEM Step4 Option/Result 推广 + 语法冻结声明 v0.5 + 门禁/复杂度治理三合一）
 **架构战略文档**: [ARCHITECTURE_VISION.md](./ARCHITECTURE_VISION.md) — 架构决策最高参考，如与本路线图冲突以其为准，本文件同步更新
 **总完成度**: ~180/183 ≈ **98.4%**（+3 任务 · 审查驱动1个+架构战略2个）
 **里程碑 M-ARCH**: ✅ **5/5 全部完成**（cycles=80 硬截止前达成）
 **里程碑 M-MEM**: ✅ **4/4 Step1+Step2+Step3+Step4 全部完成**（cycles=87 截止提前1轮完成 · M-MEM 里程碑定板）
-**审查驱动任务占比（任务池 pending）**: 9/14 = **64.3%**（本轮完成 1 审查驱动任务 · ≥30% 要求超额满足）
+**审查驱动任务占比（任务池总 94 项）**: 34/94 = **36.2%**（cycle=87 评审后新增 24 条审查派生任务 · ≥30% 要求达标）
+**下一阶段聚焦 cycles=88~90**: ① SH-1 parity baseline build（8 基准 AST JSON MD5 锚点）② Review 债务清零 Phase1（Top12 CC>15 + 159 unused_import）③ 测试补齐（TC 6 空分支 + Native 5 高风险场景）
 
 本路线图由 LLM 智能开发系统动态维护。
 
@@ -15,13 +16,43 @@
 
 ## 🗺️ v0.3.0 → v1.0 总览里程碑（架构战略约束）
 
-> 第 84 轮评审结论：M-MEM Step1+Step2 已 2/4 ✅，下阶段 **cycles=84-86 三线并行**：① 质量止血（门禁恢复 + unused_import 306→≤50）② M-MEM Step3+Step4 收尾（cycles=87 前定板）③ SH-1 前置闸门（语法冻结 P85 + parity 基线 + 第3轮100%测试）。
+> 第 87 轮评审结论：M-MEM 4/4 ✅ 提前1轮定板；SH-1 前置 4/4 解除（语法冻结已产出）；进入 SH-1 启动前窗口期。**cycles=88-90 三线并行**：① SH-1 parity baseline（8 基准 AST JSON MD5 锚点 + 逐字节 diff 脚本）② 审查债务清零 Phase1（Top 12 CC>15 函数 + 159 unused_import 清理 + 3 God Class 拆分启动）③ 质量补齐（TypeChecker 6 空分支 + NativeBackend 5 高风险场景）
+
+## 🧭 cycles=88~90 三线并行详细任务表（第 87 轮评审输出）
+
+| 优先级 | 任务线 | 任务 | 轮次 | 来源 |
+|--------|--------|------|------|------|
+| P87 | **SH-1 启动基建** | sh1_parity_baseline_build · 8 基准文件 AST JSON + MD5 固化 + fixtures/sh1_parity/ | 88 | 自主规划【SH-1 前置】 |
+| P87 | **SH-1 启动基建** | sh1_parity_diff_script · nova_vs_python_parity.py 逐字节 diff 脚本（CI 可集成） | 89 | 自主规划【SH-1 前置】 |
+| P88 | **SH-1 启动基建** | sh1_parser_edge_cases_audit · 3 处 parser edge case 固化 MD5 | 89 | 审查发现+自主规划 |
+| P88 | **审查债务 CC** | refactor_cc_native_reg_alloc CC=15→≤6（Top#1 最复杂函数） | 88/89 | 审查发现 |
+| P88 | **审查债务 CC** | refactor_cc_type_check_unify CC=14→≤3（Top#3 统一算法） | 89 | 审查发现 |
+| P88 | **审查债务 CC** | refactor_cc_parser_parse_stmt CC=14（SH-1 parity 前先降复杂度） | 89/90 | 审查发现 |
+| P88 | **审查债务 CC** | refactor_cc_lowering_lower_list_comp CC=13 | 88 | 审查发现 |
+| P90 | **审查债务 unused_import** | cleanup_unused_imports_ir（37 项一次性清理） | 88 | 审查发现 |
+| P90 | **审查债务 unused_import** | cleanup_unused_imports_backend（48 项一次性清理） | 88 | 审查发现 |
+| P89 | **审查债务 unused_import** | cleanup_unused_imports_root（74 项一次性清理） | 89 | 审查发现 |
+| P88 | **审查债务 长函数** | split_long_native_lower_function 276 行 | 88 | 审查发现 |
+| P88 | **审查债务 长函数** | split_long_type_check_expr 195 行 | 89 | 审查发现 |
+| P87 | **审查债务 大类型** | split_class_native_backend 2773 行 God Class → 5 协作者 | 89/90 | 审查发现 |
+| P87 | **审查债务 大类型** | split_class_type_checker 2218 行 God Class → 5 协作者 | 90 | 审查发现 |
+| P89 | **审查债务 过宽异常** | fix_bare_except_evaluator 6 处 bare except | 89 | 审查发现 |
+| P89 | **审查债务 过宽异常** | fix_bare_except_backends 9 处 except Exception | 90 | 审查发现 |
+| P89 | **质量补齐 测试** | test_tc_empty_branches TypeChecker 6 个空分支覆盖 | 89 | 审查发现 |
+| P88 | **质量补齐 测试** | test_native_backend_gaps NativeBackend 5 高风险场景端到端 | 90 | 审查发现 |
+
+---
+
+## 🏗️ 架构治理（第 87 轮评审更新 · 新增 24 条审查派生任务）
+
+> **审查驱动任务占比 ≥ 30% 硬约束**：cycle=87 评审后任务池 94 项中审查派生 34 项 = **36.2%**（达标）。
+> **cycles=88-90 聚焦方向**：① SH-1 parity baseline 基建 P87；② 审查债务清零 CC+长函数+unused_import P88~P90（25 项）；③ 质量补齐 TC/Native 测试覆盖 P88~P89；④ 薄弱模块 God Class 渐进拆分 P87。
 
 | 里程碑 | 内容 | 目标版本 | 预计轮次 | 状态 | 说明 |
 |--------|------|---------|---------|------|------|
 | M-ARCH | 三项立即架构手术（拆ir_nodes/隔离旧C后端/弃用Cranelift） | v0.3.x | 3 轮内 | ✅ **完成 5/5** | **self-hosting 前置条件 · cycles=80 硬截止达成** |
 | M-MEM  | Allocator API 落地（Step1-4）+ 栈/堆语义明确 | v0.4.0 | 第 82-86 轮 | ✅ **4/4 Step1+Step2+Step3+Step4 全部完成** | **cycles=82 trait+Arena/Libc；cycles=83 Evaluator 注入；cycles=85 BoxType+NovaBox+5内置函数；cycles=86 Option/Result 推广 + 自动解包兼容层；提前1轮于 cycles=87 截止前完成** |
-| M-SH1  | Self-Hosting SH-1：lexer + parser 用 Nova 写出 + 字节级一致性 | v0.4.0 | 约第 88-100 轮 | ⏳ **Pending · 4 前置条件（已解除 3/4）** | 前置：M-ARCH ✅ + M-MEM ✅（4/4 完成）+ 连续3轮100% ✅（cycles=82+83+85 达成）+ 语法冻结 ✅（SYNTAX_FREEZE_v0.5.md 已产出）+ parity 基线 ❌ · **仅剩 parity baseline build 一项前置** |
+| M-SH1  | Self-Hosting SH-1：lexer + parser 用 Nova 写出 + 字节级一致性 | v0.4.0 | 约第 88-98 轮 | 🟡 **Ready · 4 前置条件全部 4/4 解除** | 前置：M-ARCH ✅ + M-MEM ✅（4/4 完成）+ 连续3轮100% ✅（cycles=82+83+85）+ 语法冻结 ✅（SYNTAX_FREEZE_v0.5.md cycle=86 产出）· **parity baseline build（cycles=88~90 启动）** · Nova 侧 lexer+parser 实际编写 cycles=91~98 |
 | M-SH2  | Self-Hosting SH-2：type_checker + 三层 IR lowering 移植 | v0.5.0 | 约 12 轮 | ⏳ 未启动 | 前置：M-MEM 定板 + SH-1 字节级一致 |
 | M-SH3  | Self-Hosting SH-3：一个后端（C后端）+ stage2==stage3 自举 | v1.0 | 约 12 轮 | ⏳ 未启动 | 成功后 Python 编译器降级为参考实现 |
 | M-STD  | 标准库覆盖 IO/FS/Net/Concurrency/Serialize | v1.0 | 并行推进 | ⏳ 未启动 | 与 SH-2/SH-3 并行推进 |

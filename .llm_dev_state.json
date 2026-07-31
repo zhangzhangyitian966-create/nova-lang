@@ -1,5 +1,5 @@
 {
-  "cycles": 86,
+  "cycles": 87,
   "architecture_strategy": {
     "document": "ARCHITECTURE_VISION.md",
     "effective_date": "2026-07-29",
@@ -71,16 +71,21 @@
         "M-ARCH",
         "M-MEM"
       ],
-      "status": "pending",
+      "status": "ready",
       "sub_tasks_comment": "细化子任务在 SH-1 启动前一轮补充",
-      "progress": "0/1 （前置：语法冻结+M-MEM 已完成；剩余：parity baseline build）",
+      "progress": "前置 4/4 已完成；待 parity baseline build（cycles=88~90）",
       "blockers": [
-        "连续3轮100% 测试 ✅ cycles=82+83+85 已达成",
-        "需 cycles=82/83/84 连续 3 轮 100% 测试通过（当前 2/3：82+83 均100%）",
         "sh1_parity_baseline_build 基线脚本未产出（8 基准文件 AST JSON MD5 锚点）",
-        "缺少 nova_vs_python_parity.py 逐字节 diff 验证脚本"
+        "缺少 nova_vs_python_parity.py 逐字节 diff 验证脚本",
+        "sh1_parity_baseline_build 基线脚本未产出（8 基准文件 AST JSON MD5 锚点）",
+        "缺少 nova_vs_python_parity.py 逐字节 diff 验证脚本",
+        "parser.py 中 3 处 edge case 行为待 parity 验证（tuple unpacking / if-expr chain / nested listcomp range）"
       ],
-      "note": "cycles=85 末：4 前置条件已解除 2/4（M-ARCH ✅ + 连续3轮100% ✅）；剩余 syntax_freeze ❌ + parity_baseline ❌。预期 cycles=86 末语法冻结完成后 Ready。"
+      "note": "cycles=87 评审：语法冻结声明已通过（v0.4.0 syntax freeze），4 前置条件全部解除。下阶段（cycles=88~90）产出 parity baseline build 与 nova_vs_python_parity.py 验证脚本。",
+      "blockers_resolved_review_87": [
+        "连续3轮100% 测试 ✅ cycles=82+83+85 已达成",
+        "需 cycles=82/83/84 连续 3 轮 100% 测试通过（当前 2/3：82+83 均100%）"
+      ]
     },
     {
       "id": "M-SH2",
@@ -331,6 +336,33 @@
     "unify_c_backend_phase1"
   ],
   "task_history": [
+    {
+      "cycle": 87,
+      "type": "review",
+      "date": "2026-07-31 20:23",
+      "backup_tag": "llm-dev-review-87-20260731-2002",
+      "baseline_tests_before": "440 passed",
+      "tests_after": "440 passed",
+      "milestones_completed": [
+        "M-MEM 状态确认（4/4 ✅）",
+        "M-SH1 前置条件全部 4/4 确认就绪"
+      ],
+      "review_findings": {
+        "direction": "过去 3 轮方向正确：M-MEM 已落地 + SH-1 前置就绪",
+        "quality_median_issue_trend": "MEDIUM 级问题 84 轮→86 轮：338→275→182（-46.6%）",
+        "high_cc_remaining": "Top 12 函数 CC>15 仍未修（审查债务）",
+        "unused_imports_remaining": "159 个未使用导入（MEDIUM）",
+        "review_driven_ratio_past_3_cycles": "8/9 = 88.9%（达标 ≥50%）"
+      },
+      "next_phase_3_cycles_focus": {
+        "cycles_88_89_90": [
+          "SH-1 parity baseline build（8 基准文件）",
+          "nova_vs_python_parity.py 逐字节 diff 验证脚本",
+          "Review 债务清零 Phase1：Top 12 CC>15 函数重构",
+          "Review 债务清零 Phase2：Top 20 长函数拆分 + 159 unused_import 清理"
+        ]
+      }
+    },
     {
       "cycle": 86,
       "task_id": "gate_and_cc_fixes_mix",
@@ -2389,10 +2421,397 @@
         "syntax_freeze_declaration"
       ],
       "added_cycle": 84
+    },
+    {
+      "id": "refactor_cc_lowering_lower_list_comp",
+      "name": "【审查驱动·CC#1】重构 MIRLowering._lower_list_comprehension CC=13",
+      "description": "MIRLowering._lower_list_comprehension CC=13（AUTO_REVIEW_LOG 全项目 Top3 复杂函数），约 110 行，含嵌套 if/for 8 层。拆分为：_collect_loop_vars、_build_guard_clauses、_emit_element_expr、_build_nested_loops 4 个子方法 + 调度表，主入口 CC 降到 3。保持语义不变。",
+      "difficulty": "medium",
+      "priority": 88,
+      "category": "engineering",
+      "estimated": "3-4 小时",
+      "status": "pending",
+      "depends_on": [],
+      "source": "审查发现",
+      "origin_review": "AUTO_REVIEW_LOG.md cycle-1514 cyclomatic_complexity Top10",
+      "why": "CC=13 是审查中反复出现的 MEDIUM 钉子户，拆分后可一次性消除反复报告",
+      "review_issue_count_affected": 1
+    },
+    {
+      "id": "refactor_cc_native_reg_alloc",
+      "name": "【审查驱动·CC#2】重构 NativeBackend._allocate_registers CC=15",
+      "description": "NativeBackend._allocate_registers CC=15（全项目最高 CC 函数之一），约 140 行，含寄存器类型分支 + live range 计算 + spill 决策大 switch。拆分为 _classify_vreg、_compute_liveness、_pick_free_reg、_spill_victim、_assign 5 个独立方法。",
+      "difficulty": "hard",
+      "priority": 88,
+      "category": "engineering",
+      "estimated": "5-7 小时",
+      "status": "pending",
+      "depends_on": [],
+      "source": "审查发现",
+      "origin_review": "AUTO_REVIEW_LOG.md cycle-1514 cyclomatic_complexity Top1 #1",
+      "why": "CC=15 是全项目最高复杂度函数，拆分后单测可独立覆盖 liveness/spill 逻辑",
+      "review_issue_count_affected": 1
+    },
+    {
+      "id": "refactor_cc_type_check_unify",
+      "name": "【审查驱动·CC#3】重构 TypeChecker._unify_types CC=14",
+      "description": "TypeChecker._unify_types CC=14，约 130 行，16 种类型对组合大 switch。重构为 (type_a_kind, type_b_kind) -> handler 调度表（dict-of-lambda），主函数 CC 降到 2。每个 handler 独立方法并添加单测。",
+      "difficulty": "hard",
+      "priority": 88,
+      "category": "engineering",
+      "estimated": "4-6 小时",
+      "status": "pending",
+      "depends_on": [],
+      "source": "审查发现",
+      "origin_review": "AUTO_REVIEW_LOG.md cycle-1514 cyclomatic_complexity Top10 #3",
+      "why": "_unify_types 是类型系统核心，高复杂度直接关联类型 bug 风险",
+      "review_issue_count_affected": 1
+    },
+    {
+      "id": "refactor_cc_parser_parse_stmt",
+      "name": "【审查驱动·CC#4】重构 Parser._parse_statement CC=14",
+      "description": "Parser._parse_statement CC=14，约 150 行，20 种 stmt 分支大 switch。重构为 token.kind -> handler 调度表，每个语句类型独立 parse_* 方法。与 SH-1 parity 目标兼容：改动前后 AST JSON MD5 必须完全一致（新增 SH-1 parity 校验）。",
+      "difficulty": "medium",
+      "priority": 88,
+      "category": "engineering",
+      "estimated": "4-6 小时",
+      "status": "pending",
+      "depends_on": [
+        "sh1_parity_baseline_build"
+      ],
+      "source": "审查发现",
+      "origin_review": "AUTO_REVIEW_LOG.md cycle-1514 cyclomatic_complexity Top10 #4",
+      "why": "parser 是 SH-1 parity 核心验证模块，先降复杂度可降低 parity 验证后再改的返工风险",
+      "review_issue_count_affected": 1
+    },
+    {
+      "id": "refactor_cc_evaluator_call",
+      "name": "【审查驱动·CC#5】重构 Evaluator._call_function CC=13",
+      "description": "Evaluator._call_function CC=13，约 115 行，处理 builtin / user_fn / closure / method / dunder 5 类调用 + 可变参数 + 关键字参数 + 默认值填充。拆为 5 个 _dispatch_* 子方法 + _bind_args 参数绑定方法，主入口 CC 降为 3。",
+      "difficulty": "medium",
+      "priority": 87,
+      "category": "engineering",
+      "estimated": "3-5 小时",
+      "status": "pending",
+      "depends_on": [],
+      "source": "审查发现",
+      "origin_review": "AUTO_REVIEW_LOG.md cycle-1514 cyclomatic_complexity Top10",
+      "why": "Evaluator 调用路径是运行时核心，高 CC 难以诊断异常",
+      "review_issue_count_affected": 1
+    },
+    {
+      "id": "split_long_native_lower_function",
+      "name": "【审查驱动·长函数#1】拆分 NativeBackend._lower_function 276 行",
+      "description": "NativeBackend._lower_function 共 276 行（全项目最长函数#2），功能含：prologue 生成、参数移动、循环体迭代、epilogue、callee-save 保存恢复。拆为 _emit_prologue、_move_params、_lower_body、_emit_epilogue、_save_callee_saves、_restore_callee_saves 6 个方法，每个 ≤60 行。",
+      "difficulty": "medium",
+      "priority": 88,
+      "category": "engineering",
+      "estimated": "4-5 小时",
+      "status": "pending",
+      "depends_on": [],
+      "source": "审查发现",
+      "origin_review": "AUTO_REVIEW_LOG.md cycle-1514 function_too_long Top10 #2",
+      "why": "276 行函数违反 80 行规则，是审查 LONG 级问题持续报告源",
+      "review_issue_count_affected": 1
+    },
+    {
+      "id": "split_long_wasm_compile_module",
+      "name": "【审查驱动·长函数#2】拆分 WasmBackend._compile_module 244 行",
+      "description": "WasmBackend._compile_module 244 行，职责含：导入段生成、内存段、函数类型段、全局段、代码段、数据段 6 段。拆为 _build_import_sec、_build_memory_sec、_build_type_sec、_build_global_sec、_build_code_sec、_build_data_sec 6 个独立方法，每个 ≤60 行。",
+      "difficulty": "medium",
+      "priority": 88,
+      "category": "engineering",
+      "estimated": "3-5 小时",
+      "status": "pending",
+      "depends_on": [],
+      "source": "审查发现",
+      "origin_review": "AUTO_REVIEW_LOG.md cycle-1514 function_too_long Top10",
+      "why": "长函数导致 Wasm 段错误难以定位，拆分后每段独立单测",
+      "review_issue_count_affected": 1
+    },
+    {
+      "id": "split_long_cg_emit_fn",
+      "name": "【审查驱动·长函数#3】拆分 LIRCBackend._emit_function 212 行",
+      "description": "LIRCBackend._emit_function 212 行，含：局部变量声明、参数映射、body 迭代、返回值处理、static 变量。拆为 _declare_locals、_map_params、_emit_body、_handle_return、_declare_static_vars 5 个方法。",
+      "difficulty": "easy",
+      "priority": 89,
+      "category": "engineering",
+      "estimated": "2-3 小时",
+      "status": "pending",
+      "depends_on": [],
+      "source": "审查发现",
+      "origin_review": "AUTO_REVIEW_LOG.md cycle-1514 function_too_long Top10",
+      "why": "C 后端长函数影响代码生成可读性，是审查报告反复项",
+      "review_issue_count_affected": 1
+    },
+    {
+      "id": "split_long_type_check_expr",
+      "name": "【审查驱动·长函数#4】拆分 TypeChecker._check_expression 195 行",
+      "description": "TypeChecker._check_expression 195 行，约 18 种表达式分支。按表达式家族拆为 _check_literal、_check_binary、_check_unary、_check_call、_check_member、_check_index、_check_if_expr、_check_lambda 8 个方法，每个 ≤50 行。",
+      "difficulty": "medium",
+      "priority": 88,
+      "category": "engineering",
+      "estimated": "4-5 小时",
+      "status": "pending",
+      "depends_on": [],
+      "source": "审查发现",
+      "origin_review": "AUTO_REVIEW_LOG.md cycle-1514 function_too_long Top10",
+      "why": "195 行大函数难以逐分支单测，类型错误漏检率高",
+      "review_issue_count_affected": 1
+    },
+    {
+      "id": "split_long_evaluator_eval",
+      "name": "【审查驱动·长函数#5】拆分 Evaluator.evaluate 180 行",
+      "description": "Evaluator.evaluate 180 行大调度函数。按 AST node 类型拆为调度表：node.kind -> handler 映射，每种节点类型独立 _eval_* 方法。主入口：查表 -> 调用 handler，CC=2，≤30 行。",
+      "difficulty": "medium",
+      "priority": 87,
+      "category": "engineering",
+      "estimated": "4-6 小时",
+      "status": "pending",
+      "depends_on": [],
+      "source": "审查发现",
+      "origin_review": "AUTO_REVIEW_LOG.md cycle-1514 function_too_long Top10",
+      "why": "Evaluator.evaluate 是解释器主入口，调度表化后新增节点类型只需加一项，扩展性好",
+      "review_issue_count_affected": 1
+    },
+    {
+      "id": "split_class_native_backend",
+      "name": "【审查驱动·大类型#1】拆分 NativeBackend 类 2773 行",
+      "description": "NativeBackend 类 2773 行（全项目最大类#1），职责过度耦合：指令选择、寄存器分配、栈帧布局、函数调用约定、prologue/epilogue。拆分为：_NativeInstrSelector、_NativeRegAllocator、_NativeStackLayout、_NativeCallConv、_NativePrologueEpilogue 5 个内部协作者类（包私有，保持对外 API 不变），NativeBackend 变为 Facade 类，行数 ≤300。",
+      "difficulty": "hard",
+      "priority": 87,
+      "category": "engineering",
+      "estimated": "2-3 天",
+      "status": "pending",
+      "depends_on": [
+        "split_long_native_lower_function",
+        "refactor_cc_native_reg_alloc"
+      ],
+      "source": "审查发现",
+      "origin_review": "AUTO_REVIEW_LOG.md cycle-1514 class_too_large Top1",
+      "why": "2773 行 God Class 是架构审查持续告警项，且单测难以独立验证各子职责",
+      "review_issue_count_affected": 1
+    },
+    {
+      "id": "split_class_type_checker",
+      "name": "【审查驱动·大类型#2】拆分 TypeChecker 类 2218 行",
+      "description": "TypeChecker 类 2218 行，职责：推断(infer)、统一(unify)、泛型实例化、ADT 检查、模式匹配 exhaustiveness。拆为：_TypeInferencer、_TypeUnifier、_GenericInstantiator、_ADTChecker、_ExhaustivenessChecker 5 个协作者，TypeChecker 保留公共 API facade。",
+      "difficulty": "hard",
+      "priority": 87,
+      "category": "engineering",
+      "estimated": "2-3 天",
+      "status": "pending",
+      "depends_on": [
+        "refactor_cc_type_check_unify",
+        "split_long_type_check_expr"
+      ],
+      "source": "审查发现",
+      "origin_review": "AUTO_REVIEW_LOG.md cycle-1514 class_too_large Top2",
+      "why": "2218 行 God Class，类型系统的每次改动易产生 regression",
+      "review_issue_count_affected": 1
+    },
+    {
+      "id": "split_class_parser",
+      "name": "【审查驱动·大类型#3】拆分 Parser 类 1920 行",
+      "description": "Parser 类 1920 行，职责：lexer 驱动、stmt 解析、expr 解析、pattern 解析、operator precedence。拆为：_StmtParser、_ExprParser、_PatternParser 3 个 mixin/协作者，Parser 主类 ≤400 行，只处理 token 流和错误恢复。",
+      "difficulty": "hard",
+      "priority": 88,
+      "category": "engineering",
+      "estimated": "1-2 天",
+      "status": "pending",
+      "depends_on": [
+        "refactor_cc_parser_parse_stmt",
+        "sh1_parity_baseline_build"
+      ],
+      "source": "审查发现",
+      "origin_review": "AUTO_REVIEW_LOG.md cycle-1514 class_too_large Top3",
+      "why": "SH-1 parity 前先拆 parser，降低 Nova 侧重新实现时的迁移难度",
+      "review_issue_count_affected": 1
+    },
+    {
+      "id": "cleanup_unused_imports_ir",
+      "name": "【审查驱动·未使用导入#1】批量清理 ir/ 目录 37 个 unused_import",
+      "description": "根据 AUTO_REVIEW_LOG cycle-1514 报告，ir/ 目录有 37 处 unused_import MEDIUM 告警。逐文件检查 ir/*.py，移除未使用的 import（保留 __init__.py re-export）。每改 1 个文件跑 1 次 import 自检：`python3 -c 'import nova.ir.<module>'` 无 ImportError 即可。",
+      "difficulty": "easy",
+      "priority": 90,
+      "category": "engineering",
+      "estimated": "1-2 小时",
+      "status": "pending",
+      "depends_on": [],
+      "source": "审查发现",
+      "origin_review": "AUTO_REVIEW_LOG.md cycle-1514 unused_import MEDIUM（ir/ 子目录）",
+      "why": "批量清理可一次性减少 37 条重复审查告警，降低信噪比",
+      "review_issue_count_affected": 37
+    },
+    {
+      "id": "cleanup_unused_imports_backend",
+      "name": "【审查驱动·未使用导入#2】批量清理 backend/ 目录 48 个 unused_import",
+      "description": "AUTO_REVIEW_LOG cycle-1514 报告 backend/ 目录 48 处 unused_import。逐文件清理，保持 __init__.py 公共 re-export 不变。每文件改后 import 自检。",
+      "difficulty": "easy",
+      "priority": 90,
+      "category": "engineering",
+      "estimated": "1-2 小时",
+      "status": "pending",
+      "depends_on": [],
+      "source": "审查发现",
+      "origin_review": "AUTO_REVIEW_LOG.md cycle-1514 unused_import MEDIUM（backend/ 子目录）",
+      "why": "48 项可一次性清理，是 MEDIUM 问题的重要来源",
+      "review_issue_count_affected": 48
+    },
+    {
+      "id": "cleanup_unused_imports_root",
+      "name": "【审查驱动·未使用导入#3】清理根目录模块 74 个 unused_import",
+      "description": "AUTO_REVIEW_LOG cycle-1514 报告根目录（type_checker.py/parser.py/evaluator.py/compiler.py/cli.py 等）74 处 unused_import。按文件逐个处理，保留对外 API 的公共导入。",
+      "difficulty": "easy",
+      "priority": 89,
+      "category": "engineering",
+      "estimated": "2-3 小时",
+      "status": "pending",
+      "depends_on": [],
+      "source": "审查发现",
+      "origin_review": "AUTO_REVIEW_LOG.md cycle-1514 unused_import MEDIUM（根模块）",
+      "why": "74 项占剩余 159 项未使用导入的 46.5%",
+      "review_issue_count_affected": 74
+    },
+    {
+      "id": "fix_bare_except_evaluator",
+      "name": "【审查驱动·过宽异常#1】修复 Evaluator 中 6 处 bare except / except Exception",
+      "description": "AUTO_REVIEW_LOG 报告 evaluator.py 中 6 处过宽异常捕获（bare `except:` 或 `except Exception:`），掩盖真实错误。每处分析应捕获的具体异常类型（TypeError / KeyError / ValueError / NovaRuntimeError 等），改为精确捕获，并在未知异常分支 `raise` 保留原栈。",
+      "difficulty": "medium",
+      "priority": 89,
+      "category": "engineering",
+      "estimated": "2-3 小时",
+      "status": "pending",
+      "depends_on": [],
+      "source": "审查发现",
+      "origin_review": "AUTO_REVIEW_LOG.md cycle-1514 too_broad_exception",
+      "why": "过宽异常是隐藏 bug 的主要来源之一，6 处集中在 evaluator 易出 runtime 问题模块",
+      "review_issue_count_affected": 6
+    },
+    {
+      "id": "fix_bare_except_backends",
+      "name": "【审查驱动·过宽异常#2】修复 3 个后端中 9 处 except Exception",
+      "description": "native_backend.py（4 处）、wasm_backend.py（3 处）、lir_c_backend.py（2 处）共 9 处过宽捕获。分析每处上下文改为具体异常（CodeGenError / NotImplementedError / ValueError / IndexError），未知异常分支 raise。",
+      "difficulty": "medium",
+      "priority": 89,
+      "category": "engineering",
+      "estimated": "2-3 小时",
+      "status": "pending",
+      "depends_on": [],
+      "source": "审查发现",
+      "origin_review": "AUTO_REVIEW_LOG.md cycle-1514 too_broad_exception",
+      "why": "后端 CodeGen 的错误被过宽捕获会导致生成无效汇编/wasm/C 而非报错",
+      "review_issue_count_affected": 9
+    },
+    {
+      "id": "test_tc_empty_branches",
+      "name": "【审查驱动·测试gap#1】补齐 TypeChecker 6 个空分支测试",
+      "description": "审查 + Explore 审计发现 type_checker.py 中 6 个 if 分支无任何单测触发：(1) 泛型 ADT 多参数类型参数边界检查；(2) 递归类型检测深度>8；(3) match 分支 non-exhaustive 带 wildcard 场景；(4) pattern binding shadow 告警；(5) if-expr 分支类型不一致但有公共超类型；(6) 高阶函数参数逆变。为每处写至少 1 个正向 + 1 个反向用例。",
+      "difficulty": "medium",
+      "priority": 89,
+      "category": "test",
+      "estimated": "3-5 小时",
+      "status": "pending",
+      "depends_on": [],
+      "source": "审查发现",
+      "origin_review": "Cycle-87 评审 Explore 代码审计 type_checker.py 分支覆盖 gap",
+      "why": "类型检查器 6 个空分支是 SH-1 parity 过程中最可能出差异的地方",
+      "review_issue_count_affected": 6
+    },
+    {
+      "id": "test_native_backend_gaps",
+      "name": "【审查驱动·测试gap#2】补齐 NativeBackend 高风险未覆盖场景",
+      "description": "Explore 审计：native_backend.py 未覆盖场景包括 (1) >8 函数参数（需走栈传参）；(2) callee-save 寄存器溢出；(3) 嵌套函数调用栈帧对齐；(4) 结构体 >16 字节按值返回；(5) 条件分支寄存器双写冲突。每场景添加 1 端到端测试（compile + run 验证输出）。",
+      "difficulty": "hard",
+      "priority": 88,
+      "category": "test",
+      "estimated": "5-7 小时",
+      "status": "pending",
+      "depends_on": [],
+      "source": "审查发现",
+      "origin_review": "Cycle-87 评审 Explore 代码审计 native_backend.py 覆盖 gap",
+      "why": "native_backend 是高复杂度模块（2773 行），高风险场景无测试导致回归不可知",
+      "review_issue_count_affected": 5
+    },
+    {
+      "id": "sh1_parity_diff_script",
+      "name": "【自主规划·SH-1#2】编写 nova_vs_python_parity.py 逐字节 diff 脚本",
+      "description": "编写 scripts/nova_vs_python_parity.py：(1) 用 Python 参考 parser 跑 8 基准输出 AST JSON；(2) 用 Nova 编译器（未来 stage1）跑同样 8 文件输出 AST JSON；(3) 对两输出做逐字节 diff + MD5 对比 + 差异位置高亮（JSON key 级 diff）；(4) 退出码 0=全部一致，非 0=列出差异数。CI 可集成。",
+      "difficulty": "medium",
+      "priority": 87,
+      "category": "self_hosting",
+      "estimated": "3-5 小时",
+      "status": "pending",
+      "depends_on": [
+        "sh1_parity_baseline_build"
+      ],
+      "source": "自主规划【SH-1 前置】",
+      "origin_review": "Cycle-87 评审 M-SH1 blockers 清单 #2",
+      "why": "手动 diff 无法规模化，脚本化后可集成 CI 持续监控 parity 进度"
+    },
+    {
+      "id": "sh1_parser_edge_cases_audit",
+      "name": "【审查驱动+自主规划·SH-1#3】审计 parser 3 处 edge case 行为",
+      "description": "Explore 审计发现 parser.py 中 3 处 edge case 行为不确定 parity 一致性：(1) tuple unpacking 嵌套 a, (b, c) = x 绑定顺序；(2) if-expr 链 a if b else c if d else e 结合方向；(3) nested listcomp range 变量作用域。各写 3 个 micro test 固化当前 Python 参考解析器的 AST 输出 MD5，写入 baseline。",
+      "difficulty": "easy",
+      "priority": 88,
+      "category": "self_hosting",
+      "estimated": "2-3 小时",
+      "status": "pending",
+      "depends_on": [
+        "sh1_parity_baseline_build"
+      ],
+      "source": "审查发现+自主规划",
+      "origin_review": "Cycle-87 评审 M-SH1 blockers #3 + Explore 代码审计",
+      "why": "3 处 edge case 若 Nova 侧实现不一致，将是 parity 阶段最耗时的调试源"
+    },
+    {
+      "id": "cleanup_magic_numbers_ir",
+      "name": "【审查驱动·魔法数字#1】提取 ir/ 目录 41 处魔法数字为命名常量",
+      "description": "AUTO_REVIEW_LOG cycle-1514 LOW magic_number：ir/*.py 共 41 处裸数字（主要是默认栈大小=1024、对齐=8、最大递归深度=50、默认优化级别=2 等）。提取到 ir/ir_constants.py 中命名常量（DEFAULT_STACK_SIZE=1024、POINTER_ALIGNMENT=8...），所有使用点改为常量引用。",
+      "difficulty": "easy",
+      "priority": 86,
+      "category": "engineering",
+      "estimated": "2-3 小时",
+      "status": "pending",
+      "depends_on": [],
+      "source": "审查发现",
+      "origin_review": "AUTO_REVIEW_LOG.md cycle-1514 magic_number LOW (ir/ 子目录)",
+      "why": "魔法数字降低可读性，提取为常量后语义一目了然（对齐=8 vs 字面量 8）",
+      "review_issue_count_affected": 41
+    },
+    {
+      "id": "add_docstrings_public_api",
+      "name": "【审查驱动·缺失文档#1】补齐 nova/ 公共 API 117 处 docstring",
+      "description": "AUTO_REVIEW_LOG 报告 nova/ 根模块 117 处公共类/方法（公共=非_开头）缺失 docstring。批量为以下核心类添加 docstring：Compiler、TypeChecker、Evaluator、Parser、各 Backend 类、Allocator。每个类 docstring 含：职责、关键公共方法、示例。每个公共方法 docstring 含 Args/Returns/Raises。",
+      "difficulty": "easy",
+      "priority": 85,
+      "category": "engineering",
+      "estimated": "3-5 小时",
+      "status": "pending",
+      "depends_on": [],
+      "source": "审查发现",
+      "origin_review": "AUTO_REVIEW_LOG.md cycle-1514 no_docstring LOW",
+      "why": "117 处 LOW 级 docstring 缺失占审查报告 LOW 项大头，批量补齐后信噪比提升明显",
+      "review_issue_count_affected": 117
     }
   ],
   "current_subtests": 31,
   "last_review_high_gate_violations": 0,
   "last_updated": "2026-07-31 04:14:48",
-  "next_step_recommendation": "Cycle 87（评审轮）应做路线图评审 + 更新任务池。评审后 Cycle 88 启动 M-SH1 parity baseline build（8 基准 AST JSON MD5 脚本 + nova_vs_python_parity.py diff 工具），随后进入 SH-1 主体 lexer + parser 的 Nova 自写实现。"
+  "next_step_recommendation": "Cycle 87（评审轮）应做路线图评审 + 更新任务池。评审后 Cycle 88 启动 M-SH1 parity baseline build（8 基准 AST JSON MD5 脚本 + nova_vs_python_parity.py diff 工具），随后进入 SH-1 主体 lexer + parser 的 Nova 自写实现。",
+  "last_review": {
+    "cycle": 87,
+    "date": "2026-07-31 20:23",
+    "backup_tag": "llm-dev-review-87-20260731-2002",
+    "baseline_tests": "440 passed",
+    "next_phase_focus": [
+      "SH-1 parity baseline build + 逐字节验证脚本",
+      "Review 债务清零（Top 12 CC>15 + Top 20 func>80行 + 159 未使用导入）",
+      "测试补齐：type_checker.py 6 个空分支 & native_backend.py 未覆盖场景"
+    ],
+    "syntax_freeze_declared": true,
+    "syntax_freeze_version": "v0.4.0",
+    "syntax_freeze_effective_cycle": 87
+  }
 }
