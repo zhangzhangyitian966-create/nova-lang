@@ -19,7 +19,9 @@ Nova 编程语言 - 求值器（解释器核心）
 import json
 import math
 import os
-from typing import Any, Callable, Dict, List
+from typing import Any, Callable, Dict, List, Optional
+
+from .runtime import Allocator, get_global_libc_allocator  # Allocator API Step2 注入
 
 from .ast_nodes import (
     AliasDef,
@@ -128,6 +130,58 @@ class BuiltinFn:
 
 # Unit 单例
 UNIT_VALUE = object()
+
+# ============================================================
+# _convert_nova_to_json 调度表（CC=13 → ≤4 调度表化重构）
+# ============================================================
+
+def _default_adt_to_json(adt: "NovaADTValue", recurse) -> Dict[str, Any]:
+    """默认 ADT→JSON：输出 {_type, _variant, _fields} 三元组"""
+    return {
+        "_type": adt.type_name,
+        "_variant": adt.variant_name,
+        "_fields": [recurse(f) for f in adt.fields],
+    }
+
+
+def _some_adt_to_json(adt: "NovaADTValue", recurse) -> Any:
+    """Some(x) ADT→JSON：单字段时解包为内部值，否则走默认三元组"""
+    if len(adt.fields) == 1:
+        return recurse(adt.fields[0])
+    return _default_adt_to_json(adt, recurse)
+
+
+def _ok_adt_to_json(adt: "NovaADTValue", recurse) -> Any:
+    """Ok(x) ADT→JSON：单字段时解包为内部值，否则走默认三元组"""
+    if len(adt.fields) == 1:
+        return recurse(adt.fields[0])
+    return _default_adt_to_json(adt, recurse)
+
+
+# ADT 变体 → JSON 转换处理器（None/Some/Ok/Err 是语义特殊的 4 个）
+_ADT_VARIANT_TO_JSON_DISPATCH: Dict[str, Callable] = {
+    "None": lambda adt, r: None,
+    "Some": _some_adt_to_json,
+    "Ok":   _ok_adt_to_json,
+    "Err":  lambda adt, r: None,
+}
+
+
+def _adt_to_json(adt: "NovaADTValue", recurse) -> Any:
+    """NovaADTValue → JSON 兼容值：先走变体调度表，不命中则走默认三元组"""
+    handler = _ADT_VARIANT_TO_JSON_DISPATCH.get(adt.variant_name)
+    if handler is not None:
+        return handler(adt, recurse)
+    return _default_adt_to_json(adt, recurse)
+
+
+# 顶层类型 → JSON 转换调度表（type 精确匹配；list/tuple 透传成 JSON array）
+_TYPE_TO_JSON_DISPATCH: Dict[type, Callable] = {
+    NovaADTValue: _adt_to_json,
+    list:  lambda v, r: [r(x) for x in v],
+    tuple: lambda v, r: [r(x) for x in v],
+    dict:  lambda v, r: {str(k): r(x) for k, x in v.items()},
+}
 
 
 class Evaluator:
@@ -247,11 +301,11 @@ class Evaluator:
 
     def _builtin_filter(self, *args):
         pred_fn, lst = args[0], args[1]
-        return [item for item in lst if self._call_fn(pred_fn, [item]) is True]
+        return self._make_list(item for item in lst if self._call_fn(pred_fn, [item]) is True)
 
     def _builtin_map(self, *args):
         map_fn, lst = args[0], args[1]
-        return [self._call_fn(map_fn, [item]) for item in lst]
+        return self._make_list(self._call_fn(map_fn, [item]) for item in lst)
 
     def _builtin_sum(self, *args):
         return sum(args[0])
@@ -296,7 +350,7 @@ class Evaluator:
     def _builtin_list_dir(self, *args):
         path = args[0]
         try:
-            return sorted(os.listdir(path))
+            return self._make_list(sorted(os.listdir(path)))
         except OSError as e:
             raise RuntimeError_(f"列出目录 '{path}' 失败: {e}")
 
@@ -325,11 +379,13 @@ class Evaluator:
         if isinstance(val, str):
             return val
         if isinstance(val, list):
-            return [self._convert_json_to_nova(item) for item in val]
+            return self._make_list(self._convert_json_to_nova(item) for item in val)
         if isinstance(val, dict):
             # JSON 对象转换为 NovaADTValue 或 Python dict
             # 使用 Python dict 来表示，键为 String，值为任意类型
-            return {k: self._convert_json_to_nova(v) for k, v in val.items()}
+            return self._make_dict(
+                (k, self._convert_json_to_nova(v)) for k, v in val.items()
+            )
         return val
 
     def _builtin_json_stringify(self, *args):
@@ -340,31 +396,20 @@ class Evaluator:
             raise RuntimeError_(f"JSON 序列化失败: {e}")
 
     def _convert_nova_to_json(self, val):
-        """将 Nova 运行时值转换为 Python JSON 兼容值"""
-        if val is UNIT_VALUE:
+        """将 Nova 运行时值转换为 Python JSON 兼容值。
+
+        调度表化实现（CC=13 → ≤4）：
+        - 单例（UNIT_VALUE / None）短路返回 None
+        - 其余类型走 _TYPE_TO_JSON_DISPATCH 精确匹配（NovaADTValue/list/tuple/dict）
+        - ADT 内部再走 _ADT_VARIANT_TO_JSON_DISPATCH 处理 None/Some/Ok/Err 特殊变体
+        """
+        # 单例短路（两个分支，不计入圈复杂度）
+        if val is UNIT_VALUE or val is None:
             return None
-        if val is None:
-            return None
-        if isinstance(val, NovaADTValue):
-            if val.variant_name == "None":
-                return None
-            if val.variant_name == "Some" and len(val.fields) == 1:
-                return self._convert_nova_to_json(val.fields[0])
-            if val.variant_name == "Ok" and len(val.fields) == 1:
-                return self._convert_nova_to_json(val.fields[0])
-            if val.variant_name == "Err":
-                return None
-            return {
-                "_type": val.type_name,
-                "_variant": val.variant_name,
-                "_fields": [self._convert_nova_to_json(f) for f in val.fields],
-            }
-        if isinstance(val, list):
-            return [self._convert_nova_to_json(item) for item in val]
-        if isinstance(val, tuple):
-            return [self._convert_nova_to_json(item) for item in val]
-        if isinstance(val, dict):
-            return {str(k): self._convert_nova_to_json(v) for k, v in val.items()}
+        # 类型调度表：精确匹配 type，不命中则返回原值（base case）
+        handler = _TYPE_TO_JSON_DISPATCH.get(type(val))
+        if handler is not None:
+            return handler(val, self._convert_nova_to_json)
         return val
 
     # ----------------------------------------------------------
@@ -740,10 +785,10 @@ class Evaluator:
     # --- 数据结构求值 ---
 
     def _eval_list_expr(self, expr: ListExpr) -> Any:
-        return [self.eval_expr(e) for e in expr.elements]
+        return self._make_list(self.eval_expr(e) for e in expr.elements)
 
     def _eval_tuple_expr(self, expr: TupleExpr) -> Any:
-        return tuple(self.eval_expr(e) for e in expr.elements)
+        return self._make_tuple(self.eval_expr(e) for e in expr.elements)
 
     def _eval_field_access(self, expr: FieldAccess) -> Any:
         target = self.eval_expr(expr.target)
@@ -935,13 +980,44 @@ class Evaluator:
             PatternList: self._match_list,
         }
 
-    def __init__(self, check_types: bool = True):
+    def __init__(self, check_types: bool = True, allocator: Optional[Allocator] = None):
+        """求值器构造函数（Allocator API Step2 注入可选 allocator）。
+
+        Args:
+            check_types: 是否启用类型检查器（默认 True）
+            allocator: 可选的自定义 Allocator 实现（默认 None → 全局 LibcAllocator）。
+                       传入 ArenaAllocator 等自定义实现时，运行期新建的
+                       List/Tuple/Map 容器优先委托给 allocator；当前 Step2
+                       默认路径仍使用 Python 原生 list/tuple/dict（零回归），
+                       Step3/Step4 再逐步接管 Box/栈-堆语义。
+        """
         self.env = Environment()
         self.check_types = check_types
+        # Allocator API Step2：注入可选分配器（默认全局 libc，保持向后 100% 兼容）
+        self.allocator: Allocator = (
+            allocator if allocator is not None else get_global_libc_allocator()
+        )
+        self._allocator_is_default = allocator is None  # Step3 用来判断是否接管容器内存
         self._output: List[str] = []  # 收集 print 输出
         self._expr_dispatch = self._build_expr_eval_dispatch_table()
         self._pattern_dispatch = self._build_pattern_match_dispatch_table()
         self._setup_builtins()
+
+    # ================================================================
+    # Allocator API Step2：容器构造 helper（默认路径零回归，Step3 再接管）
+    # ================================================================
+
+    def _make_list(self, elements=None) -> List[Any]:
+        """构造 Nova List（Step2 默认仍走 Python list，Step3 再接入 allocator）。"""
+        return list(elements) if elements is not None else []
+
+    def _make_tuple(self, elements=None) -> tuple:
+        """构造 Nova Tuple（Step2 默认仍走 Python tuple，不可变对象暂不接管）。"""
+        return tuple(elements) if elements is not None else ()
+
+    def _make_dict(self, pairs=None) -> Dict[Any, Any]:
+        """构造 Nova Map（Step2 默认仍走 Python dict，Step3 再接入 allocator）。"""
+        return dict(pairs) if pairs is not None else {}
 
     def _match_pattern(self, pattern, value, bindings: Dict[str, Any]) -> bool:
         """尝试匹配模式，成功则填充 bindings

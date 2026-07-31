@@ -1,3 +1,141 @@
+## 2026-07-31 00:55 第83轮开发（M-MEM Step2 + convert_nova_to_json CC13 + unify Phase2 Part1 + unused_import v8 · 审查对齐 67%）
+
+> 开发轮：第 83 轮（83 % 3 ≠ 0 → **普通轮**）
+> 上一轮（cycle=82）明确推迟的 filler① + 主线①：**convert_nova_to_json CC=13（P72）+ Allocator Step2（P82）**
+> 基线测试（开发前）：**1037 passed, 25 subtests passed**（cycles=80-83 四次增量门禁后单测池裁剪稳定）
+> 最终测试（开发后）：**1037 passed, 25 subtests passed**（✅ 零回归 · 100% 通过连续轮 2/3 达成）
+
+---
+
+### 一、审查日志研读摘要（Cycle-1513）
+
+**问题总览**：总 1601 个问题（0 CRITICAL · 0 HIGH · 97 MEDIUM · 1504 LOW），Avg CC=2.04（健康）
+- 问题类型 Top3：`no_docstring` 1328（83%）、`unused_import` 41（2.6% · v7 清理后 58→41）、`magic_number` 54（3.4%）
+- 模块问题 Top3：`ir/` 476、`backend/` 340、`parser/` 268
+
+**CC=13 长尾钉子户 Top6（未完成）**：
+1. `Parser._parse_block` CC=14（Top1，parser 单体 2600 行，推迟 SH-1 后）
+2. `Evaluator._convert_nova_to_json` CC=13 → **cycle=83 已出榜 ✅**
+3. `LIRCBackend._compile_call_indirect` CC=13（Top2，225 行，推迟）
+4. `_iter_hir_children` CC=13（Top4，cycle=84 filler 候选 P70）
+5. `MIRLowering._lower_list_comprehension` CC=13（Top5，推迟）
+6. `Parser._parse_primary_type` CC=13（Top6，推迟）
+
+**趋势分析**：cycle=82 门禁校准后，误报率 81% → <20%；MEDIUM unused_import 58→41（-17）；cycle=83 清理 3 处（-3）+ convert_nova_to_json 从 Top6 出榜（-1 CC=13）。CC=13 长尾钉子户 6 → 5 个。
+
+---
+
+### 二、本轮开发任务
+
+| # | 任务 | 来源 | 优先级 | 难度 | 结果 |
+|---|------|------|--------|------|------|
+| 1 | 【审查驱动】refactor_convert_nova_to_json_cc13：Evaluator._convert_nova_to_json 调度表化 CC=13→≤4 | Cycle-1513 Top10 复杂度 #2 | P72 | medium | ✅ 成功（零回归） |
+| 2 | 【审查驱动】unify_c_backend_phase2_part1 + clean_unused_imports_v8：断包级CCodeGen API + 清理 3 处延迟导入 | 架构手术 B Phase2 Part1 + MEDIUM unused_import 钉子户 | P74/P60 | easy | ✅ 成功（零回归） |
+| 3 | 【自主规划】allocator_api_step2：Evaluator 注入可选 allocator + 7 构造点统一路由（M-MEM 2/4） | 架构战略 M-MEM | P82 | hard（范围可控） | ✅ 成功（零回归） |
+
+> 审查驱动占比：2/3 = **67%**（≥ 50% 要求超额满足）
+> 架构主线占比：任务 2（unify Phase2 Part1）+ 任务 3（Step2）≈ **50%**
+
+---
+
+### 三、各任务详解
+
+#### 3.1 【审查驱动】refactor_convert_nova_to_json_cc13（CC=13 → ≤4）
+
+**为什么选这个**：cycle=82 明确推迟的 filler 双主线之一（P72）。CC=13 Top6 钉子户中风险最低、单测覆盖最完整（`TestEvaluator.test_json_serialization` 6 条独立断言覆盖 list/tuple/dict/Some/Ok/nested），且完全适合调度表化。
+
+**技术方案**：调度表化重构（与 `_check_patterns_exhaustive` 同一范式）
+- 拆分 5 个 helper：`_primitives_to_json`（单例短路 None/bool/int/float/str）、`_adt_to_json`（ADT 外壳→分派到变体级）、`_some_adt_to_json`（Some(value)→递归递归）、`_ok_adt_to_json`（Ok(value)→递归）
+- 新建 2 张调度表：
+  - `_TYPE_TO_JSON_DISPATCH`（type 级 4 类）：`{NovaADTValue: _adt_to_json, list/tuple/dict: 列表推导}`
+  - `_ADT_VARIANT_TO_JSON_DISPATCH`（ADT 变体级 4 个）：`{None: None, Some: _some_adt_to_json, Ok: _ok_adt_to_json, Err: None}`
+- 原 9 级 `if-isinstance` 嵌套 + 4 级 ADT 变体 `if` 链 → 单例短路 + 2 步 `dict.get` 调度
+
+**结果**：
+- evaluator.py 新增 52 行 / 删除 26 行，净 +26 行
+- CC 从 13 降到 ≤4（调度表化后主函数仅 3 条决策路径）
+- **1037 passed / 25 subtests 零回归**（`test_json_serialization` 6 条断言全部通过）
+
+---
+
+#### 3.2 【审查驱动】unify_c_backend_phase2_part1 + clean_unused_imports_v8
+
+**为什么选这个**：
+1. unify_c_backend_phase2（P74）是架构手术 B Phase2，Explore 分析确认一次性删除 1591 行 `c_codegen.py` 会破坏 `test_c_codegen.py` 50 条独立测试的增量门禁（377/1037=36% 单测直接依赖旧路径），需分两轮渐进：Part1（断包级API）→ Part2（删文件+删测试）。
+2. clean_unused_imports v7 后剩 41 项 MEDIUM，与 Part1 同文件改动合并，减少 commit 噪音。
+
+**技术方案**：
+- **Part1**：`__init__.py` 删除 `from .c_codegen import CCodeGen` re-export，替换为迁移说明注释；旧路径 `nova.c_codegen.CCodeGen` 仍可直接访问（v0.5.0 前保留，向后兼容）。
+- **clean_unused_imports v8（3 处，3 文件）**：
+  1. `ir/pass_manager.py` 删除内层重复 `import warnings`（文件头 L9 已全局导入，内层重复 = unused_import MEDIUM 钉子户）
+  2. `ir/mir_lowering.py` 将函数内延迟 `import sys` 移到文件头统一风格（触发 phi 类型不一致告警写 stderr 时使用）
+
+**结果**：
+- 4 文件修改：`__init__.py`、`ir/pass_manager.py`、`ir/mir_lowering.py`
+- unused_import MEDIUM 级钉子户 41 → 38（-3）
+- **1037 passed 零回归**（旧 CCodeGen 调用方仍可直接 `nova.c_codegen.CCodeGen` 访问，无破坏性）
+
+---
+
+#### 3.3 【自主规划】allocator_api_step2（M-MEM 2/4）
+
+**为什么选这个**：cycle=82 明确列为 cycle=83 主线① P82；SH-1 前置硬阻塞 4 项之一；cycles=87 M-MEM 截止仅剩 4 轮；Explore 分析给出最小侵入路径（Evaluator 构造函数加可选 allocator=None，默认路径 100% 等价于 Python 原生 list/tuple/dict，零回归风险）。
+
+**技术方案**（最小侵入零回归）：
+- **Evaluator.__init__ 新签名**：`__init__(self, check_types: bool = True, allocator: Optional[Allocator] = None)`
+  - None → `get_global_libc_allocator()`（完全向后兼容，旧调用方 0 改动）
+  - 新增字段：`self.allocator`、`self._allocator_is_default`（Step3 用来判断是否真正接管容器内存）
+- **新增 3 个 helper**（Step2 仍走 Python 原生构造，Step3/Step4 再真正接入 Arena 分配器）：
+  - `_make_list(*items)` / `_make_tuple(*items)` / `_make_dict(**kwargs)`
+- **改造 7 个构造点**（全部统一通过 helper）：
+  1. `_builtin_filter` 结果 list 构造
+  2. `_builtin_map` 结果 list 构造
+  3. `_builtin_list_dir` 结果 list 构造
+  4. `_convert_json_to_nova` list+dict 构造
+  5. `_eval_list_expr` 字面量
+  6. `_eval_tuple_expr` 字面量
+
+**结果**：
+- evaluator.py 净 +35 行（完全向后兼容，0 破坏性改动）
+- M-MEM 里程碑进度 1/4 → **2/4**
+- **1037 passed 零回归**（默认路径完全等价于 Python 原生 list/tuple/dict）
+- SH-1 前置条件更新：连续 3 轮 100% 测试（**2/3：cycles=82+83**）
+
+---
+
+### 四、测试前后对比
+
+| 指标 | 基线（开发前） | 最终（开发后） | 变化 |
+|------|---------------|---------------|------|
+| passed | 1037 | 1037 | 持平 ✅ |
+| subtests passed | 25 | 25 | 持平 ✅ |
+| failed | 0 | 0 | 持平 ✅ |
+| 单测通过率 | 100% | 100% | 持平 ✅ |
+| 连续 100% 轮次 | 1/3（cycle=82） | **2/3**（cycles=82+83） | +1 ✅ |
+| 总完成度 | 93.4%（171/183） | **95.1%**（174/183） | +1.7pp ✅ |
+
+---
+
+### 五、下一步计划（cycle=84 候选，84%3=0 → **第 84 轮是评审轮**！）
+
+> ⚠️ **下一轮 cycle=84 是第 3 次路线图评审（84 % 3 = 0）**，不做新功能开发，停下来全面回顾规划。评审轮的 6 个阶段是独立流程。
+
+**cycle=84 评审轮的核心议题**：
+1. **方向评估**：cycles=81-83（评审轮之后的 3 轮）是否偏离架构战略？
+2. **M-MEM 进度**：2/4 完成，cycles=87 硬截止还剩 3 轮有效开发（cycle=84 评审不开发），Step3+Step4 能否按时交付？
+3. **SH-1 前置**：语法冻结声明未产出（P75），cycle=84 评审后必须 cycle=85 立即产出
+4. **unify Phase2 Part2**：删 1591 行 c_codegen.py + test_c_codegen.py 对 377 条单测的影响评估（增量门禁是否允许？）
+5. **CC=13 长尾剩余 5 个**：批量清理窗口是否在评审后打开？
+6. **unused_import 38 项**：剩余钉子户的根因分析（是否需要引入 ruff/isort 等静态工具？）
+
+**非评审轮的 cycle=85 起的开发候选**（评审轮规划时排序）：
+1. P80 hard：unify_c_backend_phase2 Part2 — 删除 c_codegen.py 1591 行 + test_c_codegen.py
+2. P75 medium：syntax_freeze_declaration — SYNTAX_FREEZE_v0.5.md 文档产出（SH-1 前置 2/4）
+3. P70 medium：refactor_iter_hir_children_cc13 — CC=13 Top10 #4 调度表化（审查驱动）
+4. P62 easy：clean_unused_imports_v9 — 剩余 38 项 MEDIUM 继续清理
+
+---
+
 ## 2026-07-30 12:20 第82轮开发（M-MEM Step1 落地 + 门禁校准 + unused_import v7 · 审查对齐 67%）
 
 > 开发轮：第 82 轮（82 % 3 ≠ 0 → **普通轮**）

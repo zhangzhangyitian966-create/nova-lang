@@ -6,6 +6,7 @@ HIR -> MIR 降级器
 """
 
 from typing import Optional
+import sys  # noqa: F401  — 用于 Phi 类型不一致告警写 stderr（L985）
 
 from .ir_nodes import (
     BOOL_TYPE,
@@ -977,7 +978,7 @@ class MIRLowering:
                     has_inconsistency = True
                     # 第一阶段（安全观察期）：仅记录到 stderr，不中断编译
                     # 未来（零假阳性后）：升级为 raise MIRLoweringError(...)
-                    import sys
+                    # import sys 已移到文件头（统一风格，避免函数内延迟导入触发 unused_import 检测误报）
                     print(
                         f"[MIR Phi 类型不一致{(' @ ' + context_label) if context_label else ''}] "
                         f"前驱块 {b_i} → 类型 {t_i} 与 前驱块 {b_j} → 类型 {t_j} 不兼容。"

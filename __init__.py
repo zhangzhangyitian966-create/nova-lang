@@ -40,4 +40,8 @@ from .environment import Environment
 from .type_checker import TypeChecker
 from .compiler import BytecodeCompiler
 from .compiler import Bytecode
-from .c_codegen import CCodeGen
+# 注：旧 CCodeGen (c_codegen.py AST→C 直译路径) 已在 v0.3.x 弃用
+# (ARCHITECTURE_VISION.md §2.2「立即架构手术 B」)，
+# 统一入口改为 nova.backend.lir_c_backend.LIRCBackend (通过 NovaCompilerPipeline)。
+# 为避免包级 API 破坏性变更 + 增量门禁噪音，此处不再 re-export CCodeGen。
+# 旧调用方仍可通过 nova.c_codegen.CCodeGen 直接访问（v0.5.0 正式删除文件前保留）。

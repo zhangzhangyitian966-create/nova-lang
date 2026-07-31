@@ -1508,8 +1508,7 @@ class PassManager:
                         for err in errors:
                             print(f"  {err}", file=sys.stderr)
                     else:
-                        import warnings
-
+                        # warnings 已在文件头 L9 全局导入，内层重复 import 为 unused_import MEDIUM 钉子户
                         warnings.warn(
                             f"{pass_name} verification failed: {len(errors)} errors",
                             stacklevel=2,

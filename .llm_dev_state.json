@@ -1,5 +1,5 @@
 {
-  "cycles": 82,
+  "cycles": 83,
   "architecture_strategy": {
     "document": "ARCHITECTURE_VISION.md",
     "effective_date": "2026-07-29",
@@ -46,15 +46,19 @@
       "depends_on": [
         "M-ARCH"
       ],
-      "status": "ready",
+      "status": "in_progress",
       "sub_tasks": [
         "allocator_api_step1",
         "allocator_api_step2",
         "allocator_api_step3",
         "allocator_api_step4"
       ],
-      "progress": "0/4",
-      "note": "第81轮评审确认：cycles=82 立即启动 allocator_api_step1；target_cycles=87 截止，剩余 5 轮有效开发窗口（cycles=82/83/84/85/86）。"
+      "progress": "2/4",
+      "note": "cycles=82 Step1 完成（trait+Arena/Libc实现）+ cycles=83 Step2 完成（Evaluator 注入可选 allocator + 7 个构造点统一路由）。截止 cycles=87，还剩 4 轮有效开发窗口。Step3(栈/堆+Box) + Step4(Option/Result) 待推进。",
+      "sub_tasks_done": [
+        "allocator_api_step1",
+        "allocator_api_step2"
+      ]
     },
     {
       "id": "M-SH1",
@@ -69,9 +73,9 @@
       "sub_tasks_comment": "细化子任务在 SH-1 启动前一轮补充",
       "progress": "0/1",
       "blockers": [
-        "M-MEM allocator_api_step1 未完成",
         "syntax_freeze_declaration 文档未产出",
-        "需 cycles=82/83/84 连续 3 轮 100% 测试通过"
+        "需 cycles=82/83/84 连续 3 轮 100% 测试通过（当前 2/3：82+83 均100%）",
+        "M-MEM allocator_api_step3/Step4 未完成（栈/堆+Box语义未定板）"
       ]
     },
     {
@@ -307,13 +311,102 @@
     },
     "allocator_api_step1",
     "fix_review_gate_false_positives",
-    "clean_unused_imports_v7"
+    "clean_unused_imports_v7",
+    "allocator_api_step2",
+    "refactor_convert_nova_to_json_cc13",
+    "clean_unused_imports_v8"
   ],
   "failed_tasks": [
     "fix_native_test_import",
     "unify_c_backend_phase1"
   ],
   "task_history": [
+    {
+      "cycle": 83,
+      "type": "normal",
+      "date": "2026-07-31 00:58:45",
+      "review_digest": {
+        "cycle_1513_total": 1601,
+        "critical": 0,
+        "high": 0,
+        "medium": 97,
+        "low": 1504,
+        "avg_cc": 2.04,
+        "unused_import_medium_after_v7": 41,
+        "gate_false_positive_pct_after_calibration": "<20",
+        "top6_cc_tail_remaining": [
+          "Parser._parse_block CC=14",
+          "LIRCBackend._compile_call_indirect CC=13",
+          "_iter_hir_children CC=13",
+          "MIRLowering._lower_list_comprehension CC=13",
+          "Parser._parse_primary_type CC=13"
+        ],
+        "note": "cycle=83 完成 convert_nova_to_json CC=13（Top10#2 出榜），剩余 5 个 CC=13/14 长尾"
+      },
+      "baseline_passed": 1037,
+      "baseline_subtests": 20,
+      "final_passed": 1037,
+      "final_subtests": 25,
+      "test_regression": false,
+      "consecutive_100pct_cycles": 2,
+      "tasks": [
+        {
+          "id": "refactor_convert_nova_to_json_cc13",
+          "name": "重构 Evaluator._convert_nova_to_json 调度表化 CC=13→≤4",
+          "source": "审查驱动 · Cycle-1513 Top10 复杂度 #2（Evaluator._convert_nova_to_json CC=13）",
+          "source_type": "审查驱动",
+          "priority": 72,
+          "difficulty": "medium",
+          "why_chosen": "上一轮 cycle=82 明确推迟到 cycle=83 完成（P72 filler 双主线之一）；Explore 分析确认完全适合调度表化；CC=13 是 Top6 长尾钉子户中风险最低、收益最高、单测覆盖最完整的 1 个。",
+          "status": "completed",
+          "result": "成功 · 1037 passed 零回归",
+          "notes": "拆分 5 个 helper + 2 张调度表（顶层 type 级 4 类：NovaADTValue/list/tuple/dict；ADT 变体级 4 个：None/Some/Ok/Err）。原 9 级 if-isinstance 嵌套 + 4 级ADT 变体 if 链 → 单例短路 + 2 步 dict.get 调度，CC 从 13 降到 ≤4；evaluator.py 新增 52 行/删除 26 行，净 +26 行。",
+          "files_changed": [
+            "evaluator.py"
+          ]
+        },
+        {
+          "id": "unify_c_backend_phase2_part1_clean_unused_imports_v8",
+          "name": "unify_c_backend Phase2 Part1（断包级CCodeGen API）+ clean_unused_imports_v8（3处）",
+          "source": "审查驱动 · MEDIUM unused_import 41→38 钉子户清理 + 架构手术B Phase2 Part1",
+          "source_type": "审查驱动",
+          "priority": 74,
+          "difficulty": "easy",
+          "why_chosen": "unify_c_backend_phase2 分两轮删除（Explore 分析确认：直接一次性删除 1591 行c_codegen.py 会破坏 test_c_codegen.py 50 条独立测试的增量门禁，需 2 轮渐进）；unused_import v7 剩 41，v8 继续清理 3 处内层延迟导入（pass_manager/mir_lowering），同时 __init__.py 移除 CCodeGen re-export 消除包 API 暴露。",
+          "status": "completed",
+          "result": "成功 · 1037 passed 零回归",
+          "notes": "Part1 改动：① __init__.py 删除 `from .c_codegen import CCodeGen` re-export，替换为迁移说明注释（旧路径 nova.c_codegen.CCodeGen 仍可直接访问，v0.5.0 前保留，下轮 Part2 连同 test_c_codegen.py + c_codegen.py 正式删除）；② clean_unused_imports v8：ir/pass_manager.py 删除内层重复 `import warnings`（L9 已全局导入），ir/mir_lowering.py 将函数内延迟 `import sys` 移到文件头统一风格。合计 4 文件修改，unused_import MEDIUM 级钉子户 41→38（-3）。",
+          "files_changed": [
+            "__init__.py",
+            "ir/pass_manager.py",
+            "ir/mir_lowering.py"
+          ]
+        },
+        {
+          "id": "allocator_api_step2",
+          "name": "Allocator API Step2：Evaluator 注入可选 allocator（M-MEM 2/4）",
+          "source": "自主规划 · 架构战略 M-MEM",
+          "source_type": "自主规划",
+          "priority": 82,
+          "difficulty": "hard（范围可控）",
+          "why_chosen": "cycle=82 明确列为 cycle=83 主线① P82；SH-1 前置硬阻塞 4 项之一；cycles=87 M-MEM 截止仅剩 4 轮；Explore 分析给出最小侵入路径（Evaluator.__init__ 加可选 allocator=None，默认路径 100% 等价于 Python 原生 list/tuple/dict，零回归风险）。",
+          "status": "completed",
+          "result": "成功 · 1037 passed 零回归",
+          "notes": "Evaluator.__init__(check_types=True, allocator=None) 新签名：None→get_global_libc_allocator()（完全向后兼容）；新增 self.allocator、self._allocator_is_default 字段；新增 _make_list/_make_tuple/_make_dict 3 个 helper（Step2 仍走 Python 原生构造，Step3/Step4 再真正接入 Arena 分配器接管内存）；改造 7 个构造点：_builtin_filter/map/list_dir、_convert_json_to_nova list+dict、_eval_list_expr/_eval_tuple_expr。净 +35 行，0 破坏性改动。",
+          "files_changed": [
+            "evaluator.py"
+          ]
+        }
+      ],
+      "review_driven_ratio_pct": 67,
+      "architecture_debt_ratio_pct": 33,
+      "next_cycle_recommendation": [
+        "P80 hard 主线①：unify_c_backend_phase2 Part2 — 删除 c_codegen.py 1591 行 + test_c_codegen.py",
+        "P75 medium 主线②：syntax_freeze_declaration — SYNTAX_FREEZE_v0.5.md 文档产出（SH-1 前置 2/4）",
+        "P70 medium filler：refactor_iter_hir_children_cc13 — CC=13 Top10#4 调度表化（审查驱动）",
+        "P62 easy filler：clean_unused_imports_v9 — 剩余 38 项 MEDIUM 继续清理"
+      ]
+    },
     {
       "cycle": 82,
       "type": "normal",
@@ -1317,11 +1410,14 @@
       "priority": 82,
       "category": "architecture",
       "estimated": "2-3 天",
-      "status": "pending",
+      "status": "completed",
       "depends_on": [
         "allocator_api_step1"
       ],
-      "reason": "[ARCHITECTURE_VISION.md §3.1 Step2] 内存模型决策落地第二步。数据结构接受allocator参数是self-hosting编译器使用Arena分配器获得性能爆炸的关键前置。[架构战略·新增任务]"
+      "reason": "[ARCHITECTURE_VISION.md §3.1 Step2] 内存模型决策落地第二步。数据结构接受allocator参数是self-hosting编译器使用Arena分配器获得性能爆炸的关键前置。[架构战略·新增任务]",
+      "completed_cycle": 83,
+      "completed_at": "2026-07-31T00:58:45.191898",
+      "note": "cycle=83 完成的 Step2 是最小侵入版：Evaluator 注入可选 allocator，默认路径 100% 等价于 Python list/tuple/dict（零回归），真正接管容器内存留 Step3。"
     },
     {
       "id": "allocator_api_step3",
@@ -1363,7 +1459,8 @@
       "depends_on": [
         "unify_c_backend_phase1"
       ],
-      "reason": "[ARCHITECTURE_VISION.md §2.2 Phase2] 依赖Phase1完成标记弃用和入口清理。对齐功能后永久移除维护双份语义的负担。[自主规划 · [第81轮评审调优：P70→P74，Phase1 弃用标记已挂，SH-1 前必须删除旧 c_codegen.py 1036 行消除双路径维护成本，微提升反映前置压力]"
+      "reason": "[ARCHITECTURE_VISION.md §2.2 Phase2] 依赖Phase1完成标记弃用和入口清理。对齐功能后永久移除维护双份语义的负担。[自主规划 · [第81轮评审调优：P70→P74，Phase1 弃用标记已挂，SH-1 前必须删除旧 c_codegen.py 1036 行消除双路径维护成本，微提升反映前置压力]",
+      "note": "[cycle=83 Part1 完成] __init__.py 已移除 CCodeGen re-export（断包级API）；Part2（cycle=84）正式删除 c_codegen.py + test_c_codegen.py。"
     },
     {
       "id": "benchmark_enhance_exec_time",
@@ -1387,10 +1484,12 @@
       "priority": 72,
       "category": "engineering",
       "estimated": "3-5 小时",
-      "status": "pending",
+      "status": "completed",
       "depends_on": [],
       "reason": "[审查驱动·新增] 第1505轮审查 MEDIUM 级 Top10 最复杂函数#2（CC=13）。Evaluator._convert_nova_to_json 是 evaluator.py 中复杂度最高的函数，单一大 switch 结构可读性差，测试覆盖无法独立验证各类型分支。[来源：AUTO_REVIEW_LOG.md cyclomatic_complexity Top10 #2 · [第81轮评审调优：P68→P72，架构手术完成后 Top10 CC=13 长尾批量清理窗口打开，与 refactor_iter_hir_children_cc13 同属一批可并行处理]",
-      "source": "review_driven"
+      "source": "review_driven",
+      "completed_cycle": 83,
+      "completed_at": "2026-07-31T00:58:45.191898"
     },
     {
       "id": "split_type_checker_unify",
@@ -2006,6 +2105,23 @@
       "depends_on": [],
       "source": "自主规划 SH-1 前置",
       "reason": "SH-1（移植 lexer+parser 到 Nova）启动的 4 前置之一：语法冻结声明缺失。移植 lexer+parser 后任何语法变更都要 Python 参考实现 + Nova 自举实现双份修改，维护成本 ×2。提前在 cycles=83 产出冻结文档让 cycles=84 起的 SH-1 工作有确定范围，避免移植后期出现大范围返工。[来源：评审发现 SH-1 前置差距分析 §4.2 + 自主规划]"
+    },
+    {
+      "id": "clean_unused_imports_v8",
+      "name": "批量清理未使用导入 v8（3处 · 3文件 · MEDIUM 41→38）",
+      "description": "cycle=83 与 unify_c_backend_phase2_part1 同批完成的 v8：清理 pass_manager 内层重复 warnings、mir_lowering 内层 sys 导入（移到文件头）。",
+      "difficulty": "easy",
+      "priority": 60,
+      "category": "engineering",
+      "estimated": "30 分钟",
+      "status": "completed",
+      "depends_on": [
+        "clean_unused_imports_v7"
+      ],
+      "reason": "[审查驱动] AUTO_REVIEW_LOG.md MEDIUM 级 unused_import 钉子户（v7 后 41→v8 后 38，-3 项），与 phase2_part1 改动同文件合并批量提交。",
+      "source": "review_driven",
+      "completed_cycle": 83,
+      "completed_at": "2026-07-31T00:58:45.191898"
     }
   ],
   "current_subtests": 31,

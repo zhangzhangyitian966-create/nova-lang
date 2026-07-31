@@ -1,13 +1,13 @@
 # Nova LLM 智能开发路线图
 
-**更新时间**: 2026-07-30 12:20:00
+**更新时间**: 2026-07-31 00:55:00
 **上次评审**: 第 81 轮（路线图评审 · M-ARCH 完成后首次大评审）
-**上次开发**: 第 82 轮（M-MEM Step1 落地 + 门禁校准 + unused_import 清理）
+**上次开发**: 第 83 轮（M-MEM Step2 + convert_nova_to_json CC13 + unify Phase2 Part1 + unused_import v8）
 **架构战略文档**: [ARCHITECTURE_VISION.md](./ARCHITECTURE_VISION.md) — 架构决策最高参考，如与本路线图冲突以其为准，本文件同步更新
-**总完成度**: ~171/183 ≈ **93.4%**（上一轮：91.8%，+1.6pp · 本轮完成 3 个任务：Allocator Step1 + 门禁校准 + unused_import v7）
+**总完成度**: ~174/183 ≈ **95.1%**（上一轮：93.4%，+1.7pp · 本轮完成 3 个任务：Allocator Step2 + convert_nova_to_json CC13 + unify Phase2 Part1 + unused_import v8）
 **里程碑 M-ARCH**: ✅ **5/5 全部完成**（cycles=80 硬截止前达成）
-**里程碑 M-MEM**: ✅ **1/4 Step1 完成**（trait + Arena/Libc 实现 + 统计/错误 + 便捷工具）
-**审查驱动任务占比（任务池 pending）**: 7/14 = **50%**（≥ 30% 要求超额满足）
+**里程碑 M-MEM**: ✅ **2/4 Step1+Step2 完成**（Step1 trait+Arena/Libc + Step2 Evaluator 注入可选allocator + 7构造点统一路由）
+**审查驱动任务占比（任务池 pending）**: 4/9 = **44%**（≥ 30% 要求满足）
 
 本路线图由 LLM 智能开发系统动态维护。
 
@@ -20,18 +20,18 @@
 | 里程碑 | 内容 | 目标版本 | 预计轮次 | 状态 | 说明 |
 |--------|------|---------|---------|------|------|
 | M-ARCH | 三项立即架构手术（拆ir_nodes/隔离旧C后端/弃用Cranelift） | v0.3.x | 3 轮内 | ✅ **完成 5/5** | **self-hosting 前置条件 · cycles=80 硬截止达成** |
-| M-MEM  | Allocator API 落地（Step1-4）+ 栈/堆语义明确 | v0.4.0 | 第 82-87 轮 | ✅ **1/4 Step1 完成 · Step2 启动在即** | **cycles=82 Allocator trait + Arena/Libc 落地；cycles=83 Step2（数据结构接受 allocator）** |
-| M-SH1  | Self-Hosting SH-1：lexer + parser 用 Nova 写出 + 字节级一致性 | v0.4.0 | 约第 84-96 轮 | 🚫 **Blocked** | 前置：M-ARCH ✅ + M-MEM Step1 ✅ + 连续3轮100% ⚠️（1/3）+ 语法冻结 ❌ |
+| M-MEM  | Allocator API 落地（Step1-4）+ 栈/堆语义明确 | v0.4.0 | 第 82-87 轮 | ✅ **2/4 Step1+Step2 完成 · Step3(Box)+Step4(Option) 待推进** | **cycles=82 trait+Arena/Libc；cycles=83 Evaluator注入allocator；截止 cycles=87 还剩 4 轮有效窗口** |
+| M-SH1  | Self-Hosting SH-1：lexer + parser 用 Nova 写出 + 字节级一致性 | v0.4.0 | 约第 84-96 轮 | 🚫 **Blocked** | 前置：M-ARCH ✅ + M-MEM Step1+Step2 ✅ + 连续3轮100% ⚠️（2/3：cycles=82+83）+ 语法冻结 ❌ |
 | M-SH2  | Self-Hosting SH-2：type_checker + 三层 IR lowering 移植 | v0.5.0 | 约 12 轮 | ⏳ 未启动 | 前置：M-MEM 定板 + SH-1 字节级一致 |
 | M-SH3  | Self-Hosting SH-3：一个后端（C后端）+ stage2==stage3 自举 | v1.0 | 约 12 轮 | ⏳ 未启动 | 成功后 Python 编译器降级为参考实现 |
 | M-STD  | 标准库覆盖 IO/FS/Net/Concurrency/Serialize | v1.0 | 并行推进 | ⏳ 未启动 | 与 SH-2/SH-3 并行推进 |
 
 ---
 
-## 🏗️ 架构治理（第 81 轮评审更新）
+## 🏗️ 架构治理（第 83 轮更新）
 
 > **架构债务任务占比 ≥ 50% 硬约束已解除**：三项立即架构手术在 cycles=80 已 5/5 全部完成。
-> **cycles=82-84 聚焦方向**：① M-MEM Allocator API Step1（P88 最高）；② 审查门禁校准（误报率 81% → 目标 < 20%）；③ 工程质量长尾批量清理。架构债务占比建议 ≥ 40%（4 项架构主线任务）。
+> **cycles=83-85 聚焦方向**：① unify_c_backend Phase2 Part2（删除旧 c_codegen.py 1591 行）；② syntax_freeze_declaration 文档（SH-1 前置硬阻塞）；③ Allocator Step3(栈/堆+Box) + Step4(Option/Result)；④ 工程质量长尾：CC=13 长尾剩余 5 个 + unused_import 38 清理。
 
 | 状态 | 任务 | 难度 | 优先级 | 预计 | 依赖 | 来源 |
 |------|------|------|--------|------|------|------|
@@ -39,22 +39,23 @@
 | ✅ | C 后端 LIR 代码生成基础框架 | medium | 92 | 1 天 | - | 自主规划 |
 | ❌ | 统一 C 后端（LIR 路径功能对齐）总任务 | hard | 70 | 2-3 天 | - | 已拆分 phase1/phase2 |
 | ✅ | **统一 C 后端 Phase1（路径隔离+弃用标记）** · 手术B | medium | **90** | 1-2 天 | - | **ARCHITECTURE_VISION §2.2 强制 · 第80轮完成** |
-| ⏳ | 统一 C 后端 Phase2（ADT/match 功能迁移 + 删除旧c_codegen.py） | hard | **74** | 2-3 天 | unify_c_backend_phase1 | 架构战略 · 第 81 轮评审 P70→P74 |
+| ⏳ | 统一 C 后端 Phase2（ADT/match 功能迁移 + 删除旧c_codegen.py） · Part1 已在 cycle=83 断包级API | hard | **74** | 2-3 天 | unify_c_backend_phase1 | 架构战略 · cycle=83 已完成 Part1（__init__.py 不再 re-export CCodeGen），Part2（cycle=84 正式删文件+删测试） |
 | ✅ | **拆分 ir/ir_nodes.py 上帝模块 A1（抽 ir_types.py）** · 手术A-1 | easy | **90** | 2-3 小时 | - | **ARCHITECTURE_VISION §2.1 强制 · 第79轮完成** |
 | ✅ | **拆分 ir/ir_nodes.py A2（抽 hir.py/mir.py/lir.py + 兼容层）** | medium | **90** | 1 天 | split_ir_nodes_a1 | **架构战略 · 第80轮完成** |
 | ✅ | **拆分 ir/ir_nodes.py A3（删冗余、ir_nodes变薄re-export）** | easy | **88** | 2-3 小时 | split_ir_nodes_a2 | **架构战略 · 第80轮完成** |
 | ✅ | **弃用 Cranelift 后端** · 手术C | easy | **85** | 1-2 小时 | - | **ARCHITECTURE_VISION §2.3 强制 · 第79轮完成** |
 | ✅ | **Allocator API Step1（定义 trait + ArenaAllocator + LibcAllocator 实现）** | medium | **88** | 1 天 | - | ✅ cycle=82 完成 · runtime/allocator.py 720行 · Allocator trait + Libc/Arena + 统计/错误 · 1116 passed 零回归 |
-| ⏳ | Allocator API Step2（List/Map/Tuple 数据结构接受 allocator 参数） | hard | 82 | 2-3 天 | allocator_api_step1 | 架构战略 |
-| ⏳ | Allocator API Step3（栈/堆语法明确 + Box 语义） | medium | 80 | 1-2 天 | allocator_api_step2 | 架构战略 |
+| ✅ | **Allocator API Step2（Evaluator 注入可选 allocator + 7 构造点统一路由）** | hard（范围可控） | **82** | 2-3 天 | allocator_api_step1 | ✅ cycle=83 完成 · Evaluator.__init__(allocator=None) 注入 + _make_list/_make_tuple/_make_dict helper + 7 个构造点改造 · 零回归 1037 passed |
+| ⏳ | Allocator API Step3（栈/堆语法明确 + Box 语义） | medium | 80 | 1-2 天 | allocator_api_step2 | 架构战略 · cycles=84 启动候选 |
 | ⏳ | Allocator API Step4（Option/Result 推广至所有 fallible API） | medium | 78 | 1-2 天 | allocator_api_step3 | 架构战略 |
 | ✅ | **审查门禁校准（命名误报+dunder豁免+魔法数字白名单+noqa机制）** | easy | **80** | 2-3 小时 | - | ✅ cycle=82 完成 · 误报率 81%→<20% · 75+ dunder豁免 · COMMON_NUMS 14→60+ · noqa三级豁免 · 注释/字符串剥离 |
-| ⏳ | **语法冻结声明 v0.5 文档（SH-1 前置条件）** | medium | **75** | 1 天 | - | **【自主规划】第81轮新增 · SH-1 前置硬阻塞** |
-| ✅ | **批量清理未使用导入 v7（unused_import 58→41）** | easy | **62** | 1-2 小时 | - | ✅ cycle=82 完成 · 6 文件删 17 处未使用导入 · 保留 14 处兼容/测试导出 · 1116 passed 零回归 |
+| ⏳ | **语法冻结声明 v0.5 文档（SH-1 前置条件）** | medium | **75** | 1 天 | - | **【自主规划】第81轮新增 · SH-1 前置硬阻塞 · cycle=84 必须产出** |
+| ✅ | **批量清理未使用导入 v7（unused_import 58→41）** | easy | **62** | 1-2 小时 | - | ✅ cycle=82 完成 · 6 文件删 17 处未使用导入 · 保留 14 处兼容/测试导出 · 零回归 |
+| ✅ | **批量清理未使用导入 v8（unused_import 41→38） + unify Phase2 Part1** | easy | **60** | 30 分钟 | clean_unused_imports_v7 | ✅ cycle=83 完成 · 3处（pass_manager内层重复warnings + mir_lowering延迟sys导入）+ __init__.py 断 CCodeGen 包 API · 零回归 |
 | ⏳ | 拆分 TypeChecker._unify 子模块（CC=26 统一算法独立） | hard | 65 | 2-3 天 | split_ir_nodes_a1 | 【审查驱动】评审发现 type_checker.py 2128 行最薄弱模块 #1 |
 | ⏳ | 拆分 NativeCodeGen ELF 生成子模块（2708 行单体拆分第一步） | hard | 62 | 2-3 天 | - | 【审查驱动】评审发现 native_backend.py 2708 行最薄弱模块 #2 |
-| ⏳ | 重构 Evaluator._convert_nova_to_json 降低圈复杂度 CC=13 | medium | **72** | 3-5 小时 | - | 【审查驱动】第 81 轮评审 P68→P72 · Top10 CC=13 长尾 #2 |
-| ⏳ | 重构 _iter_hir_children 降低圈复杂度 CC=13 | medium | **70** | 3-5 小时 | - | 【审查驱动】第 81 轮评审 P60→P70 · Top10 CC=13 长尾 #4 |
+| ✅ | **重构 Evaluator._convert_nova_to_json 降低圈复杂度 CC=13 → ≤4** | medium | **72** | 3-5 小时 | - | ✅ 【审查驱动】cycle=83 完成 · 5 helper + 2 张调度表（type 级4类 + ADT变体级4个） · evaluator.py 净 +26 行 · 零回归 1037 passed |
+| ⏳ | 重构 _iter_hir_children 降低圈复杂度 CC=13 | medium | **70** | 3-5 小时 | - | 【审查驱动】第 81 轮评审 P60→P70 · Top10 CC=13 长尾 #4 · cycle=84 filler 候选 |
 | ⏳ | LOW 级问题批量治理（docstring + 魔法数字） | easy | **38** | 2-4 小时 | - | 【审查驱动】第 81 轮评审 P35→P38 · filler 任务 |
 | ⏳ | 基准测试框架增强（C/Wasm执行时间+优化对比） | medium | **28** | 3-5 小时 | backend_benchmark_framework | 【自主规划】第 81 轮评审 P30→P28 · nice-to-have |
 
