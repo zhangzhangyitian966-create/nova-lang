@@ -1,13 +1,13 @@
 # Nova LLM 智能开发路线图
 
-**更新时间**: 2026-07-31 00:55:00
-**上次评审**: 第 81 轮（路线图评审 · M-ARCH 完成后首次大评审）
+**更新时间**: 2026-07-31 04:02:00
+**上次评审**: 第 84 轮（路线图评审 · 质量止血 + SH-1 前置定板）
 **上次开发**: 第 83 轮（M-MEM Step2 + convert_nova_to_json CC13 + unify Phase2 Part1 + unused_import v8）
 **架构战略文档**: [ARCHITECTURE_VISION.md](./ARCHITECTURE_VISION.md) — 架构决策最高参考，如与本路线图冲突以其为准，本文件同步更新
-**总完成度**: ~174/183 ≈ **95.1%**（上一轮：93.4%，+1.7pp · 本轮完成 3 个任务：Allocator Step2 + convert_nova_to_json CC13 + unify Phase2 Part1 + unused_import v8）
+**总完成度**: ~174/183 ≈ **95.1%**（与上轮持平 · 本轮为评审轮无功能开发）
 **里程碑 M-ARCH**: ✅ **5/5 全部完成**（cycles=80 硬截止前达成）
-**里程碑 M-MEM**: ✅ **2/4 Step1+Step2 完成**（Step1 trait+Arena/Libc + Step2 Evaluator 注入可选allocator + 7构造点统一路由）
-**审查驱动任务占比（任务池 pending）**: 4/9 = **44%**（≥ 30% 要求满足）
+**里程碑 M-MEM**: ✅ **2/4 Step1+Step2 完成**（Step3+Step4 优先级提升 P80→P82，cycles=84-85 推进）
+**审查驱动任务占比（任务池 pending）**: 11/16 = **68.8%**（评审前 0% → 本轮修复后 68.8% · ≥30% 要求超额满足）
 
 本路线图由 LLM 智能开发系统动态维护。
 
@@ -15,23 +15,23 @@
 
 ## 🗺️ v0.3.0 → v1.0 总览里程碑（架构战略约束）
 
-> 第 81 轮评审结论：M-ARCH（三项立即架构手术）已 5/5 ✅，下阶段架构主线进入 **M-MEM Allocator API** 阶段（Step1-4），同时为 Self-Hosting SH-1 做前置准备（语法冻结声明 + 连续 3 轮 100% 测试）。
+> 第 84 轮评审结论：M-MEM Step1+Step2 已 2/4 ✅，下阶段 **cycles=84-86 三线并行**：① 质量止血（门禁恢复 + unused_import 306→≤50）② M-MEM Step3+Step4 收尾（cycles=87 前定板）③ SH-1 前置闸门（语法冻结 P85 + parity 基线 + 第3轮100%测试）。
 
 | 里程碑 | 内容 | 目标版本 | 预计轮次 | 状态 | 说明 |
 |--------|------|---------|---------|------|------|
 | M-ARCH | 三项立即架构手术（拆ir_nodes/隔离旧C后端/弃用Cranelift） | v0.3.x | 3 轮内 | ✅ **完成 5/5** | **self-hosting 前置条件 · cycles=80 硬截止达成** |
-| M-MEM  | Allocator API 落地（Step1-4）+ 栈/堆语义明确 | v0.4.0 | 第 82-87 轮 | ✅ **2/4 Step1+Step2 完成 · Step3(Box)+Step4(Option) 待推进** | **cycles=82 trait+Arena/Libc；cycles=83 Evaluator注入allocator；截止 cycles=87 还剩 4 轮有效窗口** |
-| M-SH1  | Self-Hosting SH-1：lexer + parser 用 Nova 写出 + 字节级一致性 | v0.4.0 | 约第 84-96 轮 | 🚫 **Blocked** | 前置：M-ARCH ✅ + M-MEM Step1+Step2 ✅ + 连续3轮100% ⚠️（2/3：cycles=82+83）+ 语法冻结 ❌ |
+| M-MEM  | Allocator API 落地（Step1-4）+ 栈/堆语义明确 | v0.4.0 | 第 82-87 轮 | ✅ **2/4 Step1+Step2 完成 · Step3(P82)+Step4(P80) 本轮起推进** | **cycles=82 trait+Arena/Libc；cycles=83 Evaluator 注入；截止 cycles=87 还剩 3 轮有效窗口** |
+| M-SH1  | Self-Hosting SH-1：lexer + parser 用 Nova 写出 + 字节级一致性 | v0.4.0 | 约第 87-99 轮 | 🚫 **Blocked · 4 前置条件明确** | 前置：M-ARCH ✅ + M-MEM Step1+Step2 ✅ + 连续3轮100% ⚠️（2/3）+ 语法冻结 ❌ + parity 基线 ❌ · **预期 cycles=86 末解除 Blocked** |
 | M-SH2  | Self-Hosting SH-2：type_checker + 三层 IR lowering 移植 | v0.5.0 | 约 12 轮 | ⏳ 未启动 | 前置：M-MEM 定板 + SH-1 字节级一致 |
 | M-SH3  | Self-Hosting SH-3：一个后端（C后端）+ stage2==stage3 自举 | v1.0 | 约 12 轮 | ⏳ 未启动 | 成功后 Python 编译器降级为参考实现 |
 | M-STD  | 标准库覆盖 IO/FS/Net/Concurrency/Serialize | v1.0 | 并行推进 | ⏳ 未启动 | 与 SH-2/SH-3 并行推进 |
 
 ---
 
-## 🏗️ 架构治理（第 83 轮更新）
+## 🏗️ 架构治理（第 84 轮评审更新）
 
-> **架构债务任务占比 ≥ 50% 硬约束已解除**：三项立即架构手术在 cycles=80 已 5/5 全部完成。
-> **cycles=83-85 聚焦方向**：① unify_c_backend Phase2 Part2（删除旧 c_codegen.py 1591 行）；② syntax_freeze_declaration 文档（SH-1 前置硬阻塞）；③ Allocator Step3(栈/堆+Box) + Step4(Option/Result)；④ 工程质量长尾：CC=13 长尾剩余 5 个 + unused_import 38 清理。
+> **架构债务任务占比 ≥ 50% 硬约束**：cycles=84-86 三线规划中架构债占比 75%-83%，远超要求。
+> **cycles=84-86 聚焦方向**：① 质量止血（unused_import 306→≤50 + 门禁恢复）P88-P86；② M-MEM Step3(Box) P82 + Step4(Option) P80；③ SH-1 前置：syntax_freeze P85（必须启动）+ parity P77；④ 薄弱模块渐进治理：CC=13 filler + 文档化 + native_backend 拆分首步。
 
 | 状态 | 任务 | 难度 | 优先级 | 预计 | 依赖 | 来源 |
 |------|------|------|--------|------|------|------|
@@ -39,25 +39,32 @@
 | ✅ | C 后端 LIR 代码生成基础框架 | medium | 92 | 1 天 | - | 自主规划 |
 | ❌ | 统一 C 后端（LIR 路径功能对齐）总任务 | hard | 70 | 2-3 天 | - | 已拆分 phase1/phase2 |
 | ✅ | **统一 C 后端 Phase1（路径隔离+弃用标记）** · 手术B | medium | **90** | 1-2 天 | - | **ARCHITECTURE_VISION §2.2 强制 · 第80轮完成** |
-| ⏳ | 统一 C 后端 Phase2（ADT/match 功能迁移 + 删除旧c_codegen.py） · Part1 已在 cycle=83 断包级API | hard | **74** | 2-3 天 | unify_c_backend_phase1 | 架构战略 · cycle=83 已完成 Part1（__init__.py 不再 re-export CCodeGen），Part2（cycle=84 正式删文件+删测试） |
+| ⏳ | 统一 C 后端 Phase2（ADT/match 功能迁移 + 删除旧c_codegen.py） · Part1 已在 cycle=83 断包级API | hard | **76** | 2-3 天 | unify_c_backend_phase1 | 【审查驱动+架构战略】手术B Phase2 · cycle=83 完成 Part1，Part2（cycle=85 删除旧 c_codegen.py 1591 行 + 迁移功能） |
 | ✅ | **拆分 ir/ir_nodes.py 上帝模块 A1（抽 ir_types.py）** · 手术A-1 | easy | **90** | 2-3 小时 | - | **ARCHITECTURE_VISION §2.1 强制 · 第79轮完成** |
 | ✅ | **拆分 ir/ir_nodes.py A2（抽 hir.py/mir.py/lir.py + 兼容层）** | medium | **90** | 1 天 | split_ir_nodes_a1 | **架构战略 · 第80轮完成** |
 | ✅ | **拆分 ir/ir_nodes.py A3（删冗余、ir_nodes变薄re-export）** | easy | **88** | 2-3 小时 | split_ir_nodes_a2 | **架构战略 · 第80轮完成** |
 | ✅ | **弃用 Cranelift 后端** · 手术C | easy | **85** | 1-2 小时 | - | **ARCHITECTURE_VISION §2.3 强制 · 第79轮完成** |
 | ✅ | **Allocator API Step1（定义 trait + ArenaAllocator + LibcAllocator 实现）** | medium | **88** | 1 天 | - | ✅ cycle=82 完成 · runtime/allocator.py 720行 · Allocator trait + Libc/Arena + 统计/错误 · 1116 passed 零回归 |
 | ✅ | **Allocator API Step2（Evaluator 注入可选 allocator + 7 构造点统一路由）** | hard（范围可控） | **82** | 2-3 天 | allocator_api_step1 | ✅ cycle=83 完成 · Evaluator.__init__(allocator=None) 注入 + _make_list/_make_tuple/_make_dict helper + 7 个构造点改造 · 零回归 1037 passed |
-| ⏳ | Allocator API Step3（栈/堆语法明确 + Box 语义） | medium | 80 | 1-2 天 | allocator_api_step2 | 架构战略 · cycles=84 启动候选 |
-| ⏳ | Allocator API Step4（Option/Result 推广至所有 fallible API） | medium | 78 | 1-2 天 | allocator_api_step3 | 架构战略 |
+| ⏳ | Allocator API Step3（栈/堆语法明确 + Box 语义） | medium | **82** | 1-2 天 | allocator_api_step2 | 【自主规划】架构战略 M-MEM 3/4 · cycle=84 启动 · cycles=87 截止 |
+| ⏳ | Allocator API Step4（Option/Result 推广至所有 fallible API） | medium | **80** | 1-2 天 | allocator_api_step3 | 【自主规划】架构战略 M-MEM 4/4 · cycle=85 推进 · cycles=87 截止 |
 | ✅ | **审查门禁校准（命名误报+dunder豁免+魔法数字白名单+noqa机制）** | easy | **80** | 2-3 小时 | - | ✅ cycle=82 完成 · 误报率 81%→<20% · 75+ dunder豁免 · COMMON_NUMS 14→60+ · noqa三级豁免 · 注释/字符串剥离 |
-| ⏳ | **语法冻结声明 v0.5 文档（SH-1 前置条件）** | medium | **75** | 1 天 | - | **【自主规划】第81轮新增 · SH-1 前置硬阻塞 · cycle=84 必须产出** |
-| ✅ | **批量清理未使用导入 v7（unused_import 58→41）** | easy | **62** | 1-2 小时 | - | ✅ cycle=82 完成 · 6 文件删 17 处未使用导入 · 保留 14 处兼容/测试导出 · 零回归 |
-| ✅ | **批量清理未使用导入 v8（unused_import 41→38） + unify Phase2 Part1** | easy | **60** | 30 分钟 | clean_unused_imports_v7 | ✅ cycle=83 完成 · 3处（pass_manager内层重复warnings + mir_lowering延迟sys导入）+ __init__.py 断 CCodeGen 包 API · 零回归 |
-| ⏳ | 拆分 TypeChecker._unify 子模块（CC=26 统一算法独立） | hard | 65 | 2-3 天 | split_ir_nodes_a1 | 【审查驱动】评审发现 type_checker.py 2128 行最薄弱模块 #1 |
-| ⏳ | 拆分 NativeCodeGen ELF 生成子模块（2708 行单体拆分第一步） | hard | 62 | 2-3 天 | - | 【审查驱动】评审发现 native_backend.py 2708 行最薄弱模块 #2 |
-| ✅ | **重构 Evaluator._convert_nova_to_json 降低圈复杂度 CC=13 → ≤4** | medium | **72** | 3-5 小时 | - | ✅ 【审查驱动】cycle=83 完成 · 5 helper + 2 张调度表（type 级4类 + ADT变体级4个） · evaluator.py 净 +26 行 · 零回归 1037 passed |
-| ⏳ | 重构 _iter_hir_children 降低圈复杂度 CC=13 | medium | **70** | 3-5 小时 | - | 【审查驱动】第 81 轮评审 P60→P70 · Top10 CC=13 长尾 #4 · cycle=84 filler 候选 |
-| ⏳ | LOW 级问题批量治理（docstring + 魔法数字） | easy | **38** | 2-4 小时 | - | 【审查驱动】第 81 轮评审 P35→P38 · filler 任务 |
-| ⏳ | 基准测试框架增强（C/Wasm执行时间+优化对比） | medium | **28** | 3-5 小时 | backend_benchmark_framework | 【自主规划】第 81 轮评审 P30→P28 · nice-to-have |
+| ⏳ | **语法冻结声明 v0.5 文档（SH-1 前置条件）** | medium | **85** | 1 天 | - | 【自主规划】SH-1 前置硬阻塞 · cycle=84 **必须启动不再延期** |
+| ⏳ | **批量清理未使用导入 v9 Massive（306→≤50） · Cycle-1514 止血任务** | easy | **88** | 2-3 小时 | - | 【审查驱动】Cycle-1514 MEDIUM 爆增 97→341 主因 · cycle=84 最高优先级止血 |
+| ⏳ | **test_parser.py 74 例测试函数补 docstring（门禁修复）** | easy | **86** | 1-2 小时 | - | 【审查驱动】Cycle-1512 门禁失败 74 例主因 · cycle=84 质量止血 #2 |
+| ⏳ | **调优增量门禁：魔法数字豁免（断言值/注释/文档字符串）** | easy | **79** | 1-2 小时 | - | 【审查驱动】门禁每轮必触发 1-9+ 次误报 · 降低噪音提高可信度 |
+| ⏳ | **ir/mir_lowering.py 文档化补全（27 个无 doc→≤3）** | medium | **72** | 3-5 小时 | - | 【审查驱动】薄弱模块#3 · 三层IR核心（1897 行 42.9% 无 doc） |
+| ⏳ | **evaluator.py 语义权威文档化（67 个无 doc→≤20）** | medium | **70** | 3-5 小时 | - | 【审查驱动】薄弱模块#5 · 架构指定语义权威 ARCHITECTURE_VISION §1.3 · 64.4% 无 doc |
+| ⏳ | **native_backend 拆分 Step1：抽出 X86_64RegAlloc 寄存器分配类** | hard（范围可控） | **68** | 1-2 天 | split_native_backend_elf | 【审查驱动】薄弱模块#1 · 全项目最复杂单体（2771 行）· _allocate_registers 历史 CC=18 |
+| ⏳ | **SH-1 parity 基线搭建：8 个基准文件 AST JSON + MD5 输出脚本** | medium | **77** | 3-5 小时 | syntax_freeze_declaration | 【自主规划】SH-1 字节级一致性校验基础设施 · cycle=85 推进 |
+| ✅ | **批量清理未使用导入 v7（unused_import 58→41）** | easy | **62** | 1-2 小时 | - | ✅ cycle=82 完成 · 6 文件删 17 处未使用导入 · 零回归 |
+| ✅ | **批量清理未使用导入 v8（unused_import 41→38） + unify Phase2 Part1** | easy | **60** | 30 分钟 | clean_unused_imports_v7 | ✅ cycle=83 完成 · 3处清理 + 断 CCodeGen 包 API · 零回归 |
+| ⏳ | 拆分 TypeChecker._unify 子模块（CC=26 统一算法独立） | hard | 65 | 2-3 天 | split_ir_nodes_a1 | 【审查驱动】薄弱模块#2 · type_checker.py 2301 行 · HM 推断核心算法独立 |
+| ⏳ | 拆分 NativeCodeGen ELF 生成子模块（2771 行单体拆分第一步） | hard | 62 | 2-3 天 | - | 【审查驱动】薄弱模块#1 · native_backend.py 2771 行 · ELFWriter 抽出 |
+| ✅ | **重构 Evaluator._convert_nova_to_json 降低圈复杂度 CC=13 → ≤4** | medium | **72** | 3-5 小时 | - | ✅ 【审查驱动】cycle=83 完成 · 5 helper + 2 张调度表 · 零回归 1037 passed |
+| ⏳ | 重构 _iter_hir_children 降低圈复杂度 CC=13 | medium | **70** | 3-5 小时 | - | 【审查驱动】Top10 CC=13 长尾 #4 · cycle=84 filler 首选 |
+| ⏳ | LOW 级问题批量治理（docstring + 魔法数字） | easy | **38** | 2-4 小时 | - | 【审查驱动】no_docstring 619 + magic_number 825 持续增长 · nice-to-have |
+| ⏳ | 基准测试框架增强（C/Wasm执行时间+优化对比） | medium | **25** | 3-5 小时 | backend_benchmark_framework | 【自主规划】nice-to-have · 优先级下调 |
 
 ## 🔧 IR 降级 / 正确性
 

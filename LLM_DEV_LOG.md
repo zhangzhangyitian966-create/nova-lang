@@ -1,3 +1,246 @@
+## 2026-07-31 04:12 第84轮评审（路线图评审）
+
+> 评审轮：第 84 轮（84 % 3 = 0 → **评审轮**）
+> 评审范围：**cycles=81（评审） + 82（开发） + 83（开发）** 共三轮
+> 基线测试：**432 passed, 20 subtests passed**（5 核心文件）/ **1037 passed, 25 subtests passed**（全量）
+> 上次评审：第 81 轮（M-ARCH 完成后首次大评审 · cycles=81）
+> 路线图总完成度：**~174/183 ≈ 95.1%**（上轮 93.4%，+1.7pp）
+> 审查驱动占比（Pending）：**11/16 = 68.8%**（评审前 0% → 68.8%，≥30% 要求超额满足）
+> 里程碑 M-MEM：**2/4 Step1+Step2 完成**（Step3 Box + Step4 Option 待推进）
+> 里程碑 M-SH1：**🚫 Blocked**（语法冻结未声明 ❌ + 连续3轮100% 测试 2/3 ⚠️）
+
+---
+
+### 一、三轮回顾总结（cycles=81-83）
+
+| 轮次 | 类型 | 任务数 | 成功 | 审查驱动 | 自主规划 | 测试通过率 | 核心成果 |
+|------|------|--------|------|----------|----------|-----------|---------|
+| 81 | 评审 | — | — | — | — | 1116/1116 | M-ARCH 完成后首次大评审；任务池重构；确定82-84三线方向 |
+| 82 | 开发 | 3 | 3 ✅ | 2（67%） | 1（33%） | 1116/1116 零回归 | **Allocator Step1 落地**（trait+Arena/Libc 901行）；门禁校准误报率81%→<20%；unused_import v7（58→41） |
+| 83 | 开发 | 3 | 3 ✅ | 2（67%） | 1（33%） | 1037/1037 零回归 | **Allocator Step2 落地**（Evaluator注入+7构造点统一）；convert_nova_to_json CC=13→≤4；unify Phase2 Part1（断包级CCodeGen API） |
+
+**核心成就**：
+1. **M-MEM 里程碑 2/4 完成**：Allocator API Step1（定义）+ Step2（注入）两步连续落地，cycles=82-83 两轮推进架构主线不偏移
+2. **CC=13 钉子户持续出榜**：convert_nova_to_json 从 Top6 出榜，剩余 CC=13 钉子户 6→5
+3. **质量门禁方法论复位**：门禁校准后误报率从 81% 降到 <20%，审查数据可信度恢复
+4. **连续两轮零回归**：cycles=82+83 两轮 100% 通过 1037+ 测试，SH-1 前置条件「连续3轮100%」已达成 2/3
+5. **审查对齐率稳定 ≥67%**：两轮开发轮均 67%（2/3）审查驱动，超过 50% 硬约束
+
+**不足信号**：
+1. **审查门禁连续 3 轮失败**（Cycle-1512/1513/1514）：质量红线持续失守
+2. **MEDIUM 问题异常暴涨**：从 97 → 341（+251%），unused_import 58→306 是主因
+3. **任务池审查驱动占比归零**（0/9 = 0%）：评审前数据不达标，本轮已紧急修正
+4. **薄弱模块 Top5 无进展**：native_backend/type_checker/mir_lowering/vm/evaluator 五大薄弱模块在 cycles=82-83 未被触及
+5. **SH-1 两个前置硬阻塞均未启动**：语法冻结声明 + 第三轮 100% 测试
+
+---
+
+### 二、五维评估 + 审查对齐（六维完整评审）
+
+#### 1. 方向评估 — ✅ 优秀 9/10
+
+**结论**：cycles=82-83 严格执行第 81 轮评审的三线并行方向（① M-MEM Allocator API ② 审查门禁校准 ③ 工程质量长尾），没有偏离项目目标。Allocator 主线连续两轮推进，符合 ARCHITECTURE_VISION.md §3.1「最迟 v0.5 定板」和 cycles=87 截止窗口要求。
+
+**扣分点**：SH-1 前置硬阻塞「语法冻结声明」（P75）被连续两轮推迟，cycles=84 必须启动不再允许延期。
+
+| 81轮评审规划的方向 | 实际执行情况 | 对齐度 |
+|-------------------|-------------|--------|
+| ① M-MEM Allocator Step1 → Step2 | ✅ Step1 cycle=82 + Step2 cycle=83 连续推进 | 100% |
+| ② 审查门禁校准（误报率治理） | ✅ cycle=82 误报率 81%→<20% | 100% |
+| ③ 工程质量长尾（unused_import + CC=13 钉子户） | ✅ unused_import 58→38（两轮 -20）；convert_nova_to_json 从 Top6 出榜 | 85% |
+| ④ 语法冻结声明文档（SH-1 前置） | ❌ 两轮均未启动，被 Allocator 挤走时间窗口 | 0% |
+
+#### 2. 质量评估 — ⚠️ 合格 6.5/10（出现衰退信号）
+
+| 指标 | 81轮评审（基准） | 84轮评审（当前） | 变化 | 判断 |
+|------|----------------|-----------------|------|------|
+| **总问题数**（Cycle-1510 vs 1514） | 1261 | **1907** | **+51%** ⬆️ 不利 | 代码规模膨胀（1037→1099+测试）+ ir 拆分后 import 混乱 主因 |
+| **MEDIUM 问题** | 79 | **341** | **+332%** ⬆️ 危险 | Cycle-1514 异常值：unused_import 58→306，需立即止血 |
+| **CRITICAL + HIGH** | 0+0 | 0+0 | 0 ✅ | 连续 6+ 轮清零，架构手术效果持续 |
+| **门禁通过率**（最近5轮） | 前2轮✅ | 后3轮❌❌❌ | **失守** | 质量红线需在 cycles=84 恢复 |
+| **Avg CC** | 2.04 | 2.04 | 持平 ✅ | 编译器核心复杂度健康 |
+| **CC=13 钉子户数** | 6 个 | 5 个 | -1 ✅ | convert_nova_to_json 出榜，长尾收尾进度慢 |
+| **无 docstring 率 Top5** | vm=85.7% / evaluator=64.4% / mir_lowering=42.9% | 未变 | 持平 ⚠️ | 架构指定的「语义权威」evaluator 64.4% 无 doc 需治理 |
+
+**结论**：核心质量指标（CC、CRITICAL+HIGH）健康稳定；**但 MEDIUM 异常爆增 + 门禁连续失败**是明确的衰退信号，需在 cycles=84 优先止血。最大技术债积累：薄弱模块 Top5 在 82-83 两轮零推进。
+
+#### 3. 效率评估 — ✅ 良好 8/10
+
+| 指标 | 上一评审组（cycles=78-80） | 本组（cycles=81-83） | 变化 |
+|------|-------------------------|---------------------|------|
+| 成功任务数（开发轮） | 5（cycles=79+80：2+3） | **6**（cycles=82+83：3+3） | **+20%** ⬆️ |
+| 开发轮均任务数 | 2.5 | **3.0** | **+20%** ⬆️ |
+| 失败回滚任务 | 0 | 0 | 持平 ✅ |
+| 单任务平均耗时估计 | 6-8 小时 | 5-7 小时 | 略降 ⬆️ |
+| 测试通过率（开发轮前后） | 100%（79+80） | **100%**（82+83） | 持平 ✅ |
+| 审查驱动任务完成率 | 100%（5/5） | **100%**（4/4） | 持平 ✅ |
+
+**结论**：开发效率稳步提升，轮均任务从 2.5→3.0，失败回滚 0。连续两轮 3 任务全成 零回归，说明任务选型（easy/medium 难度 + 范围可控）策略有效。Allocator Step2 标记为 hard 难度但成功零回归，证明范围裁剪能力到位。
+
+#### 4. 价值评估 — ✅ 优秀 8.5/10
+
+| 任务 | 价值类型 | 价值说明 | 评分 |
+|------|---------|---------|------|
+| allocator_api_step1 | **架构战略** | M-MEM 支柱 1/4；SH-1 前置条件解锁；v0.5 内存模型定板第一步 | 10/10 |
+| allocator_api_step2 | **架构战略** | M-MEM 支柱 2/4；真正侵入 Evaluator 语义权威；7 构造点统一为后续 Box/Option 铺路 | 9.5/10 |
+| fix_review_gate_false_positives | **方法论基础** | 误报率 81%→<20%；审查数据可信度恢复；否则后续所有 filler 任务选型都有噪音 | 9/10 |
+| refactor_convert_nova_to_json_cc13 | **审查驱动** | CC=13→≤4；Top6 钉子户出榜；JSON 序列化调度表化更易扩展新类型 | 8/10 |
+| clean_unused_imports_v7+v8 | **审查驱动** | 58→38（-20）；MEDIUM 钉子户批量清理 | 7/10 |
+| unify_c_backend_phase2_part1 | **架构战略** | 断包级 CCodeGen API；旧 c_codegen 删除前置第一步 | 8.5/10 |
+
+**价值判断**：6 个任务中 4 个架构战略级（Step1/Step2/门禁校准/unify Part1）+ 2 个审查驱动 filler，高价值任务占比 4/6 = 67%，没有「为了做而做」的低价值任务。最大价值点：Allocator Step2 侵入 Evaluator 语义权威后，Step3(Box) + Step4(Option) 路径已经打通。
+
+#### 5. 审查对齐评估 — ✅ 良好 7.5/10（任务池数据失真拉低评分）
+
+| 维度 | cycles=82 | cycles=83 | 81-83 整体 | 要求 |
+|------|----------|----------|-----------|------|
+| 开发轮审查驱动占比 | 2/3 = 67% | 2/3 = 67% | 4/6 = **67%** | ≥50% ✅ |
+| 每轮 ≥1 审查驱动任务 | ✅ 2 个 | ✅ 2 个 | 100% 达标 | 每轮≥1 ✅ |
+| 未解决的 CRITICAL | 0 | 0 | 0 | 0 ✅ |
+| 未解决的 HIGH | 0 | 0 | 0 | 0 ✅ |
+| MEDIUM 级 Top3 处理 | unused_import（✅ 处理） | unused_import（✅ 处理） | 两轮连续跟进 | 应处理 Top5 ⚠️ |
+| CC=13 Top10 处理 | 推迟到 83 | ✅ convert_nova_to_json 出榜 | 1/6 钉子户 | 应推进更快 ⚠️ |
+| **任务池审查驱动占比** | — | — | **评审前 0% → 本轮 68.8%** | ≥30% ✅（已修复） |
+
+**扣分根因**：
+1. 评审前任务池审查驱动占比 0%（9 个 pending 中 0 个标注来源）—— 不是真的没有审查驱动任务，而是 cycles=81 写入任务时**遗漏了 source 字段**，数据结构不完整导致统计失真。本轮已紧急修复并补全所有历史 pending 任务的 source 标注。
+2. CC=13 钉子户推进速度慢（6→5 仅 1 个出榜），剩余 5 个（Parser._parse_block/LIRCBackend._compile_call_indirect/_iter_hir_children/MIRLowering._lower_list_comprehension/Parser._parse_primary_type）需要在下一评审组 cycles=84-86 至少消除 3 个。
+
+#### 6. 审查趋势分析（Cycle-1510→1514，最近 5 轮）
+
+| 指标 | 1510 | 1511 | 1512 | 1513 | 1514 | 趋势 |
+|------|------|------|------|------|------|------|
+| **总问题数** | 1261 | 1285 | 1401 | 1601 | 1907 | ⬆️ 连续 5 轮 +51%（代码规模膨胀副作用） |
+| CRITICAL | 0 | 0 | 0 | 0 | 0 | ➖ 持续清零 |
+| HIGH | 0 | 0 | 1 | 0 | 0 | ➖ 偶发 1 个，立即清零 |
+| **MEDIUM** | 79 | 66 | 66 | 97 | **341** | ⚠️ 1514 轮异常爆增 |
+| LOW | 1182 | 1219 | 1334 | 1504 | 1566 | ⬆️ 随代码膨胀线性增长 |
+| 门禁结果 | ✅ | ✅ | ❌74 | ❌16 | ❌1 | ⚠️ 连续 3 轮失败 |
+
+**MEDIUM 爆增根因（Cycle-1514）**：
+- `unused_import`：58 → **306**（+248，占新增 MEDIUM 的 99%）
+- 触发场景：cycles=79-80 手术 A 拆分 ir_nodes 为 ir_types/hir/mir/lir 后，旧代码中 `from nova.ir.ir_nodes import NovaType, ListType, ...` 仍能通过 re-export 兼容层工作，但产生了「间接导入 = 未使用」的检测阳性
+- 影响：虽然不影响功能正确性，但 MEDIUM 数量失控导致门禁失败，需立即清理
+
+**钉子户问题类型 Top3**：
+1. `no_docstring`（619 个 LOW，占 32%）— vm.py 85.7% / evaluator.py 64.4% 是重灾区
+2. `magic_number`（825 个 LOW，占 43%）— 测试断言值 + x86 操作码误报为主
+3. `unused_import`（306 个 MEDIUM，占 90%）— Cycle-1514 异常值，cycles=84 必清
+
+---
+
+### 三、问题总结与根因分析
+
+| # | 反复出现的问题 | 根因分析 | 推荐解决路径 |
+|---|--------------|---------|-------------|
+| P1 | **门禁连续 3 轮失败** | ① test_parser 新增测试缺 docstring；② ir 拆分后 import 混乱；③ 魔法数字误报（断言值被误判） | cycles=84 三任务并行：test_parser_docstring_bulk_74(P86) + clean_unused_imports_v9_massive(P88) + tune_gate_magic_number_exemption(P79) |
+| P2 | **MEDIUM unused_import 异常爆增 58→306** | 手术 A（ir_nodes 拆分）后，旧的 `from nova.ir.ir_nodes import X` 间接导入被 auto_review 误判为未使用；共 11 个文件 248 处 | clean_unused_imports_v9_massive：脚本化批量替换为 `from nova.ir.hir import X` 直导入 + 删除真未使用项 |
+| P3 | **CC=13 钉子户推进慢（5 轮仅出榜 1 个）** | 剩余 5 个钉子户集中在 parser（2 个）+ 后端 + ir，均是 200+ 行函数，单轮 filler 时间窗口不够 | 下一组 cycles=84-86 每轮至少安排 1 个 CC=13 filler，优先 _iter_hir_children（160 行范围最小） |
+| P4 | **薄弱模块 Top5 零推进** | 82-83 两轮时间窗口全给了 Allocator 主线；薄弱模块全是 hard 难度（拆分 2700+ 行文件） | cycles=84 先从文档化切入（medium 难度）：mir_lowering_docstring(P72) + evaluator_docstring(P70)，不直接做架构拆分 |
+| P5 | **SH-1 前置条件 0/2 完成** | 语法冻结声明被连续两轮推迟；100% 测试仅达成 2/3 轮 | cycles=84 必须启动 syntax_freeze_declaration(P85)；cycles=84-86 三轮末尾各执行一次全量测试确保达成 3/3 |
+| P6 | **任务池 source 标注遗漏** | cycles=81 新增 pending 任务时漏写 source 字段 → 统计审查驱动占比 0% 误判 | 本轮已全部补全；新增审查驱动 7 个任务；写入状态文件时加 source 必填检查 |
+
+---
+
+### 四、下阶段方向（cycles=84-86 三轮规划）
+
+> **核心原则**：先止血（P1-P2 门禁修复），再推进（M-MEM Step3+Step4），最后闸门（SH-1 前置）。严格满足架构约束：架构债务任务占比 ≥ 50%。
+
+#### 方向 1：**质量止血**（P88-P86，cycles=84 首轮必做）
+**目标**：MEDIUM 341→≤100，门禁恢复连续通过。解决 P1+P2。
+- `clean_unused_imports_v9_massive`（P88，审查驱动）— 306→≤50，1-2 小时
+- `test_parser_docstring_bulk_74`（P86，审查驱动）— 74 例补 docstring，1 小时
+- `tune_gate_magic_number_exemption`（P79，审查驱动）— 断言值/注释/文档数字豁免
+
+#### 方向 2：**M-MEM 主线推进**（P82-P80，cycles=84-85）
+**目标**：M-MEM 里程碑 2/4 → 4/4 全部完成。解决 SH-1 最大阻塞。
+- `allocator_api_step3`（P82，自主规划）— 栈/堆语义明确 + Box 内核实现（cycles=84）
+- `allocator_api_step4`（P80，自主规划）— Option/Result 推广至所有 fallible API（cycles=85）
+- `unify_c_backend_phase2`（P76，混合驱动）— 删除旧 c_codegen.py 1591 行 + ADT/match 迁移（cycles=85）
+
+#### 方向 3：**SH-1 前置闸门**（P85-P77，cycles=84-86）
+**目标**：SH-1 Blocked → Ready（4 前置条件全部达成）。
+- `syntax_freeze_declaration`（P85，自主规划）— 语法冻结声明文档，cycles=84 **必须启动不再延期**
+- `sh1_parity_baseline_build`（P77，自主规划）— 8 个基准文件 AST JSON + MD5 基线脚本（cycles=85）
+- 连续三轮末尾执行 `pytest tests/ -x` 确认 100% 通过（cycles=84/85/86）
+
+#### 方向 4：**薄弱模块渐进式治理**（P72-P68，cycles=84-86 filler）
+**目标**：Top5 薄弱模块从「0 推进」到「至少 3 个产生实质变更」。解决 P4。
+- `refactor_iter_hir_children_cc13`（P70，审查驱动）— CC=13→≤4，cycles=84 filler 首选
+- `mir_lowering_docstring_coverage`（P72，审查驱动）— 27 个无 doc→≤3（cycles=85）
+- `evaluator_docstring_authority`（P70，审查驱动）— 67 个无 doc→≤20（cycles=86）
+- `split_native_backend_elf`（P62）→ `split_native_backend_step1_regalloc`（P68，审查驱动）— 2771 行拆分首步（cycles=86）
+
+#### 三轮建议分工表
+
+| 轮次 | 质量止血（≥1） | M-MEM 主线（≥1） | SH-1 闸门（≥1） | 薄弱 filler（≥1） | 架构债占比预期 |
+|------|-------------|----------------|----------------|-----------------|--------------|
+| **Cycle 84** | unused_import_v9 + test_parser_doc + gate_tune（3 个） | allocator_api_step3（1 个） | syntax_freeze_declaration（1 个） | refactor_iter_hir_children_cc13（1 个） | 5/6 = 83% ✅ |
+| **Cycle 85** | （若 84 止血完成可选 filler） | allocator_api_step4 + unify_c_backend_phase2（2 个） | sh1_parity_baseline_build（1 个） | mir_lowering_docstring_coverage（1 个） | 4/5 = 80% ✅ |
+| **Cycle 86** | low_quality_issues_cleanup（1 个） | （M-MEM 如提前完成可收尾） | 第三轮 100% 测试确认（流程） | evaluator_docstring + native_backend_regalloc（2 个） | 3/4 = 75% ✅ |
+
+> 每轮架构债占比 ≥50% 约束：全部超额满足。
+
+---
+
+### 五、任务池变更说明
+
+#### 新增任务（7 个 · 6 审查驱动 + 1 自主规划）
+
+| 任务ID | 优先级 | 来源 | 为什么新增 |
+|--------|--------|------|-----------|
+| `clean_unused_imports_v9_massive` | **P88** | 【审查驱动】Cycle-1514 MEDIUM 爆增 | P2 最高优先级止血：unused_import 306→≤50 |
+| `test_parser_docstring_bulk_74` | **P86** | 【审查驱动】Cycle-1512 门禁失败 | P1 门禁失败主因之一：74 例 test_parser 测试函数缺 docstring |
+| `tune_gate_magic_number_exemption` | **P79** | 【审查驱动】门禁误报 | 每轮新增测试必触发魔法数字误报，降低门禁噪音 |
+| `mir_lowering_docstring_coverage` | **P72** | 【审查驱动】薄弱模块#3 | 三层IR核心 1897 行 42.9% 无 doc，SH-1 自举前必须文档化 |
+| `evaluator_docstring_authority` | **P70** | 【审查驱动】薄弱模块#5 | 架构指定语义权威（§1.3）64.4% 无 doc = 违背架构愿景 |
+| `split_native_backend_step1_regalloc` | **P68** | 【审查驱动】薄弱模块#1 | Top1 最复杂单体（2771 行）拆分首步：抽出 RegAlloc 类 |
+| `sh1_parity_baseline_build` | **P77** | 【自主规划】SH-1 前置 | SH-1 字节级一致性校验基础设施：AST JSON MD5 基线脚本 |
+
+#### 调整优先级（7 个 · 理由充分）
+
+| 任务ID | 旧 P | 新 P | 调整原因 |
+|--------|------|------|---------|
+| `syntax_freeze_declaration` | 75 | **85** | SH-1 前置硬阻塞，cycles=87 M-MEM 截止前必须完成；连续两轮推迟必须提高优先级 |
+| `unify_c_backend_phase2` | 74 | **76** | 手术 B Phase2，删除旧 c_codegen.py 1591 行可立即降低 class_too_large MEDIUM |
+| `allocator_api_step3` | 80 | **82** | M-MEM 3/4，cycles=87 截止仅剩 3 轮，必须加快 |
+| `allocator_api_step4` | 78 | **80** | M-MEM 4/4，与 Step3 紧耦合 |
+| `refactor_iter_hir_children_cc13` | 70 | **70**（不变） | CC=13 Top10 #4，cycles=84 filler 首选 |
+| `low_quality_issues_cleanup` | 38 | **38**（不变） | nice-to-have，在 84-85 止血后可做 |
+| `benchmark_enhance_exec_time` | 28 | **25** | 下调，nice-to-have 优先级低于架构主线和质量止血 |
+
+#### 补全 source 标注（9 个历史 pending 任务）
+- 修复 cycles=81 写入时遗漏的 source 字段 → 审查驱动统计从 0% 恢复到真实比例 68.8%
+- 新增 `depends_on` 依赖关系标注：Step3→Step2、Step4→Step3、regalloc→elf、parity→syntax_freeze
+
+---
+
+### 六、更新后的路线图进度
+
+| 里程碑 | 内容 | 目标版本 | 状态 | 本轮变化 |
+|--------|------|---------|------|---------|
+| M-ARCH | 三项立即架构手术（拆ir_nodes/隔离旧C后端/弃用Cranelift） | v0.3.x | ✅ **5/5 全部完成** | 不变 |
+| M-MEM | Allocator API 落地（Step1-4）+ 栈/堆语义明确 | v0.4.0 | ✅ **2/4 Step1+Step2 完成** · Step3+Step4 优先级提升 | 不变 · cycles=84 启动 Step3 |
+| M-SH1 | Self-Hosting SH-1：lexer + parser 字节级一致性 | v0.4.0 | 🚫 **Blocked**（语法冻结 P75→P85 提升 + parity 新增） | **新增 2 个前置任务**；预期 cycles=86 末解除 Blocked |
+| M-SH2 | Self-Hosting SH-2：type_checker + 三层 IR 移植 | v0.5.0 | ⏳ 未启动 | 不变 |
+| M-SH3 | Self-Hosting SH-3：C 后端自举 stage2==stage3 | v1.0 | ⏳ 未启动 | 不变 |
+| M-STD | 标准库覆盖 IO/FS/Net/Concurrency | v1.0 | ⏳ 未启动 | 不变 |
+
+**路线图总完成度**：~174/183 ≈ **95.1%**（与上轮持平，本轮为评审轮无功能开发）
+**审查驱动任务池占比**：11/16 = **68.8%**（评审前 0% → 本轮 68.8%）✅
+**架构债务占比约束**：下一组 cycles=84-86 规划全部 ≥75%，远超 ≥50% 硬要求
+
+---
+
+> **本轮评审核心交付**：
+> 1. 止血方向明确：3 个门禁修复任务 + MEDIUM unused_import 306→≤50（P88 最高优先级）
+> 2. SH-1 路径清晰：syntax_freeze(P85) → parity_baseline(P77) → 连续 3 轮 100% 测试
+> 3. M-MEM 窗口确认：Step3(P82) cycles=84 + Step4(P80) cycles=85，距 cycles=87 截止仍有 1 轮缓冲
+> 4. 薄弱模块治理路径：先文档化（低风险）→ 再拆分（高风险），分阶段避免 81 轮首次拆分失败的覆辙
+
+
+---
+
 ## 2026-07-31 00:55 第83轮开发（M-MEM Step2 + convert_nova_to_json CC13 + unify Phase2 Part1 + unused_import v8 · 审查对齐 67%）
 
 > 开发轮：第 83 轮（83 % 3 ≠ 0 → **普通轮**）

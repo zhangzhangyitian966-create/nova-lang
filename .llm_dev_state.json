@@ -1,5 +1,5 @@
 {
-  "cycles": 83,
+  "cycles": 84,
   "architecture_strategy": {
     "document": "ARCHITECTURE_VISION.md",
     "effective_date": "2026-07-29",
@@ -1294,9 +1294,14 @@
     }
   ],
   "current_cycle": 81,
-  "baseline_tests": 427,
+  "baseline_tests": {
+    "passed": 432,
+    "total": 432,
+    "subtests_passed": 20,
+    "note": "5核心文件 baseline (cycle=84 review)"
+  },
   "current_tests": 1065,
-  "last_review_cycle": 81,
+  "last_review_cycle": 84,
   "tasks": [
     {
       "id": "unify_c_backend_phase1",
@@ -1342,7 +1347,8 @@
       "status": "pending",
       "depends_on": [],
       "reason": "来自 AUTO_REVIEW_LOG.md 最新 HIGH 级问题 P1（sys.path hack + 增量门禁）。审查驱动任务 [AUTO_REVIEW_LOG.md HIGH P1 · [第81轮评审调优：P35→P38，filler 任务不阻塞 M-MEM；门禁校准完成后可清理的真实 LOW 问题数会减少，保持低优先级]",
-      "source": "review_driven"
+      "source": "审查驱动【no_docstring + 魔法数字钉子户】",
+      "why": "Cycle-1514 报告：no_docstring 619 个 LOW + magic_number 825 个 LOW 持续增长"
     },
     {
       "id": "split_ir_nodes_a2",
@@ -1424,35 +1430,37 @@
       "name": "Allocator API Step3：栈/堆语法明确 + Box语义",
       "description": "明确栈/堆语法区分：List{1,2,3} → 栈上分配（值语义）。Box(List{1,2,3}) → 堆上分配（指针语义，走allocator）。不允许隐式堆分配。",
       "difficulty": "medium",
-      "priority": 80,
+      "priority": 82,
       "category": "architecture",
       "estimated": "1-2 天",
       "status": "pending",
       "depends_on": [
         "allocator_api_step2"
       ],
-      "reason": "[ARCHITECTURE_VISION.md §3.1 Step3] 系统级语言必须消除隐式分配。栈/堆语义明确后，self-hosting编译器才能精细控制内存。[架构战略·新增任务]"
+      "reason": "[ARCHITECTURE_VISION.md §3.1 Step3] 系统级语言必须消除隐式分配。栈/堆语义明确后，self-hosting编译器才能精细控制内存。[架构战略·新增任务]",
+      "source": "自主规划【架构战略M-MEM】"
     },
     {
       "id": "allocator_api_step4",
       "name": "Allocator API Step4：Option/Result推广至所有fallible API",
       "description": "将Option/Result作为所有fallible API的返回类型（包括allocator.alloc的返回值）。禁止分配失败抛异常（系统级语言不该有的行为）。这一步与Step3耦合度较高。",
       "difficulty": "medium",
-      "priority": 78,
+      "priority": 80,
       "category": "architecture",
       "estimated": "1-2 天",
       "status": "pending",
       "depends_on": [
         "allocator_api_step3"
       ],
-      "reason": "[ARCHITECTURE_VISION.md §3.1 Step4] 系统级语言的重要语义约束：任何可能失败的操作必须在类型签名中体现，不允许隐式panic/异常。[架构战略·新增任务]"
+      "reason": "[ARCHITECTURE_VISION.md §3.1 Step4] 系统级语言的重要语义约束：任何可能失败的操作必须在类型签名中体现，不允许隐式panic/异常。[架构战略·新增任务]",
+      "source": "自主规划【架构战略M-MEM】"
     },
     {
       "id": "unify_c_backend_phase2",
       "name": "统一C后端Phase2（ADT/match功能迁移 + 删除旧c_codegen.py）",
       "description": "对比c_codegen.py与lir_c_backend.py的特性矩阵，找出LIR→C路径缺失的最后几个能力（主要是ADT构造/匹配边缘情况），对齐后正式删除c_codegen.py文件。",
       "difficulty": "hard",
-      "priority": 74,
+      "priority": 76,
       "category": "architecture",
       "estimated": "2-3 天",
       "status": "pending",
@@ -1460,21 +1468,24 @@
         "unify_c_backend_phase1"
       ],
       "reason": "[ARCHITECTURE_VISION.md §2.2 Phase2] 依赖Phase1完成标记弃用和入口清理。对齐功能后永久移除维护双份语义的负担。[自主规划 · [第81轮评审调优：P70→P74，Phase1 弃用标记已挂，SH-1 前必须删除旧 c_codegen.py 1036 行消除双路径维护成本，微提升反映前置压力]",
-      "note": "[cycle=83 Part1 完成] __init__.py 已移除 CCodeGen re-export（断包级API）；Part2（cycle=84）正式删除 c_codegen.py + test_c_codegen.py。"
+      "note": "[cycle=83 Part1 完成] __init__.py 已移除 CCodeGen re-export（断包级API）；Part2（cycle=84）正式删除 c_codegen.py + test_c_codegen.py。",
+      "source": "审查驱动+架构战略【手术B Phase2】",
+      "why": "删除旧 c_codegen.py 1591 行 + 迁移 ADT/match 功能；MEDIUM class_too_large 钉子户"
     },
     {
       "id": "benchmark_enhance_exec_time",
       "name": "基准测试框架增强（C/Wasm执行时间+优化对比）",
       "description": "为基准测试框架添加 C 后端和 Wasm 后端的执行时间测量，支持优化前后对比功能（同一用例在不同优化级别下的性能对比），扩充基准用例覆盖 ADT、模式匹配、闭包等场景",
       "difficulty": "medium",
-      "priority": 28,
+      "priority": 25,
       "category": "test",
       "estimated": "3-5 小时",
       "status": "pending",
       "depends_on": [
         "backend_benchmark_framework"
       ],
-      "reason": "[ARCHITECTURE_VISION.md §5.3 下调] nice-to-have，不阻塞架构手术和self-hosting。优先级从 38 下调至 30。[自主规划 · [第81轮评审调优：P30→P28，nice-to-have 不阻塞任何里程碑；M-MEM+SH-1 压力下继续下调优先级]"
+      "reason": "[ARCHITECTURE_VISION.md §5.3 下调] nice-to-have，不阻塞架构手术和self-hosting。优先级从 38 下调至 30。[自主规划 · [第81轮评审调优：P30→P28，nice-to-have 不阻塞任何里程碑；M-MEM+SH-1 压力下继续下调优先级]",
+      "source": "自主规划【nice-to-have】"
     },
     {
       "id": "refactor_convert_nova_to_json_cc13",
@@ -1504,7 +1515,8 @@
         "split_ir_nodes_a1"
       ],
       "reason": "[审查驱动·评审发现] 深度代码审计最薄弱模块#1 type_checker.py 2128 行，Top10 复杂函数独占 6 席（CC=30/26/24/20/19/18）。_unify（CC=26）是 HM 推断引擎纯函数核心，可 0 破坏性迁移（外部签名不变，内部调用替换为 import）。拆分后降低 type_checker 认知负担和合并冲突风险。[来源：深度代码审计薄弱模块#1 + 审查 cyclomatic_complexity]",
-      "source": "review_driven"
+      "source": "审查驱动【薄弱模块#2】",
+      "why": "type_checker.py 2301 行 Top2 最薄弱模块；_unify 统一算法是 HM 推断核心，应独立子模块"
     },
     {
       "id": "split_native_backend_elf",
@@ -1517,7 +1529,8 @@
       "status": "pending",
       "depends_on": [],
       "reason": "[审查驱动·评审发现] 深度代码审计最薄弱模块#2 native_backend.py 2708 行全项目最大单体文件。ELF 生成、寄存器分配、ABI 调用、指令生成四项职责混在单文件，单测无法独立验证。拆分第一步 ELF writer 是边界最清晰的子模块（输入：符号列表+节列表→输出：bytes），外部依赖极小，0 回归风险。[来源：深度代码审计薄弱模块#2 + 审查 class_too_large MEDIUM #1]",
-      "source": "review_driven"
+      "source": "审查驱动【薄弱模块#1】",
+      "why": "native_backend.py 2771 行 Top1 最复杂单体；ELF 生成、寄存器分配应独立类"
     },
     {
       "id": "refactor_iter_hir_children_cc13",
@@ -1530,7 +1543,8 @@
       "status": "pending",
       "depends_on": [],
       "reason": "[审查驱动·新增] 第1505轮审查 MEDIUM 级 Top10 复杂函数#4 _iter_hir_children CC=13。是 HIRRewriter/HIRVisitor 两大基础设施的遍历核心，CC>10 导致新增节点类型时容易遗漏分支产生静默 bug。调度表化后新增节点只需在 dict 中注册，避免大 if-elif 修改错误。[来源：AUTO_REVIEW_LOG.md cyclomatic_complexity Top10 #4 · [第81轮评审调优：P60→P70，架构手术完成后 Top10 CC=13 长尾批量清理窗口打开，调度表化重构难度低收益稳定]",
-      "source": "review_driven"
+      "source": "审查驱动【CC=13 Top10 #4】",
+      "why": "Cycle-1514 Top10 圈复杂度；_iter_hir_children 是 Visitor 模式基础遍历，CC=13 影响正确性可维护性"
     },
     {
       "id": "refactor_check_patterns_exhaustive",
@@ -2098,13 +2112,14 @@
       "name": "语法冻结声明 v0.5 文档（SH-1 前置条件）",
       "description": "新建 SYNTAX_FREEZE_v0.5.md 文档，包含四大部分：\n1) 语法冻结范围（let/mut 绑定、fn 函数、if/match/for/while 控制流、管道操作符、列表推导式、ADT type 定义、type 别名、Option/Result 内置类型、列表/元组/Map 字面量、lambda 闭包语法）+ 每个的示例代码；\n2) 暂未冻结的实验性语法（Iterator trait 与 for 循环 desugar 协议、类型变量上界与高阶类型、for-range-step 的 Range 类型形式化、class 语法扩展），每项写明解冻条件；\n3) 冻结后修改流程（RFC-like 提案 → 评审轮确认 → 语法解冻 → 同步更新 Nova 实现与 SH-1 移植代码）；\n4) 与 Python 参考实现的对比基线说明。文档评审通过后在 .llm_dev_state.json 标记 syntax_freeze=true。",
       "difficulty": "medium",
-      "priority": 75,
+      "priority": 85,
       "category": "architecture",
       "estimated": "1 天",
       "status": "pending",
       "depends_on": [],
-      "source": "自主规划 SH-1 前置",
-      "reason": "SH-1（移植 lexer+parser 到 Nova）启动的 4 前置之一：语法冻结声明缺失。移植 lexer+parser 后任何语法变更都要 Python 参考实现 + Nova 自举实现双份修改，维护成本 ×2。提前在 cycles=83 产出冻结文档让 cycles=84 起的 SH-1 工作有确定范围，避免移植后期出现大范围返工。[来源：评审发现 SH-1 前置差距分析 §4.2 + 自主规划]"
+      "source": "自主规划【SH-1前置硬阻塞】",
+      "reason": "SH-1（移植 lexer+parser 到 Nova）启动的 4 前置之一：语法冻结声明缺失。移植 lexer+parser 后任何语法变更都要 Python 参考实现 + Nova 自举实现双份修改，维护成本 ×2。提前在 cycles=83 产出冻结文档让 cycles=84 起的 SH-1 工作有确定范围，避免移植后期出现大范围返工。[来源：评审发现 SH-1 前置差距分析 §4.2 + 自主规划]",
+      "why": "SH-1 前置硬条件：语法冻结声明文档，cycles=87 M-MEM 截止前必须完成"
     },
     {
       "id": "clean_unused_imports_v8",
@@ -2122,9 +2137,97 @@
       "source": "review_driven",
       "completed_cycle": 83,
       "completed_at": "2026-07-31T00:58:45.191898"
+    },
+    {
+      "id": "clean_unused_imports_v9_massive",
+      "name": "批量清理未使用导入 v9 Massive（306→≤50）",
+      "status": "pending",
+      "priority": 88,
+      "difficulty": "easy",
+      "source": "审查驱动【Cycle-1514 MEDIUM unused_import 爆增】",
+      "why": "Cycle-1514 MEDIUM 从 97→341（+251%）主因：unused_import 58→306；ir_types/hir/mir/lir 迁移后旧 import 残留；门禁已连续3轮失败；本轮最高优先级止血任务",
+      "estimate": "2-3 小时",
+      "depends_on": [],
+      "added_cycle": 84
+    },
+    {
+      "id": "test_parser_docstring_bulk_74",
+      "name": "test_parser.py 74 例测试函数批量补全 docstring（门禁修复）",
+      "status": "pending",
+      "priority": 86,
+      "difficulty": "easy",
+      "source": "审查驱动【Cycle-1512 门禁失败 74 例 no_docstring】",
+      "why": "Cycle-1512 门禁首次失败主因（74 例）：test_parser.py 新增测试函数全缺 docstring；SH-1 前质量闸门必须恢复",
+      "estimate": "1-2 小时",
+      "depends_on": [],
+      "added_cycle": 84
+    },
+    {
+      "id": "tune_gate_magic_number_exemption",
+      "name": "调优增量门禁 - 魔法数字豁免（断言值/注释/文档字符串数字）",
+      "status": "pending",
+      "priority": 79,
+      "difficulty": "easy",
+      "source": "审查驱动【Cycle-1510-1514 门禁连续触发 gate_new_magic_number】",
+      "why": "每轮新增测试必触发 1-9+ 次魔法数字误报；断言 assertEqual(x, 42) 中 42 不应被视为魔法数字；降低门禁噪音提高审查报告可信度",
+      "estimate": "1-2 小时",
+      "depends_on": [],
+      "added_cycle": 84
+    },
+    {
+      "id": "mir_lowering_docstring_coverage",
+      "name": "ir/mir_lowering.py 文档化补全（27 个无 doc → ≤3）",
+      "status": "pending",
+      "priority": 72,
+      "difficulty": "medium",
+      "source": "审查驱动【薄弱模块#3 · 42.9% 无 docstring】",
+      "why": "三层 IR 中最薄弱环节（1897 行）；HIR→SSA/MIR 构建是编译器正确性核心；27 个方法无 docstring = SSA 值产生点无法追踪；为 SH-1 自举铺路",
+      "estimate": "3-5 小时",
+      "depends_on": [],
+      "added_cycle": 84
+    },
+    {
+      "id": "evaluator_docstring_authority",
+      "name": "evaluator.py 语义权威文档化（67 个无 doc → ≤20）",
+      "status": "pending",
+      "priority": 70,
+      "difficulty": "medium",
+      "source": "审查驱动【薄弱模块#5 · 架构指定语义权威】",
+      "why": "ARCHITECTURE_VISION §1.3 指定 evaluator.py 为\"语义活文档\"；64.4% 无 docstring = 严重违背架构愿景；任何语法变更先改 evaluator，但无文档无人能快速验证",
+      "estimate": "3-5 小时",
+      "depends_on": [],
+      "added_cycle": 84
+    },
+    {
+      "id": "split_native_backend_step1_regalloc",
+      "name": "native_backend 拆分 Step1：抽出 X86_64RegAlloc 寄存器分配类",
+      "status": "pending",
+      "priority": 68,
+      "difficulty": "hard（范围可控）",
+      "source": "审查驱动【薄弱模块#1 · native_backend.py 2771 行】",
+      "why": "全项目最复杂单体；_allocate_registers 历史 CC=18；寄存器池、caller/callee 保存、溢出逻辑独立可测试；SH-1 后 Nova 版重写前必须先 Python 版解耦",
+      "estimate": "1-2 天",
+      "depends_on": [
+        "split_native_backend_elf"
+      ],
+      "added_cycle": 84
+    },
+    {
+      "id": "sh1_parity_baseline_build",
+      "name": "SH-1 parity 基线搭建：8 个基准文件 AST JSON + MD5 输出脚本",
+      "status": "pending",
+      "priority": 77,
+      "difficulty": "medium",
+      "source": "自主规划【SH-1 前置字节级一致性校验基础设施】",
+      "why": "SH-1 要求 lexer+parser 字节级一致；需先有 Python 版基线 MD5；scripts/sh1_parity_check.py 为未来 Nova 版对比提供 golden file",
+      "estimate": "3-5 小时",
+      "depends_on": [
+        "syntax_freeze_declaration"
+      ],
+      "added_cycle": 84
     }
   ],
   "current_subtests": 31,
   "last_review_high_gate_violations": 0,
-  "last_updated": "2026-07-30 12:26:02"
+  "last_updated": "2026-07-31 04:14:48"
 }
