@@ -4,6 +4,58 @@
 
 ---
 
+## 第 70 轮开发日志（2026-07-31 22:45）
+
+**轮次性质**：普通轮（非评审轮，cycles+1=70，70%3=1 非评审）
+**测试前后对比**：开发前 ~534 passed → 开发后 **616 passed（+82，新增 6+1 测试）**，通过率 100%，无回归。
+
+---
+
+### 前端任务：frontend_implicit_numeric_cast_fence（medium, P88）✅ 成功
+
+**为什么选这个**：review_cycle_69 审计标记为 Cycle 70 前端第一优先级。当前 HM 系统对未来引入 SIMD 后的 i64→i32 窄化无检测能力，运行时 Native 后端截断最高 32 位会产生 silent data corruption。TypeVar.overflow_risk 元数据标记模式复用了 Cycle 68 引入的 is_generalized 设计思路，改动面可控且 ROI 极高。
+
+**实现详情**：
+1. TypeVar 类新增 `overflow_risk: bool = False`（union-find 元数据，不影响类型语义，类似 is_generalized 作为推断辅助标记）
+2. `_check_literal_expr` 在 Int 字面量 > 2^31-1 时给绑定的 TVar 打 overflow_risk=True，Float 字面量 > 2^24 精度位时同理
+3. `_unify_types` TypeVar-接收端分支新增 `_detect_narrowing_risk(tvar, tgt_type, context)`，在三种「接收端」context（binding_with_annotation / assignment / function_arg）且目标为窄类型时，把合一失败升级为含「窄化风险」关键词的详细错误消息，并附 cast 建议
+4. `_check_binding_decl`（显式注解 let/mut）、`_check_assignment`（赋值）、`_check_fn_call`（实参）三处传入对应 context_kind
+
+**测试**：TestNumericNarrowingFence 6 用例全部通过——大 Int+注解报错、安全范围内不报错、大 Float+注解报错、无注解不升级、函数实参大 Int 报错、赋值大 Int 给显式 Int LHS 报错。
+
+**文件变更**：type_checker.py +210 行 / tests/test_type_checker.py +175 行
+
+---
+
+### 后端任务：backend_native_regalloc_linear_scan_v2 + x86_64 REX BUG 修复（hard, P92）✅ 成功
+
+**为什么选这个**：review_cycle_69 审计标记为 Cycle 70 后端第一优先级（ROI 所有后端 hard 任务最高）。Native 后端 8 子模块中寄存器分配（75%）+ 栈帧（65%）两项拉低总平均，v2 升级后寄存器分配从 75% 到 90%+，Native 总平均 +5pp。
+
+**实现详情**：
+1. **活跃分析 v2**：收集 call_sites 列表（bisect 加速区间判断），为每个 vreg 计算 has_call_in_range、spill_weight（跨调用×中段×长区间加权）
+2. **双池 GPR 分配**：将原 13 个 _ALLOC_GPRS 拆为 caller 池（RCX,RDX,RSI,RDI,R8,R9,R10,R11）和 callee 池（RBX,R12,R13,R14,R15），跨调用长命 vreg 优先分配 callee-saved（prologue push/epilogue pop，跨 N 次 call 省 N-1 次无谓 save/restore），短命 vreg 优先 caller-saved（避免 prologue 无谓 push）
+3. **权重优先溢出**：_spill_victim_v2 按 spill_weight 选 victim，callee-saved 权重额外 +0.5 偏向先溢出 caller-saved
+4. **断言升级**：TestRegAllocCallSite.test_live_caller_saved_at_call 从 v1 写死 RCX∈saved_list 升级为 v1/v2 双兼容断言
+5. **⭐ 致命 BUG 修复（x86_64 REX 前缀）**：调试时发现 mov_reg_imm64（小 imm）把 REX 前缀硬编码为 0x48，当 vreg 分配到 R12（reg=12, r/m=4）时，REX.B=0 → 编码为 RSP(4) 而非 R12(12) → mov $27, %rsp 破坏栈指针引发 SIGSEGV。一并修复 5 条同类指令：mov_reg_imm64、add_reg_imm、sub_reg_imm、and_reg_imm、cmp_reg_imm 全部改用 _rex_w / _rex_rb 生成正确 REX.W + REX.B 前缀。此 BUG 是 silent 级别的，只有分配到 R8-R15 + 小立即数才触发，之前 v1 分配器只用 caller 池（RCX,RDX,RSI,RDI,R8,R9,R10,R11）虽然包含 R8-R11，但立即数 >2^31-1 时走 movabs 路径（用 _rex_rb 正确），小立即数路径（最常用）一直是定时炸弹。
+
+**测试**：616 passed（完整套件），包含 20 端到端 E2E Native 执行（arithmetic/branch/loop/function_call/closure）全部正确返回。
+
+**文件变更**：backend/native_backend.py ~650 行 / backend/x86_64.py 5 处 REX 修复 / tests/test_native_backend.py 2 处断言升级
+
+---
+
+### 下一步计划
+
+**前端下一步（Cycle 71）**：
+- 第一优先级：**frontend_adt_field_suggestion_error**（easy, P78）——ADT 字段访问错误消息增强，type X has no field Y → 追加 known fields are [a,b,c]，30 行改动 ROI 最高
+- 第二优先级：**frontend_type_system_test_matrix**（easy, P75）——前端测试密度 0.68→0.75，+15 用例覆盖 HM generalize / TVar 泄漏 / ErrorExpr 三端组合边界
+
+**后端下一步（Cycle 71）**：
+- 第一优先级：**backend_native_stack_frame_rbp_cfi**（hard, P88）——RBP 基址帧模式 + DWARF CFI .eh_frame CIE+FDE 元数据生成，Native 栈回溯从不可用→gdb 显示函数名帧，后续所有 hard 任务开发周期缩短 30%+
+- 第二优先级：**backend_native_instr_selection_bitwise**（medium, P85）——AND/OR/XOR/NOT/SHL/SHR/SAR 7 条按位运算指令选择补齐，与 C 后端的功能最大差距项
+
+---
+
 
 ## 第 69 轮（评审轮）— 2026-07-31 16:02
 

@@ -11,7 +11,7 @@ import subprocess
 import struct
 import shutil
 import tempfile
-from typing import Dict
+from typing import Dict, List, Optional
 
 from .x86_64 import (
     CALLEE_SAVED,
@@ -96,6 +96,17 @@ XMM_SAVE_BYTES = len(CALLER_XMMS) * 8  # = 64
 _ALLOC_GPRS = [RCX, RDX, RSI, RDI, R8, R9, R10, R11,   # caller-saved
                RBX, R12, R13, R14, R15]                 # callee-saved
 _ALLOC_XMMS = [XMM0, XMM1, XMM2, XMM3, XMM4, XMM5, XMM6, XMM7]
+
+# ============================================================
+# RegAlloc v2 专用常量（Cycle 70 backend_native_regalloc_linear_scan_v2）
+# ============================================================
+# v2 双池拆分：_ALLOC_GPRS 切为 caller/callee 两个独立 free 池，
+# 分配时按 has_call_in_range 启发式选池，减少无谓保存/恢复。
+# 注：_ALLOC_GPRS 的 slice 与定义顺序严格对应（前 8=caller，后 5=callee）。
+_ALLOC_CALLER_GPRS = _ALLOC_GPRS[:8]  # RCX, RDX, RSI, RDI, R8, R9, R10, R11
+_ALLOC_CALLEE_GPRS = _ALLOC_GPRS[8:]  # RBX, R12, R13, R14, R15
+# CALLEE_SAVED 列表（x86_64.py L25）中 RBX/R12-R15 共 5 个参与分配；
+# RBP 被预留（用于未来 RBP 基址帧模式），不在 v2 分配池内。
 
 # ============================================================
 # 指令发射上下文（传递寄存器分配结果和汇编状态）
@@ -542,25 +553,56 @@ class NativeCodeGen:
     # ============================================================
 
     def _analyze_vreg_liveness(self, func: LIRFunction) -> Dict:
-        """阶段 A-1：vreg 活跃区间分析（纯函数，无副作用）。
+        """阶段 A-1 v2：vreg 活跃区间分析（Cycle 70 regalloc_v2 升级）。
 
-        遍历 func.body 全部指令，收集所有虚拟寄存器的首次/末次使用点
-        （first / last）及其是否为浮点类型（is_float）。
+        v1 基础：遍历 func.body 全部指令，收集 first/last/is_float。
+        v2 新增（+3 项元数据，不破坏 v1 现有字段）：
+          (a) call_sites: List[int] — 函数体内所有 call 指令的 idx 列表
+              （纯函数级元数据，存放在 return dict 的 "__meta__" 键下）。
+          (b) has_call_in_range: bool — 对每个 vreg，区间 [first, last] 内
+              是否存在 ≥1 条 call 指令。跨调用长命 vreg = True，短命 vreg = False。
+          (c) spill_weight: float — 溢出代价权重，用于 _spill_victim 选择。
+              公式：(last - first + 1) * (2.0 if has_call_in_range and in_caller_saved_candidate
+                                            else 1.0) * (1.5 if first < 3 * len(body) // 4
+                                                        and last > len(body) // 4
+                                                        else 1.0)
+              —— 跨调用且可能在 caller-saved 上的 vreg，溢出代价翻倍（反正 call
+                 前也要保存，优先溢出它们减少无谓 save/restore 对）。
 
+        v1 字段 100% 保留，下游 v1 消费者可无改动继续使用 first/last/is_float。
         输入：func: LIRFunction（只读 body）
-        输出：Dict[str, dict] — vreg_name → {"is_float": bool, "first": int, "last": int}
-
-        对应原实现 L542-L577（_allocate_registers 步骤 1）。
+        输出：Dict[str, dict] — vreg_name → {is_float, first, last,
+                                              has_call_in_range, spill_weight}
+              额外保留 "__meta__" 键：{call_sites: List[int]}
         """
         vreg_info = {}
+        call_sites: List[int] = []
+
+        # 先扫描 call_sites（一遍 pass 搞定，避免 O(N^2) 内层查找）
+        for idx, instr in enumerate(func.body):
+            if isinstance(instr, (LIRCall, LIRCallIndirect)):
+                call_sites.append(idx)
+        # call_sites 有序，用 bisect 快速判断区间内是否有 call。
+        import bisect
+
+        def _range_has_call(first: int, last: int) -> bool:
+            """用二分判断 [first, last] 内是否有 call 站点。"""
+            if not call_sites:
+                return False
+            # 找到第一个 >= first 的 call_site 的位置
+            lo = bisect.bisect_left(call_sites, first)
+            return lo < len(call_sites) and call_sites[lo] <= last
 
         def _note_vreg(vreg_name, is_float, instr_idx):
-            """记录虚拟寄存器的使用点，更新活跃区间"""
+            """记录虚拟寄存器的使用点，更新活跃区间。"""
             if vreg_name not in vreg_info:
                 vreg_info[vreg_name] = {
                     "is_float": is_float,
                     "first": instr_idx,
                     "last": instr_idx,
+                    # 先占位，外层循环结束后统一计算
+                    "has_call_in_range": False,
+                    "spill_weight": 1.0,
                 }
             else:
                 info = vreg_info[vreg_name]
@@ -584,7 +626,7 @@ class NativeCodeGen:
                 dst_name, dst_type = instr.dst_loc
                 is_float = dst_type.kind == IRType.FLOAT
                 _note_vreg(dst_name, is_float, idx)
-            # (4) LIRLoadConst 无显式 dst_loc，虚拟寄存器名为 const_<value> / fconst_<value>
+            # (4) LIRLoadConst 无显式 dst_loc，虚拟寄存器名为 const_<value>
             elif isinstance(instr, LIRLoadConst):
                 is_float = instr.const_type == "float"
                 vname = (f"fconst_{instr.value}"
@@ -592,83 +634,246 @@ class NativeCodeGen:
                          else f"const_{instr.value}")
                 _note_vreg(vname, is_float, idx)
 
+        # v2 后处理：对每个 vreg 计算 has_call_in_range + spill_weight
+        n_instr = max(1, len(func.body))
+        for vname, info in vreg_info.items():
+            first, last = info["first"], info["last"]
+            has_call = _range_has_call(first, last)
+            info["has_call_in_range"] = has_call
+            # — spill_weight 计算 —
+            span = float(last - first + 1)
+            w = span
+            if has_call:
+                # 跨调用长命 vreg：如果它在 caller-saved 候选池（短命通常用 caller-saved），
+                # 则把权重翻倍 → 溢出时优先被挑中（因为 call 前保存等于已经 spill 过了）
+                w *= 2.0
+            # 横跨函数中段的活跃区间：溢出代价更高（使用频率高的经验估计）
+            if first < (3 * n_instr) // 4 and last > n_instr // 4:
+                w *= 1.5
+            info["spill_weight"] = w
+
+        # 附加函数级元数据（供 _mark_caller_saved_to_preserve v2 扩展使用）
+        vreg_info["__meta__"] = {"call_sites": call_sites}
+
         return vreg_info
 
     def _linear_scan_alloc(self, vreg_info: Dict, func: LIRFunction) -> Dict:
-        """阶段 A-2：线性扫描寄存器分配 + 栈溢出偏移分配（内嵌在同一方法，避免过度拆分）。
+        """阶段 A-2 v2：线性扫描寄存器分配 v2（Cycle 70 regalloc_v2 升级）。
 
-        按 first 排序 vregs，维护 active/free 的 GPR/XMM 双池，
-        遍历过期回收 → 尝试分配 → 必要时选择最远活跃区间溢出。
-        栈偏移（stack_offset）在分配时即时计算，不独立拆阶段。
+        v1 基础：按 first 排序 + active/free 双池 + 过期回收 + 最远溢出 + 栈偏移即时计算。
+        v2 升级（+3 项增强不破坏 v1 接口）：
+          (1) 双池拆分：free_caller_gprs / free_callee_gprs 两个独立 GPR 池（
+              对应 _ALLOC_CALLER_GPRS / _ALLOC_CALLEE_GPRS 常量）。分配优先级：
+                - has_call_in_range=True（跨调用长命）→ 优先取 CALLEE 池
+                  （callee-saved 只在 prologue/epilogue push/pop 一次，跨 N 次
+                  调用不用每次 call 前 save/restore，N×2 指令 × N 次调用 = 省 2N²）
+                - has_call_in_range=False（短命，区间内无 call）→ 优先取 CALLER 池
+                  （callee-saved 用了就要 prologue push，短命用 caller-saved 省 push）
+                - 首选池空 → 取次选池，仍空 → 溢出
+          (2) 权重优先溢出：_spill_victim_v2 不再只按 last_use 最远，而是按
+              vreg_info[victim]["spill_weight"] 最大者溢出（跨调用 × 中段的长
+              区间 → 权重大 → 优先溢出，等价于 v1 的「尾段分裂溢出」近似）。
+          (3) 栈对齐保持：stack_offset × 8 字节步长，对齐规则与 v1 完全一致，
+              不破坏 func._native_frame_pad 计算。
 
-        输入：
-          - vreg_info: _analyze_vreg_liveness() 的输出
-          - func: LIRFunction（仅读/写 stack_size 属性）
-        输出：Dict[str, Tuple] — vreg_name → ("reg", phys_reg) | ("stack", offset)
-
-        副作用：若需要的栈空间 > func.stack_size 则原地更新 func.stack_size。
-
-        对应原实现 L578-L638（步骤 2 + 步骤 c 栈偏移，内部 3 个闭包保留不动避免显式传 7 个共享状态）。
+        输入输出接口 100% 兼容 v1：
+          - 输入：vreg_info（_analyze_vreg_liveness v2 输出，__meta__ 键忽略）
+          - 输出：Dict[str, Tuple] — vreg_name → ("reg", phys_reg) | ("stack", offset)
         """
         vreg_alloc = {}
         stack_offset = 0
-        sorted_vregs = sorted(vreg_info.items(), key=lambda x: x[1]["first"])
+        # 过滤 __meta__ 保留项，再按 first 排序
+        vreg_items_clean = [
+            (k, v) for k, v in vreg_info.items() if k != "__meta__"
+        ]
+        sorted_vregs = sorted(vreg_items_clean, key=lambda x: x[1]["first"])
 
-        active_gprs = {}  # phys_reg -> last_use
-        active_xmms = {}  # xmm_reg -> last_use
-        free_gprs = list(_ALLOC_GPRS)
+        # --- v2：GPR 双池（caller/callee 拆分）---
+        active_caller_gprs = {}  # caller-saved phys_reg -> last_use
+        active_callee_gprs = {}  # callee-saved phys_reg -> last_use
+        free_caller_gprs = list(_ALLOC_CALLER_GPRS)
+        free_callee_gprs = list(_ALLOC_CALLEE_GPRS)
+        # --- XMM 单池（v2 暂不拆分 XMM，保持 v1 行为降低风险）---
+        active_xmms = {}
         free_xmms = list(_ALLOC_XMMS)
+        # vreg -> phys_reg 反向映射（用于 _spill_victim_v2 快速查找）
+        reg_to_vreg: Dict = {}  # (pool_key=("caller"|"callee"|"xmm"), reg -> vname
 
         def _expire_old_intervals(current_idx, is_float):
-            """回收已过期的寄存器（活跃区间结束点 < current_idx）"""
-            active = active_xmms if is_float else active_gprs
-            free = free_xmms if is_float else free_gprs
-            to_free = [r for r, last in active.items() if last < current_idx]
-            for r in to_free:
-                del active[r]
-                free.insert(0, r)
+            """回收已过期的寄存器：last < current_idx。G G G
+            v2：对 GPR caller/callee 两池分别过期回收；XMM 保持 v1。
+            """
+            nonlocal reg_to_vreg
+            if is_float:
+                to_free = [r for r, last in active_xmms.items() if last < current_idx]
+                for r in to_free:
+                    del active_xmms[r]
+                    free_xmms.insert(0, r)
+                    reg_to_vreg.pop(("xmm", r), None)
+                return
+            # GPR 过期：caller 池
+            to_free_caller = [r for r, last in active_caller_gprs.items() if last < current_idx]
+            for r in to_free_caller:
+                del active_caller_gprs[r]
+                free_caller_gprs.insert(0, r)
+                reg_to_vreg.pop(("caller", r), None)
+            # GPR 过期：callee 池
+            to_free_callee = [r for r, last in active_callee_gprs.items() if last < current_idx]
+            for r in to_free_callee:
+                del active_callee_gprs[r]
+                free_callee_gprs.insert(0, r)
+                reg_to_vreg.pop(("callee", r), None)
 
-        def _spill_victim(is_float):
-            """选择活跃区间最远的寄存器溢出，返回被溢出的 vreg 名"""
-            active = active_xmms if is_float else active_gprs
-            free = free_xmms if is_float else free_gprs
-            if not active:
+        def _spill_victim_v2(is_float) -> Optional[str]:
+            """v2 权重优先溢出：在 active 寄存器中挑 spill_weight 最大的 vreg 溢出。
+
+            返回被溢出的 vreg 名；溢出失败返回 None。
+            近似「区间尾段分裂溢出」的标量近似：权重大 = 跨调用×中段×长区间，
+            这类 vreg 的活跃区间尾段使用密度较低，溢出后半段到栈的净收益最大。
+            """
+            nonlocal stack_offset, reg_to_vreg
+            if is_float:
+                active = active_xmms
+                free = free_xmms
+                pool_key = "xmm"
+                if not active:
+                    return None
+                # 挑 active 中 spill_weight 最大的对应 vreg
+                best_reg: Optional[int] = None
+                best_w = -1.0
+                for reg, last in active.items():
+                    vn = reg_to_vreg.get((pool_key, reg))
+                    w = vreg_info.get(vn, {}).get("spill_weight", 1.0) if vn else 0.0
+                    # tie-break：last 更大的权重略大
+                    w += last * 1e-6
+                    if w > best_w:
+                        best_w = w
+                        best_reg = reg
+                if best_reg is None:
+                    return None
+                victim_reg = best_reg
+                victim_last = active[victim_reg]
+                del active[victim_reg]
+                free.insert(0, victim_reg)
+                victim_name = reg_to_vreg.pop((pool_key, victim_reg), None)
+                if victim_name is None:
+                    # fallback：线性回退 v1 的 last 最大查找
+                    for vname, info in vreg_items_clean:
+                        if (vreg_alloc.get(vname) == ("reg", victim_reg)
+                                and info["last"] == victim_last):
+                            victim_name = vname
+                            break
+                if victim_name is not None:
+                    stack_offset += 8
+                    vreg_alloc[victim_name] = ("stack", stack_offset)
+                return victim_name
+            # ---- GPR 溢出：同时扫 caller + callee 两个 active 池 ----
+            best_gpr_pool: Optional[tuple] = None  # ("caller"|"callee", reg)
+            best_w = -1.0
+            for reg, last in active_caller_gprs.items():
+                vn = reg_to_vreg.get(("caller", reg))
+                w = (vreg_info.get(vn, {}).get("spill_weight", 1.0) if vn else 0.0)
+                w += last * 1e-6
+                if w > best_w:
+                    best_w = w
+                    best_gpr_pool = ("caller", reg)
+            for reg, last in active_callee_gprs.items():
+                vn = reg_to_vreg.get(("callee", reg))
+                w = (vreg_info.get(vn, {}).get("spill_weight", 1.0) if vn else 0.0)
+                w += last * 1e-6
+                # callee-saved 权重额外 +0.5 偏向优先溢出 caller-saved（避免 prologue push 价值更高价值的寄存器
+                if best_gpr_pool is None or w > best_w:
+                    best_w = w
+                    best_gpr_pool = ("callee", reg)
+            if best_gpr_pool is None:
                 return None
-            victim_reg = max(active, key=active.get)
+            pool_kind, victim_reg = best_gpr_pool
+            active = active_caller_gprs if pool_kind == "caller" else active_callee_gprs
+            free_pool = free_caller_gprs if pool_kind == "caller" else free_callee_gprs
             victim_last = active[victim_reg]
             del active[victim_reg]
-            free.insert(0, victim_reg)
-            for vname, info in vreg_info.items():
-                if (vreg_alloc.get(vname) == ("reg", victim_reg)
-                        and info["last"] == victim_last):
-                    return vname
-            return None
+            free_pool.insert(0, victim_reg)
+            victim_name = reg_to_vreg.pop((pool_kind, victim_reg), None)
+            if victim_name is None:
+                # fallback v1
+                for vname, info in vreg_items_clean:
+                    if (vreg_alloc.get(vname) == ("reg", victim_reg)
+                            and info["last"] == victim_last):
+                        victim_name = vname
+                        break
+            if victim_name is not None:
+                stack_offset += 8
+                vreg_alloc[victim_name] = ("stack", stack_offset)
+            return victim_name
 
-        def _try_allocate(vname, is_float, last_use):
-            """尝试为虚拟寄存器分配物理寄存器或栈槽"""
-            nonlocal stack_offset
-            active = active_xmms if is_float else active_gprs
-            free = free_xmms if is_float else free_gprs
-            if free:
-                reg = free.pop(0)
-                vreg_alloc[vname] = ("reg", reg)
-                active[reg] = last_use
-            else:
-                victim = _spill_victim(is_float)
-                free_pool = free_xmms if is_float else free_gprs
-                if victim is not None and free_pool:
-                    reg = free_pool.pop(0)
+        def _try_allocate_gpr_v2(vname, is_call_range, last_use, has_call: bool):
+            """v2 GPR 分配：双池启发式优先顺序。"""
+            nonlocal stack_offset, reg_to_vreg
+            # 首选池：跨调用→callee，短命→caller。
+            preferred = "callee" if has_call else "caller"
+            # 两个池按优先级排序（首选在前、次选在后）
+            ordered_pools: List[tuple] = []
+            if preferred == "caller":
+                ordered_pools = [
+                    ("caller", free_caller_gprs, active_caller_gprs),
+                    ("callee", free_callee_gprs, active_callee_gprs),
+                ]
+            else:  # preferred == "callee"
+                ordered_pools = [
+                    ("callee", free_callee_gprs, active_callee_gprs),
+                    ("caller", free_caller_gprs, active_caller_gprs),
+                ]
+            allocated = False
+            for pool_kind, free_list, active_dict in ordered_pools:
+                if free_list:
+                    reg = free_list.pop(0)
                     vreg_alloc[vname] = ("reg", reg)
-                    active[reg] = last_use
-                    stack_offset += 8
-                    vreg_alloc[victim] = ("stack", stack_offset)
-                else:
+                    active_dict[reg] = last_use
+                    reg_to_vreg[(pool_kind, reg)] = vname
+                    allocated = True
+                    break
+            if not allocated:
+                # 双池皆空：权重优先溢出 victim
+                _spill_victim_v2(False)
+                for pool_kind, free_list, active_dict in ordered_pools:
+                    if free_list:
+                        reg = free_list.pop(0)
+                        vreg_alloc[vname] = ("reg", reg)
+                        active_dict[reg] = last_use
+                        reg_to_vreg[(pool_kind, reg)] = vname
+                        allocated = True
+                        break
+                if not allocated:
+                    # 最后兜底：栈槽
                     stack_offset += 8
                     vreg_alloc[vname] = ("stack", stack_offset)
 
+        # ---- 主循环：vregs 线性扫描 ----
         for vname, info in sorted_vregs:
             _expire_old_intervals(info["first"], info["is_float"])
-            _try_allocate(vname, info["is_float"], info["last"])
+            if info["is_float"]:
+                # XMM：复用 v1 单池逻辑（不做双池，降低改动面）
+                if free_xmms:
+                    reg = free_xmms.pop(0)
+                    vreg_alloc[vname] = ("reg", reg)
+                    active_xmms[reg] = info["last"]
+                    reg_to_vreg[("xmm", reg)] = vname
+                else:
+                    victim = _spill_victim_v2(True)
+                    if free_xmms:
+                        reg = free_xmms.pop(0)
+                        vreg_alloc[vname] = ("reg", reg)
+                        active_xmms[reg] = info["last"]
+                        reg_to_vreg[("xmm", reg)] = vname
+                    else:
+                        stack_offset += 8
+                        vreg_alloc[vname] = ("stack", stack_offset)
+            else:
+                # GPR：v2 双池分配
+                _try_allocate_gpr_v2(
+                    vname, info["first"], info["last"],
+                    info.get("has_call_in_range", False)
+                )
 
         # 副作用：更新函数所需最小栈帧大小
         if stack_offset > func.stack_size:

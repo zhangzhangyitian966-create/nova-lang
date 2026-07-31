@@ -1,7 +1,7 @@
 {
-  "cycles": 69,
-  "frontend_completed": 46,
-  "backend_completed": 54,
+  "cycles": 70,
+  "frontend_completed": 47,
+  "backend_completed": 55,
   "last_review_cycle": 69,
   "current_review_cycle": 69,
   "completed_tasks": [
@@ -122,7 +122,10 @@
     "frontend_harden_typevar_leak_guard",
     "backend_mir_phi_type_upgrade_raise",
     "backend_native_float_imm_xmm0_conflict",
-    "review_cycle_69"
+    "review_cycle_69",
+    "frontend_implicit_numeric_cast_fence",
+    "backend_native_regalloc_linear_scan_v2",
+    "backend_x86_64_rex_prefix_fix"
   ],
   "failed_tasks": [],
   "deprecated_tasks": [
@@ -141,6 +144,40 @@
     "backend_wasmgc_instruction_fill"
   ],
   "task_history": [
+    {
+      "cycle": 70,
+      "task_id": "frontend_implicit_numeric_cast_fence",
+      "name": "隐式数值窄化安全栅栏：TypeVar.overflow_risk 标记 + 3 接收端（绑定/赋值/实参）合一失败升级窄化风险错误",
+      "track": "frontend",
+      "priority": 88,
+      "difficulty": "medium",
+      "status": "success",
+      "duration_min": 130,
+      "details": "TypeVar 类新增 overflow_risk: bool = False；_check_literal_expr 在 Int 字面量 > 2^31-1（2147483647）或 Float 字面量 > 2^24（16777216）精度位时标记对应新鲜 TVar overflow_risk=True；_unify_types 的 TypeVar-接收端分支新增 _detect_narrowing_risk(tvar, tgt_type, context) 函数：当 tvar.overflow_risk=True 且 context.kind∈{'binding_with_annotation','assignment','function_arg'} 且 目标类型是 Int/Float 等窄类型时，错误消息升级为含「值 xxx 存在隐式窄化风险，超过目标类型 Int/Float 的安全范围」的详细提示，并附 cast 建议；_check_binding_decl 在显式类型注解 let/mut 绑定（ctx=binding_with_annotation）、_check_assignment 在赋值（ctx=assignment）、_check_fn_call 在实参传递（ctx=function_arg）三处分别传入对应 context_kind。新增 TestNumericNarrowingFence 6 用例：(1) 大 Int 字面量+显式 Int 注解 → 报窄化风险错误；(2) Int 在 2^31-1 内 + 显式注解 → 不报错（回归保护）；(3) Float>2^24 + 显式 Float 注解 → 报错；(4) 无注解绑定 → 仅合一不升级（保持 HM 推断）；(5) 函数实参大 Int 传 Int 形参 → 报错；(6) 赋值 RHS 大 Int 给显式 Int LHS → 报错。修改 type_checker.py +210 行，tests/test_type_checker.py +175 行。",
+      "files_changed": [
+        "type_checker.py",
+        "tests/test_type_checker.py"
+      ],
+      "timestamp": "2026-07-31 22:45:00"
+    },
+    {
+      "cycle": 70,
+      "task_id": "backend_native_regalloc_linear_scan_v2",
+      "name": "寄存器分配 v2：Linear Scan 双池（caller/callee 独立 GPR 池）+ 权重优先溢出 + x86_64 编码器 REX 前缀 BUG 修复",
+      "track": "backend",
+      "priority": 92,
+      "difficulty": "hard",
+      "status": "success",
+      "duration_min": 240,
+      "details": "_analyze_vreg_liveness 升级为 v2：收集 call_sites 列表、为每个 vreg 计算 has_call_in_range（区间内是否有 call）、spill_weight 权重三元组；_linear_scan_alloc 内部重构为 GPR 双池（free_caller_gprs = RCX/RDX/RSI/RDI/R8/R9/R10/R11；free_callee_gprs = RBX/R12/R13/R14/R15），新增 _try_allocate_gpr_v2 函数按 has_call_in_range 启发式：跨调用长命 vreg 优先分配 callee 池（prologue push/epilogue pop，跨 N 次 call 省 N-1 次 save/restore 对），短命 vreg 优先分配 caller 池（避免 prologue 无谓 push）；_spill_victim_v2 按 spill_weight 选 victim，callee-saved 权重额外 +0.5 偏向先溢出 caller-saved；_mark_caller_saved_to_preserve 保持 v1 精确集不变。TestRegAllocCallSite.test_live_caller_saved_at_call 的断言由 v1 写死 RCX 检查升级为 v1/v2 双兼容（若分配到 caller-saved 则在精确保存列表，若分配到 callee-saved 则不在列表，总保存列表始终 <8 个）。调试发现致命 BUG：x86_64 编码器 mov_reg_imm64 的小立即数分支把 REX 前缀硬编码为 0x48，忽略 R8-R15（reg>=8）需 REX.B=1，导致 R12 被编码为 RSP → mov $imm, %rsp 破坏栈指针引发 SIGSEGV。一并修复 x86_64.py 中 5 条同类硬编码指令：mov_reg_imm64、add_reg_imm、sub_reg_imm、and_reg_imm、cmp_reg_imm 全部改用 _rex_w(0, (reg>>3)&1) 或 _rex_rb(0, reg) 生成正确 REX 前缀。新增 6+1 用例，端到端 E2E 测试全部通过（add(15,27)=42、fib、loop、branch、closure）。修改 backend/native_backend.py ~650 行（活跃分析 + 双池分配 + 权重溢出），backend/x86_64.py 5 处 REX 前缀生成，tests/test_native_backend.py 2 处断言升级。",
+      "files_changed": [
+        "backend/native_backend.py",
+        "backend/x86_64.py",
+        "tests/test_native_backend.py",
+        "tests/test_backends.py"
+      ],
+      "timestamp": "2026-07-31 22:45:00"
+    },
     {
       "cycle": 69,
       "task_id": "review_cycle_69",
@@ -210,7 +247,7 @@
       "difficulty": "medium",
       "priority": 88,
       "estimated_effort": "3-4小时",
-      "status": "pending",
+      "status": "completed",
       "source": "review_cycle_69 审计：Native 后端 i32/i64 指令选择前，TypeChecker 侧缺少窄化溢出告警 = 未来 SIMD 引入后的 silent data corruption 前置风险",
       "depends_on": [],
       "severity": "P2"
@@ -252,7 +289,7 @@
       "difficulty": "hard",
       "priority": 92,
       "estimated_effort": "10-14小时",
-      "status": "pending",
+      "status": "completed",
       "source": "review_cycle_69 审计：Native 8 子模块中寄存器分配 75% + 栈帧 65% 两项拉低总平均至 78.1%，v2 升级后两项分别到 90%/82%，Native 总平均 +5pp 到 83%，ROI 所有后端 hard 任务最高",
       "depends_on": [
         "backend_native_regalloc_cc_split"
@@ -347,6 +384,6 @@
       "severity": "P2"
     }
   ],
-  "last_updated": "2026-07-31 16:02:00",
-  "active_tasks_count": 8
+  "last_updated": "2026-07-31 22:45:00",
+  "active_tasks_count": 6
 }

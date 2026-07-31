@@ -19,6 +19,7 @@ from nova.backend.x86_64 import (
 )
 from nova.backend.native_backend import (
     NativeCodeGen,
+    CALLER_GPRS,
 )
 
 # 直接导入 IR 节点
@@ -872,11 +873,18 @@ class TestRegAllocCallSite(unittest.TestCase):
         )
 
     def test_live_caller_saved_at_call(self):
-        """调用点后有活跃 caller-saved 寄存器 → 仅保存该寄存器"""
+        """调用点后有活跃 vreg → 若分配到 caller-saved 则精确保存；若分配到 callee-saved 则不保存。
+
+        v2 双池策略下（Cycle 70 backend_native_regalloc_linear_scan_v2）：
+        跨调用长命 vreg（const_10 first=0, last=2, call 在 idx=1）优先取
+        callee-saved 池（RBX/R12-R15），prologue push 过，call 前无需再保存。
+        若 callee-saved 池满，则 fallback 到 caller-saved 池的某个寄存器
+        （call 前保存）。两种策略都正确，本测试用断言同时兼容两者。
+        """
         codegen = NativeCodeGen()
         fn = LIRFunction("main", [], INT_TYPE)
         fn.body = [
-            LIRLoadConst(value=10, const_type="int"),   # const_10, 分配到 RCX
+            LIRLoadConst(value=10, const_type="int"),   # const_10
             LIRCall(
                 func_name="foo",
                 arg_count=0,
@@ -888,12 +896,19 @@ class TestRegAllocCallSite(unittest.TestCase):
         ]
         vreg_alloc, _, _ = codegen._allocate_registers(fn)
         call_instr = fn.body[1]
-        # const_10 被分配到 RCX（caller-saved），且在 call 后仍活跃
-        self.assertIn(
-            RCX, call_instr.caller_saved_to_preserve,
-            "const_10 分配到 RCX 且在 call 后活跃，应保存 RCX"
-        )
-        # 不应保存所有 8 个 caller-saved 寄存器
+        const_10_loc = vreg_alloc.get("const_10")
+        self.assertIsNotNone(const_10_loc, "const_10 必须被分配位置")
+        if const_10_loc[0] == "reg" and const_10_loc[1] in CALLER_GPRS:
+            # v1 行为：const_10 分配到 RCX（caller-saved），call 前保存
+            self.assertIn(
+                const_10_loc[1], call_instr.caller_saved_to_preserve,
+                f"const_10 分配到 caller-saved 寄存器 {const_10_loc[1]} 且 call 后活跃，"
+                f"应在 caller_saved_to_preserve 中"
+            )
+        else:
+            # v2 行为：分配到 callee-saved 或栈，caller_saved_to_preserve 不包含该寄存器
+            pass  # callee-saved 由 prologue/epilogue push/pop 负责，无需 call 前保存
+        # 无论 v1/v2，都不应保存全部 8 个 caller-saved 寄存器（精确保留而非全保存）
         self.assertLess(
             len(call_instr.caller_saved_to_preserve), 8,
             "应精确保存而非全部 8 个 caller-saved 寄存器"

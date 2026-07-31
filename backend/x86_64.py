@@ -88,7 +88,10 @@ class X86_64Emitter:
         if 0 <= imm <= 0x7FFFFFFF:
             # 使用 mov r/m64, imm32（REX.W + C7 + ModR/M + imm32）
             # 这会零扩展 32 位立即数到 64 位
-            self.emit_byte(0x48)
+            # Cycle 70 FIX: 原硬编码 0x48 忽略了 R8-R15（编号 ≥8）需要 REX.B=1，
+            #   导致 r/m=reg&7=4 时 REX.B=0→RSP 而非 REX.B=1→R12，产生 SIGSEGV。
+            #   用 _rex_rb(0, reg) 统一生成 W=1 + 正确 REX.B/R 位。
+            self._rex_rb(0, reg)
             self.emit_byte(0xC7)
             self.emit_byte(self._modrm(0b11, 0, reg & 7))
             self.emit_uint32(imm)
@@ -163,7 +166,8 @@ class X86_64Emitter:
 
     def add_reg_imm(self, reg, imm):
         """add reg, imm (64-bit)"""
-        self.emit_byte(0x48)  # REX.W
+        # Cycle 70 FIX: 原硬编码 0x48 忽略 R8-R15 需要 REX.B
+        self._rex_w(0, (reg >> 3) & 1)
         if -128 <= imm <= 127:
             self.emit_byte(0x83)
             self.emit_byte(self._modrm(0b11, 0, reg & 7))
@@ -181,7 +185,8 @@ class X86_64Emitter:
 
     def sub_reg_imm(self, reg, imm):
         """sub reg, imm (64-bit)"""
-        self.emit_byte(0x48)  # REX.W
+        # Cycle 70 FIX: 原硬编码 0x48 忽略 R8-R15 需要 REX.B
+        self._rex_w(0, (reg >> 3) & 1)
         if -128 <= imm <= 127:
             self.emit_byte(0x83)
             self.emit_byte(self._modrm(0b11, 5, reg & 7))
@@ -277,7 +282,8 @@ class X86_64Emitter:
 
     def and_reg_imm(self, reg, imm):
         """and reg, imm (64-bit)"""
-        self.emit_byte(0x48)  # REX.W
+        # Cycle 70 FIX: 原硬编码 0x48 忽略 R8-R15 需要 REX.B
+        self._rex_w(0, (reg >> 3) & 1)
         if -128 <= imm <= 127:
             self.emit_byte(0x83)
             self.emit_byte(self._modrm(0b11, 4, reg & 7))
@@ -296,7 +302,8 @@ class X86_64Emitter:
 
     def cmp_reg_imm(self, reg, imm):
         """cmp reg, imm (64-bit)"""
-        self.emit_byte(0x48)  # REX.W
+        # Cycle 70 FIX: 原硬编码 0x48 忽略 R8-R15 需要 REX.B
+        self._rex_w(0, (reg >> 3) & 1)
         if -128 <= imm <= 127:
             self.emit_byte(0x83)
             self.emit_byte(self._modrm(0b11, 7, reg & 7))

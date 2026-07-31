@@ -1698,5 +1698,126 @@ fn main() {
         tc.check_program(parser.parse())  # 不抛错，Int 字面量完全约束无泄漏
 
 
+# =====================================================================
+# TestNumericNarrowingFence - Cycle 70 frontend_implicit_numeric_cast_fence
+# 隐式数值窄化安全栅栏 6 用例专项测试
+# 对齐 C/C++ -Wconversion：字面量超 32 位有符号安全阈值 + 显式类型注解接收端 = 报错
+# =====================================================================
+class TestNumericNarrowingFence(unittest.TestCase):
+    """隐式数值窄化安全栅栏（TypeVar.overflow_risk + 3 接收端告警）。"""
+
+    # -- 用例 1：大 Int 字面量 + 显式 Int 注解 → 窄化风险报错（P2 正确性）
+    def test_large_int_with_explicit_annotation_triggers_narrowing_error(self):
+        """let x: Int = 3,000,000,000（> 2^31-1）+ 显式注解 = 隐式窄化风险报错。"""
+        src = """
+fn main() {
+    let x: Int = 3000000000
+    x
+}
+"""
+        from nova.lexer import Lexer
+        from nova.parser import Parser
+        from nova.errors import TypeCheckError
+        lex = Lexer(src)
+        parser = Parser(lex.tokenize(), source=src)
+        tc = TypeChecker(source=src)
+        with self.assertRaises(TypeCheckError) as ctx:
+            tc.check_program(parser.parse())
+        # 错误消息必须包含「窄化风险」关键词（验证新的风险路径被触发）
+        self.assertIn("窄化风险", str(ctx.exception))
+
+    # -- 用例 2：大 Int 字面量 + 无显式注解 → 静默通过（注解是窄化判定的必要条件）
+    def test_large_int_without_annotation_passes_silently(self):
+        """let x = 3,000,000,000 无注解 = 无窄化接收端，不报错（向后兼容）。"""
+        src = """
+fn main() {
+    let x = 3000000000
+    x
+}
+"""
+        from nova.lexer import Lexer
+        from nova.parser import Parser
+        lex = Lexer(src)
+        parser = Parser(lex.tokenize(), source=src)
+        tc = TypeChecker(source=src)
+        tc.check_program(parser.parse())  # 不抛错
+
+    # -- 用例 3：32 位范围内 Int + 注解 → 不报错（阈值边界保护）
+    def test_small_int_with_annotation_no_narrowing(self):
+        """let x: Int = 2147483647（= 2^31-1，刚好在阈值上）= 无风险不报错。"""
+        src = """
+fn main() {
+    let x: Int = 2147483647
+    x
+}
+"""
+        from nova.lexer import Lexer
+        from nova.parser import Parser
+        lex = Lexer(src)
+        parser = Parser(lex.tokenize(), source=src)
+        tc = TypeChecker(source=src)
+        tc.check_program(parser.parse())  # 不抛错，32 位边界内安全
+
+    # -- 用例 4：大 Float 字面量 + 显式 Float 注解 → 窄化报错（单精度尾数阈值）
+    def test_large_float_with_explicit_annotation_triggers_narrowing(self):
+        """let x: Float = 1.7e10（> 2^24 单精度尾数阈值）+ 显式注解 = 窄化风险报错。"""
+        src = """
+fn main() {
+    let x: Float = 17000000000.0
+    x
+}
+"""
+        from nova.lexer import Lexer
+        from nova.parser import Parser
+        from nova.errors import TypeCheckError
+        lex = Lexer(src)
+        parser = Parser(lex.tokenize(), source=src)
+        tc = TypeChecker(source=src)
+        with self.assertRaises(TypeCheckError) as ctx:
+            tc.check_program(parser.parse())
+        self.assertIn("窄化风险", str(ctx.exception))
+
+    # -- 用例 5：大 Int 字面量作为函数实参 + 形参有显式 Int 注解 → 窄化报错（函数调用接收端）
+    def test_large_int_fn_arg_with_annotated_param_triggers_narrowing(self):
+        """fn f(a: Int) {..}; f(3_000_000_000) 实参超阈值 = 函数调用接收端窄化报错。"""
+        src = """
+fn f(a: Int) -> Int {
+    a + 1
+}
+fn main() {
+    f(3000000000)
+}
+"""
+        from nova.lexer import Lexer
+        from nova.parser import Parser
+        from nova.errors import TypeCheckError
+        lex = Lexer(src)
+        parser = Parser(lex.tokenize(), source=src)
+        tc = TypeChecker(source=src)
+        with self.assertRaises(TypeCheckError) as ctx:
+            tc.check_program(parser.parse())
+        self.assertIn("窄化风险", str(ctx.exception))
+
+    # -- 用例 6：mut 赋值接收端大 Int → 目标已约束为 Int PrimType = 窄化报错（赋值接收端）
+    def test_mut_assign_large_int_to_typed_target_triggers_narrowing(self):
+        """mut x: Int = 0; x = 3_000_000_000 赋值接收端 = 窄化风险报错。"""
+        src = """
+fn main() {
+    mut x: Int = 0
+    x = 3000000000
+    x
+}
+"""
+        from nova.lexer import Lexer
+        from nova.parser import Parser
+        from nova.errors import TypeCheckError
+        lex = Lexer(src)
+        parser = Parser(lex.tokenize(), source=src)
+        tc = TypeChecker(source=src)
+        with self.assertRaises(TypeCheckError) as ctx:
+            tc.check_program(parser.parse())
+        self.assertIn("窄化风险", str(ctx.exception))
+
+
 if __name__ == "__main__":
     unittest.main()

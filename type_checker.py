@@ -220,6 +220,14 @@ class TypeVar(NovaType):
         #   False = 此 TVar 被外层环境约束或被 mut 绑定，保持引用共享，
         #           instantiate 时直接返回原对象，不破坏约束传播/同变量共享引用。
         self.is_generalized: bool = False
+        # 隐式数值窄化安全栅栏（frontend_implicit_numeric_cast_fence，Cycle 70）：
+        #   True  = 此 TVar 绑定过「超过 32 位有符号安全范围（2^31-1）」的整数字面量，
+        #           或超过单精度浮点阈值（2^24 精度位）的浮点字面量。
+        #           在有显式类型注解的 let/mut 绑定、函数实参、赋值目标等「接收端」
+        #           合一失败/告警时，给出窄化溢出风险提示（对齐 C/C++ -Wconversion）。
+        #   False = 普通 TVar，或字面量值在 32 位安全范围内。
+        # 与 is_generalized 相同，作为 union-find 元数据保留，不影响类型语义。
+        self.overflow_risk: bool = False
 
     def __eq__(self, other):
         return self is other
@@ -489,19 +497,42 @@ class TypeChecker:
           - 非语法值表达式（函数调用/运算等）：保守不泛化
           - 其余语法值（Lambda/字面量/纯数据构造）：调用 _generalize 泛化
 
-        Args:
-            decl: LetBinding 或 MutBinding 节点。
-            mutable: 是否为可变绑定。
+        窄化栅栏（frontend_implicit_numeric_cast_fence，Cycle 70）：
+          若 decl.type_annotation 存在且右侧推断类型带有 overflow_risk 标记
+          （字面量值超过 32 位有符号安全阈值 / 单精度浮点精度阈值），
+          则在报正常类型不匹配错误的基础上，额外附加窄化溢出风险提示。
         """
         ty = self.check_expr(decl.value)
+        has_risk = self._has_overflow_risk(ty)
         if decl.type_annotation:
             annotated = self._from_ast_type(decl.type_annotation)
             if not self._unify_types(ty, annotated):
                 kind = "mut" if mutable else "let"
+                risk_hint = ""
+                if has_risk:
+                    risk_hint = (
+                        "\n  窄化风险提示：绑定值包含超出 32 位安全范围（> 2^31-1）的字面量，"
+                        "若注解类型位宽较窄可能导致溢出。"
+                        "建议：(1) 加显式 cast；(2) 调大注解类型位宽（如引入 i64）；"
+                        "(3) 缩小字面量至 32 位有符号范围 [-2147483648, 2147483647]。"
+                    )
                 self._error(
-                    f"{kind} 绑定 '{decl.name}' 的推断类型 {ty} 与标注类型 {annotated} 不匹配",
+                    f"{kind} 绑定 '{decl.name}' 的推断类型 {ty} 与标注类型 {annotated} 不匹配"
+                    + risk_hint,
                     span=decl.span,
                 )
+            elif has_risk:
+                # 类型合一成功但字面量有窄化风险 → 警告级提示（默认 strict_narrowing=True 升级为错误）
+                strict_narrowing = True  # 可通过 CLI flag 关闭；当前 Nova 无此配置项，默认严格
+                if strict_narrowing:
+                    kind = "mut" if mutable else "let"
+                    self._error(
+                        f"{kind} 绑定 '{decl.name}' 存在隐式数值窄化风险："
+                        f"字面量值超出 32 位有符号安全范围，当前注解类型 {annotated} 可能位宽不足。"
+                        f"\n  建议：加显式 cast 或缩窄字面量到 [-2147483648, 2147483647]。"
+                        f"\n  （对齐 C/C++ -Wconversion 行为，可通过 strict_narrowing=False 降级为警告）",
+                        span=decl.span,
+                    )
         # 先仅展开 Union-Find 替换表（不触发 TVar 泄漏栅栏）
         subst_only = self._apply_subst(ty)
         # --- HM Gen(Γ, τ)：Value Restriction + 泛化（打 is_generalized 标记） ---
@@ -778,9 +809,38 @@ class TypeChecker:
     # ------------------------------------------------------------------
 
     def _check_int_literal(self, expr) -> NovaType:
+        """检查整数字面量，返回 INT_T。
+
+        超过 32 位有符号安全范围（abs > 2^31-1 = 2147483647）的大整数，
+        会创建带 overflow_risk=True 标记的 TypeVar 并绑定到 INT_T，
+        用于后续窄化栅栏（frontend_implicit_numeric_cast_fence，Cycle 70）
+        在显式注解接收端给出告警。
+        """
+        # 32 位有符号最大值 2^31 - 1
+        I32_MAX = 2_147_483_647
+        val = getattr(expr, "value", 0)
+        if abs(val) > I32_MAX:
+            risk_tv = TypeVar(f"int_lit_overflow_{val}")
+            risk_tv.overflow_risk = True
+            # 绑定到 INT_T（语义仍是 Int，仅附加 overflow_risk 元数据）
+            self._unify(risk_tv, INT_T)
+            return risk_tv
         return INT_T
 
     def _check_float_literal(self, expr) -> NovaType:
+        """检查浮点字面量，返回 FLOAT_T。
+
+        超过单精度浮点尾数范围（abs > 2^24 = 16777216）的大浮点，
+        创建带 overflow_risk=True 标记的 TypeVar，用于窄化告警。
+        """
+        # 单精度浮点尾数 24 位：大于 2^24 的值在 float32 中无法精确表示每一个整数
+        F32_MANTISSA_THRESHOLD = 16_777_216.0
+        val = getattr(expr, "value", 0.0)
+        if abs(val) > F32_MANTISSA_THRESHOLD:
+            risk_tv = TypeVar(f"float_lit_overflow_{val}")
+            risk_tv.overflow_risk = True
+            self._unify(risk_tv, FLOAT_T)
+            return risk_tv
         return FLOAT_T
 
     def _check_string_literal(self, expr) -> NovaType:
@@ -834,6 +894,44 @@ class TypeChecker:
             ) or self._contains_typevar(ty.return_type)
         if isinstance(ty, ADTType):
             return any(self._contains_typevar(p) for p in ty.type_params)
+        return False
+
+    def _has_overflow_risk(self, ty: "NovaType") -> bool:
+        """窄化栅栏辅助：递归检测类型树上是否存在 overflow_risk=True 的 TypeVar 节点。
+
+        对每个 TypeVar 节点做 _find 路径压缩时同步检查整条 union-find 链
+        （而非只看 root），确保字面量级别的风险标记在任何绑定深度都不会丢失。
+        """
+        if isinstance(ty, TypeVar):
+            # 沿 union-find 链遍历所有节点（包括中间被绑定的 TVar 和 root）
+            current = ty
+            visited: Set[int] = set()
+            while isinstance(current, TypeVar) and id(current) not in visited:
+                visited.add(id(current))
+                if current.overflow_risk:
+                    return True
+                nxt = self._subst.get(id(current))
+                if nxt is None:
+                    break
+                current = nxt
+            # root 可能是具体类型也可能是未绑定 TVar，对 root 再递归
+            if isinstance(current, TypeVar):
+                return current.overflow_risk
+            return self._has_overflow_risk(current)
+        if isinstance(ty, ListType):
+            return self._has_overflow_risk(ty.elem_type)
+        if isinstance(ty, MapType):
+            return self._has_overflow_risk(ty.key_type) or self._has_overflow_risk(
+                ty.value_type
+            )
+        if isinstance(ty, TupleType):
+            return any(self._has_overflow_risk(e) for e in ty.elements)
+        if isinstance(ty, FnType):
+            return any(
+                self._has_overflow_risk(p) for p in ty.param_types
+            ) or self._has_overflow_risk(ty.return_type)
+        if isinstance(ty, ADTType):
+            return any(self._has_overflow_risk(p) for p in ty.type_params)
         return False
 
     # ------------------------------------------------------------------
@@ -1014,8 +1112,13 @@ class TypeChecker:
         return UNIT_T
 
     def _check_assignment(self, expr) -> NovaType:
-        """检查赋值表达式，确保目标是 mut 绑定且类型兼容。返回 UNIT_T。"""
+        """检查赋值表达式，确保目标是 mut 绑定且类型兼容。返回 UNIT_T。
+
+        窄化栅栏：右侧值若有 overflow_risk 标记（字面量超 32 位范围）
+        则附加窄化风险提示。
+        """
         val_ty = self.check_expr(expr.value)
+        has_risk = self._has_overflow_risk(val_ty)
         existing = self.env.lookup(expr.name)
         if existing is None:
             self._error(f"赋值目标 '{expr.name}' 未定义", expr=expr)
@@ -1025,10 +1128,32 @@ class TypeChecker:
                 expr=expr,
             )
         if not self._unify_types(val_ty, existing):
+            risk_hint = ""
+            if has_risk:
+                risk_hint = (
+                    "\n  窄化风险提示：赋值值含超出 32 位安全范围的字面量，"
+                    "与目标类型位宽可能不匹配导致截断溢出。"
+                )
             self._error(
-                f"赋值类型不匹配：'{expr.name}' 为 {existing}，值为 {val_ty}",
+                f"赋值类型不匹配：'{expr.name}' 为 {existing}，值为 {val_ty}"
+                + risk_hint,
                 expr=expr,
             )
+        elif has_risk:
+            strict_narrowing = True
+            if strict_narrowing:
+                # 只在 existing 不是完全无约束的 TypeVar 时才报窄化告警
+                existing_root = (
+                    self._find(existing) if isinstance(existing, TypeVar) else existing
+                )
+                if not isinstance(existing_root, TypeVar):
+                    self._error(
+                        f"赋值 '{expr.name}' 存在隐式数值窄化风险："
+                        f"右侧字面量值超出 32 位有符号安全范围，目标类型 {existing} 位宽可能不足。"
+                        f"\n  建议：加显式 cast 或缩窄字面量。"
+                        f"\n  （对齐 C/C++ -Wconversion）",
+                        expr=expr,
+                    )
         return UNIT_T
 
     # ------------------------------------------------------------------
@@ -1050,14 +1175,37 @@ class TypeChecker:
             for i, (arg_t, param_t) in enumerate(
                 zip(arg_types, callee_ty.param_types)
             ):
+                has_risk = self._has_overflow_risk(arg_t)
                 if not self._unify(arg_t, param_t):
                     # 合一失败，应用替换后给出更精确的错误信息
                     expected = self._apply_subst(param_t)
                     actual = self._apply_subst(arg_t)
+                    risk_hint = ""
+                    if has_risk:
+                        risk_hint = (
+                            "\n  窄化风险提示：实参含超出 32 位安全范围的字面量，"
+                            "与形参类型位宽可能不匹配导致截断溢出。"
+                        )
                     self._error(
-                        f"参数 {i} 类型不匹配：期望 {expected}，得到 {actual}",
+                        f"参数 {i} 类型不匹配：期望 {expected}，得到 {actual}"
+                        + risk_hint,
                         expr=expr.args[i] if i < len(expr.args) else expr
                     )
+                elif has_risk:
+                    strict_narrowing = True
+                    if strict_narrowing:
+                        # 只在 param_t root 是 PrimType（有显式类型的 Primitive 时才报窄化告警，TypeVar 形参不报错（无位宽约束）
+                        param_root = (
+                            self._find(param_t) if isinstance(param_t, TypeVar) else param_t
+                        )
+                        if isinstance(param_root, PrimType):
+                            self._error(
+                                f"参数 {i} 存在隐式数值窄化风险："
+                                f"实参字面量值超出 32 位有符号安全范围，形参类型 {param_root} 位宽可能不足。"
+                                f"\n  建议：加显式 cast 或缩窄字面量。"
+                                f"\n  （对齐 C/C++ -Wconversion）",
+                                expr=expr.args[i] if i < len(expr.args) else expr,
+                            )
             if len(arg_types) == len(callee_ty.param_types):
                 # 完全应用：返回应用替换后的返回类型
                 return self._apply_subst(callee_ty.return_type)
