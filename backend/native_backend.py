@@ -1063,12 +1063,14 @@ class NativeCodeGen:
                         )
                         float_idx += 1
                     else:
-                        # Float imm 溢出：XMM0 → movq RAX → push
-                        fixup_offset = e.movsd_reg_imm(XMM0, 0)
+                        # Float imm 溢出（8 个 XMM 参数寄存器用完）：
+                        # 【修复 BUG：原代码直接 movsd XMM0 → 污染 XMM0，而 XMM0 可能已装载第 0 个 float 参数】
+                        # 改为内存中转等价替代：用 mov rax,[rip+disp32] 把 8 字节 float 作为整数搬，
+                        #   再 push rax。完全不碰 XMM 寄存器，避免 XMM0-XMM7 任何冲突。
+                        fixup_offset = e.mov_reg_rip(RAX)
                         self.data_fixups.append(
                             (ctx.func_name, fixup_offset, data_off, "float")
                         )
-                        e.movq_gpr_xmm(RAX, XMM0)
                         e.push_reg(RAX)
                         stack_arg_count += 1
                 # Int imm → mov_reg_imm64

@@ -913,5 +913,126 @@ class TestRegAllocCallSite(unittest.TestCase):
         )
 
 
+class TestNativeFloatImmOverflowXmm0Conflict(unittest.TestCase):
+    """Cycle 66 P2：Native Float imm 溢出路径覆盖 XMM0 的 BUG 修复验证。
+
+    原 BUG：9+ float 参数时，第 9+ 个 float imm 参数加载走
+      `movsd XMM0, [RIP+disp] ; movq RAX, XMM0 ; push RAX`
+    但 XMM0 已经装载了第 0 个 float 参数，导致被覆盖。
+
+    修复：完全避开 XMM 寄存器，改为
+      `mov RAX, [RIP+disp] ; push RAX`
+    （8 字节 float 作为整数搬，内容完全等价）。
+    """
+
+    # —— 字节特征码（编码常量，避免 magic bytes 散落在每个断言） ——
+    # movsd XMM0,[RIP+disp32]: F2 0F 10 /0, ModRM(00,000,101) = 05 → F2 0F 10 05
+    MOVSD_XMM0_RIP = bytes([0xF2, 0x0F, 0x10, 0x05])
+    # movq RAX, XMM0 (x86: REX.W + 0F 7E /r): 48 0F 7E C0
+    MOVQ_RAX_XMM0 = bytes([0x48, 0x0F, 0x7E, 0xC0])
+    # mov RAX,[RIP+disp32]: REX.W + 8B /0, ModRM(00,000,101) → 48 8B 05
+    MOV_RAX_RIP = bytes([0x48, 0x8B, 0x05])
+
+    def _emit_runtime_with_args(self, arg_specs, ret_dst=None):
+        """辅助：构造 NativeCodeGen + _EmitContext，调用 _emit_runtime_call 并返回机器码字节。
+
+        arg_specs: List[ (arg_val, is_float) ]
+        ret_dst: None 或 (vreg_name, ir_type) 元组
+        """
+        from nova.backend.native_backend import _EmitContext
+
+        codegen = NativeCodeGen()
+        e = X86_64Emitter()
+        ctx = _EmitContext(
+            e=e,
+            func_name="test_xmm0_ctx",
+            vreg_alloc={"vret": ("stack", 0)},
+            label_offsets={},
+            jump_fixups=[],
+        )
+
+        # 转换为 _emit_runtime_call 的 args 格式: [ (spec, ir_type) ]
+        args = []
+        for val, is_flt in arg_specs:
+            spec = ("imm", val)
+            ty = FLOAT_TYPE if is_flt else INT_TYPE
+            args.append((spec, ty))
+        codegen._emit_runtime_call("nova_dummy_runtime", args, ret_dst, ctx)
+        return e.get_code()
+
+    def test_float_imm_overflow_emit_no_movsd_xmm0_in_overflow(self):
+        """溢出分支不发射 movsd XMM0 后接 movq XMM0→RAX 的旧中转序列。
+
+        注意：MOVSD XMM0,[RIP+disp32]（F2 0F 10 05）本身合法——第 0 个 float 参数装载。
+        真正的 BUG 特征是：溢出路径用 XMM0 作为临时中转，导致"参数装载后再覆盖"。
+        因此验证关键：
+          a) 不得出现 MOVQ_RAX_XMM0（48 0F 7E C0 = movq RAX,XMM0，旧中转）
+          b) 溢出 float 的装载方式改为 MOV_RAX_RIP（整数搬），push RAX
+        """
+        # 9 个 float imm：前 8 走 XMM0-7，第 9 走溢出路径
+        arg_specs = [(1.0 * i, True) for i in range(9)]
+        code = self._emit_runtime_with_args(arg_specs)
+
+        # (a) 核心修复：不允许 movq RAX,XMM0 出现（这是 XMM0 被污染的标志）
+        self.assertNotIn(
+            self.MOVQ_RAX_XMM0, code,
+            "溢出分支不得使用 movq RAX,XMM0（旧 bug 代码将 XMM0 作为中转，会覆盖第 0 个 float 参数）"
+        )
+        # (b) 溢出分支必须用整数搬：mov RAX,[RIP+disp32] + push RAX
+        rax_rip_count = code.count(self.MOV_RAX_RIP)
+        self.assertEqual(rax_rip_count, 1, "9 float imm 中恰好 1 个溢出走 RAX 中转")
+
+    def test_float_imm_overflow_stack_count(self):
+        """9 float imm → 溢出压栈数 = 1（通过 data_fixups 间接验证）。"""
+        from nova.backend.native_backend import _EmitContext, CALLER_GPRS
+
+        codegen = NativeCodeGen()
+        e = X86_64Emitter()
+        ctx = _EmitContext(
+            e=e, func_name="stack_ctx", vreg_alloc={},
+            label_offsets={}, jump_fixups=[],
+        )
+        arg_specs = [(("imm", 1.0 * i), FLOAT_TYPE) for i in range(9)]
+        codegen._emit_runtime_call("f", arg_specs, None, ctx)
+        code = e.get_code()
+        # movsd [XMMn], [RIP+...] 是前 8 个 float 参数：特征码 F2 0F 10 ?? 05
+        # 统计 F2 0F 10 (ModRM 的 rm=5) 出现次数 —— 简化：统计 MOVSD RIP-rel 次数
+        # movsd reg,[RIP+disp32] = F2 0F 10 ModRM(00, XMMn, 101) = F2 0F 10 [C0+C8..] & 0x3F == 0x05*8 + reg
+        # 简化：统计出现的 mov_rax_rip 次数 = 溢出 float 数（应该是 1）
+        mov_rax_rip_count = code.count(self.MOV_RAX_RIP)
+        self.assertEqual(mov_rax_rip_count, 1, "9 float imm 中恰好 1 个溢出走 RAX 中转")
+
+    def test_int_args_then_float_overflow_no_xmm0_conflict(self):
+        """混合参数（6 int + 9 float）：float 第 9 个溢出时 XMM0 不被 movq XMM0→RAX 覆盖。"""
+        arg_specs = (
+            [(100 + i, False) for i in range(6)]  # 6 int → RDI,RSI,RDX,RCX,R8,R9
+            + [(1.0 * i, True) for i in range(9)]  # 9 float → XMM0-7 + 压栈
+        )
+        code = self._emit_runtime_with_args(arg_specs)
+        # 核心断言：不允许 movq RAX,XMM0 出现（旧 bug 中转）
+        self.assertNotIn(
+            self.MOVQ_RAX_XMM0, code,
+            "混合场景溢出分支也不得用 movq RAX,XMM0（会覆盖 XMM0 中的第 0 个 float 参数）"
+        )
+        # 溢出：恰好 1 个 float 走 RAX 中转
+        self.assertEqual(code.count(self.MOV_RAX_RIP), 1,
+                         "6 int + 9 float 中，第 9 个 float 溢出恰好 1 次走 RAX 中转")
+
+    def test_vast_majority_float_overflow_multiple_no_xmm0(self):
+        """20 个 float imm：前 8 XMM，后 12 全部走 RAX 中转（不经过任何 XMM）。"""
+        arg_specs = [(0.5 * i, True) for i in range(20)]
+        code = self._emit_runtime_with_args(arg_specs)
+        rax_rip_count = code.count(self.MOV_RAX_RIP)
+        self.assertGreaterEqual(
+            rax_rip_count, 12,
+            f"20 float imm 中至少 12 次走 mov RAX,[RIP+disp32] 溢出路径，实际 {rax_rip_count}"
+        )
+        # 核心修复：不得再用 XMM 做溢出中转（movq RAX,XMM0 是旧中转标志）
+        self.assertNotIn(
+            self.MOVQ_RAX_XMM0, code,
+            "不得出现 movq RAX,XMM0（旧 BUG 代码：把 XMM 寄存器当作溢出中转，破坏参数装载）"
+        )
+
+
 if __name__ == '__main__':
     unittest.main()

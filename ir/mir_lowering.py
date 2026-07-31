@@ -283,6 +283,8 @@ class MIRLowering:
         self.ssa_types = {}
 
         mir_fn = MIRFunction(hir_fn.name, [], hir_fn.return_type)
+        # 动态属性：Phi 类型不一致计数器、标记位等（不修改 MIRFunction dataclass，保持跨模块兼容）
+        mir_fn.annotation = {}
 
         entry = MIRBasicBlock("bb0")
         self.current_block = entry
@@ -976,14 +978,14 @@ class MIRLowering:
                 b_j, t_j = valid_candidates[j]
                 if not _ir_types_compatible(t_i, t_j):
                     has_inconsistency = True
-                    # 第一阶段（安全观察期）：仅记录到 stderr，不中断编译
-                    # 未来（零假阳性后）：升级为 raise MIRLoweringError(...)
-                    # import sys 已移到文件头（统一风格，避免函数内延迟导入触发 unused_import 检测误报）
-                    print(
-                        f"[MIR Phi 类型不一致{(' @ ' + context_label) if context_label else ''}] "
-                        f"前驱块 {b_i} → 类型 {t_i} 与 前驱块 {b_j} → 类型 {t_j} 不兼容。"
-                        f"当前仍取第一个有效类型继续编译（观察期不中断）。",
-                        file=sys.stderr,
+                    # 观察期（cycle 61-65）已确认零假阳性，正式升级为 fail-fast
+                    # 结束 5 轮观察期（cycle 61→65，原计划 1-2 轮超期 3 轮）
+                    # 报告内容含：上下文标签 + 两个前驱块标签名 + 各自类型（便于用户定位）
+                    ctx = f" @ {context_label}" if context_label else " @ unknown_context"
+                    raise MIRLoweringError(
+                        f"Phi 类型不一致{ctx}: "
+                        f"前驱块 {b_i} (类型 {t_i}, kind={t_i.kind.name}) 与 "
+                        f"前驱块 {b_j} (类型 {t_j}, kind={t_j.kind.name}) 不兼容"
                     )
 
         # 5. 选取 phi_type：优先取第一个非 UNIT 非 TYPE_VAR 的候选；若全是 TYPE_VAR → 取第一个
@@ -1017,10 +1019,17 @@ class MIRLowering:
 
             if len(phi_sources) >= 2:
                 # 修复 P1-4：用统一的 _resolve_phi_type 替代"第一个命中即 break"
-                phi_type, _ = self._resolve_phi_type(
+                # 显式消费 has_inconsistency：写入 current_function.annotation 作为可追踪标记，
+                # 后续 emit 阶段或代码生成可读取此标记生成告警或终止（当前先保留计数）
+                phi_type, has_incon = self._resolve_phi_type(
                     phi_sources,
                     context_label=f"merge_block[{merge_block.label}]::var[{name}]"
                 )
+                if has_incon:
+                    # （注意：raise 路径下 has_incon=True 但不会执行到这里）
+                    self.current_function.annotation["phi_inconsistency_count"] = (
+                        self.current_function.annotation.get("phi_inconsistency_count", 0) + 1
+                    )
 
                 instr = MIRPhi(phi_type)
                 instr.sources = phi_sources
@@ -1093,10 +1102,15 @@ class MIRLowering:
 
             if len(phi_sources) >= 2:
                 # 修复 P1-4：用统一的 _resolve_phi_type 替代"第一个命中即 break"
-                phi_type, _ = self._resolve_phi_type(
+                # 显式消费 has_inconsistency：写入 current_function.annotation 计数器
+                phi_type, has_incon = self._resolve_phi_type(
                     phi_sources,
                     context_label=f"match_merge[{merge_block.label}]::var[{name}]"
                 )
+                if has_incon:
+                    self.current_function.annotation["phi_inconsistency_count"] = (
+                        self.current_function.annotation.get("phi_inconsistency_count", 0) + 1
+                    )
                 instr = MIRPhi(phi_type)
                 instr.sources = phi_sources
                 instr.result_name = self._new_ssa()
@@ -1552,17 +1566,25 @@ class MIRLowering:
                 # 循环中新定义的变量，入口边没有值，跳过
                 continue
 
-            # 从入口边的 SSA 类型推断 Phi 类型
-            phi_type = UNIT_TYPE
-            if pre_ssa in self.ssa_types:
-                phi_type = self.ssa_types[pre_ssa]
-
-            phi_instr = MIRPhi(phi_type)
-            # 收集所有 source：入口边 + 所有回边
+            # 收集所有 source：入口边 + 所有回边（先构建 phi_sources，再统一解析类型）
             phi_sources = [(entry_block_label, pre_ssa)]  # 入口边
             for latch_block, latch_env in latch_blocks:
                 latch_ssa = latch_env.get(var_name, pre_ssa)
                 phi_sources.append((latch_block.label, latch_ssa))
+
+            # Loop Phi 统一走 _resolve_phi_type：不再只取入口边 pre_ssa 的类型（第一个命中即 break 的旧逻辑）。
+            # 覆盖 for/while/list_comprehension 三类循环的循环变量 Phi，
+            # 若入口边类型与回边类型不兼容（如入口边 INT 回边 FLOAT）→ fail-fast 报错。
+            phi_type, has_incon = self._resolve_phi_type(
+                phi_sources,
+                context_label=f"loop_header[{header_block.label}]::var[{var_name}]"
+            )
+            if has_incon:
+                self.current_function.annotation["phi_inconsistency_count"] = (
+                    self.current_function.annotation.get("phi_inconsistency_count", 0) + 1
+                )
+
+            phi_instr = MIRPhi(phi_type)
             phi_instr.sources = phi_sources
             phi_instr.result_name = self._new_ssa()
             header_block.instructions.insert(current_offset, phi_instr)

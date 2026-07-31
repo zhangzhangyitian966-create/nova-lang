@@ -682,5 +682,74 @@ class TestLIRBuildADTVariantTag(unittest.TestCase):
                             "两者应能保存不同值")
 
 
+class MIRLoweringPhiUpgradeRaiseTest(unittest.TestCase):
+    """Cycle 66 P1 Phi 升级：stderr → raise MIRLoweringError + has_incon 消费 + Loop Phi 覆盖。
+
+    4 个用例覆盖：
+      1. If Merge Var Phi INT/FLOAT → raise（含 context_label）
+      2. Match Merge Var Phi INT/FLOAT → raise（含 context_label）
+      3. For Loop Var Phi（入口边 INT，回边 FLOAT）→ raise（含 loop context）
+      4. While Loop Var Phi（入口边 INT，回边 STR）→ raise（含 loop context）
+    """
+
+    def _lowerer_with_ssa_types(self, mapping):
+        """构造 MIRLowering 实例，填充 ssa_types + mock current_function.annotation。"""
+        from nova.ir.mir_lowering import MIRLowering
+        lowerer = MIRLowering()
+        for k, v in mapping.items():
+            lowerer.ssa_types[k] = v
+        class _MockFn:
+            pass
+        lowerer.current_function = _MockFn()
+        lowerer.current_function.annotation = {}
+        return lowerer
+
+    def test_if_merge_phi_int_float_conflict_raises_with_context(self):
+        """If merge var Phi：true 分支 INT vs false 分支 FLOAT → raise MIRLoweringError（含 context_label）"""
+        from nova.ir.mir_lowering import MIRLoweringError
+        lowerer = self._lowerer_with_ssa_types({"s1": INT_TYPE, "s2": FLOAT_TYPE})
+        phi_sources = [("bb_true", "s1"), ("bb_false", "s2")]
+        with self.assertRaises(MIRLoweringError) as ctx:
+            lowerer._resolve_phi_type(phi_sources, context_label="merge[bb3]::var[x]")
+        msg = str(ctx.exception)
+        self.assertIn("Phi 类型不一致", msg)
+        self.assertIn("@ merge[bb3]::var[x]", msg)
+        self.assertIn("bb_true", msg)
+        self.assertIn("bb_false", msg)
+        self.assertIn("INT", msg)
+        self.assertIn("FLOAT", msg)
+
+    def test_match_merge_phi_int_float_conflict_raises(self):
+        """Match merge var Phi：两个 arm 分别 INT/FLOAT → raise MIRLoweringError"""
+        from nova.ir.mir_lowering import MIRLoweringError
+        lowerer = self._lowerer_with_ssa_types({"a1": INT_TYPE, "a2": FLOAT_TYPE})
+        phi_sources = [("arm0_blk", "a1"), ("arm1_blk", "a2")]
+        with self.assertRaises(MIRLoweringError) as ctx:
+            lowerer._resolve_phi_type(phi_sources, context_label="match_merge[bb8]::var[y]")
+        msg = str(ctx.exception)
+        self.assertIn("Phi 类型不一致 @ match_merge[bb8]::var[y]", msg)
+        self.assertIn("arm0_blk", msg)
+        self.assertIn("arm1_blk", msg)
+
+    def test_for_loop_phi_int_vs_float_conflict_raises(self):
+        """For Loop Phi：入口边 INT，回边 FLOAT → raise，含 loop_header context"""
+        from nova.ir.mir_lowering import MIRLoweringError
+        lowerer = self._lowerer_with_ssa_types({"entry": INT_TYPE, "latch": FLOAT_TYPE})
+        phi_sources = [("bb0", "entry"), ("bb_body", "latch")]
+        with self.assertRaises(MIRLoweringError) as ctx:
+            lowerer._resolve_phi_type(phi_sources, context_label="loop_header[bb_hdr]::var[i]")
+        self.assertIn("loop_header[bb_hdr]::var[i]", str(ctx.exception))
+
+    def test_while_loop_phi_int_vs_str_conflict_raises(self):
+        """While Loop Phi：入口边 INT，回边 STR → raise"""
+        from nova.ir.mir_lowering import MIRLoweringError
+        STR_TYPE = STRING_TYPE  # alias，保持测试语义与任务描述一致
+        lowerer = self._lowerer_with_ssa_types({"pre_i": INT_TYPE, "latch_i": STR_TYPE})
+        phi_sources = [("bb_pre", "pre_i"), ("bb_while_body", "latch_i")]
+        with self.assertRaises(MIRLoweringError) as ctx:
+            lowerer._resolve_phi_type(phi_sources, context_label="loop_header[bb_while]::var[i]")
+        self.assertIn("STR", str(ctx.exception))
+
+
 if __name__ == "__main__":
     unittest.main()

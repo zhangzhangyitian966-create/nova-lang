@@ -214,6 +214,12 @@ class TypeVar(NovaType):
             self.name = name
         # HM generalize 需要的嵌套深度标记
         self.level = level
+        # HM generalize / instantiate 协作标记：
+        #   True  = 此 TVar 已被 generalize 标记为可泛化的（env_free 外新引入的），
+        #           instantiate 时应 fresh 成独立实例，支持多态使用；
+        #   False = 此 TVar 被外层环境约束或被 mut 绑定，保持引用共享，
+        #           instantiate 时直接返回原对象，不破坏约束传播/同变量共享引用。
+        self.is_generalized: bool = False
 
     def __eq__(self, other):
         return self is other
@@ -496,18 +502,24 @@ class TypeChecker:
                     f"{kind} 绑定 '{decl.name}' 的推断类型 {ty} 与标注类型 {annotated} 不匹配",
                     span=decl.span,
                 )
-        resolved = self._unify_and_resolve(ty)
-        # --- HM Gen(Γ, τ)：Value Restriction + 泛化 ---
+        # 先仅展开 Union-Find 替换表（不触发 TVar 泄漏栅栏）
+        subst_only = self._apply_subst(ty)
+        # --- HM Gen(Γ, τ)：Value Restriction + 泛化（打 is_generalized 标记） ---
         if mutable:
             # mut 绑定：引用不透明，绝对不泛化（Value Restriction 强制）
-            generalized = resolved
+            generalized = subst_only
         elif not self._is_syntactic_value(decl.value):
             # 非语法值：可能有副作用或引用不透明，保守不泛化
-            generalized = resolved
+            generalized = subst_only
         else:
             # 语法值（lambda/字面量/纯数据构造）：调用 Gen(Γ, τ) 泛化
-            generalized = self._generalize(resolved)
-        self.env.define(decl.name, generalized, mutable=mutable)
+            # 内部会走 _walk_type_generalize 给 env_free 外的 TVar 打 is_generalized=True
+            generalized = self._generalize(subst_only)
+        # 最后再完整解析 + TVar 泄漏栅栏：
+        #   - generalize 已打过标的可泛化 TVar → 泄漏栅栏跳过（合法泛化结果）
+        #   - 残留未打标 TVar（空集合无注解 / 参数未引用未约束 等）→ 报友好错误
+        final_resolved = self._unify_and_resolve(generalized)
+        self.env.define(decl.name, final_resolved, mutable=mutable)
 
     def _check_let_decl(self, decl):
         """检查 let 绑定声明。"""
@@ -522,18 +534,24 @@ class TypeChecker:
 
         注册函数类型（支持递归和相互递归），检查参数类型，
         并在新环境中检查函数体返回类型。
+
+        最后对完整函数类型（参数列表 + 返回）统一调用 _unify_and_resolve
+        触发 TVar 泄漏栅栏：无注解且 body 未引用的参数类型 TVar
+        （param_*/lambda_param 前缀）在此被正确捕获为「参数类型无法确定」。
         """
         # 若 check_program 预注册时未写入（如独立调用 check_decl），则补充注册
         if self.env.lookup(decl.name) is None:
             fn_type = self._infer_fn_type(decl)
             self.env.define(decl.name, fn_type)
-        # 检查函数体
+        # 检查函数体（收集参数 ptype 到列表，便于之后构建完整 fn 类型）
+        param_types: List[NovaType] = []
         child_env = self.env.child()
         for param in decl.params:
             if param.type_annotation:
                 ptype = self._from_ast_type(param.type_annotation)
             else:
                 ptype = TypeVar(f"param_{decl.name}_{param.name}")
+            param_types.append(ptype)
             child_env.define(param.name, ptype)
         old_env = self.env
         self.env = child_env
@@ -547,6 +565,89 @@ class TypeChecker:
                     f"函数 '{decl.name}' 返回类型 {body_type} 与声明的 {expected} 不匹配",
                     span=decl.span,
                 )
+            return_type = expected
+        else:
+            return_type = body_type
+
+        # 构建完整函数类型，触发 TVar 泄漏栅栏 + HM 泛化：
+        #
+        # 修复 cycle 66 两个回归冲突：
+        #   [A] test_vm_higher_order: fn apply(f, x) -> Int { f(x) }
+        #       x 类型 = T，f 类型 = FnType([T], Int)
+        #       T 在 f 的类型内部被引用 → 合法多态参数，不是泄漏
+        #   [B] test_fn_param_unreferenced: fn unused_param(x) { 42 }
+        #       x 类型 = T 只在 param_types[0] 自身顶层出现
+        #       不在 return 或其他参数内部被引用 → 悬空参数 → 应报「参数类型无法确定」
+        #
+        # 算法：先在 full_fn_type 的 param_types 顶层找出"悬空 param TVar"（只
+        #   在自身顶层出现、不被任何其他参数或返回类型的子节点引用），
+        #   然后先 _generalize（合法多态 T → is_generalized=True），
+        #   再 _unify_and_resolve 的 leaking 检测会命中"悬空 param"未泛化的。
+        full_fn_type = FnType(param_types, return_type)
+        # —— 悬空 param 检测：找出 param TypeVar 不被其他子类型引用的集合
+        def _collect_tvar_ids(typ: NovaType) -> set:
+            """收集类型树中所有 TypeVar 的 root id（duck-typing，不依赖类名）。"""
+            ids: set = set()
+            def walk(t: NovaType) -> None:
+                if isinstance(t, TypeVar):
+                    ids.add(id(self._find(t)))
+                    return
+                # FnType: param_types + return_type
+                params_list = getattr(t, "param_types", None)
+                if params_list is not None:
+                    for p in params_list:
+                        walk(p)
+                    ret_ty = getattr(t, "return_type", None)
+                    if ret_ty is not None:
+                        walk(ret_ty)
+                    return
+                # ListType: elem_type / MapType: key_type,value_type / OptionType: value_type
+                for attr in ("elem_type", "key_type", "value_type", "ok_type", "err_type"):
+                    sub = getattr(t, attr, None)
+                    if sub is not None:
+                        walk(sub)
+                # TupleType: elem_types / ADTType: type_params / 通用 params
+                for attr in ("elem_types", "type_params", "params"):
+                    subs = getattr(t, attr, None)
+                    if subs is not None:
+                        for s in subs:
+                            walk(s)
+            walk(typ)
+            return ids
+        # 除每个 param 自身顶层 TypeVar 外的子树集合 S：
+        # = {参数 j 的类型 root 不是 TypeVar → 收集其所有子树 TVar id} ∪ {return_type 所有 TVar id}
+        # 关键点：不能判断 isinstance(pt, TypeVar)，因为 TypeVar 可能已被 unify（.subst 指向其他类型）。
+        #   必须用 self._find(pt) 拿到 root 后再判断 root 是不是 TypeVar。
+        all_other_ids: set = set()
+        for j, pt in enumerate(param_types):
+            pt_root = self._find(pt)
+            if not isinstance(pt_root, TypeVar):
+                # 参数 j 的类型是具体复合类型（FnType/ListType/...），它内部出现的 TVar 作为
+                #   "被其他参数引用"的证据 → 加入 all_other_ids
+                all_other_ids |= _collect_tvar_ids(pt_root)
+        all_other_ids |= _collect_tvar_ids(self._find(return_type))
+        dangling_param_ids: set = set()
+        for i, pt in enumerate(param_types):
+            pt_root = self._find(pt)
+            if isinstance(pt_root, TypeVar):
+                root_id = id(pt_root)
+                # 自身是 TVar，检查是否只在自身顶层出现（不被其他参数/返回类型引用）
+                if root_id not in all_other_ids:
+                    dangling_param_ids.add(root_id)
+        # 先泛化（合法多态 TVar），悬空 param TVar 因未被任何复合类型包裹
+        #   即使在 _generalize 中被 generalise，在 leaking 检测中
+        #   也能通过前缀匹配（param_*）报出友好错误（见 _unify_and_resolve L2398）。
+        # 然而为了避免 generalize 对悬空 param 的副作用，这里对 dangling param
+        #   强制不 generalise（让 leaking 检测一定命中）：泛化后恢复其 is_generalized=False。
+        generalized_fn_type = self._generalize(full_fn_type)
+        # —— 对悬空 param 撤销 generalize（保证 leaking 检测命中）
+        def _restore_dangling(typ: NovaType) -> None:
+            if isinstance(typ, TypeVar):
+                if id(self._find(typ)) in dangling_param_ids:
+                    self._find(typ).is_generalized = False
+        for pt in generalized_fn_type.param_types:
+            _restore_dangling(pt)
+        self._unify_and_resolve(generalized_fn_type)
 
     def _check_type_decl(self, decl):
         """检查 ADT 类型定义声明。
@@ -893,32 +994,23 @@ class TypeChecker:
     # ------------------------------------------------------------------
 
     def _check_let_binding(self, expr) -> NovaType:
-        """检查 let 绑定，验证值类型与注解一致性，绑定到环境。
+        """检查 let 绑定（语句级 / 表达式级）。
 
-        若有类型注解，推断类型必须与注解兼容。返回 UNIT_T。
+        直接复用 _check_binding_decl 的 Value Restriction + generalize 逻辑：
+        mut 绑定绝对不泛化 / 非语法值保守不泛化 / 语法值调用 Gen(Γ,τ) 泛化。
+        保证顶层声明级 let（_check_let_decl）与语句级 let（_check_let_binding）
+        的泛化策略完全一致，避免函数体内 let-polymorphism 失效的长尾 bug。
         """
-        val_ty = self.check_expr(expr.value)
-        if expr.type_annotation:
-            annotated = self._from_ast_type(expr.type_annotation)
-            if not self._unify_types(val_ty, annotated):
-                self._error(
-                    f"let 绑定类型不匹配：推断为 {val_ty}，标注为 {annotated}",
-                    expr=expr,
-                )
-        self.env.define(expr.name, self._unify_and_resolve(val_ty), mutable=False)
+        self._check_binding_decl(expr, mutable=False)
         return UNIT_T
 
     def _check_mut_binding(self, expr) -> NovaType:
-        """检查 mut 绑定表达式。若有类型注解，推断类型必须与注解兼容。返回 UNIT_T。"""
-        val_ty = self.check_expr(expr.value)
-        if expr.type_annotation:
-            annotated = self._from_ast_type(expr.type_annotation)
-            if not self._unify_types(val_ty, annotated):
-                self._error(
-                    f"mut 绑定类型不匹配：推断为 {val_ty}，标注为 {annotated}",
-                    expr=expr,
-                )
-        self.env.define(expr.name, self._unify_and_resolve(val_ty), mutable=True)
+        """检查 mut 绑定（语句级 / 表达式级）。
+
+        直接复用 _check_binding_decl 的逻辑：mut 绑定绝对不泛化（Value
+        Restriction 强制），保证与声明级 _check_mut_decl 策略一致。
+        """
+        self._check_binding_decl(expr, mutable=True)
         return UNIT_T
 
     def _check_assignment(self, expr) -> NovaType:
@@ -2105,6 +2197,11 @@ class TypeChecker:
 
         def instantiate_rec(t: "NovaType") -> "NovaType":
             if isinstance(t, TypeVar):
+                # is_generalized 守卫：仅 generalize 打标过的 TVar 做 fresh 实例化；
+                # 未打标的（被外层约束或 mut 绑定）保持共享引用，不破坏：
+                #   (a) 内外层约束传播一致性；(b) mut 同变量多次读取 TVar 共享。
+                if not t.is_generalized:
+                    return t
                 if id(t) not in mapping:
                     mapping[id(t)] = TypeVar(f"inst_{t.name}")
                 return mapping[id(t)]
@@ -2213,6 +2310,13 @@ class TypeChecker:
         if isinstance(ty, TypeVar):
             root = self._find(ty)
             if isinstance(root, TypeVar):
+                # HM generalize / instantiate 协作打标：
+                #   root 在 env_free 内 → 被外层约束 → 不打标，保持共享引用，
+                #     instantiate 时直接返回，不破坏外层/内层约束传播；
+                #   root 不在 env_free 内 → 当前 let 新引入的 → 打标，
+                #     instantiate 时 fresh，支持多态独立实例化。
+                if id(root) not in env_free:
+                    root.is_generalized = True
                 # 返回 root（而非 ty）保证 Union-Find 展开后一致
                 return root
             # root 已是具体类型，递归继续 walk
@@ -2283,9 +2387,100 @@ class TypeChecker:
         b_resolved = self._apply_subst(b)
         return self._unify(a_resolved, b_resolved)
 
+    def _detect_leaking_tvars(self, ty: "NovaType") -> List["TypeVar"]:
+        """检测解析后类型中仍残留的未绑定 TypeVar（TypeVar 泄漏栅栏）。
+
+        合一解析后，某些类型仍可能含有未被约束的残留 TypeVar：
+          - 空 List [] / 空 Map {} 无注解时，元素/键值类型无法推断；
+          - 函数声明/ Lambda 中参数无注解且 body 不引用此参数，
+            参数类型永远无法合一；
+          - 返回类型无法确定的其他边界情况。
+
+        收集规则：
+          - 递归遍历类型结构，对每个 TypeVar 执行 _find() 后若 root 仍为
+            TypeVar 且 root.is_generalized == False（未被 generalize 打标），
+            即为泄漏；
+          - is_generalized=True 的 TVar（合法 let-polymorphism 泛化结果）
+            不算泄漏，不在此列；
+          - ERROR_T（ErrorExpr 哨兵）直接跳过，不误报为泄漏。
+
+        Returns:
+            泄漏的 root TypeVar 列表（去重，按 id 排序以保证错误消息稳定）。
+        """
+        seen: Set[int] = set()
+        result: List["TypeVar"] = []
+
+        def rec(t: "NovaType") -> None:
+            nonlocal result
+            if t is ERROR_T:
+                return  # ErrorExpr 哨兵，不是真实类型泄漏
+            if isinstance(t, TypeVar):
+                root = self._find(t)
+                if isinstance(root, TypeVar):
+                    if not root.is_generalized and id(root) not in seen:
+                        seen.add(id(root))
+                        result.append(root)
+                return  # root 已为具体类型，无需再递归
+            if isinstance(t, ListType):
+                rec(t.elem_type)
+            elif isinstance(t, MapType):
+                rec(t.key_type)
+                rec(t.value_type)
+            elif isinstance(t, TupleType):
+                for e in t.elements:
+                    rec(e)
+            elif isinstance(t, FnType):
+                for p in t.param_types:
+                    rec(p)
+                rec(t.return_type)
+            elif isinstance(t, ADTType):
+                for p in t.type_params:
+                    rec(p)
+            # PrimType 无可递归的子类型
+
+        rec(ty)
+        result.sort(key=lambda tv: tv.name)
+        return result
+
     def _unify_and_resolve(self, ty: NovaType) -> NovaType:
-        """合一后解析类型：应用替换表，获得最终的完全展开类型。"""
-        return self._apply_subst(ty)
+        """合一后解析类型：应用替换表 + TypeVar 泄漏栅栏。
+
+        对解析后仍残留的未绑定 TypeVar（非 generalize 结果）生成
+        友好的 TypeCheckError，帮助用户定位需要加类型注解的位置。
+        ERROR_T 哨兵在此被正确跳过，不触发次生泄漏误报。
+        """
+        resolved = self._apply_subst(ty)
+        leaking = self._detect_leaking_tvars(resolved)
+        if leaking:
+            for tv in leaking:
+                name = tv.name
+                # 按 TVar 命名前缀分发 3 类友好错误：
+                #   空集合推断（来自 _check_list_expr / _check_map_expr）
+                if name.startswith("unknown_list_elem"):
+                    self._error(
+                        "空列表无法推断元素类型，请添加类型注解，例如：xs: List[Int] = []"
+                    )
+                elif name.startswith("unknown_map_key") or name.startswith(
+                    "unknown_map_value"
+                ):
+                    self._error(
+                        "空映射无法推断键/值类型，请添加类型注解，例如：m: Map[String,Int] = {}"
+                    )
+                # 参数类型未确定（来自 _check_fn_decl / _check_lambda param 无注解且 body 不引用）
+                elif name.startswith("param_") or name.startswith("lambda_param"):
+                    self._error(
+                        "参数类型无法确定，请为参数添加类型注解"
+                    )
+                # 返回类型/其他未命名 TVar
+                elif name.startswith("ret_"):
+                    self._error(
+                        "返回类型无法确定，请为函数或绑定添加返回类型注解"
+                    )
+                else:
+                    self._error(
+                        "类型推断存在歧义，建议显式添加类型注解"
+                    )
+        return resolved
 
 # ============================================================
 # 类型合一调度表
