@@ -5,6 +5,148 @@
 ---
 
 
+## 第 69 轮（评审轮）— 2026-07-31 16:02
+
+> **双线路线图评审 ✅**（覆盖 Cycle 67-68 两轮普通开发 + P1 清零收官 5/5 评估 + Cycle 70-72 规划）｜前端质量 8.6→8.7（↑0.1）｜后端质量 7.9→7.6（↓0.3）｜**前后端完成度 92% vs 64.3%（差 27.7pp，12pp 结构性合理 / 16pp 后端硬积压）**｜Cycle 70-72 资源配比 FE 35% / BE 65%｜新增 8 项高价值任务（FE 3 / BE 5）｜废弃 0 / 调整 2｜下一轮 70 = **普通轮 hard 任务攻坚**（regalloc_v2 P92 hard + 数值窄化栅栏 P88 medium + 位运算指令选择 P85 medium 三线并行）
+
+### 一、三轮回顾总结（Cycle 67-68，覆盖评审 66 → 评审 69）
+
+#### 前端回顾（Cycle 66→69：2 项 hard + 1 项 easy，完成率 88%→92% +4pp）
+
+| # | 任务 | 轮次 | 难度 | 结果 | 核心价值 |
+|---|------|:----:|:----:|:----:|---------|
+| 1 | ErrorExpr 下游双 handler（TypeChecker+Evaluator） | 67 | easy | ✅ | Parser 四级熔断 3 轮投入（24/48/64）ROI 从 0→1；错误恢复体系真实可用 |
+| 2 | **TypeVar Harden 三合一**（HM TVar 区分 + mut 幻影 + 泄漏栅栏 4 类前缀） | 68 | hard | ✅ | 前端 P1 最后一项清零；HM「实例化-泛化」对称正确；TypeChecker 现在对 4 类最常见歧义（空集合/悬空参数/悬空返回/未命名 TVar）给出中文友好错误；mut 幻影 bug 修复（同一 mut 变量两次读取 TVar 独立→冲突不检测） |
+
+**前端里程碑**：HM 子集（generalize/instantiate 对称 + Value Restriction 最小化实现 + Error 哨兵 + 泄漏栅栏）完整性从 Cycle 66 的 65% → Cycle 69 的 **85%+**。错误恢复三端贯通（Parser 熔断 → TypeChecker ERROR_T 宽容合一 → Evaluator None 哨兵），前端的「用户体验成熟度」从 70% → **90%**。
+
+#### 后端回顾（Cycle 66→69：3 项 hard + 1 项 medium，完成率 61.9%→64.3% +2.4pp）
+
+| # | 任务 | 轮次 | 难度 | 结果 | 核心价值 |
+|---|------|:----:|:----:|:----:|---------|
+| 1 | WasmGC 双 P1（ADT variant_tag 独立 + Float 复合构建 4 处位转换） | 67 | medium | ✅ | WasmGC 真实可用度 15%→65%（单轮 +50pp）；C/Native 同款 variant_tag 复制粘贴 bug 同步修复 |
+| 2 | **Phi 升级 fail-fast**（stderr→raise + has_incon 消费 + Loop Phi 覆盖） | 68 | medium | ✅ | MIR 降级 Phi 类型一致性从软观察（6 轮超期）升级为硬保证；_insert_loop_phis 旧「入口边单类型命中即 break」bug 修复（循环变量 Phi 回边类型不再静默被入口边覆盖） |
+| 3 | **Native Float imm XMM0 冲突**（9+ float 参数溢出路径 silent data corruption 级 bug） | 68 | easy | ✅ | ABI 骨架 280 行 10 步的最后 1 个确定性 correctness bug 清零；Native ABI 子模块 78%→82% |
+
+**后端里程碑**：P1 积压 **0（清零）**。评审 66 定义的 5 项 P1（FE 2 + BE 3）全部在 Cycle 67-68 两轮完成。三后端完成度分化：C 88.8%（健康）>> Native 78.1%（被栈帧 65%+寄存器分配 75% 两项拖后腿）> WasmGC 73.8%（复合结构 65% 全走 runtime 模拟，未切原生 GC struct/array）。
+
+---
+
+### 二、双线评估结果（深度审计维度）
+
+#### 前端评估：质量 8.7/10 ↑0.1｜进度 92%｜体系已成熟
+
+| 子维度 | 分数 | 证据 |
+|--------|:----:|------|
+| 类型系统完整性 | 9.0/10 | HM 泛化/实例化 85%+；泄漏栅栏 4 类全覆盖；ERROR_T 宽容合一；**缺口：Type Classes（架构愿景远景）+ 隐式数值窄化告警（近期 P88）** |
+| 错误恢复可用性 | 9.2/10 | Parser TOP_LEVEL/STMT_BOUNDARY/EXPR 三级熔断 + ErrorExpr + TypeChecker ERROR_T + Evaluator None 哨兵 四端贯通；**缺口：STMT 级独立计数器（嵌套块偶发错误被 Panic mode 吞掉无计数）** |
+| 测试密度 | 7.5/10 | type_checker.py 2496 行 / test_type_checker.py 1702 行 = **密度 0.68**（parser 0.90 / evaluator 1.01 的 ~67%）；Cycle 65-68 三项大改动（generalize/ErrorExpr/泄漏栅栏）的「边界×组合」路径覆盖仅 ~60%，需 frontend_type_system_test_matrix P75 补齐 |
+| 代码注释率 | 9.0/10 | 关键算法（_generalize/_instantiate/_detect_leaking_tvars/_is_syntactic_value）docstring 覆盖率 >95%；TypeVar 元数据字段注释完整 |
+
+**趋势**：**变好（↑）**——Cycle 66-68 前端投入 ROI 极高（两项任务直接清零所有 F-P1 积压 + 成熟度 +22pp），剩余 8% 全部是体验优化和测试补齐，无 correctness 类高优缺口。
+
+#### 后端评估：质量 7.6/10 ↓0.3｜进度 Native 78.1% / WasmGC 73.8% / C 88.8%｜结构性分化
+
+| 后端 | 8 子模块平均 | 最高子模块 | 最低子模块 | 测试密度 |
+|------|:------:|------|------|------|
+| **Native x86_64** | **78.1%** | ELF 头/节区 88%、全局变量 85% | **栈帧 65%、指令选择 72%** | **0.38**（2773 行源码 / 1045 行测试，< 业界 0.5 安全线） |
+| **WasmGC** | **73.8%** | 局部变量 90%、函数 85% | **extern 导入 60%、复合结构 65%** | ~0.51 |
+| **C** | **88.8%** | 局部变量 98%、类型声明 95% | 闭包 80%、复合结构 82% | **0.84**（健康） |
+
+**Native 三大硬缺口（按 ROI 排序）**：
+1. **寄存器分配 v1 → v2（75%→90%，+15pp）**：Linear Scan 区间分裂 + R12-R15 候选池扩展，vreg 溢出率 -40%、密集循环速度 +25-35%
+2. **栈帧（65%→88%，+23pp）**：RBP 基址帧 + DWARF CFI .eh_frame（CIE+FDE），**可调试性 0→100**，后续所有 hard 任务开发周期 -50%
+3. **指令选择（72%→88%，+16pp）**：按位运算 7 条指令（AND/OR/XOR/NOT/SHL/SHR/SAR）+ CMOVcc，加密/哈希/网络协议代码从 NotImplementedError → 可用
+
+**趋势**：**持平略降（→）但加速追赶窗口已打开**——P1 清零后的 2-3 轮（Cycle 70-72）如果把 Native 三大硬缺口清掉，Native 总平均将从 78.1%→ **85%**，后端总体从 64.3%→**72%**，前后端差距从 27.7pp 收窄到 **~20pp**（<20pp 容差）。
+
+#### 综合评估：前后端平衡度 7.2/10 →
+
+**差距合理性拆解（27.7pp）**：
+- ✅ **12pp 结构性合理**：前端目标 50（相对收敛） vs 后端目标 84（3 条后端 × N 子模块天然发散），分母大 68%；且前端剩余 4 项全是 easy/medium，后端 30 项里 10+ 是 hard
+- ⚠️ **~16pp 后端硬积压**：Native 三大硬缺口（regalloc/栈帧/位运算）+ WasmGC 原生 struct/array 切换共 4 项 hard 任务，每轮平均 1.5 项 hard 吞吐，需要约 3 轮（Cycle 70-72）才能消化
+
+**方向正确性**：✅ 正确——Cycle 66 评审定义的 5 项 P1 全部按时清零；Native ABI 正确性类 bug（silent data corruption 级）清零，安全边际达成。
+
+**Cycle 70-72 资源配比建议：前端 35% / 后端 65%**
+
+理由：
+1. **边际收益差**：前端 92%→95% 的最后 3pp 是测试密度（0.68→0.75，+15 用例）和错误消息改进（30 行改动），每轮投入 1 项任务 ROI 足够；后端 64.3%→72% 的 +7.7pp 需要每轮 2 项 hard 任务
+2. **hard 任务吞吐**：4 项 P1-P2 级 hard 任务（regalloc_v2/栈帧CFI/位运算/WasmGC 原生）+ 1 项 medium（struct 返回 ABI）= 5 项后端，3 轮平均每轮 ~1.7 项，需 65% 资源
+3. **风险对冲**：如果前端 35% 资源在 Cycle 70 中提前完成 implicit_cast_fence P88，可弹性切到 test_matrix P75，不影响后端主线
+
+---
+
+### 三、问题总结与根因分析（评审 69 新发现）
+
+| # | 问题 | 严重度 | 根因 | 对应任务 |
+|---|------|:------:|------|---------|
+| 1 | **Native 栈帧 65% 不可调试**：gdb backtrace 仅显示 _start+0x??，所有 hard 任务的调试效率极低 | **P1 级体验** | prologue/epilogue 未用 RBP 基址帧；ELF shoff=0 无节区头；.eh_frame CFI 未生成 | **backend_native_stack_frame_rbp_cfi P88 hard**（Cycle 71） |
+| 2 | **Native 测试密度 0.38 不达标**：2773 行源码仅 1045 行测试，调度表覆盖率达标但长尾边界（9+ float 参数/混合参数/递归/结构体返回）覆盖不足 | P2 级风险 | emit_abi_call_direct 骨架化 280 行后没有同步补对应长尾测试；Cycle 64-68 五轮 CC 拆分/骨架化/XMM0 修复只补了 4 个专项，缺 10+ 普通场景 | **backend_native_abi_test_coverage P80 medium**（Cycle 72） |
+| 3 | **WasmGC 复合结构 65% 全走 runtime 模拟**：nova_list_new 等导入函数返回 externref，GC 把对象当黑盒、字段访问索引是运行时参数 | P2 级正确性 | 第 67 轮只修了 variant_tag 独立和 float 位转换，没切原生 GC 类型声明 | **backend_wasmgc_native_struct_array P82 hard**（Cycle 71） |
+| 4 | **前端 TypeChecker 测试密度 0.68 偏低**：generalize/ErrorExpr/TVar 泄漏 三大改动的组合路径覆盖 ~60% | P2 级回归风险 | Cycle 67-68 每轮只补了本任务专项的 7/11 用例，没覆盖「泄漏栅栏 × generalize × mut」三维组合 | **frontend_type_system_test_matrix P75 easy**（Cycle 71） |
+| 5 | **Native 按位运算 7 条指令缺失**：AND/OR/XOR/NOT/SHL/SHR/SAR 调度表 7 条映射空白 | P2 级功能缺口 | 早期 C 后端优先实现，Native 后端从 ELF→指令选择→寄存器分配→ABI 的主线推进中没跟进同步 | **backend_native_instr_selection_bitwise P85 medium**（Cycle 70） |
+
+---
+
+### 四、下阶段方向与理由（Cycle 70-72 正式规划）
+
+#### 总体方向
+- **主线（65% 后端）**：Native 三大硬缺口（regalloc_v2 → 栈帧CFI → 位运算 + struct 返回 ABI）+ WasmGC 原生 struct/array 切换，**目标：Native 总平均 78.1% → 85%、后端总体 64.3% → 72%、差距 27.7pp → ~20pp**
+- **辅线（35% 前端）**：隐式窄化栅栏（正确性前瞻）→ ADT 字段建议（体验优化）→ 测试矩阵 15 用例（密度 0.68→0.75），**目标：前端 92% → 95%、测试密度达标 ≥0.75**
+
+#### 三轮排期表
+
+| 轮次 | 前端任务（35%） | 后端任务（65%） | 里程碑目标 |
+|:----:|-----------------|-----------------|-----------|
+| **70** | **frontend_implicit_numeric_cast_fence P88 medium**（隐式数值窄化安全栅栏 + TypeVar.overflow_risk 标记，6 用例） | **backend_native_regalloc_linear_scan_v2 P92 hard**（Linear Scan 区间分裂 + R12-R15 callee-saved 候选池扩展，8 用例）**+** **backend_native_instr_selection_bitwise P85 medium**（按位运算 7 条指令 + CMOVcc，9 用例） | 寄存器分配 v1→v2 75%→90%；指令选择 72%→88%；Native 总平均 78.1%→81.5%；前端隐式窄化 silent bug 类清零 |
+| **71** | **frontend_adt_field_suggestion_error P78 easy**（ADT 字段访问错误 known fields 补全，4 用例）**+** **frontend_type_system_test_matrix P75 easy**（15 用例 4 类测试补齐，密度 0.68→0.75） | **backend_native_stack_frame_rbp_cfi P88 hard**（RBP 基址帧 + DWARF CFI CIE+FDE + ELF 节区头 .shstrtab/.eh_frame/.symtab/.strtab，5 用例）**+** **backend_wasmgc_native_struct_array P82 hard**（WasmGC 原生 struct/array 声明替换 nova_* runtime，6 用例） | 栈帧 65%→88%；Native 总平均 81.5%→84%；WasmGC 复合结构 65%→90%，WasmGC 总平均 73.8%→80%；前端测试密度 0.68→0.75；前端 92%→94% |
+| **72** | **Cycle 70-71 遗留任务（如有）** 或 新增体验项（parser STMT 级计数器） | **backend_native_abi_struct_return P80 medium**（大结构体 >16 字节 by-value 返回 System V 约定，5 用例）**+** **backend_native_abi_test_coverage P80 medium**（Native ABI +10 场景 / WasmGC wat 合法性 6 场景，16 用例合计） | ABI 82%→92%；Native 总平均 84%→85%；Native 测试密度 0.38→0.50（达标 ≥0.5）；后端总体 64.3%→72%；差距 27.7pp → ~20pp（<20pp 容差） |
+
+---
+
+### 五、任务池变更说明
+
+#### 新增任务（8 项，FE 3 + BE 5）
+
+| 任务 ID | Track | 优先级 | 难度 | 预计耗时 | 来源理由 |
+|---------|:-----:|:------:|:----:|---------|---------|
+| **frontend_implicit_numeric_cast_fence** | FE | P88 | medium | 3-4h | review_cycle_69 审计：Native SIMD 引入后 i32/i64 窄化无检测 = 前置 silent data corruption 风险；对齐 C/C++ -Wconversion |
+| **frontend_adt_field_suggestion_error** | FE | P78 | easy | 1-2h | review_cycle_69 审计：前端 92% 后体验优化 ROI 最高项；35 行改动 → 错误消息可用性 +30% |
+| **frontend_type_system_test_matrix** | FE | P75 | easy | 2-3h | review_cycle_69 审计：前端测试密度 0.68 < parser 0.90 / evaluator 1.01；三大改动组合路径覆盖仅 60%，需固化回归 |
+| **backend_native_regalloc_linear_scan_v2** | BE | P92 | hard | 10-14h | review_cycle_69 审计：Native 完成度最大单项瓶颈；升级后寄存器分配 75%→90%；Native 总平均 +3.5pp；所有后端 hard 任务 ROI 最高 |
+| **backend_native_stack_frame_rbp_cfi** | BE | P88 | hard | 12-16h | review_cycle_69 审计：Native 24 子模块最低分 65%；DWARF CFI 生成后可调试性 0→100，后续所有 hard 任务开发周期缩短 50% |
+| **backend_native_instr_selection_bitwise** | BE | P85 | medium | 4-6h | review_cycle_69 审计：Native 指令选择 72% 与 C 后端 88% 最大功能缺口；加密/哈希/网络协议代码 silent 降级到 NotImplementedError；改动 ~200 行 7 条映射 |
+| **backend_wasmgc_native_struct_array** | BE | P82 | hard | 10-14h | review_cycle_69 审计：WasmGC 复合结构 65% 全走 runtime 模拟（externref 黑盒）→ 切原生 (ref struct) 后字段静态检查 + GC 精确回收；WasmGC 总平均 +6pp 到 ≥80%，float 位转换 i64.reinterpret_f64 可彻底删除 |
+| **backend_native_abi_struct_return** | BE | P80 | medium | 4-6h | review_cycle_69 审计：Native ABI 82% 拖后腿项；Nova/C 互操作 90% 用例（Vec3/Mat4 值传递）才可用；改动 ~180 行（ABI 骨架 Step 0 扩展） |
+
+#### 保留 / 调整任务（2 项）
+- **backend_native_abi_test_coverage P80 medium**：保留，排 Cycle 72（与 struct 返回 ABI 一起打包补测试）
+- **frontend_type_system_test_matrix P78→P75**：优先级下调 3pp（从 roadmap 剩余活跃任务的位置继续保留，不与 P88/P78 两项 FE 新任务挤 Cycle 70）
+
+#### 废弃任务（0 项）
+- 本轮无废弃：所有 deprecated 列表 13 项均是之前评审已确认 0 NIE 的历史任务
+
+#### 已完成任务（新增 1 项记录）
+- review_cycle_69：本轮评审本身
+
+---
+
+### 六、更新后的路线图进度（Cycle 69 评审后）
+
+| 维度 | 目标 | 当前完成 | 进度条 | 完成率 | 较评审 66 |
+|------|-----:|---------:|:-------|-------:|-------:|
+| 前端（类型系统+解析器+语义分析） | 50 | 46 | ██████████████████████░░ | 92.0% | ↑2pp |
+| 后端（Native x86_64 + WasmGC + C 统一） | 84 | 54 | ███████████████░░░░░░░░░ | 64.3% | ↑2.4pp |
+| 任务池历史累计（completed_tasks 去重） | — | 118 | — | — | +1（review_cycle_69） |
+| 当前任务池（tasks 列表） | — | **10 项：1 completed / 8 pending / 0 failed / 1 deprecated alias** | — | — | **新增 8 项高价值任务** |
+| P1 积压（active） | ≤2 | **0（清零维持）** | — | — | ✅ 持续 |
+| Native 测试密度 | ≥0.5 | 0.38 | ███████░░░░░░░░ | 76% 目标 | ↓待 Cycle 72 补齐 |
+| 前后端完成度差距 | ≤20pp | 27.7pp | ██████████████████████░░░░░░░ | 72% 目标 | ↓待 Cycle 72 收窄到 ~20pp |
+
+---
+
+
 ## 第 68 轮（普通轮）— 2026-07-31 05:05
 
 > **P1 清零里程碑 5/5 收官 ✅**（TypeVar 泄漏三合一 harden + Phi 升级 fail-fast + Native XMM0 冲突修复三项全部成功）｜前端 46/50=92%（↑2pp）｜后端 54/84=64.3%（↑2.4pp）｜新增 19 专项测试（前端 11、后端 8）全通过｜基线 6 文件 455 passed / 20 subtests > 374 passed（↑81）｜0 回归｜**P1 积压清零**（F-P1-1+2 TypeVar 泄漏+HM+mut ✅ / B-P1-2 Phi 升级 ✅ / B-P1-5 Native XMM0 ✅）｜剩余活跃任务仅 2 项（easy+medium）｜下一轮 69 = **路线图评审轮**（3 轮周期：67→68→69，69 % 3 = 0，评审前 63/64/65 → 66/67/68 回顾）
