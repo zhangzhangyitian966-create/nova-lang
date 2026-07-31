@@ -72,6 +72,9 @@ class LIRLowering:
         self.ssa_types = {}  # SSA 名 -> 类型映射
         self.loc_counter = 0
         self.functions = {}
+        # ADT 注册表（第 66 轮 P1 修复：variant_tag 与 type_tag 独立计算）
+        self._adt_type_ids: Dict[str, int] = {}  # type_name -> type_id (顺序自增)
+        self._adt_variant_index: Dict[str, Dict[str, int]] = {}  # type_name -> {variant_name -> variant_tag}
         self._instr_dispatch = self._build_instr_dispatch_table()
 
     def _build_instr_dispatch_table(self):
@@ -761,15 +764,33 @@ class LIRLowering:
         """降级 ADT 构建
 
         将所有字段通过 src_locs 传递，后端负责循环填充。
-        type_name 和 variant_name 作为附加信息通过 type_tag 暂存
-        （后端可通过类型表查询）。
+        type_tag/variant_tag 独立计算（第 66 轮 P1 修复：variant_tag 不再与 type_tag 同值）。
 
         60-B2 修复：fields SSA 位置 + dst 严格化。
         """
+        # ---- 独立计算 type_tag 和 variant_tag（第 66 轮 P1-ADT 修复）----
+        type_name = instr.type_name or "<anonymous_adt>"
+        variant_name = instr.variant_name or "<default>"
+
+        # type_tag：按首次出现顺序自增（不同 ADT 类型取不同 type_id）
+        if type_name not in self._adt_type_ids:
+            self._adt_type_ids[type_name] = len(self._adt_type_ids)
+        type_tag = self._adt_type_ids[type_name]
+
+        # variant_tag：按 ADT 内变体首次出现顺序自增（同一 ADT 的不同变体取不同索引）
+        if type_name not in self._adt_variant_index:
+            self._adt_variant_index[type_name] = {}
+        variant_registry = self._adt_variant_index[type_name]
+        if variant_name not in variant_registry:
+            variant_registry[variant_name] = len(variant_registry)
+        variant_tag = variant_registry[variant_name]
+
         lir = LIRBuildADT()
         lir.field_count = len(instr.fields)
-        lir.type_name = instr.type_name
-        lir.variant_name = instr.variant_name
+        lir.type_name = type_name
+        lir.variant_name = variant_name
+        lir.type_tag = type_tag
+        lir.variant_tag = variant_tag
         # 传递所有字段的位置和类型
         for field_ssa in instr.fields:
             field_loc = self._require_ssa_loc(field_ssa, bb_label, "LIRBuildADT.field")

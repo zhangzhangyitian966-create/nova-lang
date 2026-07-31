@@ -290,6 +290,7 @@ class LIRBuildADT(LIRInstr):
     type_name: str = ""
     variant_name: str = ""
     type_tag: int = 0
+    variant_tag: int = 0  # 变体在 ADT 内的索引（第 66 轮 P1 修复：与 type_tag 独立）
     field_count: int = 0
 
 

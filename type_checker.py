@@ -58,6 +58,7 @@ from .ast_nodes import (
     UnaryOp,
     UnitLiteral,
     WhileExpr,
+    ErrorExpr,
 )
 from .errors import TypeCheckError
 
@@ -283,6 +284,8 @@ STRING_T = PrimType("String")
 BOOL_T = PrimType("Bool")
 CHAR_T = PrimType("Char")
 UNIT_T = PrimType("Unit")
+# 错误哨兵类型：ErrorExpr 检查结果，合一中与任何类型兼容（宽容策略）
+ERROR_T = PrimType("__Error__")
 
 
 class TypeChecker:
@@ -627,7 +630,15 @@ class TypeChecker:
             FieldAccess: self._check_field_access,
             TryExpr: self._check_try_expr,
             ListComprehension: self._check_list_comprehension,
+            # 错误占位节点（Parser 四级熔断产出，下游优雅降级）
+            ErrorExpr: self._check_error_expr,
         }
+
+    def _check_error_expr(self, expr) -> NovaType:
+        """ErrorExpr 表示上游已发生 ParseError，类型检查阶段不抛次生错。
+        返回 ERROR_T 哨兵类型，合一时兼容任何类型，不破坏后续分析。"""
+        # 不再次报错：错误已在 parser 侧记录，此处仅优雅降级
+        return ERROR_T
 
     def _build_pattern_checkers(self):
         """构建模式类型检查调度表
@@ -1969,6 +1980,10 @@ class TypeChecker:
         """
         a_root = self._find(a) if isinstance(a, TypeVar) else a
         b_root = self._find(b) if isinstance(b, TypeVar) else b
+
+        # 情况 0：ERROR_T 宽容合一（ErrorExpr 下游产物，与任何类型兼容）
+        if a_root is ERROR_T or b_root is ERROR_T:
+            return True
 
         # 情况 1：两侧都是未绑定的 TypeVar
         if isinstance(a_root, TypeVar) and isinstance(b_root, TypeVar):

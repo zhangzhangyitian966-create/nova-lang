@@ -10,6 +10,7 @@ from nova.ast_nodes import (
     BinaryOp,
     BoolLiteral,
     CharLiteral,
+    ErrorExpr,
     FloatLiteral,
     Identifier,
     IfExpr,
@@ -30,10 +31,12 @@ from nova.ast_nodes import (
     StringLiteral,
     UnitLiteral,
 )
+from nova.errors import ParseError
 from nova.type_checker import (
     ADTType,
     BOOL_T,
     CHAR_T,
+    ERROR_T,
     FLOAT_T,
     FnType,
     INT_T,
@@ -1399,6 +1402,87 @@ class TestTypeCheckErrorLocation(unittest.TestCase):
         self.assertGreaterEqual(err.line, 2,
                                 f"期望报错在第2行（pair 调用行），实际 line={err.line}")
         self.assertGreaterEqual(err.column, 1)
+
+
+# ====================================================================
+# ErrorExpr 下游双缺失修复验证（frontend_fix_error_expr_downstream）
+# 对应 P1 归零风险：Parser 四级熔断产出 ErrorExpr 后下游崩溃
+# ====================================================================
+
+
+class TestErrorExprDownstream(unittest.TestCase):
+    """ErrorExpr 在 TypeChecker/Evaluator 下游的优雅降级验证。"""
+
+    def setUp(self):
+        self.tc = TypeChecker()
+
+    # ---------- TypeChecker 侧：ErrorExpr → ERROR_T，不抛未知类型错 ----------
+
+    def test_error_expr_check_returns_error_t(self):
+        """直接构造 ErrorExpr 传入 check_expr，应返回 ERROR_T 单例、不抛异常"""
+        fake_err = ParseError("模拟解析错误", line=2, column=5, source="")
+        expr = ErrorExpr(error=fake_err, span=None)
+        # 不应抛 "未知的表达式类型" 错误
+        result = self.tc.check_expr(expr)
+        self.assertIs(result, ERROR_T,
+                      f"ErrorExpr 检查结果应为 ERROR_T 单例，实际: {result!r}")
+
+    def test_error_t_is_prim_type_error(self):
+        """ERROR_T 单例的 name 应为 '__Error__'（与其他 PrimType 区分）"""
+        self.assertEqual(ERROR_T.name, "__Error__")
+        self.assertIsNot(ERROR_T, INT_T)
+        self.assertIsNot(ERROR_T, UNIT_T)
+
+    def test_error_t_unify_tolerant_with_any(self):
+        """ERROR_T 应与任何类型合一成功（宽容策略，不触发次生类型错误）"""
+        # ERROR_T <-> PrimType
+        self.assertTrue(self.tc._unify_types(ERROR_T, INT_T),
+                        "ERROR_T 应与 Int 合一通过")
+        self.assertTrue(self.tc._unify_types(FLOAT_T, ERROR_T),
+                        "Float 应与 ERROR_T 合一通过（反向）")
+        # ERROR_T <-> 复合类型
+        self.assertTrue(self.tc._unify_types(ERROR_T, ListType(INT_T)),
+                        "ERROR_T 应与 List[Int] 合一通过")
+        self.assertTrue(self.tc._unify_types(TupleType([INT_T, STRING_T]), ERROR_T),
+                        "Tuple 应与 ERROR_T 合一通过（反向）")
+        # ERROR_T <-> TypeVar
+        tv = TypeVar("t1")
+        self.assertTrue(self.tc._unify_types(ERROR_T, tv),
+                        "ERROR_T 应与自由 TypeVar 合一通过")
+        # ERROR_T <-> ERROR_T（自反）
+        self.assertTrue(self.tc._unify_types(ERROR_T, ERROR_T))
+
+    def test_error_expr_in_program_not_raises_unknown_type(self):
+        """含 ErrorExpr 的程序（Parser 错误恢复产出）经 TypeChecker 不抛未知类型错。
+
+        直接构造含 ErrorExpr 的 Program AST 喂给 TypeChecker.check_program，
+        验证调度表有 ErrorExpr handler（不会走到 fallback '未知的表达式类型'）。"""
+        from nova.ast_nodes import Block, FnDef, Program
+        fake_err = ParseError("模拟 Parser 熔断产出的错误", line=1, column=15, source="")
+        err_expr = ErrorExpr(error=fake_err, span=None)
+        # 构造一个 main 函数体 = Block([ErrorExpr])，然后对整个 Program 检查
+        main_body = Block([err_expr])
+        main_fn = FnDef(name="main", params=[], return_type=None, body=main_body)
+        prog = Program([main_fn])
+        tc = TypeChecker(source="fn main() { <parse-error> }")
+
+        try:
+            tc.check_program(prog)
+        except RuntimeError as e:
+            if "未知的表达式类型" in str(e):
+                self.fail(f"TypeChecker 缺失 ErrorExpr handler：{e}")
+            raise  # 其他 RuntimeError 继续向上
+        except Exception:
+            # 允许抛 TypeCheckError 或其他类型错（毕竟内容是占位错误节点）
+            # 只要不是 "未知的表达式类型" 即验证通过
+            pass
+
+    def test_error_t_not_leaked_tvar(self):
+        """ERROR_T 经过 _unify_and_resolve 后仍为 ERROR_T（不被当作 TypeVar 泄漏哨兵）。
+
+        未来 harden 任务的泄漏栅栏需要正确跳过 ERROR_T，本用例提前固化行为。"""
+        resolved = self.tc._unify_and_resolve(ERROR_T)
+        self.assertIs(resolved, ERROR_T)
 
 
 if __name__ == "__main__":

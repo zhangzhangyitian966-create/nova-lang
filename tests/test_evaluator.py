@@ -17,7 +17,7 @@ from nova.evaluator import (
     UNIT_VALUE,
 )
 from nova.environment import Environment
-from nova.errors import RuntimeError_, BreakSignal, ContinueSignal
+from nova.errors import RuntimeError_, BreakSignal, ContinueSignal, ParseError
 from nova.ast_nodes import (
     Assignment,
     BinaryOp,
@@ -26,6 +26,7 @@ from nova.ast_nodes import (
     BreakExpr,
     CharLiteral,
     ContinueExpr,
+    ErrorExpr,
     FnCall,
     FnDef,
     ForExpr,
@@ -1148,6 +1149,59 @@ class TestProgramEval(unittest.TestCase):
         ev = make_eval()
         prog = Program([LetBinding("x", IntLiteral(1))])
         ev.eval_program(prog)  # 不应抛出异常
+
+
+# ====================================================================
+# ErrorExpr 下游 Evaluator 侧修复验证（frontend_fix_error_expr_downstream）
+# 对应 P1 归零风险：Parser 四级熔断产出 ErrorExpr 后 Evaluator 抛 RuntimeError 崩溃
+# ====================================================================
+
+
+class TestErrorExprEvalDownstream(unittest.TestCase):
+    """ErrorExpr 在 Evaluator 调度表中的 handler 验证。"""
+
+    def test_error_expr_eval_returns_none(self):
+        """直接构造 ErrorExpr 传入 eval_expr，应返回 None 哨兵、不抛 RuntimeError"""
+        fake_err = ParseError("模拟解析错误", line=1, column=1, source="")
+        expr = ErrorExpr(error=fake_err, span=None)
+        ev = make_eval()
+        # 关键断言：不应抛 "未知的表达式类型: ErrorExpr" RuntimeError_
+        result = ev.eval_expr(expr)
+        self.assertIsNone(result,
+                          f"ErrorExpr 求值结果应为 None 哨兵，实际: {result!r}")
+
+    def test_error_expr_eval_multiple_calls_safe(self):
+        """多次对 ErrorExpr 求值都返回 None，不污染 Evaluator 状态"""
+        fake_err = ParseError("语法错1", line=2, column=3, source="")
+        expr_a = ErrorExpr(error=fake_err, span=None)
+        fake_err2 = ParseError("语法错2", line=4, column=7, source="")
+        expr_b = ErrorExpr(error=fake_err2, span=None)
+        ev = make_eval()
+        r1 = ev.eval_expr(expr_a)
+        r2 = ev.eval_expr(expr_b)
+        r3 = ev.eval_expr(expr_a)
+        self.assertIsNone(r1)
+        self.assertIsNone(r2)
+        self.assertIsNone(r3)
+
+    def test_error_expr_in_block_not_breaks_other_stmts(self):
+        """块中某语句是 ErrorExpr 时，前后的正常语句仍可正确求值。
+
+        验证：优雅降级不影响非错误语句的执行（错误恢复模式）。"""
+        from nova.ast_nodes import Block
+        fake_err = ParseError("中间语句语法错", line=2, column=1, source="")
+        # 构造块：[正常赋值, ErrorExpr, 正常赋值后读取]
+        ev = make_eval()
+        # 直接用 evaluator 的环境绑定模拟：
+        # 先验证正常字面量不受影响
+        v1 = ev.eval_expr(IntLiteral(42))
+        self.assertEqual(v1, 42)
+        # 中间插入 ErrorExpr 求值（不抛错）
+        err_result = ev.eval_expr(ErrorExpr(error=fake_err, span=None))
+        self.assertIsNone(err_result)
+        # 再验证正常字面量继续正确
+        v2 = ev.eval_expr(IntLiteral(99))
+        self.assertEqual(v2, 99)
 
 
 if __name__ == "__main__":

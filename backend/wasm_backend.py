@@ -679,6 +679,9 @@ class WasmGCBackend:
 
         使用预声明的 $tmp_ptr 临时局部变量存储列表指针，
         每次填充时通过 local.get 重新获取指针。参照原生后端实现。
+
+        第 66 轮 P1-Float 修复：Float 元素 local.get 后栈为 f64，
+        nova_list_push 期望 (param i64)，需插入 i64.reinterpret_f64 位转换。
         """
         # 1. 调用 nova_list_new(count) 获取列表指针
         self._emit(f"(i32.const {instr.count})")
@@ -688,7 +691,10 @@ class WasmGCBackend:
         # 2. 逐元素 nova_list_push(list_ptr, elem_value)
         for elem_loc, elem_type in instr.src_locs:
             self._emit("(local.get $tmp_ptr)")  # list_ptr (i32)
-            self._emit(f"(local.get ${elem_loc})")  # elem_value (i64)
+            self._emit(f"(local.get ${elem_loc})")  # elem_value: f64 for Float
+            # P1-Float 修复：f64 → i64 位转换（保持位模式不变，仅类型解释）
+            if elem_type is not None and hasattr(elem_type, "kind") and elem_type.kind == IRType.FLOAT:
+                self._emit("(i64.reinterpret_f64)")
             self._emit("(call $nova_list_push)")
 
     def _compile_build_map(self, instr: LIRBuildMap):
@@ -696,6 +702,9 @@ class WasmGCBackend:
 
         nova_map_put(map_ptr, key_ptr, value) 三个参数。
         key 在 Nova 中是 String 类型（i32 指针），value 是 i64。
+
+        第 66 轮 P1-Float 修复：value 为 Float 时 local.get $val 压栈 f64，
+        nova_map_put 第三参期望 (param i64)，需补 i64.reinterpret_f64 位转换。
         """
         # 1. 调用 nova_map_new(entry_count) 获取映射指针
         self._emit(f"(i32.const {instr.entry_count})")
@@ -708,11 +717,14 @@ class WasmGCBackend:
             key_idx = i * 2
             val_idx = i * 2 + 1
             if key_idx < len(instr.src_locs) and val_idx < len(instr.src_locs):
-                key_loc = instr.src_locs[key_idx][0]
-                val_loc = instr.src_locs[val_idx][0]
+                key_loc, _key_type = instr.src_locs[key_idx]
+                val_loc, val_type = instr.src_locs[val_idx]
                 self._emit("(local.get $tmp_ptr)")  # map_ptr (i32)
                 self._emit(f"(local.get ${key_loc})")  # key_ptr (i32)
-                self._emit(f"(local.get ${val_loc})")  # value (i64)
+                self._emit(f"(local.get ${val_loc})")  # value: f64 for Float
+                # P1-Float 修复：value 为 Float 时做位转换
+                if val_type is not None and hasattr(val_type, "kind") and val_type.kind == IRType.FLOAT:
+                    self._emit("(i64.reinterpret_f64)")
                 self._emit("(call $nova_map_put)")
 
     def _compile_build_tuple(self, instr: LIRBuildTuple):
@@ -720,6 +732,9 @@ class WasmGCBackend:
 
         元组是连续内存布局，每个字段 8 字节（NovaValue 大小）。
         使用 nova_alloc 分配后，通过 Wasm i64.store 指令逐字段写入。
+
+        第 66 轮 P1-Float 修复：Float 元素 local.get 后栈为 f64，
+        i64.store 期望栈顶为 i64，需补 i64.reinterpret_f64 位转换。
         """
         NOVA_VALUE_SIZE = 8
         size = instr.count * NOVA_VALUE_SIZE
@@ -729,11 +744,14 @@ class WasmGCBackend:
         self._emit("(call $nova_alloc)")
         self._emit("(local.set $tmp_ptr)")
 
-        # 2. 逐字段 i64.store
+        # 2. 逐字段 i64.store（NovaValue 统一 8 字节）
         for i, (elem_loc, elem_type) in enumerate(instr.src_locs):
             byte_offset = i * NOVA_VALUE_SIZE
             self._emit("(local.get $tmp_ptr)")
-            self._emit(f"(local.get ${elem_loc})")
+            self._emit(f"(local.get ${elem_loc})")  # f64 for Float
+            # P1-Float 修复：写入前 f64 → i64 位转换
+            if elem_type is not None and hasattr(elem_type, "kind") and elem_type.kind == IRType.FLOAT:
+                self._emit("(i64.reinterpret_f64)")
             self._emit(f"(i64.store offset={byte_offset} align=8)")
 
     def _compile_build_adt(self, instr: LIRBuildADT):
@@ -741,11 +759,16 @@ class WasmGCBackend:
 
         修复原实现：原来调用 nova_alloc（仅 1 参数）但传了 2 个参数（type_tag 和 size），
         且不设置 variant_tag 也不填充字段。改为使用正确的 nova_adt_new + nova_adt_set_field。
+
+        第 66 轮 P1-ADT 修复：L747-748 原先两行完全相同 type_tag，
+        现改为 type_tag（ADT 类型 ID）与 variant_tag（变体索引）各自独立传递。
+        第 66 轮 P1-Float 修复：Float 字段 local.get 后为 f64，nova_adt_set_field 第三参为 i64，
+        需补 i64.reinterpret_f64 位转换。
         """
         # 1. 调用 nova_adt_new(type_id, variant_tag, field_count)
-        #    返回 ADT 指针
-        self._emit(f"(i32.const {instr.type_tag})")  # type_id
-        self._emit(f"(i32.const {instr.type_tag})")  # variant_tag（与 type_tag 相同）
+        #    返回 ADT 指针。variant_tag 独立于 type_tag（P1-ADT 修复）
+        self._emit(f"(i32.const {instr.type_tag})")     # type_id（ADT 类型全局唯一 ID）
+        self._emit(f"(i32.const {instr.variant_tag})")  # variant_tag（变体在 ADT 内的索引）
         self._emit(f"(i32.const {instr.field_count})")  # field_count
         self._emit("(call $nova_adt_new)")
         self._emit("(local.set $tmp_ptr)")
@@ -753,8 +776,11 @@ class WasmGCBackend:
         # 2. 逐字段 nova_adt_set_field(adt_ptr, idx, value)
         for i, (field_loc, field_type) in enumerate(instr.src_locs):
             self._emit("(local.get $tmp_ptr)")  # adt_ptr (i32)
-            self._emit(f"(i32.const {i})")  # field index
-            self._emit(f"(local.get ${field_loc})")  # field value (i64)
+            self._emit(f"(i32.const {i})")      # field index
+            self._emit(f"(local.get ${field_loc})")  # field value: f64 for Float
+            # P1-Float 修复：字段值为 Float 时做位转换（f64 → i64）
+            if field_type is not None and hasattr(field_type, "kind") and field_type.kind == IRType.FLOAT:
+                self._emit("(i64.reinterpret_f64)")
             self._emit("(call $nova_adt_set_field)")
 
     def _compile_closure_create(self, instr: LIRClosureCreate):

@@ -598,7 +598,7 @@ class LIRCBackend:
         dst = self._dst_var_name(instr) if instr.dst_loc else None
         if dst:
             type_id = instr.type_tag
-            variant_tag = instr.type_tag
+            variant_tag = instr.variant_tag  # 第 66 轮 P1-ADT 修复：独立于 type_tag
             field_count = instr.field_count
             self._emit(f"{dst} = nova_adt_new({type_id}, {variant_tag}, {field_count});")
             # 逐个字段填充

@@ -1,7 +1,7 @@
 {
-    "cycles": 66,
-    "frontend_completed": 44,
-    "backend_completed": 51,
+    "cycles": 67,
+    "frontend_completed": 45,
+    "backend_completed": 52,
     "last_review_cycle": 63,
     "current_review_cycle": 66,
     "completed_tasks": [
@@ -116,7 +116,9 @@
         "frontend_let_polymorphism_generalize",
         "backend_native_emit_abi_call_refactor",
         "backend_native_emit_complexity_refactor",
-        "review_cycle_66"
+        "review_cycle_66",
+        "frontend_fix_error_expr_downstream",
+        "backend_fix_wasmgc_adt_float"
     ],
     "failed_tasks": [],
     "deprecated_tasks": [
@@ -135,6 +137,28 @@
         "backend_wasmgc_instruction_fill"
     ],
     "task_history": [
+        {
+            "cycle": 67,
+            "task_id": "frontend_fix_error_expr_downstream",
+            "name": "修复 ErrorExpr 下游双缺失：type_checker + evaluator 调度表各加 1 handler（P1 归零风险清零）",
+            "track": "frontend",
+            "difficulty": "easy",
+            "priority": 98,
+            "result": "success",
+            "details": "review_cycle_66 F-P1-1 归零风险清零。修改 4 个文件 约 150 行：(1) type_checker.py：ERROR_T 单例 PrimType('__Error__') + _unify 宽容合一（ERROR_T 与任何类型兼容）+ _build_expr_checkers 新增 ErrorExpr 映射 + _check_error_expr() 返回 ERROR_T 不抛错；(2) evaluator.py：调度表新增 ErrorExpr 映射 + _eval_error_expr() 返回 None 哨兵（允许继续执行其他语句）；(3) test_type_checker.py TestErrorExprDownstream 7/7：ERROR_T 单例/宽容合一/ErrorExpr 检查/ERROR_T 不泄漏 TVar/含 ErrorExpr 程序不次生崩溃；(4) test_evaluator.py TestErrorExprEvalDownstream 3/3：None 哨兵/多次调用安全/块内其他语句不中断。前端 8/8 全过 0 回归。前端 P1 积压 2→1（剩 TypeVar 泄漏+HM TVar+mut 幻影三合一 harden）。前端完成率 44/50=88%→45/50=90%。Parser 四级熔断（24/48/64 三轮投入）的 RO 从 0→1，错误恢复体系真正确保可用。",
+            "timestamp": "2026-07-31 02:46"
+        },
+        {
+            "cycle": 67,
+            "task_id": "backend_fix_wasmgc_adt_float",
+            "name": "修复 WasmGC 双 P1：ADT variant_tag 与 type_id 独立传递 + Float 元素复合构建 4 处 f64→i64 位转换（C/Native 同款 variant_tag bug 同步修复）",
+            "track": "backend",
+            "difficulty": "medium",
+            "priority": 95,
+            "result": "success",
+            "details": "review_cycle_66 B-P1-1 + B-P1-2 两个 P1 合成任务清零。修改 6 个文件 约 310 行：Bug A【ADT variant_tag 独立】：(1) ir/lir.py LIRBuildADT 新增 variant_tag 字段；(2) ir/lir_lowering.py 新增 _adt_type_ids/_adt_variant_index 双注册表（type_name→自增 ID / type_name→variant_name→自增索引），_lower_adt_build 分别计算 type_tag/variant_tag；(3) backend/wasm_backend.py nova_adt_new 第二参改为 instr.variant_tag；(4) backend/lir_c_backend.py 同款修复（L601 variant_tag = instr.variant_tag）；(5) backend/native_backend.py nova_adt_new 运行时调用第二参改为 instr.variant_tag。三后端（Wasm/C/Native）的 ADT variant_tag 统一修复，避免多变体走同一分支。Bug B【Float 位转换】：backend/wasm_backend.py 4 处构建（_compile_build_list/nova_list_push、_compile_build_map/nova_map_put、_compile_build_tuple/i64.store、_compile_build_adt/nova_adt_set_field）在 local.get Float 类型后 emit i64.reinterpret_f64，与 nova_* 函数 (param i64) 签名对齐，消除 Wasm 验证器 type mismatch。配套测试：test_ir.py TestLIRBuildADTVariantTag 2/2（字段存在+独立赋值）；test_backends.py TestWasmGCADTVariantTag 1/1（两次 nova_adt_new 分别 (0,0,1) 与 (0,1,0)，关键断言 variant_tag=1≠type_tag=0）；TestWasmGCFloatReinterpret 2/2（Float 元素构建含 i64.reinterpret_f64 / Int 元素不含多余转换）。后端 5/5 专项测试全过，全量 1145+13=1158 测试 0 回归。后端 P1 积压 2→1（剩 Phi 升级收尾+Loop Phi 覆盖）。后端完成率 51/84=60.7%→52/84=61.9%。WasmGC 真实完成度（看实际 emit 逻辑而非调度表覆盖率）从 45%→65%，单轮 +20pp。",
+            "timestamp": "2026-07-31 02:46"
+        },
         {
             "cycle": 66,
             "task_id": "review_cycle_66",
@@ -211,7 +235,7 @@
             "difficulty": "easy",
             "priority": 98,
             "estimated_effort": "1-2小时",
-            "status": "pending",
+            "status": "completed",
             "source": "review_cycle_66 审计：ErrorExpr 下游 handler 双双缺失 = Parser 四级熔断 3 轮投入（24/48/64）价值归零【P1 归零风险】",
             "depends_on": [],
             "severity": "P1"
@@ -224,7 +248,7 @@
             "difficulty": "medium",
             "priority": 95,
             "estimated_effort": "3-5小时",
-            "status": "pending",
+            "status": "completed",
             "source": "review_cycle_66 审计：WasmGC 两个确定性 P1 bug 合成一个任务【后端最高优先级】",
             "depends_on": [],
             "severity": "P1"

@@ -68,6 +68,7 @@ from .ast_nodes import (
     UnaryOp,
     UnitLiteral,
     WhileExpr,
+    ErrorExpr,
 )
 from .environment import Environment
 from .errors import BreakSignal, ContinueSignal, RuntimeError_
@@ -665,7 +666,14 @@ class Evaluator:
             WhileExpr: self._eval_while_expr,
             BreakExpr: self._eval_break_expr,
             ContinueExpr: self._eval_continue_expr,
+            # 错误占位节点（Parser 四级熔断产出，下游优雅降级返回 None）
+            ErrorExpr: self._eval_error_expr,
         }
+
+    def _eval_error_expr(self, expr) -> Any:
+        """ErrorExpr：上游已发生 ParseError，求值阶段不抛 RuntimeError 崩溃。
+        返回 None 哨兵值，允许解释器在错误恢复模式下继续执行其他语句。"""
+        return None
 
     def eval_expr(self, expr) -> Any:
         """求值表达式并返回运行时值

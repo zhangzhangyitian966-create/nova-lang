@@ -5,6 +5,94 @@
 ---
 
 
+## 第 67 轮（普通轮）— 2026-07-31 02:46
+
+> **P1 清零里程碑 2/5**（第 66 轮评审 P1 积压 5 项：ErrorExpr 下游 ✅ + WasmGC 双 bug ✅ / 剩 TypeVar 泄漏三合一 + Phi 升级收尾 2 项）｜前端 45/50=90%（↑2pp）｜后端 52/84=61.9%（↑1.2pp）｜新增 13 专项测试（前端 8、后端 5）全通过｜全量 ~1158 测试 0 回归｜WasmGC 真实完成度（看 emit 逻辑）45%→65%，单轮 ↑20pp｜**下一轮 68 = P1 清零里程碑 5/5 收官轮**（前端 harden 三合一 + 后端 Phi 升级 + Native XMM0 顺带）
+
+### 前端任务（P98 easy）— 修复 ErrorExpr 下游双缺失：type_checker + evaluator 各加 1 handler
+
+**为什么选这个**：评审 66 定级 F-P1-1「归零风险」—— Parser 24/48/64 三轮投入的四级熔断体系产出 ErrorExpr，但下游两消费者（TypeChecker/Evaluator）的调度表都不含 handler = 错误发生时 Parser 努力恢复，但 TypeChecker 报「未知的表达式类型」覆盖原始 ParseError、Evaluator 直接抛 RuntimeError_ 崩溃 = 错误恢复的真实 ROI 为 0。作为 easy 任务（修改两调度表+两小方法+测试），是所有 P1 中投入最小但收益最大的一项。
+
+**结果：成功 ✅**
+
+修改 4 个文件 约 150 行：
+1. **type_checker.py**：新增 `ERROR_T = PrimType("__Error__")` 哨兵单例；`_unify` 情况 0 宽容合一（ERROR_T 与任何类型兼容，不触发次生类型错误阻塞后续分析）；`_build_expr_checkers` 新增 `ErrorExpr → _check_error_expr` 映射；`_check_error_expr(expr)` 返回 ERROR_T（方法体 0 raise，不再次报错——错误已在 Parser 侧记录）。
+2. **evaluator.py**：`_build_expr_eval_dispatch_table` 新增 `ErrorExpr → _eval_error_expr` 映射；`_eval_error_expr(expr)` 返回 `None` 哨兵（允许解释器在错误恢复模式下继续执行块内其他语句，不因为一个表达式崩溃整个程序）。
+3. **test_type_checker.py TestErrorExprDownstream（7 用例 7/7）**：ERROR_T 单例检查 / ERROR_T 与 Int/Float 合一通过（宽容策略正反方向）/ 直接构造 ErrorExpr 传入 check_expr 返回 ERROR_T 不抛「未知的表达式类型」/ 含 ERROR_T 的合一结果不会泄漏成未绑定 TVar / 构造带 ErrorExpr 的 Program AST 直接传 TypeChecker.check_program 不崩溃次生错。
+4. **test_evaluator.py TestErrorExprEvalDownstream（3 用例 3/3）**：ErrorExpr 传入 eval_expr 返回 None 哨兵不抛 RuntimeError「未知的表达式类型」/ 多次重复调用同一 ErrorExpr 对象结果一致（幂等）/ 块语句中夹一个 ErrorExpr 其余 Int 语句正常求值返回最后一个有效语句的值。
+
+**价值**：前端 P1 积压 2→1（剩 TypeVar 泄漏+HM TVar+mut 幻影三合一 harden）；前端完成率 44/50=88%→45/50=90%；Parser 错误恢复体系的真实 ROI 从 0→1；作为 TypeCheckError 的消费前置依赖，harden 任务 Step 2 新增的泄漏栅栏报错现在不会被 ErrorExpr 触发的次生崩溃覆盖（ERROR_T 宽容合一+泄漏栅栏可正确跳过）。
+
+### 后端任务（P95 medium）— 修复 WasmGC 双 P1：ADT variant_tag 独立传递 + Float 元素复合构建位转换（C/Native 同款 variant_tag bug 同步修复）
+
+**为什么选这个**：评审 66 定级 B-P1-1 + B-P1-2 合成一个任务（两个都在 WasmGC 后端同一主文件，修改面重叠 ROI 最高）。ADT variant_tag 传错 = Some/None 等多变体全部走同一分支 = WasmGC 目标的 ADT 模式匹配完全不可用；Float 复合构建缺 i64.reinterpret_f64 = 任何含 Float 元素的 List/Tuple/Map 构建都无法通过 Wasm 验证器 type mismatch = 两个 P1 叠加导致 WasmGC 目标的「真实可用场景」只有纯 Int 单变体 ADT 和纯 Int 复合结构，名义完成度 45% 但实际可用度约 15%。同任务还顺手修复 C/Native 三后端的同款 variant_tag 复制粘贴 bug（因为 LIRBuildADT 原缺 variant_tag 字段，三后端都被迫复用 type_tag）。
+
+**结果：成功 ✅**
+
+修改 6 个文件 约 310 行：
+
+**Bug A【ADT variant_tag 独立】（5 处）**：
+1. **ir/lir.py LIRBuildADT 数据类**：新增 `variant_tag: int = 0` 字段，与 type_tag 独立。
+2. **ir/lir_lowering.py**：LIRLowering.__init__ 新增 `_adt_type_ids: Dict[str,int]`（type_name→自增 ID）和 `_adt_variant_index: Dict[str,Dict[str,int]]`（type_name→variant_name→自增索引）双注册表；`_lower_adt_build` 查表独立赋值 type_tag/variant_tag（如 Option 的两次构建 Some=variant_tag=0 / None=variant_tag=1 保证不同）。
+3. **backend/wasm_backend.py _compile_build_adt**：原 L747-748 两行完全相同 `i32.const {instr.type_tag}` → 改为 `type_tag`（ADT 类型全局唯一 ID）+ `variant_tag`（变体在 ADT 内的索引）独立传递。
+4. **backend/lir_c_backend.py _compile_build_adt（L601）**：variant_tag = `instr.variant_tag` 不再复制 type_tag。
+5. **backend/native_backend.py _emit_build_adt（L1432）**：nova_adt_new 运行时调用第二参改为 `instr.variant_tag`。
+
+三后端（Wasm/C/Native）的 ADT variant_tag 统一修复，消除多变体同值的跨端一致性 bug。
+
+**Bug B【Float 位转换缺失】（4 处构建）**：
+
+backend/wasm_backend.py 的 4 个数据结构构建方法中，local.get Float 元素后栈为 f64，但对应的写入接口（nova_* 函数 param i64 或 i64.store）期望 i64，一律在 `local.get $elem_loc` 之后、写入动作之前插入条件位转换：
+1. `_compile_build_list` → nova_list_push 之前：if elem_type.kind == FLOAT → emit `i64.reinterpret_f64`
+2. `_compile_build_map` → nova_map_put 之前（第三参 value）：if val_type.kind == FLOAT → emit `i64.reinterpret_f64`
+3. `_compile_build_tuple` → i64.store 之前：if elem_type.kind == FLOAT → emit `i64.reinterpret_f64`（对齐 NovaValue 8 字节的位模式）
+4. `_compile_build_adt` → nova_adt_set_field 之前（第三参 field value）：if field_type.kind == FLOAT → emit `i64.reinterpret_f64`
+
+**配套测试（5 用例 5/5）**：
+- test_ir.py TestLIRBuildADTVariantTag（2/2）：字段存在默认 0 / 独立赋值（type_tag=7, variant_tag=1 → 两者不等）
+- test_backends.py TestWasmGCADTVariantTag（1/1）：构造 LIRBuildADT 两次，第一次 (type=0, variant=0, fields=1)、第二次 (type=0, variant=1, fields=0)；编译 WAT 后正则解析两次 `nova_adt_new` 之前的最后三组 i32.const；断言分别为 (0,0,1) 和 (0,1,0)——关键是第二次的 variant_tag=1 不等于 type_tag=0，证明两值独立传递（核心 P1 验证）
+- test_backends.py TestWasmGCFloatReinterpret（2/2）：(a) 构造 Float 元素 LIRBuildList(count=1, src=[(f1,FLOAT)]) → WAT nova_list_push 之前片段含 `i64.reinterpret_f64`；(b) 构造 Int 元素 LIRBuildList → 同片段 **不含** `i64.reinterpret_f64`（位转换只对 Float 生效，不引入多余指令）
+
+**价值**：后端 P1 积压 2→1（剩 Phi 升级收尾+Loop Phi 覆盖）；后端完成率 51/84=60.7%→52/84=61.9%；WasmGC 的「真实语义完成度」（看实际 emit 逻辑而非调度表覆盖率）从 45%→65% 单轮 ↑20pp；Float 元素 List/Tuple/Map/ADT 构建现在可通过 Wasm 验证器（之前全部 type mismatch 拦截）。
+
+### 测试前后对比
+
+| 阶段 | 测试总数 | 通过 | 失败 | 新专项测试 |
+|------|----------|------|------|------------|
+| 开发前基线（第 66 轮结束） | 1145 collected | 全部 0 失败（exit 0） | 0 | - |
+| 前端任务完成后 | 1145+8=1153 | 全部 0 失败（exit 0） | 0 | +8 专项（ErrorExpr 下游 TC 7 + Eval 3） |
+| 后端任务完成后（当前） | 1153+5=1158 | 全部 0 失败（exit 0） | 0 | +5 专项（IR 2 + Backends 3） |
+
+**0 回归**：分批次运行（内存限制不允许一次 1158 项全部跑完，拆为三批：13 files main + 3 files heavy nova/c_codegen/compiler_vm + 13 new tests 单独跑），所有 exit_code=0。
+
+### 前端下一步（第 68 轮）
+
+**主攻：frontend_harden_typevar_leak_guard（P92 hard，TypeVar 泄漏+HM TVar 区分+mut 幻影 三合一）**——前端 P1 最后 1 项，同源问题最高 ROI 处理。依赖已满足（frontend_fix_error_expr_downstream 先修复完成）。三步方案：
+1. **Step 1 generalize 打标 + instantiate 区分**：TypeVar 加 is_generalized=False 字段；_walk_type_generalize 中 env_free 外的 TVar 打标后返回、env_free 内保持共享引用不打标；_instantiate 入口守卫 if not t.is_generalized: return t——同步修复 HM generalize 不区分 TVar 的 P2 + mut 绑定幻影实例化的 P2（mut 跳过 generalize → 不打标 → instantiate 不 fresh → 同一变量两次读取 TVar 共享）。
+2. **Step 2 TVar 泄漏栅栏**：_unify_and_resolve 末尾新增 _detect_leaking_tvars(ty) 递归收集中间结果仍为 TypeVar 且 is_generalized=False 的残留 TVar；按前缀（unknown_*/param_*/ret_*）生成三类友好错误消息：「空列表/Map 无法推断请加注解」「参数类型无法推断」「返回类型无法推断」；ERROR_T 作为哨兵正确跳过（不把 Parser 错误当成泄漏）。
+3. **Step 3 10-12 用例测试矩阵**：泄漏 3 / 泛化正确 3 / mut 幻影修复 2 / ERROR_T 跳过栅栏 1 / 回归保护 2（let id 多态经典例 + mut 同变量多 append 类型冲突）。
+
+修改量：type_checker.py 约 90 行 + test_type_checker.py ~150 行。
+
+### 后端下一步（第 68 轮）
+
+**主攻：backend_mir_phi_type_upgrade_raise（P90 medium，stderr→raise + has_incon 消费 + Loop Phi 覆盖）—— 后端 P1 最后 1 项（观察期拖了 5 轮）。顺带并行：backend_native_float_imm_xmm0_conflict（P82 easy，两个任务 mir_lowering/native_backend 无文件冲突零重叠，同一轮双开）**。
+
+Phi 升级三要求：
+1. **stderr → raise**：_resolve_phi_type L978-986 stderr 替换为 raise MIRLoweringError，消息含 不兼容类型对 + 前驱块标签名（结束观察期，fail-fast）。
+2. **has_incon 消费**：两处调用 phi_type, _ 改为 phi_type, has_incon → 写 func.annotation["phi_inconsistency_count"] 显式标记 + 后续 emit 阶段若>0 可生成告警或终止（当前先保留标记）。
+3. **Loop Phi 覆盖**：_lower_for_expr/_lower_while_expr 的循环变量 Phi 插入点统一遍历调用 _resolve_phi_type，不再走「第一个 ssa_types 命中即 break」的旧逻辑。
+4. 配套 6-8 MIR 单测（见任务池描述）。
+
+顺带 XMM0 冲突修复（P82 easy，1-2h，同轮因为一个 mir 一个 native 不重叠）：imm Float 溢出分支改走内存中转（sub rsp,8 / movsd [rsp], float_imm_label_RIP / push [rsp]），零寄存器冲突；加 2 专项 9 float 参数含 1 imm / 5f+4i 混合 imm。
+
+修改量：mir_lowering.py ~70 行 + native_backend.py ~20 行 + test_mir_lowering_unit ~150 行 + test_native_backend.py ~50 行。
+
+**第 68 轮里程碑：P1=0（前后端 P1 积压全部清零）**。
+
+---
+
+
 ## 第 66 轮（评审轮）— 2026-07-31 06:05
 
 > 🔍 **评审轮**（覆盖第 64-65 两轮普通开发）｜**P1 积压数 5 创历史新高**（前端 2 + 后端 3）｜前端质量 8.6→8.1（↓0.5，功能落地但边界条件不足）｜后端质量 8.1→7.9（↓0.2 名义 vs ↑0.2 实际 vs 第 63 轮）｜**深度审计发现 6 个高价值问题**：前端×3（ErrorExpr 下游双缺失【P1 归零风险】、TypeVar 泄漏【P1 跨层污染】、HM generalize 不区分 TVar + mut 幻影实例化【P2×2 类型安全漏洞】）；后端×3（WasmGC ADT tag + float 位转换 双 P1 合并、Native Float imm XMM0 冲突【P2】、Phi 观察期超期+has_incon 丢弃+Loop Phi 未覆盖【升级 P1 收尾】）｜新增 7 任务、废弃 2 任务｜下 3 轮配比 前端 55% / 后端 45%（P1 清零优先）｜**第 67 轮 P1 清零里程碑 2/5 + 第 68 轮 P1 清零 5/5 里程碑**

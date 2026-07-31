@@ -1425,11 +1425,12 @@ class NativeCodeGen:
         int_ty = IRType.int_type()
 
         # 调用 nova_adt_new(type_id, variant_tag, field_count)
+        # 第 66 轮 P1-ADT 修复：variant_tag 独立于 type_tag（原先两者相同，导致多变体无法区分）
         self._emit_runtime_call(
             "nova_adt_new",
             [
                 (("imm", instr.type_tag), int_ty),
-                (("imm", instr.type_tag), int_ty),
+                (("imm", instr.variant_tag), int_ty),
                 (("imm", instr.field_count), int_ty),
             ],
             dst_info,

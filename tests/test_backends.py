@@ -1083,5 +1083,155 @@ class TestCBackendClosure(unittest.TestCase):
                     os.unlink(exe_file)
 
 
+# ============================================================
+# 第 66 轮 P1 修复：WasmGC variant_tag 独立 + Float 位转换
+# ============================================================
+
+class TestWasmGCADTVariantTag(unittest.TestCase):
+    """WasmGC 后端 nova_adt_new 调用中 variant_tag 与 type_tag 独立传递的验证。"""
+
+    def test_build_adt_emits_distinct_type_tag_and_variant_tag(self):
+        """手动构造含两个不同变体值的 LIRBuildADT，验证 WAT 中两者 i32.const 值不同。"""
+        from nova.ir.ir_nodes import (
+            LIRBuildADT, LIRReturn, LIRFunction, LIRModule, LIRLabel,
+        )
+
+        module = LIRModule(name="test_adt_vt")
+        fn = LIRFunction(name="main", params=[], return_type=INT_TYPE)
+        adt_type = INT_TYPE  # dst_loc 类型占位
+
+        # 手动构造两个 LIRBuildADT：Option_Some(type_tag=0, variant_tag=0)
+        # 和 Option_None(type_tag=0, variant_tag=1)
+        some_adt = LIRBuildADT(
+            type_name="Option",
+            variant_name="Some",
+            type_tag=0,
+            variant_tag=0,   # 第 0 个变体
+            field_count=1,
+            src_locs=[("field_0", INT_TYPE)],
+            dst_loc=("r1", adt_type),
+        )
+        none_adt = LIRBuildADT(
+            type_name="Option",
+            variant_name="None",
+            type_tag=0,
+            variant_tag=1,   # 第 1 个变体（与 type_tag 不同！）
+            field_count=0,
+            src_locs=[],
+            dst_loc=("r2", adt_type),
+        )
+        ret = LIRReturn()
+        ret.src_locs = [("r1", adt_type)]
+
+        fn.body = [LIRLabel(name="bb0"), some_adt, none_adt, ret]
+        module.functions["main"] = fn
+
+        backend = WasmGCBackend()
+        wat = backend.compile(module)
+
+        # 验证：两次 nova_adt_new 调用，第一次两个 i32.const 均为 0，
+        # 第二次 type_tag 仍为 0 但 variant_tag 为 1（独立于 type_tag）
+        import re
+        calls = list(re.finditer(r"\(call \$nova_adt_new\)", wat))
+        self.assertEqual(len(calls), 2, f"应生成两次 nova_adt_new 调用\n{wat}")
+
+        # 解析每次调用前的三组 i32.const
+        def last_three_consts_before(text: str, end_pos: int):
+            preceding = text[:end_pos]
+            consts = list(re.finditer(r"\(i32\.const (\d+)\)", preceding))
+            self.assertGreaterEqual(len(consts), 3,
+                                    f"每次 nova_adt_new 调用前应有至少 3 个 i32.const：\n{wat}")
+            return tuple(int(c.group(1)) for c in consts[-3:])
+
+        some_call_consts = last_three_consts_before(wat, calls[0].start())
+        # 期望: (type_tag=0, variant_tag=0, field_count=1)
+        self.assertEqual(some_call_consts, (0, 0, 1),
+                         f"Some 的三次 i32.const 应为 (0,0,1)，实际: {some_call_consts}\n{wat}")
+
+        none_call_consts = last_three_consts_before(wat, calls[1].start())
+        # 期望: (type_tag=0, variant_tag=1, field_count=0)
+        # 关键断言：variant_tag (1) != type_tag (0)，证明两者独立
+        self.assertEqual(none_call_consts, (0, 1, 0),
+                         f"None 的三次 i32.const 应为 (0,1,0)，证明 variant_tag 不再复制 type_tag，"
+                         f"实际: {none_call_consts}\n{wat}")
+
+
+class TestWasmGCFloatReinterpret(unittest.TestCase):
+    """WasmGC 后端复合结构构建中 Float 元素的 i64.reinterpret_f64 位转换验证。"""
+
+    def _build_list_with_float(self) -> str:
+        """构造含 Float 元素列表构建的 LIR，返回 WAT。"""
+        from nova.ir.ir_nodes import (
+            LIRBuildList, LIRLoadConst, LIRReturn, LIRFunction,
+            LIRModule, LIRLabel, ListType,
+        )
+        from nova.ir.ir_nodes import FLOAT_TYPE
+
+        module = LIRModule(name="test_float_list")
+        fn = LIRFunction(name="main", params=[], return_type=INT_TYPE)
+
+        # 加载浮点常量 3.14
+        load_float = LIRLoadConst(value=3.14, const_type="float")
+        load_float.dst_loc = ("f1", FLOAT_TYPE)
+        # 构建列表 [3.14]：src_locs 明确标记为 FLOAT 类型
+        list_type = ListType(FLOAT_TYPE)
+        build_list = LIRBuildList(count=1)
+        build_list.src_locs = [("f1", FLOAT_TYPE)]
+        build_list.dst_loc = ("lst", list_type)
+
+        ret = LIRReturn()
+        ret.src_locs = [("f1", FLOAT_TYPE)]
+
+        fn.body = [LIRLabel(name="bb0"), load_float, build_list, ret]
+        module.functions["main"] = fn
+
+        backend = WasmGCBackend()
+        return backend.compile(module)
+
+    def test_build_list_float_emits_reinterpret_f64(self):
+        """Float 元素列表构建必须在 local.get f1 后、nova_list_push 前插入 i64.reinterpret_f64。"""
+        wat = self._build_list_with_float()
+        import re
+        push_match = re.search(r"\(call \$nova_list_push\)", wat)
+        self.assertIsNotNone(push_match,
+                             f"应生成 nova_list_push 调用\n{wat}")
+        # 取 push 前的 WAT 片段
+        before_push = wat[:push_match.start()]
+        # 片段中应包含 i64.reinterpret_f64
+        self.assertIn("i64.reinterpret_f64", before_push,
+                      f"Float 元素在 nova_list_push 前应插入 i64.reinterpret_f64\n{wat}")
+
+    def test_build_list_int_no_unnecessary_reinterpret(self):
+        """Int 元素列表构建不应生成 i64.reinterpret_f64（位转换仅对 Float 生效）。"""
+        from nova.ir.ir_nodes import (
+            LIRBuildList, LIRLoadConst, LIRReturn, LIRFunction,
+            LIRModule, LIRLabel, ListType,
+        )
+
+        module = LIRModule(name="test_int_list")
+        fn = LIRFunction(name="main", params=[], return_type=INT_TYPE)
+        load_int = LIRLoadConst(value=42, const_type="int")
+        load_int.dst_loc = ("i1", INT_TYPE)
+        build_list = LIRBuildList(count=1)
+        build_list.src_locs = [("i1", INT_TYPE)]
+        build_list.dst_loc = ("lst", ListType(INT_TYPE))
+
+        ret = LIRReturn()
+        ret.src_locs = [("i1", INT_TYPE)]
+
+        fn.body = [LIRLabel(name="bb0"), load_int, build_list, ret]
+        module.functions["main"] = fn
+
+        backend = WasmGCBackend()
+        wat = backend.compile(module)
+        import re
+        push_match = re.search(r"\(call \$nova_list_push\)", wat)
+        self.assertIsNotNone(push_match)
+        before_push = wat[:push_match.start()]
+        # Int 元素不应触发 reinterpret_f64
+        self.assertNotIn("i64.reinterpret_f64", before_push,
+                         f"Int 元素不应有多余的 i64.reinterpret_f64\n{wat}")
+
+
 if __name__ == "__main__":
     unittest.main()

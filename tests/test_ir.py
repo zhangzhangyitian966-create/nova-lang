@@ -651,5 +651,36 @@ class TestEndToEnd(unittest.TestCase):
         # 不应抛出异常
 
 
+# ============================================================
+# 第 66 轮 P1 修复：ADT variant_tag 独立 + Float 位转换
+# ============================================================
+
+class TestLIRBuildADTVariantTag(unittest.TestCase):
+    """LIRBuildADT variant_tag 字段与 LIR 降级中 type_tag/variant_tag 独立计算的验证。"""
+
+    def test_lir_build_adt_has_variant_tag_field(self):
+        """LIRBuildADT 数据类必须包含 variant_tag 字段（第 66 轮新增）"""
+        from nova.ir.lir import LIRBuildADT
+        adt = LIRBuildADT()
+        # variant_tag 默认值为 0，类型为 int
+        self.assertEqual(adt.variant_tag, 0,
+                         "LIRBuildADT 应有默认 variant_tag=0")
+        # 可以设置不同的值
+        adt.variant_tag = 3
+        self.assertEqual(adt.variant_tag, 3,
+                         "variant_tag 应可独立赋值")
+
+    def test_variant_tag_independent_from_type_tag(self):
+        """type_tag 与 variant_tag 必须可以保存不同值（核心 P1 验证）"""
+        from nova.ir.lir import LIRBuildADT
+        adt = LIRBuildADT()
+        adt.type_tag = 7
+        adt.variant_tag = 1
+        self.assertEqual(adt.type_tag, 7, "type_tag 应为 7")
+        self.assertEqual(adt.variant_tag, 1, "variant_tag 应为 1（独立于 type_tag）")
+        self.assertNotEqual(adt.type_tag, adt.variant_tag,
+                            "两者应能保存不同值")
+
+
 if __name__ == "__main__":
     unittest.main()
