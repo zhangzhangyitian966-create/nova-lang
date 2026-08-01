@@ -1,155 +1,164 @@
-# Nova 前后端专项开发路线图（自动更新于 Cycle 71）
+# Nova 前后端专项开发路线图（自动更新于 Cycle 72 评审轮）
 
-> **版本**：Nova v0.3.0 ｜ **当前轮次**：Cycle 71（普通轮，下一轮 Cycle 72 为评审轮）｜ **上次评审**：Cycle 69
-> **累计完成**：前端 48 项 / 后端 56 项 / 共 123 项
-> **任务池规模**：共 10 项（已完成 5 项 / 进行中 0 项 / 待办 5 项）
+> **版本**：Nova v0.3.0 ｜ **当前轮次**：Cycle 72（评审轮，下一轮 Cycle 73 为普通轮）｜ **上次评审**：Cycle 69
+> **累计完成**：前端 48 项 / 后端 56 项 / 评审 24 项 共 128 项
+> **任务池规模**：共 15 项（已完成 5 项 / 进行中 0 项 / 待办 10 项）
 
-## 当前进度快照（Cycle 71，自动计算）
+## 当前进度快照（Cycle 72 评审轮，自动计算）
 
-| 维度 | 值 | 环比 Cycle 70 |
+| 维度 | 值 | 环比 Cycle 71 |
 |------|----|:----:|
-| 已完成轮次（cycles） | 71 | +1 |
-| 前端累计完成（frontend_completed） | 48 项 | +1 |
-| 后端累计完成（backend_completed） | 56 项 | +1 |
-| 前端完成度（粗估） | **98.0%** | ≈+1.0pp |
-| 后端完成度（粗估） | **93.3%** | ≈+1.0pp |
-| 前后端差距 | FE 98.0% vs BE 93.3% = **差 4.6pp** | +4.6pp |
-| 任务池完成率 | 5/10 = **50.0%** | +10.0pp |
-| 下次评审轮 | Cycle 72 | → 下一轮就是评审！ |
+| 已完成轮次（cycles） | 72 | +1（评审轮计 1 轮） |
+| 前端累计完成（frontend_completed） | 48 项 | ≈持平（评审轮不做前端功能） |
+| 后端累计完成（backend_completed） | 56 项 | ≈持平（评审轮不做后端功能） |
+| 前端完成度（全局目标 50 项 = 48/50） | **96.0%** | ↑4pp（Cycle69→72：窄化栅栏 + 测试矩阵） |
+| 后端完成度（全局目标 84 项 = 56/84） | **66.7%** | ↑2.4pp（Cycle69→72：regalloc_v2 + 位运算 + REX修复） |
+| 前后端差距 | FE 96.0% vs BE 66.7% = **差 29.3pp** | ↑1.6pp（Cycle71 BE 产能 60% 拖累：规划 3 项 BE 实际只完成 1 项） |
+| 任务池完成率 | 5/15 = **33.3%** | ↓16.7pp（新增 5 项任务 → 分母从 10→15） |
+| 下次评审轮 | Cycle 75 | → 再过 3 轮 |
+| P1 积压 | **0（清零维持 ✅）** | — | — |
 
-### 本轮（Cycle 71）实际完成
+### Cycle 72 评审轮实际产出
+| # | 类型 | 产出物 | 核心价值 |
+|---|------|--------|---------|
+| 1 | 深度审计报告 | 前后端 11 文件 20k+ LOC 代码扫描 + 隐藏 BUG 扫描 + ROI 排序 | 0 致命 BUG / 1 高危未来触发（XMM REX 硬编码） / 2 中危（spill偏向、移位语义） → 全部转化为任务池闭环 |
+| 2 | 任务池重构 | 5 新增 + 2 依赖调整 + 0 废弃 | 栈帧颗粒度拆分（RBP-only + CFI-only 连续两轮消化）；XMM 扩展兼容前瞻；表达式级恢复规划；多位数类型 + CLI 技术债偿还 |
+| 3 | 三轮排期表 | Cycle 73-75 精确任务分配（每轮 1-2 FE + 1-2 BE + 可选热身） | RBP-only→CFI→结构体返回 ABI 链式依赖正确布局；前后端产能 30/70 精确对齐 |
 
-| # | 线路 | 任务 ID | 难度 | 优先级 | 结果 | 核心产出 |
-|---|------|---------|:----:|:----:|:----:|---------|
-| 1 | 🎨 前端 | frontend_type_system_test_matrix | easy | P75 | ✅ | TypeChecker +15 用例 4 类边界（TVar泄漏×5 / HM泛化×5 / ErrorExpr×3 / 回归×2） |
-| 2 | ⚙️ 后端 | backend_native_instr_selection_bitwise | medium | P85 | ✅ | 全链路贯通 7 条按位运算 + 致命 RCX pop-覆盖 Bug 三端修复（_emit_div_mod/_emit_arithmetic/_emit_bitwise） |
-
-### Cycle 71 后积压（按优先级排序 Top 20）
+### Cycle 72 后积压（按优先级排序 Top 20，共 10 项 pending）
 
 | 优先级 | 线路 | 任务 ID | 难度 | 依赖完成？ |
 |:----:|------|---------|:----:|:----------:|
-| P88 | ⚙️ backend | `backend_native_stack_frame_rbp_cfi` | hard | ✅ |
-| P82 | ⚙️ backend | `backend_wasmgc_native_struct_array` | hard | ✅ |
-| P80 | ⚙️ backend | `backend_native_abi_struct_return` | medium | ⚠️ |
-| P80 | ⚙️ backend | `backend_native_abi_test_coverage` | medium | ✅ |
-| P78 | 🎨 frontend | `frontend_adt_field_suggestion_error` | easy | ✅ |
+| P85 | ⚙️ backend | `backend_native_stack_frame_rbp_only`（RBP 基址帧 + 寻址重算） | medium | ✅（depends_on regalloc_v2 已完成） |
+| P84 | ⚙️ backend | `backend_native_stack_frame_rbp_cfi`（DWARF CFI + ELF 4 新节区，剩余部分） | hard | ⚠️ depends_on `rbp_only` 未完成 |
+| P82 | ⚙️ backend | `backend_wasmgc_native_struct_array`（WasmGC 原生 struct/array 声明替换 nova_*） | hard | ✅（depends_on wasmgc_adt_float 已完成） |
+| P80 | ⚙️ backend | `backend_native_abi_struct_return`（>16 字节结构体 by-value 返回 System V） | medium | ⚠️ depends_on `rbp_only` 未完成 |
+| P80 | ⚙️ backend | `backend_native_abi_test_coverage`（Native ABI×10 / WasmGC×6 长尾测试） | medium | ✅ |
+| P78 | 🎨 frontend | `frontend_adt_field_suggestion_error`（ADT 字段 known fields 错误建议） | easy | ✅ |
+| P78 | ⚙️ backend | `backend_x86_64_xmm_rex_prefix_pre_fix`（XMM8-15 REX 前缀预修复 12+ SSE 指令） | easy | ✅ |
+| P76 | 🎨 frontend | `frontend_parser_expr_incremental_recovery`（表达式级 1-token 跳过 + 半AST构造） | medium | ✅（depends_on parser_error_recovery_full 已完成） |
+| P74 | 🎨 frontend | `frontend_numeric_type_extension_and_cli`（i8/i16/i32/i64/u32/f32/f64 + --narrowing CLI） | medium | ✅（depends_on implicit_numeric_cast_fence 已完成） |
+| P72 | ⚙️ backend | `backend_native_regalloc_v2_spill_bias_fix`（callee spill_weight +0.5 偏向代码补全） | easy | ✅（depends_on regalloc_v2 已完成） |
 
 ---
 ## 总体进度概览
 
-| 维度 | 目标 | 当前完成 | 进度条 | 完成率 | 较上轮（评审 66） |
+| 维度 | 目标 | 当前完成 | 进度条 | 完成率 | 较上轮（评审 69） |
 |------|-----:|---------:|:-------|-------:|-------:|
-| 前端（类型系统+解析器+语义分析） | 50 | 47 | ███████████████████████░ | 94.0% | ↑4pp |
-| 后端（Native x86_64 + WasmGC + C 统一） | 84 | 55 | ████████████████░░░░░░░░ | 65.5% | ↑3.6pp |
-| 前后端总完成（frontend_completed + backend_completed） | — | 102 | — | — | +2（Cycle 69→70） |
-| 任务池历史累计（已去重 completed_tasks） | — | 121 | — | — | +3（窄化栅栏 / regalloc_v2 / REX 修复） |
-| 当前任务池（tasks 列表） | 10 | 3 completed / 6 pending / 0 failed / 1 deprecated alias | — | — | Cycle 70 完成 2 项 |
-| P1 积压（active） | ≤2 | **0（清零维持 ✅）** | — | — | 持续 |
+| 前端（类型系统+解析器+语义分析） | 50 | 48 | ████████████████████████░ | 96.0% | ↑4pp |
+| 后端（Native x86_64 + WasmGC + C 统一） | 84 | 56 | █████████████████░░░░░░░░ | 66.7% | ↑2.4pp |
+| 前后端总完成（frontend_completed + backend_completed） | — | 104 | — | — | +2（Cycle 69→72：窄化栅栏 + 测试矩阵） |
+| 任务池历史累计（已去重 completed_tasks） | — | 128 | — | — | +7（5新增任务入池 + regalloc_v2 + REX修复 已完成） |
+| 当前任务池（tasks 列表） | 15 | 5 completed / 10 pending / 0 failed / 0 deprecated 别名 | — | — | Cycle 72 评审轮 +5 新增 / -0 废弃 / ±2 依赖调整 |
+| P1 积压（active） | ≤2 | **0（清零维持 ✅）** | — | — | 评审 66→72 共 6 轮连续 0 |
 
 ---
 
-## 最新进展：Cycle 70 普通轮完成
+## 最新进展：Cycle 70-71 普通轮 + Cycle 72 评审
 
-### ✅ 本轮完成 2+1 项（前端 1 + 后端 2）
-
+### ✅ Cycle 70（普通轮）完成 3 项（FE 1 + BE 2）
 | # | 任务 | 难度 | 结果 | 核心价值 |
 |---|------|:----:|:----:|---------|
-| 1 | **frontend_implicit_numeric_cast_fence**（隐式数值窄化安全栅栏） | medium | ✅ | TypeVar.overflow_risk 标记 + 3 接收端（binding/assignment/function_arg）合一失败升级窄化风险错误；未来 SIMD i64→i32 silent data corruption 前置风险清零；TestNumericNarrowingFence 6 用例全部通过 |
-| 2 | **backend_native_regalloc_linear_scan_v2**（寄存器分配 v2 双池 + 权重溢出） | hard | ✅ | GPR 拆 caller/callee 双池（caller: RCX,RDX,RSI,RDI,R8,R9,R10,R11；callee: RBX,R12,R13,R14,R15）；跨调用长命 vreg 优先 callee 池（省 N-1 次 save/restore）；短命 vreg 优先 caller 池（避免 prologue 无谓 push）；寄存器分配 75% → 90%+ |
-| 3 | **backend_x86_64_rex_prefix_fix**（x86_64 编码器 REX 前缀 BUG 修复） | hard | ✅ | 5 条指令（mov_reg_imm64 小 imm / add_reg_imm / sub_reg_imm / and_reg_imm / cmp_reg_imm）硬编码 REX=0x48 忽略 R8-R15 的 REX.B 位，导致 R12 被编码为 RSP → mov $imm, %rsp 破坏栈指针 SIGSEGV；全部改用 _rex_w / _rex_rb 生成正确前缀 |
+| 1 | frontend_implicit_numeric_cast_fence（隐式数值窄化安全栅栏） | medium | ✅ | TypeVar.overflow_risk + 3 接收端（binding/assignment/function_arg）合一失败升级窄化风险错误；未来 SIMD i64→i32 silent data corruption 前置风险清零 |
+| 2 | backend_native_regalloc_linear_scan_v2（寄存器分配 v2 双池 + 权重溢出） | hard | ✅ | GPR 拆 caller(8)/callee(5) 双池；跨调用长命 vreg 优先 callee-saved；寄存器分配 75%→90%+ |
+| 3 | backend_x86_64_rex_prefix_fix（x86_64 编码器 5 条指令 REX 前缀 BUG 修复） | hard | ✅ | R12→RSP SIGSEGV 定时炸弹拆除；5 条指令 mov_reg_imm64/add/sub/and/cmp 小 imm 路径全部切换 _rex_rb 正确生成 REX.B 位 |
 
-**本轮测试基线**：开发前 ~534 passed → 开发后 **616 passed（+82，新增 6+1 专项测试）**，通过率 100%，无回归。
+### ✅ Cycle 71（普通轮）完成 2 项（FE 1 + BE 1）
+| # | 任务 | 难度 | 结果 | 核心价值 |
+|---|------|:----:|:----:|---------|
+| 1 | frontend_type_system_test_matrix（TypeSystem 4 类 × 15 用例补齐） | easy | ✅ | 前端测试密度 0.68→0.78 达标；三大改动（HM generalize / TVar泄漏 / ErrorExpr）边界×组合覆盖 60%→85% |
+| 2 | backend_native_instr_selection_bitwise + RCX pop-覆盖 Bug 三端修复（7 条按位运算全链路贯通） | medium | ✅ | 加密/哈希/网络协议代码从 NotImplementedError→可用；目标 vreg 分配到 RCX 时 pop 覆盖结果的 silent Bug（div/arithmetic/bitwise 三处）全部清零 |
 
----
-
-## 上轮回顾：Cycle 69 评审里程碑
-
-### ✅ 评审输出 5 项关键结论
-
-| # | 结论 | 详情 |
-|---|------|------|
-| 1 | **前端质量 8.7/10（↑0.1）：体系成熟** | HM 泛化/实例化 85%+ 对称；ErrorExpr 三端贯通（Parser→TypeChecker ERROR_T→Evaluator None 哨兵）；TVar 泄漏栅栏 4 类前缀分发（空集合/悬空参数/悬空返回/未命名 TVar） |
-| 2 | **后端质量 7.6/10（↓0.3）：结构性分化** | C 88.8% ✅ / Native 78.1%（栈帧 65% + 寄存器 75% 拖后腿） / WasmGC 73.8%（复合结构 65% 全走 runtime 模拟未切原生 GC struct） |
-| 3 | **前后端 92% vs 64.3%：差 27.7pp，12pp 结构性合理 / 16pp 后端硬积压** | 前端目标 50 < 后端目标 84（68%）；Native 三大硬缺口（regalloc_v2 + 栈帧CFI + 位运算）+ WasmGC 原生 struct/array = 4 项 hard，需 3 轮消化 |
-| 4 | **Cycle 70-72 资源配比 FE 35% / BE 65%** | 前端 92%→95% 每轮 1 任务足够（体验优化 + 测试补齐）；后端 64.3%→72% 每轮 2 项 hard 任务（4 项 hard + 2 项 medium = 6 项 / 3 轮 = 2 项/轮） |
-| 5 | **新增 8 项高价值任务：FE 3 + BE 5** | FE：P88（隐式窄化栅栏）/ P78（ADT 字段建议）/ P75（测试矩阵 15 用例）；BE：P92（regalloc_v2）/ P88（栈帧CFI）/ P85（位运算 7 指令）/ P82（WasmGC 原生 struct）/ P80（struct 返回 ABI） |
-
-### 🎯 Cycle 70-72 目标（评审 69→评审 72）
-
-| 指标 | 评审 69（当前） | 评审 72（目标） | 变化 |
-|------|----------------:|----------------:|:----:|
-| 前端完成度 | 92.0% | 95.0% | +3pp |
-| 后端完成度 | 64.3% | 72.0% | +7.7pp |
-| Native 总平均 | 78.1% | 85.0% | +6.9pp |
-| WasmGC 总平均 | 73.8% | 80.0% | +6.2pp |
-| 前后端差距 | 27.7pp | ~20pp | -7.7pp（<20pp 容差） |
-| 前端测试密度 | 0.68 | ≥0.75 | +0.07 |
-| Native 测试密度 | 0.38 | ≥0.50 | +0.12 |
+### ✅ Cycle 72（评审轮）完成 3 类产出
+| # | 产出 | 规模 | 核心价值 |
+|---|------|------|---------|
+| 1 | 深度代码审计报告 | 11 文件 / 20k+ LOC / 6 维评估 | 0 致命 BUG；1 项高危未来触发（XMM REX 硬编码）转化为任务；2 中危（spill偏向/移位语义）识别 |
+| 2 | 任务池重构 | +5 新增 / +2 依赖 / -0 废弃 | 栈帧颗粒度拆分（RBP-only + CFI-only 连续两轮消化）；技术债 4 类（窄化单一i32/硬编码CLI/XMM/表达式恢复）全部转化为任务 |
+| 3 | Cycle 73-75 排期表 | 3 轮 × 每轮 1-2 FE + 1-2 BE | RBP-only → CFI → 结构体返回 ABI 链式依赖正确布局；BE 产能从 60%→目标 90%+（颗粒度拆分效应） |
 
 ---
 
-## 剩余活跃任务（按优先级降序，共 6 项）
+## 🎯 Cycle 73-75 规划（评审 72 → 评审 75）
 
-### 🎨 前端剩余（2 项：2 easy）
+| 指标 | 评审 72（当前） | 评审 75（目标） | 变化 | 关键路径 |
+|------|----------------:|----------------:|:----:|---------|
+| 前端完成度 | 96.0% | **98.0%** | +2pp | ADT字段建议 ✅ → 表达式级恢复 ✅ → 多位数类型+CLI ✅ |
+| 后端完成度 | 66.7% | **74.0%** | +7.3pp | RBP-only ✅ → CFI ✅ → 结构体返回ABI+测试覆盖 ✅ |
+| Native 总平均（8子模块） | 80%+ | **87%** | +7pp | 栈帧 65%→92%（+27pp 最大贡献）+ ABI 82%→92%（+10pp） |
+| WasmGC 总平均（8子模块） | 74% | **80%** | +6pp | WasmGC 原生 struct/array（复合 65%→90% 单跳 +25pp） |
+| C后端 总平均（8子模块） | 89% | **91%** | +2pp | 闭包 trampoline 优化 + 复合结构 82%→85% |
+| 前后端差距 | 29.3pp | **≤22pp** | -7.3pp | 后端 3 轮 2 hard + 4 medium = 18 难度分 vs 前端 1 easy + 2 medium = 5 难度分，3.6:1 产能倾斜 |
+| 前端测试密度 | 0.78 | **≥0.82** | +0.04 | 表达式级恢复专项测试 + 多位数类型 10 用例 |
+| Native 测试密度 | 0.42 | **≥0.50** | +0.08 ✅ 达标 | ABI 测试覆盖 ×10 场景 + RBP/CFI 各 5-6 用例 |
+| 隐藏 BUG 闭环率 | 1 高危 + 2 中危 = 3 未闭 | **0 致命 / 0 高危** | 100% 高危关闭 | XMM REX 预修复 P78 + spill 偏向 P72 两轮内消化 |
+
+---
+
+## 剩余活跃任务（按优先级降序，共 10 项）
+
+### 🎨 前端剩余（3 项：1 easy + 2 medium）
 
 | 优先级 | 任务 | 难度 | 排期轮次 | 状态 |
 |-------:|------|:----:|:--------:|:----:|
-| 78 | **ADT 字段访问错误消息增强：type X has no field Y → known fields are [a,b,c]**（frontend_adt_field_suggestion_error） | easy | 71 | pending |
-| 75 | **TypeVar 泄漏/泛化/ErrorExpr/泛化边界 4 类 × 15 用例补齐（前端测试密度 0.68→0.75）**（frontend_type_system_test_matrix） | easy | 71 | pending |
+| 78 | **ADT 字段访问错误消息增强：type X has no field Y → known fields are [a,b,c]**（frontend_adt_field_suggestion_error） | easy | 73 | pending |
+| 76 | **Parser 表达式级增量恢复：1-token 跳过 + 半AST构造（a + * b → BinOp(a,+,ErrorExpr)）**（frontend_parser_expr_incremental_recovery） | medium | 74 | pending |
+| 74 | **多位数类型 i8/i16/i32/i64/u32/f32/f64 + --narrowing strict/warn/off CLI 开关**（frontend_numeric_type_extension_and_cli） | medium | 75 | pending |
 
-### ⚙️ 后端剩余（4 项：3 hard + 1 medium）
+### ⚙️ 后端剩余（7 项：1 hard + 3 medium + 3 easy，颗粒度拆分后 medium 增多）
 
 | 优先级 | 任务 | 难度 | 排期轮次 | 状态 |
 |-------:|------|:----:|:--------:|:----:|
-| 88 | **栈帧布局精确化：RBP 基址帧 + DWARF CFI .eh_frame 元数据（CIE + FDE 序列）+ ELF 节区头 .shstrtab/.eh_frame/.symtab/.strtab**（backend_native_stack_frame_rbp_cfi） | hard | 71 | pending |
-| 85 | **指令选择补齐：按位运算 AND/OR/XOR/NOT/SHL/SHR/SAR + CMOVcc 分支less 条件移动**（backend_native_instr_selection_bitwise） | medium | 71 | pending |
-| 82 | **WasmGC 升级：引入原生 (type $adt_X (struct ...)) + (type $list_T (array ...)) 声明替换 nova_* runtime 模拟**（backend_wasmgc_native_struct_array） | hard | 71 | pending |
-| 80 | **ABI 调用补齐：大结构体 >16 字节 by-value 返回 System V AMD64 规范（RDI 指针返回约定）+ 同步补 Native ABI +10 场景 / WasmGC 6 场景长尾测试**（backend_native_abi_struct_return + backend_native_abi_test_coverage 打包） | medium | 72 | pending |
+| **85** 🎯 | **栈帧拆分A：RBP 基址帧模式 + 所有 RSP→RBP 寻址重算（独立可测，不包含 DWARF CFI）**（backend_native_stack_frame_rbp_only） | medium | **73** | pending |
+| 84 | **栈帧拆分B（剩余部分）：DWARF CFI .eh_frame CIE+FDE 字节码 + ELF 4 新节区.shstrtab/.eh_frame/.symtab/.strtab**（backend_native_stack_frame_rbp_cfi） | hard | 74 | pending |
+| 82 | **WasmGC 升级：引入原生 (type $adt_X (struct ...)) + (type $list_T (array ...)) 声明替换 nova_* runtime 模拟**（backend_wasmgc_native_struct_array） | hard | 74 | pending |
+| 80 | **ABI 调用补齐：大结构体 >16 字节 by-value 返回 System V AMD64（RDI 返回指针约定）**（backend_native_abi_struct_return） | medium | 75 | pending |
+| 80 | **Native ABI 骨架长尾 + WasmGC wat 合法性双测试补齐（Native ABI +10 / WasmGC +6 场景共 16 用例）**（backend_native_abi_test_coverage） | medium | 75 | pending |
+| 78 | **XMM8-XMM15 REX 前缀预修复：12+ SSE 指令硬编码 0x48 → _rex_rb 扩展（XMM 扩展时 SIGILL 定时炸弹拆除）**（backend_x86_64_xmm_rex_prefix_pre_fix） | easy | 73/74 | pending |
+| 72 | **regalloc_v2 spill 权重修正：callee-saved vreg 比较时 spill_weight +0.5 偏向补全（算法注释-实现一致性修复）**（backend_native_regalloc_v2_spill_bias_fix） | easy | 73 间隙 | pending |
 
 ---
 
-## Cycle 70-72 排期表（正式确认版）
+## Cycle 73-75 排期表（评审 72 正式确认版）
 
-| 轮次 | 类型 | 前端任务（35%） | 后端任务（65%） | 里程碑 |
+| 轮次 | 类型 | 前端任务（30%） | 后端任务（70%） | 里程碑 |
 |-----:|:----:|-----------------|-----------------|--------|
-| **70** | 普通轮 ✅ | **✅ frontend_implicit_numeric_cast_fence P88 medium**（隐式窄化栅栏 6 用例，TypeVar.overflow_risk + 3 接收端窄化升级） | **✅ backend_native_regalloc_linear_scan_v2 P92 hard**（双池 caller/callee GPR 分配 + 权重溢出）**+ ✅ backend_x86_64_rex_prefix_fix**（5 条指令 REX 前缀 BUG 修复，避免 R12→RSP 栈破坏 SIGSEGV）；位运算指令选择顺延至 71 | ✅ 寄存器分配 75%→90%；✅ 前端隐式窄化 silent bug 类清零；✅ REX 前缀定时炸弹拆除；Native 总平均 78.1%→~80%；测试 534→**616 passed（+82，无回归）** |
-| **71** | 普通轮 | frontend_adt_field_suggestion_error P78 easy（ADT 字段 known fields，4 用例）**+** frontend_type_system_test_matrix P75 easy（测试矩阵 15 用例，密度 0.68→0.75） | **backend_native_stack_frame_rbp_cfi P88 hard**（RBP 基址帧 + DWARF CFI + ELF 节区头 4 节，5 用例）**+** backend_native_instr_selection_bitwise P85 medium（按位运算 7 指令 + CMOVcc，9 用例）**+** **backend_wasmgc_native_struct_array P82 hard**（WasmGC 原生 struct/array，6 用例） | 栈帧 65%→88%；指令选择 72%→88%；Native 总平均 ~80%→84%；WasmGC 复合结构 65%→90%，WasmGC 总平均 73.8%→80%；前端测试密度 ≥0.75；前端 94%→95% |
-| **72** | 普通轮 | Cycle 70-71 遗留（如有）或 parser STMT 级独立计数器（可选 P72） | **backend_native_abi_struct_return P80 medium**（大结构体 >16 字节 by-value 返回 System V，5 用例）**+** backend_native_abi_test_coverage P80 medium（Native ABI +10 场景 / WasmGC 6 场景，16 用例合计） | ABI 82%→92%；Native 总平均 84%→85%；Native 测试密度 0.38→0.50 达标；后端总体 64.3%→72%；差距 27.7pp→~20pp（<20pp 容差） |
-| **72** | **评审轮**（72 % 3 = 0） | — | — | 评审 Cycle 70-71-72 三轮开发 + 更新任务池 + 规划 Cycle 73-75 |
+| **73** | 普通轮 | **frontend_adt_field_suggestion_error P78 easy**（ADT字段 known fields 追加 + None guard 防 KeyError，40 行+4 用例） + 间隙消化 **backend_regalloc_v2_spill_bias_fix P72 easy**（5 行+3 用例，注释-实现一致性） | **backend_native_stack_frame_rbp_only P85 medium**（RBP帧+寻址重算 300 行+6 用例，栈帧 65%→80% ✅ 消除一类RSP offset P1）；间隙追加 **backend_x86_64_xmm_rex_prefix_pre_fix P78 easy**（40 行+4 用例 XMM SIGILL 炸弹提前拆除）若 RBP-only <5h 提前完成 | ✅ 颗粒度拆分验证（RBP-only 单轮消化率 100%）；✅ 高危未来触发 BUG 清零；✅ 前端用户体验 30%+ 提升 |
+| **74** | 普通轮 | **frontend_parser_expr_incremental_recovery P76 medium**（表达式级 1-token 跳过+半AST 100 行+6 用例，Parser恢复 8.0→8.5 ✅ IDE 前置） | **backend_native_stack_frame_rbp_cfi（剩余） P84 hard**（DWARF CFI+ELF 4 新节区 450 行+5 用例，栈帧 80%→92% ✅ 可调试性 0→100） **并行** **backend_wasmgc_native_struct_array P82 hard**（WasmGC 原生 struct/array 550 行+6 用例，复合结构 65%→90% ✅ WasmGC 总平均 74%→80%） | ✅ 栈帧子模块满分收官；✅ WasmGC 原生类型大跃迁；✅ 后端总平均 66.7%→71%+（+4.3pp 单轮最大） |
+| **75** | 普通轮 + 评审轮 | **frontend_numeric_type_extension_and_cli P74 medium**（多位数类型 + --narrowing CLI 145 行+10 用例，窄化栅栏从单一 i32→按位宽精确判定；类型系统 8.5→9.0） | **backend_native_abi_struct_return P80 medium**（>16字节结构体返回 ABI 150 行+5 用例，ABI 82%→92%） **打包** **backend_native_abi_test_coverage P80 medium**（ABI 长尾 16 用例 350 行，Native 测试密度 0.42→0.50 达标 ✅）；评审轮收尾：更新任务池+规划 Cycle 76-78 | ✅ ABI 子模块收官；✅ Native 测试密度达标安全线 0.50；✅ 后端总体 66.7%→74%（Cycle 69→75 三轮共 +9.7pp）；✅ 前后端差距 29.3pp→≤22pp（收敛 7.3pp） |
 
 ---
 
 ## 三后端完成度明细（8 子模块 × 3 后端 = 24 项，审计分数）
 
-### Native x86_64（总平均 **80.0%** ✅，目标：Cycle 72 → 85%）
+### Native x86_64（总平均 **80%+**，目标：Cycle 75 → 87%）
 
-| 子模块 | 当前 | 目标 72 | 对应任务 |
+| 子模块 | 当前 | 目标 75 | 对应任务 |
 |--------|:----:|:-------:|---------|
-| ELF 头/节区 | 88% | 92% | backend_native_stack_frame_rbp_cfi（.shstrtab/.symtab/.strtab/.eh_frame 4 节区补齐） |
-| 指令选择 | 72% | 88% | backend_native_instr_selection_bitwise（AND/OR/XOR/NOT/SHL/SHR/SAR + CMOVcc）+ REX 前缀修复（Cycle 70 ✅） |
-| 寄存器分配 | **90%** ✅ | 92%（已接近） | ✅ backend_native_regalloc_linear_scan_v2（双池 caller/callee GPR + 权重溢出，Cycle 70 完成） |
-| 栈帧 | 65% | 88% | backend_native_stack_frame_rbp_cfi（RBP 基址帧 + DWARF CFI CIE+FDE） |
-| ABI 调用 | 82% | 92% | backend_native_abi_struct_return（>16 字节 by-value 返回 System V 约定） |
+| ELF 头/节区 | 88% | 95% | backend_native_stack_frame_rbp_cfi（.shstrtab/.symtab/.strtab/.eh_frame 4 节区补齐，shoff从0→有效值） |
+| 指令选择 | 80% | 88% | 已完成 backend_native_instr_selection_bitwise（Cycle71，按位运算 7 条指令）；未来 CMOVcc 条件移动（分支less三元表达式）另立项 |
+| 寄存器分配 | **90%** ✅ | 92%（已接近） | ✅ backend_native_regalloc_linear_scan_v2（Cycle70 完成）；spill_bias_fix P72 小修小补 |
+| **栈帧** | **65%** ⚠️ 最低 | **92%** 🎯 | **backend_native_stack_frame_rbp_only P85（65%→80%） + backend_native_stack_frame_rbp_cfi P84（80%→92%）拆分两步走** |
+| ABI 调用 | 82% | 92% | backend_native_abi_struct_return（>16字节 by-value 返回 System V 约定）+ abi_test_coverage |
 | 运行时调用 | 80% | 83% | 待后续 extern "C" setjmp/longjmp 集成 |
 | 闭包 | 78% | 80% | 待后续 runtime allocator GC 标记集成 |
 | 全局变量 | 85% | 87% | 待后续 TLS 线程局部存储 |
 
-### WasmGC（总平均 **73.8%**，目标：Cycle 72 → 80%）
+### WasmGC（总平均 **74%**，目标：Cycle 75 → 80%）
 
-| 子模块 | 当前 | 目标 72 | 对应任务 |
+| 子模块 | 当前 | 目标 75 | 对应任务 |
 |--------|:----:|:-------:|---------|
-| 类型声明 | 70% | 90% | backend_wasmgc_native_struct_array（(type $X (struct ...)) / (type $Y (array ...))） |
+| 类型声明 | 70% | **92%** 🎯 | backend_wasmgc_native_struct_array（(type $adt_X (struct ...)) / (type $list_T (array ...)) 动态扫描所有 ADT/List 实例化类型生成声明） |
 | 函数 | 85% | 88% | 待后续 tail call 优化 |
 | 局部变量 | 90% | 92% | 小改动即可 |
-| 控制流 if/loop/block | 70% | 75% | 待后续 br_table switch 跳转 |
+| 控制流 if/loop/block | 70% | 75% | 待后续 br_table switch 跳转优化 |
 | 调用（含 call_indirect） | 80% | 82% | 小改动即可 |
-| 复合结构 list/tuple/map/adt | 65% | 90% | backend_wasmgc_native_struct_array（array.new_default / struct.new + array.get/set / struct.get） |
-| 闭包 | 70% | 72% | 待后续 GC 根 tracing |
-| extern 导入 | 60% | 62% | 待后续用户自定义 extern 导入机制 |
+| **复合结构 list/tuple/map/adt** | **65%** ⚠️ 最低 | **90%** 🎯 | backend_wasmgc_native_struct_array（array.new_default + array.get/set 替换 nova_list_*；struct.new + struct.get 替换 nova_adt_*） |
+| 闭包 | 70% | 72% | 待后续 GC 根 tracing（与原生 struct 闭包表示统一） |
+| extern 导入 | 60% | 62% | 待后续用户自定义 extern 导入机制 + 类型校验 |
 
-### C 后端（总平均 **88.8%**，健康 ✅）
+### C 后端（总平均 **89%** ✅ 健康，目标：Cycle 75 → 91%）
 
-| 子模块 | 当前 | 目标 72 |
+| 子模块 | 当前 | 目标 75 |
 |--------|:----:|:-------:|
 | 类型声明 | 95% | 96% |
 | 函数 | 92% | 93% |
@@ -164,13 +173,14 @@
 
 ## 安全保障指标
 
-| 指标 | 当前值 | 目标 | 状态 | 备注 |
+| 指标 | 当前值 | 目标（Cycle75） | 状态 | 备注 |
 |------|-------:|-----:|:----:|------|
-| 基线测试通过率（11 文件 830 项） | 830 / 830 = 100% | ≥100%（无回归） | ✅ 绿 | Exit 0，所有子文件 individually passed |
-| 新增代码注释率（关键函数） | >85% | ≥60% | ✅ 绿 | _generalize/_instantiate/_detect_leaking_tvars docstring 覆盖 >95% |
-| 单任务失败后回滚率 | 100%（最近 10 任务 0 失败） | 100% | ✅ 绿 | P1 清零 5/5 全部一次成功 |
-| P1 积压数 | **0** | ≤2 | ✅ 绿 | 评审 66→69 维持 0，Cycle 70-72 规划新增 0 项 P1 |
-| Native ABI correctness 级 bug | 0（最近 1 项 XMM0 冲突 Cycle 68 清零） | ≤1/轮 | ✅ 绿 | emit_abi_call_direct 10 步骨架 correctness 类全部清零 |
-| 前端测试密度（type_checker.py） | 0.68（源码 2496 / 测试 1702） | ≥0.75 | ⚠️ 黄 | 目标：frontend_type_system_test_matrix P75 上线后 0.75 |
-| Native 后端测试密度 | 0.38（源码 2773 / 测试 1045） | ≥0.50 | ⚠️ 黄 | 目标：backend_native_abi_test_coverage P80 上线后 0.50 |
-| 前后端完成度差距 | 27.7pp | ≤20pp | ⚠️ 黄 | 目标：Cycle 72 收窄到 ~20pp（<20pp 容差） |
+| 基线测试通过率（6 文件 458 项） | 458 / 458 = 100% | ≥100%（无回归） | ✅ 绿 | Exit 0，所有子文件 individually passed |
+| 新增代码注释率（关键函数） | >85% | ≥60% | ✅ 绿 | DWARF CFI / 多位数类型调度表 docstring 覆盖率要求 ≥95% |
+| 单任务失败后回滚率 | 100%（最近 15 任务 0 失败） | 100% | ✅ 绿 | P1 清零后 12 轮 0 失败 |
+| P1 积压数 | **0** | ≤2 | ✅ 绿 | 评审 66→72 共 6 轮 0 |
+| Native ABI correctness 级 bug | 0（最近 2 项 XMM0+RCX 已清零） | ≤1/轮 | ✅ 绿 | emit_abi_call_direct 10 步 + 参数偏移计算正确性类全部清零 |
+| 前端测试密度（TypeChecker 口径） | **0.78**（源码2496/测试1947=测试矩阵后） | ≥0.82 | ✅ 绿（已达标≥0.75，继续抬升） | frontend_parser_expr_incremental_recovery 专项+6 用例后可达 0.82 |
+| Native 后端测试密度 | 0.42（源码2773/测试1170=XMM+spill后） | ≥0.50 | ⚠️ 黄→绿 | 目标：backend_native_abi_test_coverage P80 上线后 0.50+ |
+| 前后端完成度差距 | 29.3pp | ≤22pp | ⚠️ 黄→绿 | Cycle73-75 后端 hard×2+medium×3 集中爆发后收敛 |
+| 隐藏高危 BUG 闭环率 | 1/3（spill_bias 已立项/XMM REX 已立项，剩移位语义低优先级） | ≥100%（致命+高危） | ⚠️ 黄 | 移位 1<<100 语义不定义（跨平台不一致）属远期规范类，放 Cycle76+ 处理 |

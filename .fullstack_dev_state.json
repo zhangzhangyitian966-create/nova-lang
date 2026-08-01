@@ -1,9 +1,9 @@
 {
-  "cycles": 71,
+  "cycles": 72,
   "frontend_completed": 48,
   "backend_completed": 56,
-  "last_review_cycle": 69,
-  "current_review_cycle": 69,
+  "last_review_cycle": 72,
+  "current_review_cycle": 72,
   "completed_tasks": [
     "frontend_try_expr_typecheck",
     "backend_native_label_patch",
@@ -127,7 +127,8 @@
     "backend_native_regalloc_linear_scan_v2",
     "backend_x86_64_rex_prefix_fix",
     "frontend_type_system_test_matrix",
-    "backend_native_instr_selection_bitwise"
+    "backend_native_instr_selection_bitwise",
+    "review_cycle_72"
   ],
   "failed_tasks": [],
   "deprecated_tasks": [
@@ -146,6 +147,18 @@
     "backend_wasmgc_instruction_fill"
   ],
   "task_history": [
+    {
+      "cycle": 72,
+      "task_id": "review_cycle_72",
+      "name": "第 72 轮双线路线图评审（覆盖 Cycle 70-71 两轮普通开发 + Native 硬缺口拆分子任务 + XMM 扩展兼容 + 表达式级恢复 3 方向规划）",
+      "track": "review",
+      "difficulty": "n/a",
+      "priority": 99,
+      "status": "success",
+      "result": "success",
+      "details": "审计范围 Cycle 69-71（3 轮跨度）。前端质量 8.7→8.5(↓0.2：Roadmap 完成度虚高，审计按全局目标修正；TVar泄漏9.0/HM泛化8.0/ErrorExpr8.5/Parser恢复8.0/测试7.4 分项健康，综合A-)；后端质量 7.6→7.8(↑0.2：Native regalloc_v2 9.0+位运算贯通拉 Native 平均 78.1%→实际审计 80%+；C后端8.9✅/WasmGC7.4 结构性分化，综合B+)；0 项致命隐藏 BUG；1 项中危性能(regalloc_v2 spill 权重未加 0.5 修正)；1 项高危未来触发(XMM8-XMM15 硬编码 0x48 REX 前缀→扩展时 SIGILL)。深度审计新增 5 项高价值任务：前端 2（表达式级增量恢复 P76 / 多位数类型+窄化CLI P74）+ 后端 3（RBP-only 拆分 P85 / XMM REX 预修复 P78 / regalloc_v2 spill 偏向修正 P72）。调整 2 项依赖：backend_native_stack_frame_rbp_cfi 新增 depends_on backend_native_stack_frame_rbp_only（拆 RBP 独立子任务降低颗粒度）；backend_native_abi_struct_return 新增 depends_on backend_native_stack_frame_rbp_only（只依赖 RBP 帧不依赖 CFI 字节码）。废弃 0 项。Cycle 73-75 资源配比建议 FE 30% / BE 70%（后端积压 4 项 hard+2 medium，前端仅 2 easy+2 medium，差距 29.3pp，向后端再倾斜 5pp）。",
+      "timestamp": "2026-08-01 10:11:49"
+    },
     {
       "cycle": 71,
       "task_id": "frontend_type_system_test_matrix",
@@ -337,15 +350,16 @@
     {
       "task_id": "backend_native_stack_frame_rbp_cfi",
       "name": "栈帧布局精确化：RBP 基址帧模式 + DWARF CFI .eh_frame 元数据生成（CIE + FDE 序列）",
-      "description": "P1 级 Native 可调试性（Native 最大的开发者体验缺口）。当前 Native ELF 仅用 RSP 相对寻址访问参数和局部变量，无 RBP 基址帧 → gdb/lldb backtrace 无法通过 DWARF CFA（Canonical Frame Address）规则回溯栈帧，只能显示 _start+0x?? 符号偏移，完全无法定位崩溃位置；prologue/epilogue 也缺少 DWARF CFI .eh_frame section（目前 ELF shoff=0 无节区头，.eh_frame 即使写入也不可寻址）。方案：(1) 新增模式：_frame_mode = \"rbp\"（默认开启，可用 CLI flag --fast-nofp 切 RSP-only 模式）；prologue 改为 push rbp → mov rbp, rsp（标准 RBP 帧序言），之后局部变量用 [rbp - offset*8]、参数用 [rbp + 16 + arg_idx*8]（对齐 System V AMD64 标准帧结构）；(2) epilogue 改为 mov rsp, rbp → pop rbp → ret；(3) 新增 _emit_dwarf_cfi() 生成器：先写 1 条 CIE（Common Information Entry，定义寄存器映射规则 RSP/RBP 的编码 + DW_CFA_def_cfa/offset 操作码），再按函数写 FDE（Frame Description Entry）覆盖函数地址范围，FDE 内按指令偏移逐条记录 DW_CFA 事件（prologue 结束时 def_cfa RSP+16 offset RBP=[CFA-16]；call 指令前 def_cfa 更新）；(4) ELF 节区头从 shoff=0 空壳改为至少 3 节：.shstrtab（节名表）+.eh_frame（CIE+FDE）+.symtab（函数符号）+ .strtab（符号字符串）——shoff/shnum/shstrndx 字段正确回填；(5) 配套 5 用例：ELF 节区头 e_shoff≠0、readelf --sections 输出含 .eh_frame 节、gdb -batch -ex bt core 文件输出含函数名帧（可用 objdump --dwarf=frames 模拟验证 CIE/FDE 字节结构）、RBP 帧嵌套调用 fib(10) 回溯 12+ 帧不崩溃、--fast-nofp 模式退化为纯 RSP 无 CIE。修改 native_backend.py ~600 行（prologue/epilogue 重写 + _emit_dwarf_cfi ~250 行 + ELF shdr 生成 ~150 行）+ test_native_backend.py ~120 行 5 用例。Cycle 71 后端第一优先级，depends_on regalloc_v2（R12-R15 callee-saved 要统一在 prologue/epilogue 中 push/pop）。",
+      "description": "（RBP-only 拆分后剩余部分）DWARF CFI .eh_frame CIE+FDE 字节码生成 + ELF 节区头扩展（.shstrtab/.eh_frame/.symtab/.strtab 4 节区）。RBP 基址帧 + 所有寻址重算已在 backend_native_stack_frame_rbp_only（P85）独立完成。方案：(1) _emit_dwarf_cfi() 生成器：1 条 CIE（Common Information Entry，DW_CFA_def_cfa/offset 操作码 + RSP/RBP 寄存器映射规则）+ 每函数 1 条 FDE（Frame Description Entry，覆盖函数地址范围 + prologue 结束时 def_cfa RSP+16 offset RBP=[CFA-16]）；(2) _generate_elf 的节区头从 shoff=0 空壳扩展为 3+4=7 节：null + .text(已有) + .data(已有) + 新增 .shstrtab(节名表) + .eh_frame(CIE+FDE 序列) + .symtab(函数符号表) + .strtab(符号字符串)；e_shoff / e_shnum / e_shstrndx 字段正确回填；(3) 配套 5 用例：ELF shoff≠0 且 shnum=7、readelf --sections 输出含 .eh_frame、objdump --dwarf=frames 输出含 CIE+FDE 序列、fib(10)嵌套调用 gdb backtrace 输出含函数名帧、CLI --fast-nofp 模式跳过 CFI（RSP-only 模式兼容）。修改 native_backend.py ~450 行（DWARF CFI ~250 + ELF shdr 扩展 ~150）+ test_native_backend.py ~100 行。Cycle 74 后端优先级，strict depends_on RBP-only 完成。",
       "track": "backend",
       "difficulty": "hard",
-      "priority": 88,
+      "priority": 84,
       "estimated_effort": "12-16小时",
       "status": "pending",
       "source": "review_cycle_69 审计：Native 栈帧子模块 65% 是所有 24 个子模块（3后端×8）中分数最低项；DWARF CFI 生成后 Native 调试效率 +50%，后续所有 hard 任务的开发周期缩短",
       "depends_on": [
-        "backend_native_regalloc_linear_scan_v2"
+        "backend_native_regalloc_linear_scan_v2",
+        "backend_native_stack_frame_rbp_only"
       ],
       "severity": "P1"
     },
@@ -388,7 +402,7 @@
       "status": "pending",
       "source": "review_cycle_69 审计：Native ABI 子模块 82% 的拖后腿项 = 大结构体 by-value 返回不兼容 System V AMD64；补齐后 Nova/C 互操作的 90% 用例（游戏引擎/数学库的 Vec3/Mat4 值传递）可用",
       "depends_on": [
-        "backend_native_stack_frame_rbp_cfi"
+        "backend_native_stack_frame_rbp_only"
       ],
       "severity": "P2"
     },
@@ -420,8 +434,81 @@
       "source": "code_audit_60 Top 复杂度确认，review_cycle_63 合并到 _emit_abi_call 统一骨架，第 65 轮已完成",
       "depends_on": [],
       "severity": "P2"
+    },
+    {
+      "task_id": "backend_native_stack_frame_rbp_only",
+      "name": "栈帧拆分A：RBP 基址帧模式 + 所有 RSP→RBP 寻址重算（独立可测，不包含 DWARF CFI）",
+      "description": "P2 Native 稳定性（栈帧 65%→80% 的第一步，拆分自原 backend_native_stack_frame_rbp_cfi P88 降低颗粒度解决 Cycle 71 产能下滑）。当前栈帧：push 6 callee_saved → sub rsp,16 对齐 → 全 RSP+offset 寻址。新增/删除 push 时所有 offset 必须同步重算（一类 P1 来源）。方案：(1) _frame_mode='rbp' 默认开启，CLI --fast-nofp 回退 RSP-only；(2) prologue 改为 push RBP → mov RBP,RSP → push 5 callee(RBX/R12/R13/R14/R15,RBP 作为帧指针单独处理) → sub rsp,local_size+对齐；(3) epilogue 改为 mov rsp,rsp → pop 5 callee → pop RBP → ret（或统一用 leave 指令：mov rsp,rbp + pop rbp）；(4) 所有寻址重算：参数 = [rbp + 16 + idx*8]（caller's return addr + push rbp = 16 字节）、callee_saved = [rbp - 8 - idx*8]（RBP下面紧邻callee push）、局部变量 = [rbp - 16 - callee_size - slot*8]；原 _EmitContext 的 stack_offset 计算全部切换为 rbp_offset；(5) 配套 6 用例：RBP 帧的 fib(10)=55 ELF 执行正确、10 参数函数调用 RBP 模式不崩溃、嵌套 3 层调用栈平衡、mov RSP,RBP 字节特征码 C9(leave) 出现或等价序列、--fast-nofp 退化为纯 RSP、寄存器分配到 RBP 时（不允许，RBP 保留）分配器跳过 RBP。修改 native_backend.py ~300 行（prologue/epilogue 重写 + _EmitContext 寻址切换）+ test_native_backend.py ~90 行 6 用例。Cycle 73 后端第一优先级（与 frontend_adt_field_suggestion_error 并行，两任务零依赖）。",
+      "track": "backend",
+      "difficulty": "medium",
+      "priority": 85,
+      "estimated_effort": "5-7小时",
+      "status": "pending",
+      "source": "review_cycle_72 审计：原栈帧CFI P88 hard 单任务颗粒度太大（12-16h 超一轮容量），Cycle 71 实际只完成位运算未启动栈帧；拆为 RBP-only(medium 5-7h)+ CFI-only(hard 6-8h) 两个子任务后每轮可消化一个，连续两轮完成原计划总 ROI 不变",
+      "depends_on": [
+        "backend_native_regalloc_linear_scan_v2"
+      ],
+      "severity": "P2"
+    },
+    {
+      "task_id": "backend_x86_64_xmm_rex_prefix_pre_fix",
+      "name": "XMM8-XMM15 REX 前缀预修复：xorpd/movsd/加解密 SSE 指令硬编码 0x48 → _rex_rb 扩展",
+      "description": "P3 Native 前瞻性兼容（当前零触发，XMM 池未来从 XMM0-XMM7 扩展到 XMM0-XMM15 时直接 SIGILL 类定时炸弹）。审计发现 x86_64.py L743/L755（以及 10+ 条 SSE/AVX 指令）的 REX 前缀全部硬编码 0x48（仅 REX.W=1，忽略 REX.R/REX.B），当 XMM 寄存器编号 ≥8 时（XMM8=8 ... XMM15=15），ModRM 的 reg/opcode 字段 3 位不够存，需 REX.R=1 扩展第 4 位。方案：(1) 扫描 x86_64.py 所有 xmm 参数的指令（movsd_xmm_mem / movsd_mem_xmm / xorpd_xmm / addsd_xmm / mulsd_xmm / divsd_xmm / cmpsd_xmm 等）；(2) 每条指令的 REX 前缀从硬编码 0x48 → _rex_wb(1, xmm_reg>>3) 或 _rex_rb(1 if modrm.reg>=8 else 0, 1 if modrm.rm>=8 else 0)；(3) 配套 4 用例：XMM0-XMM7 生成字节与修复前字节级一致（回归保护 0 差异）、XMM8-XMM15 虚拟场景下 REX.B/R 位正确（用单元测试直接调 _rex_rb 断言位模式）、未来 regalloc_v3 打开 XMM8-15 时只需改 _ALLOC_XMMS 常量无需改指令编码器、与 regalloc_v2 现有 XMM0-7 分配器无交互。修改 backend/x86_64.py ~40 行（12 条 SSE 指令 REX 前缀生成）+ tests/test_backends.py ~30 行 4 用例。Cycle 73 或 74 后端热身任务（改动 ≤70 行，零 correctness 风险）。",
+      "track": "backend",
+      "difficulty": "easy",
+      "priority": 78,
+      "estimated_effort": "1-2小时",
+      "status": "pending",
+      "source": "review_cycle_72 深度审计：5 条 GPR 指令的同类 REX 硬编码 BUG（Cycle 70 P92 修复，R12→RSP SIGSEGV）在 XMM 侧有 12+ 条完全相同结构的定时炸弹，当前 XMM 池仅 0-7 未触发，扩展时必炸",
+      "depends_on": [],
+      "severity": "P3"
+    },
+    {
+      "task_id": "backend_native_regalloc_v2_spill_bias_fix",
+      "name": "regalloc_v2 spill 权重修正：callee-saved vreg spill_weight 未加 +0.5 偏向修正导致相等权重时可能优先溢出高价值 callee",
+      "description": "P3 Native 性能（非正确性，仅性能偏向）。Cycle 70 regalloc_v2 注释明确写 'callee-saved 权重额外 +0.5 偏向先溢出 caller'，但 _spill_victim_v2 代码未实际加 0.5 修正。当 caller 和 callee 的 vreg spill_weight 浮点相等时（常见于长命 vreg 权重饱和），遍历顺序先扫 caller 后扫 callee → 等权重时 caller 先判 equal 命中 → 可能挑中 caller（正确），但反向遍历或 hash 重排时可能挑中 callee；且若 callee 的权重略低于 caller（如 0.51 vs 0.52）时不修正会误溢出 callee（浪费 prologue 已 push 的成本）。方案：(1) _spill_victim_v2 在扫描 active_callee_gprs 时的 candidate_weight = spill_weight + 0.5（仅比较时加，不写回权重元数据）；(2) 配套 3 用例：等权重场景断言溢出 caller（而非 callee，通过构造精确 span×跨call 权重）、callee 权重略低场景通过 +0.5 翻转溢出选择、callee 权重重 +0.5 仍高时正确溢出 caller（不影响原有正确路径）。修改 backend/native_backend.py ~5 行（1 行权重比较 + 1 行注释 + 3 行 docstring）+ tests/test_native_backend.py ~40 行 3 用例。Cycle 73 后端热身任务，5 行改动 ROI 高（性能回归保护）。",
+      "track": "backend",
+      "difficulty": "easy",
+      "priority": 72,
+      "estimated_effort": "1小时",
+      "status": "pending",
+      "source": "review_cycle_72 深度审计：regalloc_v2 双池代码实现与注释不一致（注释说 +0.5，代码未加），属于正确性/性能边界的注释-实现漂移，不修复会误导后续维护者对算法行为的假设",
+      "depends_on": [
+        "backend_native_regalloc_linear_scan_v2"
+      ],
+      "severity": "P3"
+    },
+    {
+      "task_id": "frontend_parser_expr_incremental_recovery",
+      "name": "Parser 表达式级增量恢复：非 panic mode，跳过单个错误 token + 半 AST 构造（如 a + * b → BinOp(a,+,ErrorExpr)）",
+      "description": "P3 前端 IDE 体验（ROI 高于 ADT 字段建议的下一项）。当前 Parser 表达式级仅 panic mode：_synchronize_to_declaration_boundary 跳过整个子表达式到下一个分号/关键字，单个错误 token 会丢失后续 N 个绑定的类型信息 → IDE 集成时错误行之后所有变量无补全/无诊断。方案：(1) _parse_expr 外包 try-except ParseError：捕获后消费 1 个 token（_advance()）并返回 ErrorExpr；同时 errors.append() 追加错误（不改 Panic mode 的多错误聚合架构）；(2) _parse_binop_rhs（递归下降优先级链核心）：若 rhs 解析抛错→返回 ErrorExpr，lhs 保留（形成 BinOp(lhs, op, ErrorExpr) 半 AST）；(3) _parse_primary_expr：括号/字面量/标识符失败时返回 ErrorExpr（而不是向上抛），保留外层 BinOp/Call 结构；(4) 配套 6 用例：a+*b 恢复 AST 是 BinOp(a,+,ErrorExpr)（不丢 a 的绑定）、f(1,) 尾逗号恢复 Call(f,[1,ErrorExpr])、let x = a + + b 恢复 BinOp 不丢 x 绑定、嵌套 (a + * b) * c 两层错误独立恢复、精确跳过 token 数断言（每个错误只跳 1 个 token 不 panic 跳过 10+）、Panic mode 仍在 TOP_LEVEL/STMT_BOUNDARY 生效（增量恢复失败时回退到 Panic）。修改 parser.py ~100 行（3 处 try-except + _advance() 消费 + 返回 ErrorExpr）+ tests/test_parser.py ~80 行 6 用例。Cycle 74 前端优先级，ADT 字段建议完成后下一个体验优化项。",
+      "track": "frontend",
+      "difficulty": "medium",
+      "priority": 76,
+      "estimated_effort": "3-4小时",
+      "status": "pending",
+      "source": "review_cycle_72 深度审计：前端错误恢复 8.0 分项的最大短板 = 表达式级仅 Panic mode；Parser 8.0→8.5 的直接推手；同时为 IDE/LSP 集成（未来路线图）前置铺路",
+      "depends_on": [
+        "frontend_parser_error_recovery_full"
+      ],
+      "severity": "P3"
+    },
+    {
+      "task_id": "frontend_numeric_type_extension_and_cli",
+      "name": "多位数类型系统（i8/i16/i32/i64/u32/f32/f64）+ strict_narrowing CLI 开关（窄化栅栏从硬编码 True→可配置）",
+      "description": "P2 前端类型系统扩展（为 Native SIMD/FFI/C 互操作前置基础）。当前 PrimType 只有 Int(=64位)/Float(=64位)/Bool/String/Unit/Never 6 种，隐式窄化栅栏基于单一 i32 假设（_check_literal_expr 的 I32_MAX=2^31-1），strict_narrowing=True 硬编码 3 处无 CLI 入口。方案分两部分：Part A【多位数类型】(1) PrimTypeKind 枚举新增 I8/I16/I32/I64/U32/F32/F64（保持 Int/Float 作为别名=I64/F64 向后兼容）；(2) Lexer 字面量后缀：10i8 / 10i16 / 10i32 / 10i64 / 10u32 / 1.0f32 / 1.0f64，_parse_number_literal 解析后缀绑定对应类型；(3) TypeChecker 的 _check_literal_expr 窄化阈值按实际位宽判定：i8→max=127 / i16→32767 / i32→2^31-1 / u32→2^32-1 / f32→2^24 mantissa；Part B【CLI开关】(4) compiler_cli.py / cli.py 新增 --narrowing=strict|warn|off 三档（默认 strict），TypeChecker 初始化时从 CompilerConfig 读 narrow_mode；(5) _detect_narrowing_risk 的 3 处 hardcoded strict_narrowing=True → 改为 cfg.narrow_mode=='strict' 时 raise Error，==warn 时 append Warning，==off 时静默跳过。配套 10 用例：(A 6) i8 字面量 127OK / 128报错 / u32 4294967295OK / f32 字面量后缀绑定 F32 类型 / Int 别名仍解析为 I64 / Float 别名解析为 F64；(B 4) --narrowing=warn 仅告警不报错 / --narrowing=off 完全静默 / strict 默认报错 / 库代码第三方依赖 off 模式不阻断编译。修改 lexer.py(~15行) / parser.py(~20行) / type_checker.py(~80行阈值适配+3处cfg替换) / cli.py+compiler_cli.py(~30行CLI参数) + tests/test_type_checker.py(~120行10用例)。Cycle 75 前端第一优先级（需先完成表达式级增量恢复避免类型报错与 Parser 恢复交叉干扰）。",
+      "track": "frontend",
+      "difficulty": "medium",
+      "priority": 74,
+      "estimated_effort": "6-8小时",
+      "status": "pending",
+      "source": "review_cycle_72 深度审计：隐式窄化栅栏当前基于单一 i32 假设是『设计技术债』，Native 侧一旦引入 SIMD/FFI 的 i8/i16/u32/f32 参数类型将直接 mis-detect 或漏检测；同时 strict_narrowing 硬编码是用户体验死锁（第三方库代码无法控制严格度）",
+      "depends_on": [
+        "frontend_implicit_numeric_cast_fence"
+      ],
+      "severity": "P2"
     }
   ],
-  "last_updated": "2026-07-31 22:45:00",
-  "active_tasks_count": 6
+  "last_updated": "2026-08-01 10:11:49",
+  "active_tasks_count": 10
 }
