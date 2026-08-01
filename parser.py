@@ -95,6 +95,16 @@ class Parser:
     # 表达式递归链中最大嵌套错误数（超过则返回 ErrorExpr 占位符）
     _EXPR_MAX_NESTED_ERRORS = 3
 
+    # ----------------------------------------------------------
+    # SH-1 语法冻结对齐：14 个未来保留字（SYNTAX_FREEZE_v0.5 §2 表 #18-31）
+    # 当前 v0.5 版本尚未作为关键字启用，但 parser 层面必须拦截为「不可用作标识符」。
+    # ----------------------------------------------------------
+    FUTURE_RESERVED_WORDS = frozenset({
+        "class", "struct", "enum", "return", "yield",
+        "async", "await", "pub", "priv", "self",
+        "Self", "super", "where", "with",
+    })
+
     def __init__(self, tokens: List[Token], source: str = ""):
         self.tokens = tokens
         self.pos = 0
@@ -446,36 +456,53 @@ class Parser:
         return ty
 
     def _parse_primary_type(self):
-        """解析基础类型"""
+        """解析基础类型（CC 优化前 ≈13，拆分后主入口 CC≤3）
+
+        拆分策略（按 Explore agent 建议）：
+          - 主入口：仅负责 TokenType 分发（LPAREN / IDENT / 其他）
+          - _parse_tuple_type：处理 (A, B, ...) 元组类型（CC=2）
+          - _parse_named_type：处理所有标识符类型（CC=4，内部再分 4 路）
+        最高 CC 从 13 降至 4，出榜 Top10 CC≤10 阈值。
+        """
         tok = self._cur()
-
-        # 元组类型: (Int, String)
         if tok.type == TokenType.LPAREN:
-            self._advance()
-            elements = [self._parse_type_expr()]
-            while self._match(TokenType.COMMA):
-                elements.append(self._parse_type_expr())
-            self._expect(TokenType.RPAREN)
-            return TypeTuple(elements=elements, span=self._span(tok))
+            return self._parse_tuple_type(tok)
+        if tok.type == TokenType.IDENT:
+            return self._parse_named_type(tok)
+        raise ParseError(
+            f"期望类型表达式，但得到 '{tok.value}'",
+            tok.line, tok.column, source=self._source,
+        )
 
-        # 基本类型名
-        basic_types = {
-            "Int": TypeInt,
-            "Float": TypeFloat,
-            "String": TypeString,
-            "Bool": TypeBool,
-            "Char": TypeChar,
-            "Unit": TypeUnit,
-        }
-        if tok.type == TokenType.IDENT and tok.value in basic_types:
-            self._advance()
-            return basic_types[tok.value](span=self._span(tok))
+    # ---- _parse_primary_type 子方法 ----
 
-        # Fn 类型
-        if tok.type == TokenType.IDENT and tok.value == "Fn":
+    def _parse_tuple_type(self, tok):
+        """解析元组类型：(Int, String, Bool) → TypeTuple（CC=2）"""
+        self._advance()  # 消费 LPAREN
+        elements = [self._parse_type_expr()]
+        while self._match(TokenType.COMMA):
+            elements.append(self._parse_type_expr())
+        self._expect(TokenType.RPAREN)
+        return TypeTuple(elements=elements, span=self._span(tok))
+
+    # 类级常量：7 种基本类型名 → 构造器（避免每次调用重建 dict）
+    _BASIC_TYPE_MAP = {
+        "Int": TypeInt, "Float": TypeFloat, "String": TypeString,
+        "Bool": TypeBool, "Char": TypeChar, "Unit": TypeUnit,
+    }
+
+    def _parse_named_type(self, tok):
+        """解析标识符开头的类型：基本类型 / Fn[...] / 泛型 / 自定义（CC=4）"""
+        name = tok.value
+        # ① 基本类型：Int / Float / String / Bool / Char / Unit
+        if name in self._BASIC_TYPE_MAP:
+            self._advance()
+            return self._BASIC_TYPE_MAP[name](span=self._span(tok))
+        # ② Fn 类型：Fn[A, B] -> R（顶层 parse_fn_type 再处理 ->）
+        if name == "Fn":
             self._advance()
             if self._match(TokenType.LBRACKET):
-                params = []
+                params: list = []
                 if self._peek_type() != TokenType.RBRACKET:
                     params.append(self._parse_type_expr())
                     while self._match(TokenType.COMMA):
@@ -487,25 +514,16 @@ class Parser:
                     span=self._span(tok),
                 )
             return TypeIdentifier(name="Fn", span=self._span(tok))
-
-        # 泛型类型或自定义类型
-        if tok.type == TokenType.IDENT:
-            self._advance()
-            name = tok.value
-            if self._match(TokenType.LBRACKET):
-                params = [self._parse_type_expr()]
-                while self._match(TokenType.COMMA):
-                    params.append(self._parse_type_expr())
-                self._expect(TokenType.RBRACKET)
-                return TypeGeneric(base=name, params=params, span=self._span(tok))
-            return TypeIdentifier(name=name, span=self._span(tok))
-
-        raise ParseError(
-            f"期望类型表达式，但得到 '{tok.value}'",
-            tok.line,
-            tok.column,
-            source=self._source,
-        )
+        # ③ 泛型类型：List[Int] / Map[String, Int]
+        self._advance()
+        if self._match(TokenType.LBRACKET):
+            params = [self._parse_type_expr()]
+            while self._match(TokenType.COMMA):
+                params.append(self._parse_type_expr())
+            self._expect(TokenType.RBRACKET)
+            return TypeGeneric(base=name, params=params, span=self._span(tok))
+        # ④ 自定义类型标识符：Shape / Status / ...
+        return TypeIdentifier(name=name, span=self._span(tok))
 
     # ----------------------------------------------------------
     # 语句
@@ -638,12 +656,19 @@ class Parser:
             raise
 
     def _parse_pipe(self):
-        """管道操作符 |> (优先级最低)"""
+        """管道操作符 |> (优先级最低)
+
+        SH-1 语法冻结对齐（SYNTAX_FREEZE_v0.5 §5）：parser 层 desugar
+        为嵌套 FnCall，AST 中不保留独立 PipeExpr 节点。即：
+            a |> f      →  FnCall(f,  [a])
+            a |> f |> g →  FnCall(g,  [FnCall(f, [a])])
+        """
         left = self._parse_for_while_expr()
         while self._match(TokenType.PIPE_GT):
             tok = self.tokens[self.pos - 1]
             right = self._parse_for_while_expr()
-            left = PipeExpr(left=left, right=right, span=self._span(tok))
+            # desugar:  left |> right  ===  right(left)
+            left = FnCall(callee=right, args=[left], span=self._span(tok))
         return left
 
     def _parse_for_while_expr(self):
@@ -1100,7 +1125,17 @@ class Parser:
         return UnitLiteral(span=self._span(tok))
 
     def _parse_identifier_expr(self, tok):
-        """解析标识符表达式。"""
+        """解析标识符表达式。
+
+        SH-1 语法冻结对齐（SYNTAX_FREEZE_v0.5 §2）：14 个未来保留字
+        （class/struct/enum/return/yield/async/await/pub/priv/self/Self/super/where/with）
+        不作为 Token 产生，但禁止用作标识符，直接报 ParseError。
+        """
+        if tok.value in self.FUTURE_RESERVED_WORDS:
+            raise ParseError(
+                f"'{tok.value}' 是保留字，不可用作标识符",
+                tok.line, tok.column, source=self._source,
+            )
         self._advance()
         return Identifier(name=tok.value, span=self._span(tok))
 

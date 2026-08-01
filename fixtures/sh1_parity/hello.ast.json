@@ -1,0 +1,87 @@
+{
+  "$type": "Program",
+  "fields": {
+    "declarations": [
+      {
+        "$type": "FnDef",
+        "fields": {
+          "name": "main",
+          "params": [],
+          "return_type": {
+            "$type": "TypeUnit",
+            "fields": {
+              "span": {
+                "$type": "Span",
+                "fields": {
+                  "line": 1,
+                  "column": 14
+                }
+              }
+            }
+          },
+          "body": {
+            "$type": "Block",
+            "fields": {
+              "statements": [],
+              "tail_expression": {
+                "$type": "FnCall",
+                "fields": {
+                  "callee": {
+                    "$type": "Identifier",
+                    "fields": {
+                      "name": "print",
+                      "span": {
+                        "$type": "Span",
+                        "fields": {
+                          "line": 2,
+                          "column": 3
+                        }
+                      }
+                    }
+                  },
+                  "args": [
+                    {
+                      "$type": "StringLiteral",
+                      "fields": {
+                        "value": "Hello, Nova!",
+                        "span": {
+                          "$type": "Span",
+                          "fields": {
+                            "line": 2,
+                            "column": 9
+                          }
+                        }
+                      }
+                    }
+                  ],
+                  "span": {
+                    "$type": "Span",
+                    "fields": {
+                      "line": 2,
+                      "column": 23
+                    }
+                  }
+                }
+              },
+              "span": {
+                "$type": "Span",
+                "fields": {
+                  "line": 1,
+                  "column": 19
+                }
+              }
+            }
+          },
+          "span": {
+            "$type": "Span",
+            "fields": {
+              "line": 1,
+              "column": 1
+            }
+          }
+        }
+      }
+    ],
+    "span": null
+  }
+}

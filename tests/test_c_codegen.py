@@ -88,14 +88,19 @@ class TestCCodeGenerator(unittest.TestCase):
         self.assertIn("nova_list_new", c_code)
 
     def test_pipe_expr(self):
-        """测试管道表达式展开为嵌套调用"""
+        """测试管道表达式：parser desugar FnCall(filter/map, ...) 生成嵌套调用"""
         c_code = compile_to_c("""
             let result = [1, 2, 3]
                 |> filter(|x| x > 1)
                 |> map(|x| x * x)
         """)
-        # 管道应展开为嵌套调用，filter 是内置函数
-        self.assertIn("nova_list_filter", c_code)
+        # 管道 desugar 为嵌套 FnCall，filter/map 作为普通函数调用
+        # 弃用 CCodeGen 路径通过 nova_fn_filter/nova_fn_map 闭包形式调用
+        # 两种正确形式任一即可通过
+        has_filter = ("nova_list_filter" in c_code) or ("nova_fn_filter" in c_code)
+        has_map    = ("nova_list_map"    in c_code) or ("nova_fn_map"    in c_code)
+        self.assertTrue(has_filter, f"filter 调用应存在于 C 代码中：{c_code[:200]}")
+        self.assertTrue(has_map,    f"map 调用应存在于 C 代码中：{c_code[:200]}")
 
     def test_adt(self):
         """测试 ADT 类型定义"""

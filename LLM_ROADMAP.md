@@ -17,12 +17,16 @@
 ## 🗺️ v0.3.0 → v1.0 总览里程碑（架构战略约束）
 
 > 第 87 轮评审结论：M-MEM 4/4 ✅ 提前1轮定板；SH-1 前置 4/4 解除（语法冻结已产出）；进入 SH-1 启动前窗口期。**cycles=88-90 三线并行**：① SH-1 parity baseline（8 基准 AST JSON MD5 锚点 + 逐字节 diff 脚本）② 审查债务清零 Phase1（Top 12 CC>15 函数 + 159 unused_import 清理 + 3 God Class 拆分启动）③ 质量补齐（TypeChecker 6 空分支 + NativeBackend 5 高风险场景）
+>
+> cycle=88 执行进度：**3 项完成**（SH-1 parity baseline build ✅ + CC=13 钉子户出榜 1 个 ✅ + Lexer 单测 55 passed ✅）；测试量 440→643（+46.1%）；SH-1 baseline 闸门 100% 解除，cycle=89 可启动 lexer.nv。
 
 ## 🧭 cycles=88~90 三线并行详细任务表（第 87 轮评审输出）
 
 | 优先级 | 任务线 | 任务 | 轮次 | 来源 |
 |--------|--------|------|------|------|
-| P87 | **SH-1 启动基建** | sh1_parity_baseline_build · 8 基准文件 AST JSON + MD5 固化 + fixtures/sh1_parity/ | 88 | 自主规划【SH-1 前置】 |
+| P87 | **SH-1 启动基建** | sh1_parity_baseline_build · 8 基准文件 AST JSON + MD5 固化 + fixtures/sh1_parity/ + parity verify 脚本 | **88 ✅ 完成** | 自主规划【SH-1 前置】 |
+| P70 | **审查债务 CC** | refactor_cc_parse_primary_type（CC=13→≤4 拆分三方法·类级常量）· **钉子户出榜 4→3** | **88 ✅ 完成** | 审查驱动【AUTO_REVIEW_LOG.md R139-R143 TOP CC 榜·挂 3 轮】 |
+| P83 | **质量补齐 测试** | test_lexer_unit_tests（11 大类 55 passed + 40 subtests）· SH-1 lexer.nv 等价性锚点 | **88 ✅ 完成** | 审查发现【测试缺口·cycles=84/85/86 三轮告警·31 核心模块仅 29% 有独立测试】 |
 | P87 | **SH-1 启动基建** | sh1_parity_diff_script · nova_vs_python_parity.py 逐字节 diff 脚本（CI 可集成） | 89 | 自主规划【SH-1 前置】 |
 | P88 | **SH-1 启动基建** | sh1_parser_edge_cases_audit · 3 处 parser edge case 固化 MD5 | 89 | 审查发现+自主规划 |
 | P88 | **审查债务 CC** | refactor_cc_native_reg_alloc CC=15→≤6（Top#1 最复杂函数） | 88/89 | 审查发现 |
@@ -52,7 +56,7 @@
 |--------|------|---------|---------|------|------|
 | M-ARCH | 三项立即架构手术（拆ir_nodes/隔离旧C后端/弃用Cranelift） | v0.3.x | 3 轮内 | ✅ **完成 5/5** | **self-hosting 前置条件 · cycles=80 硬截止达成** |
 | M-MEM  | Allocator API 落地（Step1-4）+ 栈/堆语义明确 | v0.4.0 | 第 82-86 轮 | ✅ **4/4 Step1+Step2+Step3+Step4 全部完成** | **cycles=82 trait+Arena/Libc；cycles=83 Evaluator 注入；cycles=85 BoxType+NovaBox+5内置函数；cycles=86 Option/Result 推广 + 自动解包兼容层；提前1轮于 cycles=87 截止前完成** |
-| M-SH1  | Self-Hosting SH-1：lexer + parser 用 Nova 写出 + 字节级一致性 | v0.4.0 | 约第 88-98 轮 | 🟡 **Ready · 4 前置条件全部 4/4 解除** | 前置：M-ARCH ✅ + M-MEM ✅（4/4 完成）+ 连续3轮100% ✅（cycles=82+83+85）+ 语法冻结 ✅（SYNTAX_FREEZE_v0.5.md cycle=86 产出）· **parity baseline build（cycles=88~90 启动）** · Nova 侧 lexer+parser 实际编写 cycles=91~98 |
+| M-SH1  | Self-Hosting SH-1：lexer + parser 用 Nova 写出 + 字节级一致性 | v0.4.0 | 约第 88-98 轮 | 🚀 **In Progress · baseline 闸门 100% 解除** | 前置：M-ARCH ✅ + M-MEM ✅（4/4 完成）+ 连续5轮100% ✅（cycles=82+83+85+86+88）+ 语法冻结 ✅（SYNTAX_FREEZE_v0.5.md cycle=86 产出）· **parity baseline build ✅（cycle=88 产出 scripts/sh1_baseline.py + sh1_parity_verify.py · 8/8 MD5 锚点）** · parser 与冻结文档 2 处不一致 ✅ 对齐（14 保留字拦截 + PipeExpr→FnCall desugar）· Lexer 单测 55 passed ✅ 锚点 · cycle=89 可启动 lexer.nv 编写 · Nova 侧 lexer+parser cycles=89~98 |
 | M-SH2  | Self-Hosting SH-2：type_checker + 三层 IR lowering 移植 | v0.5.0 | 约 12 轮 | ⏳ 未启动 | 前置：M-MEM 定板 + SH-1 字节级一致 |
 | M-SH3  | Self-Hosting SH-3：一个后端（C后端）+ stage2==stage3 自举 | v1.0 | 约 12 轮 | ⏳ 未启动 | 成功后 Python 编译器降级为参考实现 |
 | M-STD  | 标准库覆盖 IO/FS/Net/Concurrency/Serialize | v1.0 | 并行推进 | ⏳ 未启动 | 与 SH-2/SH-3 并行推进 |

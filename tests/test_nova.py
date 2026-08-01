@@ -354,9 +354,15 @@ class TestParser(unittest.TestCase):
         self.assertEqual(len(decl.args), 2)
 
     def test_pipe_expr(self):
+        """管道 |> parser 层 desugar 为 FnCall(f, [x])（SYNTAX_FREEZE_v0.5 §5）"""
         ast = parse("x |> f")
         decl = ast.declarations[0]
-        self.assertIsInstance(decl, PipeExpr)
+        self.assertIsInstance(decl, FnCall)
+        self.assertIsInstance(decl.callee, Identifier)
+        self.assertEqual(decl.callee.name, "f")
+        self.assertEqual(len(decl.args), 1)
+        self.assertIsInstance(decl.args[0], Identifier)
+        self.assertEqual(decl.args[0].name, "x")
 
     def test_match_expr(self):
         ast = parse('match x { 1 -> "one", _ -> "other" }')

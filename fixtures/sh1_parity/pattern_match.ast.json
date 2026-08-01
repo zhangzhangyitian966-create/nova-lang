@@ -1,0 +1,564 @@
+{
+  "$type": "Program",
+  "fields": {
+    "declarations": [
+      {
+        "$type": "TypeDef",
+        "fields": {
+          "name": "Shape",
+          "variants": [
+            {
+              "$type": "VariantDef",
+              "fields": {
+                "name": "Circle",
+                "fields": [
+                  [
+                    "r",
+                    {
+                      "$type": "TypeFloat",
+                      "fields": {
+                        "span": {
+                          "$type": "Span",
+                          "fields": {
+                            "line": 2,
+                            "column": 13
+                          }
+                        }
+                      }
+                    }
+                  ]
+                ],
+                "span": {
+                  "$type": "Span",
+                  "fields": {
+                    "line": 2,
+                    "column": 3
+                  }
+                }
+              }
+            },
+            {
+              "$type": "VariantDef",
+              "fields": {
+                "name": "Rect",
+                "fields": [
+                  [
+                    "w",
+                    {
+                      "$type": "TypeFloat",
+                      "fields": {
+                        "span": {
+                          "$type": "Span",
+                          "fields": {
+                            "line": 3,
+                            "column": 11
+                          }
+                        }
+                      }
+                    }
+                  ],
+                  [
+                    "h",
+                    {
+                      "$type": "TypeFloat",
+                      "fields": {
+                        "span": {
+                          "$type": "Span",
+                          "fields": {
+                            "line": 3,
+                            "column": 21
+                          }
+                        }
+                      }
+                    }
+                  ]
+                ],
+                "span": {
+                  "$type": "Span",
+                  "fields": {
+                    "line": 3,
+                    "column": 3
+                  }
+                }
+              }
+            }
+          ],
+          "span": {
+            "$type": "Span",
+            "fields": {
+              "line": 1,
+              "column": 1
+            }
+          }
+        }
+      },
+      {
+        "$type": "FnDef",
+        "fields": {
+          "name": "area",
+          "params": [
+            {
+              "$type": "Param",
+              "fields": {
+                "name": "s",
+                "type_annotation": {
+                  "$type": "TypeIdentifier",
+                  "fields": {
+                    "name": "Shape",
+                    "span": {
+                      "$type": "Span",
+                      "fields": {
+                        "line": 6,
+                        "column": 12
+                      }
+                    }
+                  }
+                },
+                "span": {
+                  "$type": "Span",
+                  "fields": {
+                    "line": 6,
+                    "column": 9
+                  }
+                }
+              }
+            }
+          ],
+          "return_type": {
+            "$type": "TypeFloat",
+            "fields": {
+              "span": {
+                "$type": "Span",
+                "fields": {
+                  "line": 6,
+                  "column": 22
+                }
+              }
+            }
+          },
+          "body": {
+            "$type": "Block",
+            "fields": {
+              "statements": [],
+              "tail_expression": {
+                "$type": "MatchExpr",
+                "fields": {
+                  "subject": {
+                    "$type": "Identifier",
+                    "fields": {
+                      "name": "s",
+                      "span": {
+                        "$type": "Span",
+                        "fields": {
+                          "line": 7,
+                          "column": 9
+                        }
+                      }
+                    }
+                  },
+                  "arms": [
+                    {
+                      "$type": "MatchArm",
+                      "fields": {
+                        "pattern": {
+                          "$type": "PatternConstructor",
+                          "fields": {
+                            "name": "Circle",
+                            "fields": [
+                              {
+                                "$type": "PatternIdentifier",
+                                "fields": {
+                                  "name": "r",
+                                  "span": {
+                                    "$type": "Span",
+                                    "fields": {
+                                      "line": 8,
+                                      "column": 12
+                                    }
+                                  }
+                                }
+                              }
+                            ],
+                            "span": {
+                              "$type": "Span",
+                              "fields": {
+                                "line": 8,
+                                "column": 5
+                              }
+                            }
+                          }
+                        },
+                        "guard": null,
+                        "body": {
+                          "$type": "BinaryOp",
+                          "fields": {
+                            "op": "*",
+                            "left": {
+                              "$type": "BinaryOp",
+                              "fields": {
+                                "op": "*",
+                                "left": {
+                                  "$type": "FloatLiteral",
+                                  "fields": {
+                                    "value": 3.14159,
+                                    "span": {
+                                      "$type": "Span",
+                                      "fields": {
+                                        "line": 8,
+                                        "column": 21
+                                      }
+                                    }
+                                  }
+                                },
+                                "right": {
+                                  "$type": "Identifier",
+                                  "fields": {
+                                    "name": "r",
+                                    "span": {
+                                      "$type": "Span",
+                                      "fields": {
+                                        "line": 8,
+                                        "column": 31
+                                      }
+                                    }
+                                  }
+                                },
+                                "span": {
+                                  "$type": "Span",
+                                  "fields": {
+                                    "line": 8,
+                                    "column": 29
+                                  }
+                                }
+                              }
+                            },
+                            "right": {
+                              "$type": "Identifier",
+                              "fields": {
+                                "name": "r",
+                                "span": {
+                                  "$type": "Span",
+                                  "fields": {
+                                    "line": 8,
+                                    "column": 35
+                                  }
+                                }
+                              }
+                            },
+                            "span": {
+                              "$type": "Span",
+                              "fields": {
+                                "line": 8,
+                                "column": 33
+                              }
+                            }
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "$type": "MatchArm",
+                      "fields": {
+                        "pattern": {
+                          "$type": "PatternConstructor",
+                          "fields": {
+                            "name": "Rect",
+                            "fields": [
+                              {
+                                "$type": "PatternIdentifier",
+                                "fields": {
+                                  "name": "w",
+                                  "span": {
+                                    "$type": "Span",
+                                    "fields": {
+                                      "line": 9,
+                                      "column": 10
+                                    }
+                                  }
+                                }
+                              },
+                              {
+                                "$type": "PatternIdentifier",
+                                "fields": {
+                                  "name": "h",
+                                  "span": {
+                                    "$type": "Span",
+                                    "fields": {
+                                      "line": 9,
+                                      "column": 13
+                                    }
+                                  }
+                                }
+                              }
+                            ],
+                            "span": {
+                              "$type": "Span",
+                              "fields": {
+                                "line": 9,
+                                "column": 5
+                              }
+                            }
+                          }
+                        },
+                        "guard": null,
+                        "body": {
+                          "$type": "BinaryOp",
+                          "fields": {
+                            "op": "*",
+                            "left": {
+                              "$type": "Identifier",
+                              "fields": {
+                                "name": "w",
+                                "span": {
+                                  "$type": "Span",
+                                  "fields": {
+                                    "line": 9,
+                                    "column": 21
+                                  }
+                                }
+                              }
+                            },
+                            "right": {
+                              "$type": "Identifier",
+                              "fields": {
+                                "name": "h",
+                                "span": {
+                                  "$type": "Span",
+                                  "fields": {
+                                    "line": 9,
+                                    "column": 25
+                                  }
+                                }
+                              }
+                            },
+                            "span": {
+                              "$type": "Span",
+                              "fields": {
+                                "line": 9,
+                                "column": 23
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  ],
+                  "span": {
+                    "$type": "Span",
+                    "fields": {
+                      "line": 7,
+                      "column": 3
+                    }
+                  }
+                }
+              },
+              "span": {
+                "$type": "Span",
+                "fields": {
+                  "line": 6,
+                  "column": 28
+                }
+              }
+            }
+          },
+          "span": {
+            "$type": "Span",
+            "fields": {
+              "line": 6,
+              "column": 1
+            }
+          }
+        }
+      },
+      {
+        "$type": "FnDef",
+        "fields": {
+          "name": "main",
+          "params": [],
+          "return_type": {
+            "$type": "TypeUnit",
+            "fields": {
+              "span": {
+                "$type": "Span",
+                "fields": {
+                  "line": 13,
+                  "column": 14
+                }
+              }
+            }
+          },
+          "body": {
+            "$type": "Block",
+            "fields": {
+              "statements": [
+                {
+                  "$type": "LetBinding",
+                  "fields": {
+                    "name": "c",
+                    "value": {
+                      "$type": "FnCall",
+                      "fields": {
+                        "callee": {
+                          "$type": "Identifier",
+                          "fields": {
+                            "name": "Circle",
+                            "span": {
+                              "$type": "Span",
+                              "fields": {
+                                "line": 14,
+                                "column": 11
+                              }
+                            }
+                          }
+                        },
+                        "args": [
+                          {
+                            "$type": "FloatLiteral",
+                            "fields": {
+                              "value": 5.0,
+                              "span": {
+                                "$type": "Span",
+                                "fields": {
+                                  "line": 14,
+                                  "column": 18
+                                }
+                              }
+                            }
+                          }
+                        ],
+                        "span": {
+                          "$type": "Span",
+                          "fields": {
+                            "line": 14,
+                            "column": 21
+                          }
+                        }
+                      }
+                    },
+                    "type_annotation": null,
+                    "span": {
+                      "$type": "Span",
+                      "fields": {
+                        "line": 14,
+                        "column": 3
+                      }
+                    }
+                  }
+                }
+              ],
+              "tail_expression": {
+                "$type": "FnCall",
+                "fields": {
+                  "callee": {
+                    "$type": "Identifier",
+                    "fields": {
+                      "name": "print",
+                      "span": {
+                        "$type": "Span",
+                        "fields": {
+                          "line": 15,
+                          "column": 3
+                        }
+                      }
+                    }
+                  },
+                  "args": [
+                    {
+                      "$type": "FnCall",
+                      "fields": {
+                        "callee": {
+                          "$type": "Identifier",
+                          "fields": {
+                            "name": "float_to_str",
+                            "span": {
+                              "$type": "Span",
+                              "fields": {
+                                "line": 15,
+                                "column": 9
+                              }
+                            }
+                          }
+                        },
+                        "args": [
+                          {
+                            "$type": "FnCall",
+                            "fields": {
+                              "callee": {
+                                "$type": "Identifier",
+                                "fields": {
+                                  "name": "area",
+                                  "span": {
+                                    "$type": "Span",
+                                    "fields": {
+                                      "line": 15,
+                                      "column": 22
+                                    }
+                                  }
+                                }
+                              },
+                              "args": [
+                                {
+                                  "$type": "Identifier",
+                                  "fields": {
+                                    "name": "c",
+                                    "span": {
+                                      "$type": "Span",
+                                      "fields": {
+                                        "line": 15,
+                                        "column": 27
+                                      }
+                                    }
+                                  }
+                                }
+                              ],
+                              "span": {
+                                "$type": "Span",
+                                "fields": {
+                                  "line": 15,
+                                  "column": 28
+                                }
+                              }
+                            }
+                          }
+                        ],
+                        "span": {
+                          "$type": "Span",
+                          "fields": {
+                            "line": 15,
+                            "column": 29
+                          }
+                        }
+                      }
+                    }
+                  ],
+                  "span": {
+                    "$type": "Span",
+                    "fields": {
+                      "line": 15,
+                      "column": 30
+                    }
+                  }
+                }
+              },
+              "span": {
+                "$type": "Span",
+                "fields": {
+                  "line": 13,
+                  "column": 19
+                }
+              }
+            }
+          },
+          "span": {
+            "$type": "Span",
+            "fields": {
+              "line": 13,
+              "column": 1
+            }
+          }
+        }
+      }
+    ],
+    "span": null
+  }
+}

@@ -25,9 +25,11 @@ from nova.ir.hir import (
     HIRBinaryOp,
     HIRBlockExpr,
     HIRBoolLiteral,
+    HIRCallExpr,
     HIRExportDecl,
     HIRFloatLiteral,
     HIRFnDecl,
+    HIRIdentifier,
     HIRIfExpr,
     HIRImportDecl,
     HIRIntLiteral,
@@ -220,10 +222,18 @@ class TestHIRLowering(unittest.TestCase):
         self.assertEqual(len(decl.value.params), 1)
 
     def test_pipe_expr(self):
+        """[1,2,3] |> sum → parser desugar FnCall(sum, [[1,2,3]]) → HIR HIRCallExpr"""
         hir = compile_to_hir("[1,2,3] |> sum")
         decl = hir.declarations[0]
-        self.assertIsInstance(decl.value, HIRPipeExpr)
-        self.assertEqual(len(decl.value.stages), 2)
+        # SYNTAX_FREEZE_v0.5 §5：parser 层 desugar 为 FnCall，不再产出 PipeExpr
+        self.assertIsInstance(decl.value, HIRCallExpr)
+        # 函数 = sum 标识符
+        self.assertIsInstance(decl.value.function, HIRIdentifier)
+        self.assertEqual(decl.value.function.name, "sum")
+        # 参数 = [1,2,3] 列表
+        self.assertEqual(len(decl.value.arguments), 1)
+        self.assertIsInstance(decl.value.arguments[0], HIRListExpr)
+        self.assertEqual(len(decl.value.arguments[0].elements), 3)
 
     def test_list_expr(self):
         hir = compile_to_hir("let x = [1, 2, 3]")

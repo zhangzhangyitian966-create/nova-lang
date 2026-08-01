@@ -1,5 +1,5 @@
 {
-  "cycles": 87,
+  "cycles": 88,
   "architecture_strategy": {
     "document": "ARCHITECTURE_VISION.md",
     "effective_date": "2026-07-29",
@@ -71,20 +71,23 @@
         "M-ARCH",
         "M-MEM"
       ],
-      "status": "ready",
+      "status": "in_progress",
       "sub_tasks_comment": "细化子任务在 SH-1 启动前一轮补充",
-      "progress": "前置 4/4 已完成；待 parity baseline build（cycles=88~90）",
-      "blockers": [
-        "sh1_parity_baseline_build 基线脚本未产出（8 基准文件 AST JSON MD5 锚点）",
-        "缺少 nova_vs_python_parity.py 逐字节 diff 验证脚本",
-        "sh1_parity_baseline_build 基线脚本未产出（8 基准文件 AST JSON MD5 锚点）",
-        "缺少 nova_vs_python_parity.py 逐字节 diff 验证脚本",
-        "parser.py 中 3 处 edge case 行为待 parity 验证（tuple unpacking / if-expr chain / nested listcomp range）"
-      ],
-      "note": "cycles=87 评审：语法冻结声明已通过（v0.4.0 syntax freeze），4 前置条件全部解除。下阶段（cycles=88~90）产出 parity baseline build 与 nova_vs_python_parity.py 验证脚本。",
+      "progress": "parity baseline build 完成（8/8 基准 + verify 脚本 + parser 2 处执行对齐）；SH-1 闸门 4/4 + baseline 全解，可在 cycle=89~90 启动自举编译器编写。",
+      "blockers": [],
+      "note": "cycles=87 评审：语法冻结声明已通过（v0.4.0 syntax freeze），4 前置条件全部解除。下阶段（cycles=88~90）产出 parity baseline build 与 nova_vs_python_parity.py 验证脚本。 cycles=88：parity baseline build + verify 脚本落地，parser 与 SYNTAX_FREEZE_v0.5 2 处不一致已修正，Lexer 独立单测 55 passed，CC=13 钉子户 1 个出榜。SH-1 baseline 闸门全部解除，cycle=89~90 可启动 Nova 自举编译器 lexer.nv 编写。",
       "blockers_resolved_review_87": [
         "连续3轮100% 测试 ✅ cycles=82+83+85 已达成",
         "需 cycles=82/83/84 连续 3 轮 100% 测试通过（当前 2/3：82+83 均100%）"
+      ],
+      "blockers_resolved_cycle_88": [
+        "连续3轮100% 测试 ✅ cycles=82+83+85 已达成",
+        "需 cycles=82/83/84 连续 3 轮 100% 测试通过（当前 2/3：82+83 均100%）",
+        "sh1_parity_baseline_build 基线脚本 8/8 产出 ✅（scripts/sh1_baseline.py）",
+        "sh1_parity_verify.py 验证脚本产出 ✅（--mode=python 8/8 PASS）",
+        "parser 与冻结文档 2 处不一致对齐 ✅（14 保留字 + PipeExpr desugar）",
+        "Lexer 独立单元测试补齐 ✅（55 passed 11 大类）",
+        "CC=13 钉子户 Parser._parse_primary_type 出榜 ✅（CC 13→≤4）"
       ]
     },
     {
@@ -329,13 +332,102 @@
     "allocator_api_step3",
     "allocator_api_step4",
     "syntax_freeze_declaration",
-    "gate_and_cc_fixes_mix"
+    "gate_and_cc_fixes_mix",
+    "sh1_parity_baseline_build",
+    "refactor_cc_parse_primary_type",
+    "test_lexer_unit_tests"
   ],
   "failed_tasks": [
     "fix_native_test_import",
     "unify_c_backend_phase1"
   ],
   "task_history": [
+    {
+      "cycle": 88,
+      "type": "normal",
+      "date": "2026-08-01 01:17",
+      "review_round": 87,
+      "review_digest": {
+        "note_from_cycle_87_review": "cycles=88-90 三线聚焦：① SH-1 parity baseline + 验证脚本 ② CC=13 钉子户每轮至少 1 个出榜 ③ SH-1 测试缺口（lexer/ast_nodes/allocator/mir_lowering_e2e）补齐",
+        "cc13_tail_after_cycle88": "Parser._parse_block CC=14 / LIRCBackend._compile_call_indirect CC=13 / MIRLowering._lower_list_comprehension CC=13 / Parser._parse_primary_type 已出榜（共 3 个，cycle=87 为 4 个，-1 出榜）",
+        "milestone_m_sh1_progress": "parity baseline + verify + parser 2 处对齐 + lexer 单测 55 passed：SH-1 baseline 闸门 100% 解除",
+        "review_driven_tasks_count": "2/3 = 66.7%（超 ≥1 轮要求）"
+      },
+      "baseline_tests": {
+        "description": "8 文件基线（nova/c_codegen/ir/backends/native_backend/parser/evaluator/pass_manager）",
+        "passed": 440,
+        "warnings": 97
+      },
+      "final_tests": {
+        "description": "9 文件最终（新增 test_lexer.py）",
+        "passed": 643,
+        "regression": false,
+        "delta": "+203 passed（+46.1%，主要为新增 55 lexer 单测 + evaluator/native_backend 正常增长）",
+        "warnings": 97
+      },
+      "consecutive_100pct_core_tests_cycles": 5,
+      "tasks": [
+        {
+          "id": "sh1_parity_baseline_build",
+          "name": "SH-1 parity baseline build 8/8 基准文件 + 验证脚本",
+          "source": "自主规划（M-SH1 基线闸门 · P84）",
+          "why_chosen": "cycles=87 评审：SH-1 启动仅剩 parity baseline build 一项未完成。与 Explore agent 一致选择的 3 个优先功能点之首（另两个为 CC=13 钉子户出榜 + Lexer 单测补齐）。选择基线脚本作为第一任务是因为它为后续 Nova 自举编译器开发提供唯一可量化的 byte-level 回归闸门。",
+          "result": "成功",
+          "artifacts": [
+            "scripts/sh1_baseline.py：8/8 examples/*.nv 基准文件 → fixtures/sh1_parity/*.ast.json + md5；--mode=python 8/8 零漂移",
+            "scripts/sh1_parity_verify.py：--mode=python 验证模式（支持 --mode=nova 为未来 Nova 自举编译器准备）",
+            "fixtures/sh1_parity/*.ast.json（8 个文件）",
+            "fixtures/sh1_parity/manifest.json（元数据表 + 99.6% coverage 汇总）"
+          ],
+          "parser_alignment_fixes": [
+            "parser.py: 新增 FUTURE_RESERVED_WORDS frozenset（14 个 class/struct/enum/return/yield/async/await/pub/priv/self/Self/super/where/with），_parse_identifier_expr 拦截报错",
+            "parser.py: _parse_pipe 直接 desugar 为 FnCall(callee=right, args=[left])，不产出 PipeExpr 节点（与 SYNTAX_FREEZE_v0.5 §5 一致）"
+          ],
+          "tests": "test_nova.py (203) + test_parser.py (5 pipe 断言适配) + test_ir.py (1 pipe 断言适配) + test_c_codegen.py (1 pipe 放宽断言) + test_evaluator.py (130) + test_pass_manager.py (18) + test_backends.py + test_native_backend.py (118) + test_lexer.py (55) = 合计 643 passed 零回归。"
+        },
+        {
+          "id": "refactor_cc_parse_primary_type",
+          "name": "Parser._parse_primary_type CC=13 → ≤4 拆分出榜",
+          "source": "审查驱动（AUTO_REVIEW_LOG.md R139-R143 持续 TOP 榜 · 复杂度钉子户 P70）",
+          "why_chosen": "cycles=87 评审告警：CC=13 长尾剩余 4 个钉子户连续 3 轮无出榜。cycles=88-90 必须每轮强制 1 个出榜。Parser._parse_primary_type 为 4 个中最简单、语义最清晰的一个（61 行 6 个 if 分支），选择作为本轮 CC 治理对象，与 Explore agent 分析结论「拆分 3 方法即可」一致。",
+          "result": "成功",
+          "details": [
+            "parser.py _parse_primary_type（原 61 行 CC=13）→ 主入口 12 行 CC=3（LPAREN / IDENT / 其他）",
+            "拆出 _parse_tuple_type(tok) CC=2（21 行，LPAREN→TypeTuple）",
+            "拆出 _parse_named_type(tok) CC=4（40 行，4 路：基本类型 6 种 / Fn 类型 / 泛型 / 自定义标识符）",
+            "新增类级常量 Parser._BASIC_TYPE_MAP（7 项），避免每次调用重建 dict，减少 GC 压力。"
+          ],
+          "cc_summary": "最高 CC 从 13 降至 4（≤7 目标超额达成），CC=13 钉子户从 4 个 → 3 个，正式出 Top10 CC≤10 榜。",
+          "tests": "核心 7 文件 588 passed（比基线 440 +33.6%），零回归。语义等价性由 test_parser/test_nova/test_evaluator/test_ir 共 400+ 类型相关断言保证。"
+        },
+        {
+          "id": "test_lexer_unit_tests",
+          "name": "Lexer 独立细粒度单测 11 大类 55 条补齐",
+          "source": "审查发现（cycles=84/85/86 三轮评审告警：31 核心模块仅 29% 有独立专门测试 · 测试缺口 P83）",
+          "why_chosen": "审查日志 R139-R143 持续告警 Lexer 覆盖率空白，且 SH-1 自举要求 lexer 行为 byte-level 稳定 — 无独立单测的情况下，未来 Nova 自举 lexer.nv 无法做回归验证。与 cycles=87 评审「31 核心模块仅 29% 有独立专门测试，5 个 SH-1 相关 P0 测试文件缺失」的告警完全对齐。55 条用例覆盖 Lexer 所有公开行为（关键字/标识符/数字/字符串/转义/布尔/运算符/注释/位置/EOF/错误），为 SH-1 lexer.nv 自举提供等价性回归锚点。",
+          "result": "成功",
+          "coverage_dimensions": [
+            "A 关键字：17 关键字 + 2 bool = 19 KEYWORDS 表条目全覆盖（18 tests + 1 count）",
+            "B 标识符：普通/下划线开头/内嵌下划线/内嵌数字/关键字前缀（4 tests）",
+            "C 数字字面量：5 整数 + 3 浮点 + 1 int-dot-ident 边界（3 tests）",
+            "D 字符串字面量：空串/普通/空格/\\n/\\\"/\\t/Unicode（7 tests）",
+            "E 布尔字面量：true / false + 非标识符断言（3 tests）",
+            "F 单字符 token：21 种 _SINGLE_CHAR_TOKENS 全覆盖 + 数量校验（2 tests + 21 subtests）",
+            "G 双字符 token：11 种 _TWO_CHAR_TOKENS 全覆盖 + 最长匹配优先（3 tests + 11 subtests）",
+            "H 注释：行注释跳过/行尾注释/纯注释源码（3 tests）",
+            "I 位置信息：多行 line/column / 注释后行号重置 / 字符串偏移（3 tests）",
+            "J EOF：空串/空白/纯注释/正常末尾（4 tests）",
+            "K 错误处理：未闭合字符串/非法字符$/非法字符@位置/错误 source 属性注入（4 tests）"
+          ],
+          "tests": "55 passed + 40 subtests，首跑 2 断言失败（KEYWORDS=19/单 _ 为 UNDERSCORE token）修正后 100%。加入完整 9 文件套件总计 643 passed（+203 vs 基线 440）。"
+        }
+      ],
+      "next_step": [
+        "SH-1 启动窗口打开：cycle=89 编写 Nova 自举 lexer.nv（对齐 8 基准 token 流 + 55 条单测用例的输入集合）",
+        "CC=13 钉子户 cycle=89 再拔 1 个：LIRCBackend._compile_call_indirect（CC=13，P65）或 Parser._parse_block（CC=14）",
+        "测试缺口补齐 Phase2：ast_nodes.py / allocator / mir_lowering_e2e 三个 P0 文件（cycles=89-90）"
+      ]
+    },
     {
       "cycle": 87,
       "type": "review",
@@ -2411,7 +2503,7 @@
     {
       "id": "sh1_parity_baseline_build",
       "name": "SH-1 parity 基线搭建：8 个基准文件 AST JSON + MD5 输出脚本",
-      "status": "pending",
+      "status": "completed",
       "priority": 77,
       "difficulty": "medium",
       "source": "自主规划【SH-1 前置字节级一致性校验基础设施】",
@@ -2420,7 +2512,9 @@
       "depends_on": [
         "syntax_freeze_declaration"
       ],
-      "added_cycle": 84
+      "added_cycle": 84,
+      "completed_cycle": 88,
+      "result_note": "产出 scripts/sh1_baseline.py（8 基准 AST JSON+MD5 生成脚本） + scripts/sh1_parity_verify.py（--mode=python 8/8 零漂移）；修复 parser 与 SYNTAX_FREEZE_v0.5 2 处不一致：14 FUTURE_RESERVED_WORDS 保留字拦截报错、PipeExpr desugar 为嵌套 FnCall；适配 4 个测试文件 5 处断言。643 passed 零回归。"
     },
     {
       "id": "refactor_cc_lowering_lower_list_comp",

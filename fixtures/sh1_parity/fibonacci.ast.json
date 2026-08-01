@@ -1,0 +1,415 @@
+{
+  "$type": "Program",
+  "fields": {
+    "declarations": [
+      {
+        "$type": "FnDef",
+        "fields": {
+          "name": "fib",
+          "params": [
+            {
+              "$type": "Param",
+              "fields": {
+                "name": "n",
+                "type_annotation": {
+                  "$type": "TypeInt",
+                  "fields": {
+                    "span": {
+                      "$type": "Span",
+                      "fields": {
+                        "line": 1,
+                        "column": 11
+                      }
+                    }
+                  }
+                },
+                "span": {
+                  "$type": "Span",
+                  "fields": {
+                    "line": 1,
+                    "column": 8
+                  }
+                }
+              }
+            }
+          ],
+          "return_type": {
+            "$type": "TypeInt",
+            "fields": {
+              "span": {
+                "$type": "Span",
+                "fields": {
+                  "line": 1,
+                  "column": 19
+                }
+              }
+            }
+          },
+          "body": {
+            "$type": "Block",
+            "fields": {
+              "statements": [],
+              "tail_expression": {
+                "$type": "IfExpr",
+                "fields": {
+                  "condition": {
+                    "$type": "BinaryOp",
+                    "fields": {
+                      "op": "<=",
+                      "left": {
+                        "$type": "Identifier",
+                        "fields": {
+                          "name": "n",
+                          "span": {
+                            "$type": "Span",
+                            "fields": {
+                              "line": 2,
+                              "column": 6
+                            }
+                          }
+                        }
+                      },
+                      "right": {
+                        "$type": "IntLiteral",
+                        "fields": {
+                          "value": 1,
+                          "span": {
+                            "$type": "Span",
+                            "fields": {
+                              "line": 2,
+                              "column": 11
+                            }
+                          }
+                        }
+                      },
+                      "span": {
+                        "$type": "Span",
+                        "fields": {
+                          "line": 2,
+                          "column": 8
+                        }
+                      }
+                    }
+                  },
+                  "then_branch": {
+                    "$type": "Identifier",
+                    "fields": {
+                      "name": "n",
+                      "span": {
+                        "$type": "Span",
+                        "fields": {
+                          "line": 2,
+                          "column": 18
+                        }
+                      }
+                    }
+                  },
+                  "else_branch": {
+                    "$type": "BinaryOp",
+                    "fields": {
+                      "op": "+",
+                      "left": {
+                        "$type": "FnCall",
+                        "fields": {
+                          "callee": {
+                            "$type": "Identifier",
+                            "fields": {
+                              "name": "fib",
+                              "span": {
+                                "$type": "Span",
+                                "fields": {
+                                  "line": 3,
+                                  "column": 8
+                                }
+                              }
+                            }
+                          },
+                          "args": [
+                            {
+                              "$type": "BinaryOp",
+                              "fields": {
+                                "op": "-",
+                                "left": {
+                                  "$type": "Identifier",
+                                  "fields": {
+                                    "name": "n",
+                                    "span": {
+                                      "$type": "Span",
+                                      "fields": {
+                                        "line": 3,
+                                        "column": 12
+                                      }
+                                    }
+                                  }
+                                },
+                                "right": {
+                                  "$type": "IntLiteral",
+                                  "fields": {
+                                    "value": 1,
+                                    "span": {
+                                      "$type": "Span",
+                                      "fields": {
+                                        "line": 3,
+                                        "column": 16
+                                      }
+                                    }
+                                  }
+                                },
+                                "span": {
+                                  "$type": "Span",
+                                  "fields": {
+                                    "line": 3,
+                                    "column": 14
+                                  }
+                                }
+                              }
+                            }
+                          ],
+                          "span": {
+                            "$type": "Span",
+                            "fields": {
+                              "line": 3,
+                              "column": 17
+                            }
+                          }
+                        }
+                      },
+                      "right": {
+                        "$type": "FnCall",
+                        "fields": {
+                          "callee": {
+                            "$type": "Identifier",
+                            "fields": {
+                              "name": "fib",
+                              "span": {
+                                "$type": "Span",
+                                "fields": {
+                                  "line": 3,
+                                  "column": 21
+                                }
+                              }
+                            }
+                          },
+                          "args": [
+                            {
+                              "$type": "BinaryOp",
+                              "fields": {
+                                "op": "-",
+                                "left": {
+                                  "$type": "Identifier",
+                                  "fields": {
+                                    "name": "n",
+                                    "span": {
+                                      "$type": "Span",
+                                      "fields": {
+                                        "line": 3,
+                                        "column": 25
+                                      }
+                                    }
+                                  }
+                                },
+                                "right": {
+                                  "$type": "IntLiteral",
+                                  "fields": {
+                                    "value": 2,
+                                    "span": {
+                                      "$type": "Span",
+                                      "fields": {
+                                        "line": 3,
+                                        "column": 29
+                                      }
+                                    }
+                                  }
+                                },
+                                "span": {
+                                  "$type": "Span",
+                                  "fields": {
+                                    "line": 3,
+                                    "column": 27
+                                  }
+                                }
+                              }
+                            }
+                          ],
+                          "span": {
+                            "$type": "Span",
+                            "fields": {
+                              "line": 3,
+                              "column": 30
+                            }
+                          }
+                        }
+                      },
+                      "span": {
+                        "$type": "Span",
+                        "fields": {
+                          "line": 3,
+                          "column": 19
+                        }
+                      }
+                    }
+                  },
+                  "span": {
+                    "$type": "Span",
+                    "fields": {
+                      "line": 2,
+                      "column": 3
+                    }
+                  }
+                }
+              },
+              "span": {
+                "$type": "Span",
+                "fields": {
+                  "line": 1,
+                  "column": 23
+                }
+              }
+            }
+          },
+          "span": {
+            "$type": "Span",
+            "fields": {
+              "line": 1,
+              "column": 1
+            }
+          }
+        }
+      },
+      {
+        "$type": "FnDef",
+        "fields": {
+          "name": "main",
+          "params": [],
+          "return_type": {
+            "$type": "TypeUnit",
+            "fields": {
+              "span": {
+                "$type": "Span",
+                "fields": {
+                  "line": 6,
+                  "column": 14
+                }
+              }
+            }
+          },
+          "body": {
+            "$type": "Block",
+            "fields": {
+              "statements": [],
+              "tail_expression": {
+                "$type": "FnCall",
+                "fields": {
+                  "callee": {
+                    "$type": "Identifier",
+                    "fields": {
+                      "name": "print",
+                      "span": {
+                        "$type": "Span",
+                        "fields": {
+                          "line": 7,
+                          "column": 3
+                        }
+                      }
+                    }
+                  },
+                  "args": [
+                    {
+                      "$type": "FnCall",
+                      "fields": {
+                        "callee": {
+                          "$type": "Identifier",
+                          "fields": {
+                            "name": "int_to_str",
+                            "span": {
+                              "$type": "Span",
+                              "fields": {
+                                "line": 7,
+                                "column": 9
+                              }
+                            }
+                          }
+                        },
+                        "args": [
+                          {
+                            "$type": "FnCall",
+                            "fields": {
+                              "callee": {
+                                "$type": "Identifier",
+                                "fields": {
+                                  "name": "fib",
+                                  "span": {
+                                    "$type": "Span",
+                                    "fields": {
+                                      "line": 7,
+                                      "column": 20
+                                    }
+                                  }
+                                }
+                              },
+                              "args": [
+                                {
+                                  "$type": "IntLiteral",
+                                  "fields": {
+                                    "value": 10,
+                                    "span": {
+                                      "$type": "Span",
+                                      "fields": {
+                                        "line": 7,
+                                        "column": 24
+                                      }
+                                    }
+                                  }
+                                }
+                              ],
+                              "span": {
+                                "$type": "Span",
+                                "fields": {
+                                  "line": 7,
+                                  "column": 26
+                                }
+                              }
+                            }
+                          }
+                        ],
+                        "span": {
+                          "$type": "Span",
+                          "fields": {
+                            "line": 7,
+                            "column": 27
+                          }
+                        }
+                      }
+                    }
+                  ],
+                  "span": {
+                    "$type": "Span",
+                    "fields": {
+                      "line": 7,
+                      "column": 28
+                    }
+                  }
+                }
+              },
+              "span": {
+                "$type": "Span",
+                "fields": {
+                  "line": 6,
+                  "column": 19
+                }
+              }
+            }
+          },
+          "span": {
+            "$type": "Span",
+            "fields": {
+              "line": 6,
+              "column": 1
+            }
+          }
+        }
+      }
+    ],
+    "span": null
+  }
+}

@@ -1,0 +1,82 @@
+{
+  "schema_version": "sh1-parity-v1.0",
+  "generated_by": "scripts/sh1_baseline.py (Python reference parser)",
+  "syntax_freeze": "SYNTAX_FREEZE_v0.5.md",
+  "baseline_count": 8,
+  "baseline_files": [
+    "hello.nova",
+    "fibonacci.nova",
+    "loops.nova",
+    "math.nova",
+    "list_comprehension.nova",
+    "pattern_match.nova",
+    "pipe.nova",
+    "file_io.nova"
+  ],
+  "records": {
+    "hello.nova": {
+      "source_file": "examples/hello.nova",
+      "source_md5": "c2ca824ed34830c19403580dd81f8ab9",
+      "source_lines": 3,
+      "ast_json_file": "fixtures/sh1_parity/hello.ast.json",
+      "ast_md5": "2028c8e2c717633ce6d0eaa42ece472c",
+      "ast_json_bytes": 2220
+    },
+    "fibonacci.nova": {
+      "source_file": "examples/fibonacci.nova",
+      "source_md5": "bd8c1f4df800f7609f4fa9fe156e3a1c",
+      "source_lines": 8,
+      "ast_json_file": "fixtures/sh1_parity/fibonacci.ast.json",
+      "ast_md5": "c763d804d9356aa8ee629229eeabb1df",
+      "ast_json_bytes": 14023
+    },
+    "loops.nova": {
+      "source_file": "examples/loops.nova",
+      "source_md5": "9e2d47879e593ecc28ecbf0dc60d19eb",
+      "source_lines": 32,
+      "ast_json_file": "fixtures/sh1_parity/loops.ast.json",
+      "ast_md5": "f12f663f48cbcbb86b5ccd3ae2ea53cd",
+      "ast_json_bytes": 50412
+    },
+    "math.nova": {
+      "source_file": "examples/math.nova",
+      "source_md5": "1088866a6fb1327470be31b942287e2b",
+      "source_lines": 10,
+      "ast_json_file": "fixtures/sh1_parity/math.ast.json",
+      "ast_md5": "a018689cef25dfca8be1046be11925a7",
+      "ast_json_bytes": 33277
+    },
+    "list_comprehension.nova": {
+      "source_file": "examples/list_comprehension.nova",
+      "source_md5": "f160078efeedb4c94811c5e365ba113f",
+      "source_lines": 13,
+      "ast_json_file": "fixtures/sh1_parity/list_comprehension.ast.json",
+      "ast_md5": "8f913d934b87d4319b2d63cc22666752",
+      "ast_json_bytes": 25489
+    },
+    "pattern_match.nova": {
+      "source_file": "examples/pattern_match.nova",
+      "source_md5": "5c45a8eb8824d09280a5a7980bc60539",
+      "source_lines": 16,
+      "ast_json_file": "fixtures/sh1_parity/pattern_match.ast.json",
+      "ast_md5": "c538370f05422daaefbde8e71b9c32f2",
+      "ast_json_bytes": 18826
+    },
+    "pipe.nova": {
+      "source_file": "examples/pipe.nova",
+      "source_md5": "f3a9f65f20651513ddbcbd08d4199e36",
+      "source_lines": 7,
+      "ast_json_file": "fixtures/sh1_parity/pipe.ast.json",
+      "ast_md5": "9c1c2a77ec2226272663a4436b5a1247",
+      "ast_json_bytes": 20739
+    },
+    "file_io.nova": {
+      "source_file": "examples/file_io.nova",
+      "source_md5": "dbfcb8e82268423ec0097b1e7bd3f993",
+      "source_lines": 7,
+      "ast_json_file": "fixtures/sh1_parity/file_io.ast.json",
+      "ast_md5": "836e118f61114dde5abf47a5cc97e7e9",
+      "ast_json_bytes": 11524
+    }
+  }
+}

@@ -235,20 +235,31 @@ class TestBinaryOperators(unittest.TestCase):
         self.assertEqual(decl.op, "++")
 
     def test_pipe_operator(self):
-        """Pipe operator"""
+        """Pipe operator — parser desugar: x |> f → FnCall(f, [x])"""
         decl = parse_single("x |> f")
-        self.assertIsInstance(decl, PipeExpr)
-        self.assertIsInstance(decl.left, Identifier)
-        self.assertIsInstance(decl.right, Identifier)
+        self.assertIsInstance(decl, FnCall)
+        self.assertIsInstance(decl.callee, Identifier)
+        self.assertEqual(decl.callee.name, "f")
+        self.assertEqual(len(decl.args), 1)
+        self.assertIsInstance(decl.args[0], Identifier)
+        self.assertEqual(decl.args[0].name, "x")
 
     def test_pipe_chain_left_associative(self):
-        """x |> f |> g 应解析为 (x |> f) |> g"""
+        """x |> f |> g 应左结合解析为 (x |> f) |> g → FnCall(g, [FnCall(f, [x])])"""
         decl = parse_single("x |> f |> g")
-        self.assertIsInstance(decl, PipeExpr)
-        self.assertIsInstance(decl.left, PipeExpr)
-        self.assertEqual(decl.left.left.name, "x")
-        self.assertEqual(decl.left.right.name, "f")
-        self.assertEqual(decl.right.name, "g")
+        self.assertIsInstance(decl, FnCall)
+        # 外层：g(...)
+        self.assertIsInstance(decl.callee, Identifier)
+        self.assertEqual(decl.callee.name, "g")
+        self.assertEqual(len(decl.args), 1)
+        # 内层参数：x |> f → FnCall(f, [x])
+        inner = decl.args[0]
+        self.assertIsInstance(inner, FnCall)
+        self.assertIsInstance(inner.callee, Identifier)
+        self.assertEqual(inner.callee.name, "f")
+        self.assertEqual(len(inner.args), 1)
+        self.assertIsInstance(inner.args[0], Identifier)
+        self.assertEqual(inner.args[0].name, "x")
 
     def test_modulo_operator(self):
         """Modulo operator"""

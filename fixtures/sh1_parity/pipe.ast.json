@@ -1,0 +1,453 @@
+{
+  "$type": "Program",
+  "fields": {
+    "declarations": [
+      {
+        "$type": "FnDef",
+        "fields": {
+          "name": "main",
+          "params": [],
+          "return_type": {
+            "$type": "TypeUnit",
+            "fields": {
+              "span": {
+                "$type": "Span",
+                "fields": {
+                  "line": 1,
+                  "column": 14
+                }
+              }
+            }
+          },
+          "body": {
+            "$type": "Block",
+            "fields": {
+              "statements": [
+                {
+                  "$type": "LetBinding",
+                  "fields": {
+                    "name": "result",
+                    "value": {
+                      "$type": "FnCall",
+                      "fields": {
+                        "callee": {
+                          "$type": "Identifier",
+                          "fields": {
+                            "name": "sum",
+                            "span": {
+                              "$type": "Span",
+                              "fields": {
+                                "line": 5,
+                                "column": 8
+                              }
+                            }
+                          }
+                        },
+                        "args": [
+                          {
+                            "$type": "FnCall",
+                            "fields": {
+                              "callee": {
+                                "$type": "FnCall",
+                                "fields": {
+                                  "callee": {
+                                    "$type": "Identifier",
+                                    "fields": {
+                                      "name": "map",
+                                      "span": {
+                                        "$type": "Span",
+                                        "fields": {
+                                          "line": 4,
+                                          "column": 8
+                                        }
+                                      }
+                                    }
+                                  },
+                                  "args": [
+                                    {
+                                      "$type": "Lambda",
+                                      "fields": {
+                                        "params": [
+                                          {
+                                            "$type": "Param",
+                                            "fields": {
+                                              "name": "x",
+                                              "type_annotation": null,
+                                              "span": {
+                                                "$type": "Span",
+                                                "fields": {
+                                                  "line": 4,
+                                                  "column": 13
+                                                }
+                                              }
+                                            }
+                                          }
+                                        ],
+                                        "return_type": null,
+                                        "body": {
+                                          "$type": "BinaryOp",
+                                          "fields": {
+                                            "op": "*",
+                                            "left": {
+                                              "$type": "Identifier",
+                                              "fields": {
+                                                "name": "x",
+                                                "span": {
+                                                  "$type": "Span",
+                                                  "fields": {
+                                                    "line": 4,
+                                                    "column": 16
+                                                  }
+                                                }
+                                              }
+                                            },
+                                            "right": {
+                                              "$type": "Identifier",
+                                              "fields": {
+                                                "name": "x",
+                                                "span": {
+                                                  "$type": "Span",
+                                                  "fields": {
+                                                    "line": 4,
+                                                    "column": 20
+                                                  }
+                                                }
+                                              }
+                                            },
+                                            "span": {
+                                              "$type": "Span",
+                                              "fields": {
+                                                "line": 4,
+                                                "column": 18
+                                              }
+                                            }
+                                          }
+                                        },
+                                        "span": {
+                                          "$type": "Span",
+                                          "fields": {
+                                            "line": 4,
+                                            "column": 12
+                                          }
+                                        }
+                                      }
+                                    }
+                                  ],
+                                  "span": {
+                                    "$type": "Span",
+                                    "fields": {
+                                      "line": 4,
+                                      "column": 21
+                                    }
+                                  }
+                                }
+                              },
+                              "args": [
+                                {
+                                  "$type": "FnCall",
+                                  "fields": {
+                                    "callee": {
+                                      "$type": "FnCall",
+                                      "fields": {
+                                        "callee": {
+                                          "$type": "Identifier",
+                                          "fields": {
+                                            "name": "filter",
+                                            "span": {
+                                              "$type": "Span",
+                                              "fields": {
+                                                "line": 3,
+                                                "column": 8
+                                              }
+                                            }
+                                          }
+                                        },
+                                        "args": [
+                                          {
+                                            "$type": "Lambda",
+                                            "fields": {
+                                              "params": [
+                                                {
+                                                  "$type": "Param",
+                                                  "fields": {
+                                                    "name": "x",
+                                                    "type_annotation": null,
+                                                    "span": {
+                                                      "$type": "Span",
+                                                      "fields": {
+                                                        "line": 3,
+                                                        "column": 16
+                                                      }
+                                                    }
+                                                  }
+                                                }
+                                              ],
+                                              "return_type": null,
+                                              "body": {
+                                                "$type": "BinaryOp",
+                                                "fields": {
+                                                  "op": ">",
+                                                  "left": {
+                                                    "$type": "Identifier",
+                                                    "fields": {
+                                                      "name": "x",
+                                                      "span": {
+                                                        "$type": "Span",
+                                                        "fields": {
+                                                          "line": 3,
+                                                          "column": 19
+                                                        }
+                                                      }
+                                                    }
+                                                  },
+                                                  "right": {
+                                                    "$type": "IntLiteral",
+                                                    "fields": {
+                                                      "value": 2,
+                                                      "span": {
+                                                        "$type": "Span",
+                                                        "fields": {
+                                                          "line": 3,
+                                                          "column": 23
+                                                        }
+                                                      }
+                                                    }
+                                                  },
+                                                  "span": {
+                                                    "$type": "Span",
+                                                    "fields": {
+                                                      "line": 3,
+                                                      "column": 21
+                                                    }
+                                                  }
+                                                }
+                                              },
+                                              "span": {
+                                                "$type": "Span",
+                                                "fields": {
+                                                  "line": 3,
+                                                  "column": 15
+                                                }
+                                              }
+                                            }
+                                          }
+                                        ],
+                                        "span": {
+                                          "$type": "Span",
+                                          "fields": {
+                                            "line": 3,
+                                            "column": 24
+                                          }
+                                        }
+                                      }
+                                    },
+                                    "args": [
+                                      {
+                                        "$type": "ListExpr",
+                                        "fields": {
+                                          "elements": [
+                                            {
+                                              "$type": "IntLiteral",
+                                              "fields": {
+                                                "value": 1,
+                                                "span": {
+                                                  "$type": "Span",
+                                                  "fields": {
+                                                    "line": 2,
+                                                    "column": 17
+                                                  }
+                                                }
+                                              }
+                                            },
+                                            {
+                                              "$type": "IntLiteral",
+                                              "fields": {
+                                                "value": 2,
+                                                "span": {
+                                                  "$type": "Span",
+                                                  "fields": {
+                                                    "line": 2,
+                                                    "column": 20
+                                                  }
+                                                }
+                                              }
+                                            },
+                                            {
+                                              "$type": "IntLiteral",
+                                              "fields": {
+                                                "value": 3,
+                                                "span": {
+                                                  "$type": "Span",
+                                                  "fields": {
+                                                    "line": 2,
+                                                    "column": 23
+                                                  }
+                                                }
+                                              }
+                                            },
+                                            {
+                                              "$type": "IntLiteral",
+                                              "fields": {
+                                                "value": 4,
+                                                "span": {
+                                                  "$type": "Span",
+                                                  "fields": {
+                                                    "line": 2,
+                                                    "column": 26
+                                                  }
+                                                }
+                                              }
+                                            },
+                                            {
+                                              "$type": "IntLiteral",
+                                              "fields": {
+                                                "value": 5,
+                                                "span": {
+                                                  "$type": "Span",
+                                                  "fields": {
+                                                    "line": 2,
+                                                    "column": 29
+                                                  }
+                                                }
+                                              }
+                                            }
+                                          ],
+                                          "span": {
+                                            "$type": "Span",
+                                            "fields": {
+                                              "line": 2,
+                                              "column": 16
+                                            }
+                                          }
+                                        }
+                                      }
+                                    ],
+                                    "span": {
+                                      "$type": "Span",
+                                      "fields": {
+                                        "line": 3,
+                                        "column": 5
+                                      }
+                                    }
+                                  }
+                                }
+                              ],
+                              "span": {
+                                "$type": "Span",
+                                "fields": {
+                                  "line": 4,
+                                  "column": 5
+                                }
+                              }
+                            }
+                          }
+                        ],
+                        "span": {
+                          "$type": "Span",
+                          "fields": {
+                            "line": 5,
+                            "column": 5
+                          }
+                        }
+                      }
+                    },
+                    "type_annotation": null,
+                    "span": {
+                      "$type": "Span",
+                      "fields": {
+                        "line": 2,
+                        "column": 3
+                      }
+                    }
+                  }
+                }
+              ],
+              "tail_expression": {
+                "$type": "FnCall",
+                "fields": {
+                  "callee": {
+                    "$type": "Identifier",
+                    "fields": {
+                      "name": "print",
+                      "span": {
+                        "$type": "Span",
+                        "fields": {
+                          "line": 6,
+                          "column": 3
+                        }
+                      }
+                    }
+                  },
+                  "args": [
+                    {
+                      "$type": "FnCall",
+                      "fields": {
+                        "callee": {
+                          "$type": "Identifier",
+                          "fields": {
+                            "name": "int_to_str",
+                            "span": {
+                              "$type": "Span",
+                              "fields": {
+                                "line": 6,
+                                "column": 9
+                              }
+                            }
+                          }
+                        },
+                        "args": [
+                          {
+                            "$type": "Identifier",
+                            "fields": {
+                              "name": "result",
+                              "span": {
+                                "$type": "Span",
+                                "fields": {
+                                  "line": 6,
+                                  "column": 20
+                                }
+                              }
+                            }
+                          }
+                        ],
+                        "span": {
+                          "$type": "Span",
+                          "fields": {
+                            "line": 6,
+                            "column": 26
+                          }
+                        }
+                      }
+                    }
+                  ],
+                  "span": {
+                    "$type": "Span",
+                    "fields": {
+                      "line": 6,
+                      "column": 27
+                    }
+                  }
+                }
+              },
+              "span": {
+                "$type": "Span",
+                "fields": {
+                  "line": 1,
+                  "column": 19
+                }
+              }
+            }
+          },
+          "span": {
+            "$type": "Span",
+            "fields": {
+              "line": 1,
+              "column": 1
+            }
+          }
+        }
+      }
+    ],
+    "span": null
+  }
+}

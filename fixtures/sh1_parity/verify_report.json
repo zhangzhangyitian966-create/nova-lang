@@ -1,0 +1,82 @@
+{
+  "mode": "python",
+  "schema_version": "sh1-parity-v1.0",
+  "passed": 8,
+  "failed": 0,
+  "skipped": 0,
+  "errors": 0,
+  "results": [
+    {
+      "baseline": "hello.nova",
+      "status": "PASS",
+      "expected_md5": "2028c8e2c717633ce6d0eaa42ece472c",
+      "actual_md5": "2028c8e2c717633ce6d0eaa42ece472c",
+      "byte_diff_count": 0,
+      "diff_preview": null,
+      "detail": ""
+    },
+    {
+      "baseline": "fibonacci.nova",
+      "status": "PASS",
+      "expected_md5": "c763d804d9356aa8ee629229eeabb1df",
+      "actual_md5": "c763d804d9356aa8ee629229eeabb1df",
+      "byte_diff_count": 0,
+      "diff_preview": null,
+      "detail": ""
+    },
+    {
+      "baseline": "loops.nova",
+      "status": "PASS",
+      "expected_md5": "f12f663f48cbcbb86b5ccd3ae2ea53cd",
+      "actual_md5": "f12f663f48cbcbb86b5ccd3ae2ea53cd",
+      "byte_diff_count": 0,
+      "diff_preview": null,
+      "detail": ""
+    },
+    {
+      "baseline": "math.nova",
+      "status": "PASS",
+      "expected_md5": "a018689cef25dfca8be1046be11925a7",
+      "actual_md5": "a018689cef25dfca8be1046be11925a7",
+      "byte_diff_count": 0,
+      "diff_preview": null,
+      "detail": ""
+    },
+    {
+      "baseline": "list_comprehension.nova",
+      "status": "PASS",
+      "expected_md5": "8f913d934b87d4319b2d63cc22666752",
+      "actual_md5": "8f913d934b87d4319b2d63cc22666752",
+      "byte_diff_count": 0,
+      "diff_preview": null,
+      "detail": ""
+    },
+    {
+      "baseline": "pattern_match.nova",
+      "status": "PASS",
+      "expected_md5": "c538370f05422daaefbde8e71b9c32f2",
+      "actual_md5": "c538370f05422daaefbde8e71b9c32f2",
+      "byte_diff_count": 0,
+      "diff_preview": null,
+      "detail": ""
+    },
+    {
+      "baseline": "pipe.nova",
+      "status": "PASS",
+      "expected_md5": "9c1c2a77ec2226272663a4436b5a1247",
+      "actual_md5": "9c1c2a77ec2226272663a4436b5a1247",
+      "byte_diff_count": 0,
+      "diff_preview": null,
+      "detail": ""
+    },
+    {
+      "baseline": "file_io.nova",
+      "status": "PASS",
+      "expected_md5": "836e118f61114dde5abf47a5cc97e7e9",
+      "actual_md5": "836e118f61114dde5abf47a5cc97e7e9",
+      "byte_diff_count": 0,
+      "diff_preview": null,
+      "detail": ""
+    }
+  ]
+}

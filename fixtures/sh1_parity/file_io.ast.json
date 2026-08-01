@@ -1,0 +1,354 @@
+{
+  "$type": "Program",
+  "fields": {
+    "declarations": [
+      {
+        "$type": "FnDef",
+        "fields": {
+          "name": "main",
+          "params": [],
+          "return_type": {
+            "$type": "TypeUnit",
+            "fields": {
+              "span": {
+                "$type": "Span",
+                "fields": {
+                  "line": 1,
+                  "column": 14
+                }
+              }
+            }
+          },
+          "body": {
+            "$type": "Block",
+            "fields": {
+              "statements": [
+                {
+                  "$type": "FnCall",
+                  "fields": {
+                    "callee": {
+                      "$type": "Identifier",
+                      "fields": {
+                        "name": "write_file",
+                        "span": {
+                          "$type": "Span",
+                          "fields": {
+                            "line": 2,
+                            "column": 3
+                          }
+                        }
+                      }
+                    },
+                    "args": [
+                      {
+                        "$type": "StringLiteral",
+                        "fields": {
+                          "value": "test.txt",
+                          "span": {
+                            "$type": "Span",
+                            "fields": {
+                              "line": 2,
+                              "column": 14
+                            }
+                          }
+                        }
+                      },
+                      {
+                        "$type": "StringLiteral",
+                        "fields": {
+                          "value": "Hello from Nova!",
+                          "span": {
+                            "$type": "Span",
+                            "fields": {
+                              "line": 2,
+                              "column": 26
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "span": {
+                      "$type": "Span",
+                      "fields": {
+                        "line": 2,
+                        "column": 44
+                      }
+                    }
+                  }
+                },
+                {
+                  "$type": "LetBinding",
+                  "fields": {
+                    "name": "content",
+                    "value": {
+                      "$type": "FnCall",
+                      "fields": {
+                        "callee": {
+                          "$type": "Identifier",
+                          "fields": {
+                            "name": "read_file",
+                            "span": {
+                              "$type": "Span",
+                              "fields": {
+                                "line": 3,
+                                "column": 17
+                              }
+                            }
+                          }
+                        },
+                        "args": [
+                          {
+                            "$type": "StringLiteral",
+                            "fields": {
+                              "value": "test.txt",
+                              "span": {
+                                "$type": "Span",
+                                "fields": {
+                                  "line": 3,
+                                  "column": 27
+                                }
+                              }
+                            }
+                          }
+                        ],
+                        "span": {
+                          "$type": "Span",
+                          "fields": {
+                            "line": 3,
+                            "column": 37
+                          }
+                        }
+                      }
+                    },
+                    "type_annotation": null,
+                    "span": {
+                      "$type": "Span",
+                      "fields": {
+                        "line": 3,
+                        "column": 3
+                      }
+                    }
+                  }
+                },
+                {
+                  "$type": "FnCall",
+                  "fields": {
+                    "callee": {
+                      "$type": "Identifier",
+                      "fields": {
+                        "name": "print",
+                        "span": {
+                          "$type": "Span",
+                          "fields": {
+                            "line": 4,
+                            "column": 3
+                          }
+                        }
+                      }
+                    },
+                    "args": [
+                      {
+                        "$type": "Identifier",
+                        "fields": {
+                          "name": "content",
+                          "span": {
+                            "$type": "Span",
+                            "fields": {
+                              "line": 4,
+                              "column": 9
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "span": {
+                      "$type": "Span",
+                      "fields": {
+                        "line": 4,
+                        "column": 16
+                      }
+                    }
+                  }
+                },
+                {
+                  "$type": "LetBinding",
+                  "fields": {
+                    "name": "exists",
+                    "value": {
+                      "$type": "FnCall",
+                      "fields": {
+                        "callee": {
+                          "$type": "Identifier",
+                          "fields": {
+                            "name": "file_exists",
+                            "span": {
+                              "$type": "Span",
+                              "fields": {
+                                "line": 5,
+                                "column": 16
+                              }
+                            }
+                          }
+                        },
+                        "args": [
+                          {
+                            "$type": "StringLiteral",
+                            "fields": {
+                              "value": "test.txt",
+                              "span": {
+                                "$type": "Span",
+                                "fields": {
+                                  "line": 5,
+                                  "column": 28
+                                }
+                              }
+                            }
+                          }
+                        ],
+                        "span": {
+                          "$type": "Span",
+                          "fields": {
+                            "line": 5,
+                            "column": 38
+                          }
+                        }
+                      }
+                    },
+                    "type_annotation": null,
+                    "span": {
+                      "$type": "Span",
+                      "fields": {
+                        "line": 5,
+                        "column": 3
+                      }
+                    }
+                  }
+                }
+              ],
+              "tail_expression": {
+                "$type": "IfExpr",
+                "fields": {
+                  "condition": {
+                    "$type": "Identifier",
+                    "fields": {
+                      "name": "exists",
+                      "span": {
+                        "$type": "Span",
+                        "fields": {
+                          "line": 6,
+                          "column": 6
+                        }
+                      }
+                    }
+                  },
+                  "then_branch": {
+                    "$type": "FnCall",
+                    "fields": {
+                      "callee": {
+                        "$type": "Identifier",
+                        "fields": {
+                          "name": "print",
+                          "span": {
+                            "$type": "Span",
+                            "fields": {
+                              "line": 6,
+                              "column": 18
+                            }
+                          }
+                        }
+                      },
+                      "args": [
+                        {
+                          "$type": "StringLiteral",
+                          "fields": {
+                            "value": "File exists!",
+                            "span": {
+                              "$type": "Span",
+                              "fields": {
+                                "line": 6,
+                                "column": 24
+                              }
+                            }
+                          }
+                        }
+                      ],
+                      "span": {
+                        "$type": "Span",
+                        "fields": {
+                          "line": 6,
+                          "column": 38
+                        }
+                      }
+                    }
+                  },
+                  "else_branch": {
+                    "$type": "FnCall",
+                    "fields": {
+                      "callee": {
+                        "$type": "Identifier",
+                        "fields": {
+                          "name": "print",
+                          "span": {
+                            "$type": "Span",
+                            "fields": {
+                              "line": 6,
+                              "column": 45
+                            }
+                          }
+                        }
+                      },
+                      "args": [
+                        {
+                          "$type": "StringLiteral",
+                          "fields": {
+                            "value": "File not found",
+                            "span": {
+                              "$type": "Span",
+                              "fields": {
+                                "line": 6,
+                                "column": 51
+                              }
+                            }
+                          }
+                        }
+                      ],
+                      "span": {
+                        "$type": "Span",
+                        "fields": {
+                          "line": 6,
+                          "column": 67
+                        }
+                      }
+                    }
+                  },
+                  "span": {
+                    "$type": "Span",
+                    "fields": {
+                      "line": 6,
+                      "column": 3
+                    }
+                  }
+                }
+              },
+              "span": {
+                "$type": "Span",
+                "fields": {
+                  "line": 1,
+                  "column": 19
+                }
+              }
+            }
+          },
+          "span": {
+            "$type": "Span",
+            "fields": {
+              "line": 1,
+              "column": 1
+            }
+          }
+        }
+      }
+    ],
+    "span": null
+  }
+}
