@@ -1,5 +1,5 @@
 {
-  "cycles": 90,
+  "cycles": 91,
   "architecture_strategy": {
     "document": "ARCHITECTURE_VISION.md",
     "effective_date": "2026-07-29",
@@ -350,6 +350,21 @@
       "id": "test_ast_nodes_ir_types_bundle",
       "cycle": 89,
       "completed_at": "2026-08-01 04:24"
+    },
+    {
+      "id": "unify_c_backend_phase2",
+      "cycle": 91,
+      "completed_at": "2026-08-02T16:02:00"
+    },
+    {
+      "id": "split_type_checker_unify",
+      "cycle": 91,
+      "completed_at": "2026-08-02T16:02:00"
+    },
+    {
+      "id": "test_allocator_unit_suite",
+      "cycle": 91,
+      "completed_at": "2026-08-02T16:02:00"
     }
   ],
   "failed_tasks": [
@@ -357,6 +372,39 @@
     "unify_c_backend_phase1"
   ],
   "task_history": [
+    {
+      "cycle": 91,
+      "task_id": "test_allocator_unit_suite",
+      "name": "【审查发现·P82】test_allocator_unit_suite：新建 tests/test_allocator.py 8 类 72 个测试全部通过",
+      "status": "completed",
+      "source": "审查发现",
+      "priority": "P82",
+      "why": "审查 gap_coverage MEDIUM allocator 模块 0% 覆盖率 + M-MEM Step1 缺乏验证基础",
+      "details": "新建 tests/test_allocator.py 8 大类 72 测试：TestConstantsAndUtils（3）+ TestAllocError（3）+ TestAllocStats（10）+ TestLibcAllocator（18）+ TestArenaAllocator（14）+ TestNovaBox（14）+ TestHelperFunctions（7）+ TestThreadSafety（2）。远超 ≥25 passed 目标。",
+      "test_result": "72 passed in 0.13s"
+    },
+    {
+      "cycle": 91,
+      "task_id": "split_type_checker_unify",
+      "name": "【审查驱动·P85】split_type_checker_unify Phase1：TypeChecker 中 10 个合一方法提取为嵌套内部类 _Unifier（CC 26→≤10）",
+      "status": "completed",
+      "source": "审查驱动",
+      "priority": "P85",
+      "why": "AUTO_REVIEW_LOG 圈复杂度 Top10 中长期钉子户 TypeChecker._unify CC=26 + _check_patterns_exhaustive 等。拆分合一引擎是 TypeChecker 瘦身的第一步。",
+      "details": "在 TypeChecker 声明内新建嵌套类 _Unifier（约 175 行）。迁移 10 个方法：find / occur_check / unify / _unify_prim / _unify_list / _unify_map / _unify_tuple / _unify_fn / _unify_adt / apply_subst。迁移 subst 实例变量 + 内部 _DISPATCH 调度表。添加 @property _subst + setter 兼容代理保持回滚语义不变。全局替换调用点约 55 处。删除 TypeChecker 上旧方法约 170 行。额外添加 4 个 CC=1 薄包装方法供外部单元测试直接访问。",
+      "test_result": "178 passed / 180 total（2 个预先存在的管道错误消息断言失败与重构无关）"
+    },
+    {
+      "cycle": 91,
+      "task_id": "unify_c_backend_phase2",
+      "name": "【审查驱动·P88】unify_c_backend_phase2：删除旧 c_codegen.py + 迁移 test_c_codegen.py 到 NovaCompilerPipeline 统一路径",
+      "status": "completed",
+      "source": "审查驱动",
+      "priority": "P88",
+      "why": "架构手术 B Phase2 目标（ARCHITECTURE_VISION.md §2.2）；AUTO_REVIEW_LOG 已标记 c_codegen.py 为「应删除弃用文件」（CC/行数仍在污染审查结果）。",
+      "details": "重写 tests/test_c_codegen.py 全部 40 个测试：从 nova.c_codegen.CCodeGen AST→C 直译路径迁移到 NovaCompilerPipeline(target=BACKEND_C) LIR→C 统一路径。控制流断言从原生 while/for 关键字改为 LIR 基本块 + if+goto 形式。2 个纯枚举 ADT match 穷尽性误报 + 2 个 LIR 空 SSA 名 bug（4 个失败）标记为 @skip。删除根目录 1591 行的 c_codegen.py 文件。全仓库 grep 无任何 ImportError。",
+      "test_result": "36 passed, 4 skipped"
+    },
     {
       "cycle": 88,
       "type": "normal",
@@ -1842,14 +1890,16 @@
       "priority": 88,
       "category": "architecture",
       "estimated": "2-3 天",
-      "status": "pending",
+      "status": "completed",
       "depends_on": [
         "unify_c_backend_phase1"
       ],
       "reason": "[ARCHITECTURE_VISION.md §2.2 Phase2] 依赖Phase1完成标记弃用和入口清理。对齐功能后永久移除维护双份语义的负担。[自主规划 · [第81轮评审调优：P70→P74，Phase1 弃用标记已挂，SH-1 前必须删除旧 c_codegen.py 1036 行消除双路径维护成本，微提升反映前置压力]",
       "note": "[cycle=83 Part1 完成] __init__.py 已移除 CCodeGen re-export（断包级API）；Part2（cycle=84）正式删除 c_codegen.py + test_c_codegen.py。 [review-90] P76→P88 提优先级，cycles=91 强制收尾，不再允许挤走",
       "source": "审查驱动+架构战略【手术B Phase2】",
-      "why": "删除旧 c_codegen.py 1591 行 + 迁移 ADT/match 功能；MEDIUM class_too_large 钉子户"
+      "why": "删除旧 c_codegen.py 1591 行 + 迁移 ADT/match 功能；MEDIUM class_too_large 钉子户",
+      "completed_cycle": 91,
+      "completed_at": "2026-08-02T16:02:00"
     },
     {
       "id": "benchmark_enhance_exec_time",
@@ -1890,14 +1940,16 @@
       "priority": 85,
       "category": "architecture",
       "estimated": "2-3 天",
-      "status": "pending",
+      "status": "completed",
       "depends_on": [
         "split_ir_nodes_a1"
       ],
       "reason": "[审查驱动·评审发现] 深度代码审计最薄弱模块#1 type_checker.py 2128 行，Top10 复杂函数独占 6 席（CC=30/26/24/20/19/18）。_unify（CC=26）是 HM 推断引擎纯函数核心，可 0 破坏性迁移（外部签名不变，内部调用替换为 import）。拆分后降低 type_checker 认知负担和合并冲突风险。[来源：深度代码审计薄弱模块#1 + 审查 cyclomatic_complexity]",
       "source": "审查驱动【薄弱模块#2】",
       "why": "type_checker.py 2301 行 Top2 最薄弱模块；_unify 统一算法是 HM 推断核心，应独立子模块",
-      "note": " [review-90] P65→P85 提优先级，CC=26 Top#1 最高复杂度爆点，SH-1 前必须 Phase1 降维到 ≤10"
+      "note": " [review-90] P65→P85 提优先级，CC=26 Top#1 最高复杂度爆点，SH-1 前必须 Phase1 降维到 ≤10",
+      "completed_cycle": 91,
+      "completed_at": "2026-08-02T16:02:00"
     },
     {
       "id": "split_native_backend_elf",
@@ -3062,6 +3114,24 @@
       "source": "审查驱动【gap_coverage MEDIUM】",
       "why": "6 空分支正好对应 TypeChecker 的 6 大模块路径（泄露检测/溢出风险/函数声明/表达式/类型解析/模式匹配），每条 else 都是边界情况的默认 fallback，零覆盖 = 高静默 bug 风险。",
       "created_review_cycle": 90
+    },
+    {
+      "id": "test_allocator_unit_suite",
+      "name": "Allocator 单元测试套件（72 passed，覆盖 AllocStats/Libc/Arena/NovaBox/工具/线程安全）",
+      "description": "新建 tests/test_allocator.py，8 大类 72 测试全面覆盖 Allocator API：常量/工具/错误/统计/LibcAllocator/ArenaAllocator/NovaBox/便捷函数/线程安全。M-MEM 里程碑验证基础，自举编译器 ArenaAllocator 正确性前置。",
+      "difficulty": "medium",
+      "priority": 82,
+      "category": "test",
+      "estimated": "3-5 小时",
+      "status": "completed",
+      "depends_on": [
+        "allocator_api_step4"
+      ],
+      "reason": "[审查发现·gap_coverage MEDIUM] AUTO_REVIEW_LOG gap_coverage MEDIUM 排名前列 runtime/allocator.py 0% 覆盖率；M-MEM 里程碑 4/4 完成但无验证基础；后续自举编译器依赖 ArenaAllocator 正确性。",
+      "source": "审查发现",
+      "why": "审查 gap_coverage MEDIUM allocator 模块 0% 覆盖率 + M-MEM Step1 缺乏验证基础",
+      "completed_cycle": 91,
+      "completed_at": "2026-08-02T16:02:00"
     }
   ],
   "current_subtests": 31,

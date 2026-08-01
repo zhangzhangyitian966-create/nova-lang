@@ -314,7 +314,182 @@ ERROR_T = PrimType("__Error__")
 
 
 class TypeChecker:
-    """Nova 类型检查器"""
+    """Nova 类型检查器。"""
+
+    # ==================================================================
+    # 内部类：类型合一引擎（提取自 TypeChecker 原 10 方法，原 CC≈26 → 新≤10）
+    # Phase1: 提取纯算法（find/occur_check/unify + 6结构handler + apply_subst）
+    # Phase2: 再提取 _unify_types / _detect_leaking_tvars / _unify_and_resolve
+    # ==================================================================
+    class _Unifier:
+        """基于 union-find 的一阶类型合一引擎。
+
+        封装：替换表 (subst)、路径压缩查找 (find)、发生检查 (occur_check)、
+        结构递归合一 (unify + 6 构造器 handler)、替换表应用 (apply_subst)。
+
+        设计约束：
+          - 与 TypeChecker 完全解耦：不持有 TypeChecker 引用，不调用其方法
+          - 副作用仅修改 self.subst（替换表）
+          - 合一失败不抛异常，返回 False 由外层决定错误语义
+        """
+
+        # 结构类型合一调度表：Type 构造器 → _Unifier 方法名
+        # 对应原模块级 _UNIFY_DISPATCH，但指向 _Unifier 自身方法
+        _DISPATCH = {
+            "PrimType": "_unify_prim",
+            "ListType": "_unify_list",
+            "MapType": "_unify_map",
+            "TupleType": "_unify_tuple",
+            "FnType": "_unify_fn",
+            "ADTType": "_unify_adt",
+        }
+
+        def __init__(self):
+            # 替换表：TypeVar 的 id → 绑定的类型
+            self.subst: Dict[int, "NovaType"] = {}
+
+        # --------------------------------------------------------------
+        # Union-Find 查找 + 路径压缩
+        # --------------------------------------------------------------
+        def find(self, tv: "TypeVar") -> "NovaType":
+            """查找类型变量的最终代表元（路径压缩）。"""
+            current = tv
+            path = []
+            while isinstance(current, TypeVar) and id(current) in self.subst:
+                path.append(id(current))
+                current = self.subst[id(current)]
+            for vid in path:
+                self.subst[vid] = current
+            return current
+
+        # --------------------------------------------------------------
+        # 发生检查（防止无限递归类型）
+        # --------------------------------------------------------------
+        def occur_check(self, tv: "TypeVar", ty: "NovaType") -> bool:
+            """返回 True 表示 tv 在 ty 中出现（不可合一）。"""
+            ty_root = self.find(ty) if isinstance(ty, TypeVar) else ty
+            if isinstance(ty_root, TypeVar):
+                return tv is ty_root
+            if isinstance(ty_root, ListType):
+                return self.occur_check(tv, ty_root.elem_type)
+            if isinstance(ty_root, MapType):
+                return self.occur_check(tv, ty_root.key_type) or self.occur_check(
+                    tv, ty_root.value_type
+                )
+            if isinstance(ty_root, TupleType):
+                return any(self.occur_check(tv, e) for e in ty_root.elements)
+            if isinstance(ty_root, FnType):
+                return any(
+                    self.occur_check(tv, p) for p in ty_root.param_types
+                ) or self.occur_check(tv, ty_root.return_type)
+            if isinstance(ty_root, ADTType):
+                return any(self.occur_check(tv, p) for p in ty_root.type_params)
+            return False
+
+        # --------------------------------------------------------------
+        # 核心合一算法
+        # --------------------------------------------------------------
+        def unify(self, a: "NovaType", b: "NovaType") -> bool:
+            """合一两个类型，成功返回True并更新 self.subst，失败返回False。"""
+            a_root = self.find(a) if isinstance(a, TypeVar) else a
+            b_root = self.find(b) if isinstance(b, TypeVar) else b
+
+            # ERROR_T 宽容合一（ErrorExpr 下游产物）
+            if a_root is ERROR_T or b_root is ERROR_T:
+                return True
+
+            # 两侧都是未绑定 TypeVar
+            if isinstance(a_root, TypeVar) and isinstance(b_root, TypeVar):
+                if a_root is b_root:
+                    return True
+                self.subst[id(a_root)] = b_root
+                return True
+
+            # 左 TypeVar
+            if isinstance(a_root, TypeVar):
+                if self.occur_check(a_root, b_root):
+                    return False
+                self.subst[id(a_root)] = b_root
+                return True
+
+            # 右 TypeVar
+            if isinstance(b_root, TypeVar):
+                if self.occur_check(b_root, a_root):
+                    return False
+                self.subst[id(b_root)] = a_root
+                return True
+
+            # 同类型结构：按调度表递归合一
+            if type(a_root) is type(b_root):
+                handler_name = self._DISPATCH.get(type(a_root).__name__)
+                if handler_name is not None:
+                    return getattr(self, handler_name)(a_root, b_root)
+
+            return False
+
+        # --------------------------------------------------------------
+        # 结构类型合一 handler（6个）
+        # --------------------------------------------------------------
+        def _unify_prim(self, a, b) -> bool:
+            return a.name == b.name
+
+        def _unify_list(self, a, b) -> bool:
+            return self.unify(a.elem_type, b.elem_type)
+
+        def _unify_map(self, a, b) -> bool:
+            return self.unify(a.key_type, b.key_type) and self.unify(
+                a.value_type, b.value_type
+            )
+
+        def _unify_tuple(self, a, b) -> bool:
+            if len(a.elements) != len(b.elements):
+                return False
+            return all(
+                self.unify(e1, e2) for e1, e2 in zip(a.elements, b.elements)
+            )
+
+        def _unify_fn(self, a, b) -> bool:
+            if len(a.param_types) != len(b.param_types):
+                return False
+            return all(
+                self.unify(p1, p2) for p1, p2 in zip(a.param_types, b.param_types)
+            ) and self.unify(a.return_type, b.return_type)
+
+        def _unify_adt(self, a, b) -> bool:
+            if a.name != b.name:
+                return False
+            if len(a.type_params) != len(b.type_params):
+                return False
+            return all(
+                self.unify(p1, p2) for p1, p2 in zip(a.type_params, b.type_params)
+            )
+
+        # --------------------------------------------------------------
+        # 替换表应用
+        # --------------------------------------------------------------
+        def apply_subst(self, ty: "NovaType") -> "NovaType":
+            """递归应用替换表，TypeVar替换为最终绑定。"""
+            if isinstance(ty, TypeVar):
+                root = self.find(ty)
+                if root is ty:
+                    return ty
+                return self.apply_subst(root)
+            if isinstance(ty, ListType):
+                return ListType(self.apply_subst(ty.elem_type))
+            if isinstance(ty, MapType):
+                return MapType(
+                    self.apply_subst(ty.key_type), self.apply_subst(ty.value_type)
+                )
+            if isinstance(ty, TupleType):
+                return TupleType([self.apply_subst(e) for e in ty.elements])
+            if isinstance(ty, FnType):
+                return FnType(
+                    [self.apply_subst(p) for p in ty.param_types],
+                    self.apply_subst(ty.return_type),
+                )
+            if isinstance(ty, ADTType):
+                return ADTType(ty.name, [self.apply_subst(p) for p in ty.type_params])
+            return ty
 
     def __init__(self, source: str = ""):
         self.env = TypeEnv()
@@ -322,10 +497,38 @@ class TypeChecker:
         self._expr_checkers = self._build_expr_checkers()
         self._pattern_checkers = self._build_pattern_checkers()
         self._decl_checkers = self._build_decl_checkers()
-        # 类型合一的替换表：TypeVar 的 id -> 绑定的类型
-        # 使用 union-find 结构，支持路径压缩
-        self._subst: Dict[int, "NovaType"] = {}
+        # 类型合一引擎（嵌套内部类实例）
+        self._unifier = self._Unifier()
+        # 兼容代理：self._subst 属性 get/set 直接代理到 _unifier.subst
+        # （支持 line 1348 的回滚：self._subst = saved_subst）
         self._setup_builtins()
+
+    # ============================================================
+    # _subst 兼容代理（向后兼容：self._subst 读写→self._unifier.subst）
+    # ============================================================
+    @property
+    def _subst(self):
+        return self._unifier.subst
+
+    @_subst.setter
+    def _subst(self, value):
+        self._unifier.subst = value
+
+    # ============================================================
+    # 合一算法向后兼容薄包装（委托到 self._unifier，单条委托 CC=1）
+    # Phase2: 待所有调用点迁移后，可整体删除此区块
+    # ============================================================
+    def _find(self, tv: "TypeVar") -> "NovaType":
+        return self._unifier.find(tv)
+
+    def _occur_check(self, tv: "TypeVar", ty: "NovaType") -> bool:
+        return self._unifier.occur_check(tv, ty)
+
+    def _unify(self, a: "NovaType", b: "NovaType") -> bool:
+        return self._unifier.unify(a, b)
+
+    def _apply_subst(self, ty: "NovaType") -> "NovaType":
+        return self._unifier.apply_subst(ty)
 
     def _error(self, message: str, expr=None, span=None):
         """统一的 TypeCheckError 抛出方法，自动从 expr/span 提取位置信息。
@@ -586,7 +789,7 @@ class TypeChecker:
                         span=decl.span,
                     )
         # 先仅展开 Union-Find 替换表（不触发 TVar 泄漏栅栏）
-        subst_only = self._apply_subst(ty)
+        subst_only = self._unifier.apply_subst(ty)
         # --- HM Gen(Γ, τ)：Value Restriction + 泛化（打 is_generalized 标记） ---
         if mutable:
             # mut 绑定：引用不透明，绝对不泛化（Value Restriction 强制）
@@ -673,7 +876,7 @@ class TypeChecker:
             ids: set = set()
             def walk(t: NovaType) -> None:
                 if isinstance(t, TypeVar):
-                    ids.add(id(self._find(t)))
+                    ids.add(id(self._unifier.find(t)))
                     return
                 # FnType: param_types + return_type
                 params_list = getattr(t, "param_types", None)
@@ -700,18 +903,18 @@ class TypeChecker:
         # 除每个 param 自身顶层 TypeVar 外的子树集合 S：
         # = {参数 j 的类型 root 不是 TypeVar → 收集其所有子树 TVar id} ∪ {return_type 所有 TVar id}
         # 关键点：不能判断 isinstance(pt, TypeVar)，因为 TypeVar 可能已被 unify（.subst 指向其他类型）。
-        #   必须用 self._find(pt) 拿到 root 后再判断 root 是不是 TypeVar。
+        #   必须用 self._unifier.find(pt) 拿到 root 后再判断 root 是不是 TypeVar。
         all_other_ids: set = set()
         for j, pt in enumerate(param_types):
-            pt_root = self._find(pt)
+            pt_root = self._unifier.find(pt)
             if not isinstance(pt_root, TypeVar):
                 # 参数 j 的类型是具体复合类型（FnType/ListType/...），它内部出现的 TVar 作为
                 #   "被其他参数引用"的证据 → 加入 all_other_ids
                 all_other_ids |= _collect_tvar_ids(pt_root)
-        all_other_ids |= _collect_tvar_ids(self._find(return_type))
+        all_other_ids |= _collect_tvar_ids(self._unifier.find(return_type))
         dangling_param_ids: set = set()
         for i, pt in enumerate(param_types):
-            pt_root = self._find(pt)
+            pt_root = self._unifier.find(pt)
             if isinstance(pt_root, TypeVar):
                 root_id = id(pt_root)
                 # 自身是 TVar，检查是否只在自身顶层出现（不被其他参数/返回类型引用）
@@ -726,8 +929,8 @@ class TypeChecker:
         # —— 对悬空 param 撤销 generalize（保证 leaking 检测命中）
         def _restore_dangling(typ: NovaType) -> None:
             if isinstance(typ, TypeVar):
-                if id(self._find(typ)) in dangling_param_ids:
-                    self._find(typ).is_generalized = False
+                if id(self._unifier.find(typ)) in dangling_param_ids:
+                    self._unifier.find(typ).is_generalized = False
         for pt in generalized_fn_type.param_types:
             _restore_dangling(pt)
         self._unify_and_resolve(generalized_fn_type)
@@ -881,7 +1084,7 @@ class TypeChecker:
             risk_tv = TypeVar(f"int_lit_overflow_{val}")
             risk_tv.overflow_risk = True
             # 绑定到 INT_T（语义仍是 Int，仅附加 overflow_risk 元数据）
-            self._unify(risk_tv, INT_T)
+            self._unifier.unify(risk_tv, INT_T)
             return risk_tv
         return INT_T
 
@@ -897,7 +1100,7 @@ class TypeChecker:
         if abs(val) > F32_MANTISSA_THRESHOLD:
             risk_tv = TypeVar(f"float_lit_overflow_{val}")
             risk_tv.overflow_risk = True
-            self._unify(risk_tv, FLOAT_T)
+            self._unifier.unify(risk_tv, FLOAT_T)
             return risk_tv
         return FLOAT_T
 
@@ -936,7 +1139,7 @@ class TypeChecker:
     def _contains_typevar(self, ty: "NovaType") -> bool:
         """检查类型中是否包含未绑定的类型变量（用于判断是否需要实例化）。"""
         if isinstance(ty, TypeVar):
-            root = self._find(ty)
+            root = self._unifier.find(ty)
             return isinstance(root, TypeVar)
         if isinstance(ty, ListType):
             return self._contains_typevar(ty.elem_type)
@@ -1202,7 +1405,7 @@ class TypeChecker:
             if strict_narrowing:
                 # 只在 existing 不是完全无约束的 TypeVar 时才报窄化告警
                 existing_root = (
-                    self._find(existing) if isinstance(existing, TypeVar) else existing
+                    self._unifier.find(existing) if isinstance(existing, TypeVar) else existing
                 )
                 if not isinstance(existing_root, TypeVar):
                     self._error(
@@ -1219,7 +1422,7 @@ class TypeChecker:
     # ------------------------------------------------------------------
 
     def _check_fn_call(self, expr) -> NovaType:
-        callee_ty = self._apply_subst(self.check_expr(expr.callee))
+        callee_ty = self._unifier.apply_subst(self.check_expr(expr.callee))
         arg_types = [self.check_expr(a) for a in expr.args]
 
         if isinstance(callee_ty, FnType):
@@ -1234,10 +1437,10 @@ class TypeChecker:
                 zip(arg_types, callee_ty.param_types)
             ):
                 has_risk = self._has_overflow_risk(arg_t)
-                if not self._unify(arg_t, param_t):
+                if not self._unifier.unify(arg_t, param_t):
                     # 合一失败，应用替换后给出更精确的错误信息
-                    expected = self._apply_subst(param_t)
-                    actual = self._apply_subst(arg_t)
+                    expected = self._unifier.apply_subst(param_t)
+                    actual = self._unifier.apply_subst(arg_t)
                     risk_hint = ""
                     if has_risk:
                         risk_hint = (
@@ -1254,7 +1457,7 @@ class TypeChecker:
                     if strict_narrowing:
                         # 只在 param_t root 是 PrimType（有显式类型的 Primitive 时才报窄化告警，TypeVar 形参不报错（无位宽约束）
                         param_root = (
-                            self._find(param_t) if isinstance(param_t, TypeVar) else param_t
+                            self._unifier.find(param_t) if isinstance(param_t, TypeVar) else param_t
                         )
                         if isinstance(param_root, PrimType):
                             self._error(
@@ -1266,21 +1469,21 @@ class TypeChecker:
                             )
             if len(arg_types) == len(callee_ty.param_types):
                 # 完全应用：返回应用替换后的返回类型
-                return self._apply_subst(callee_ty.return_type)
+                return self._unifier.apply_subst(callee_ty.return_type)
             else:
                 # 部分应用：返回剩余参数 -> 返回值 的函数类型（应用替换后）
                 remaining_params = [
-                    self._apply_subst(p)
+                    self._unifier.apply_subst(p)
                     for p in callee_ty.param_types[len(arg_types) :]
                 ]
-                ret_ty = self._apply_subst(callee_ty.return_type)
+                ret_ty = self._unifier.apply_subst(callee_ty.return_type)
                 return FnType(remaining_params, ret_ty)
         elif isinstance(callee_ty, TypeVar):
             # TypeVar callee：将其合一为与调用匹配的函数类型
             # 而非无条件 duck typing（类型安全漏洞）
             ret_tv = TypeVar(f"ret_{callee_ty.name}")
             inferred_fn = FnType(arg_types, ret_tv)
-            if not self._unify(callee_ty, inferred_fn):
+            if not self._unifier.unify(callee_ty, inferred_fn):
                 self._error(
                     f"无法将类型变量 {callee_ty.name} 推断为接受 "
                     f"{len(arg_types)} 个参数的函数类型",
@@ -1346,8 +1549,8 @@ class TypeChecker:
 
         # 合一失败：回滚替换表，然后报错
         self._subst = saved_subst
-        expected = self._apply_subst(first_param)
-        actual = self._apply_subst(left_ty)
+        expected = self._unifier.apply_subst(first_param)
+        actual = self._unifier.apply_subst(left_ty)
         self._error(
             f"管道操作符类型不匹配：左侧 {actual} 无法匹配函数第一个参数 {expected}",
             expr=expr
@@ -2251,175 +2454,6 @@ class TypeChecker:
             )
         return ADTType(base, params)
 
-    # ------------------------------------------------------------------
-    # 类型合一（Unification）算法
-    # ------------------------------------------------------------------
-
-    def _find(self, tv: "TypeVar") -> "NovaType":
-        """查找类型变量的最终绑定（union-find 路径压缩）。
-
-        如果类型变量已被绑定，返回其最终代表元；否则返回自身。
-        路径压缩：将查找路径上的所有节点直接指向根，加速后续查找。
-        """
-        current = tv
-        path = []
-        while isinstance(current, TypeVar) and id(current) in self._subst:
-            path.append(id(current))
-            current = self._subst[id(current)]
-        # 路径压缩
-        for vid in path:
-            self._subst[vid] = current
-        return current
-
-    def _occur_check(self, tv: "TypeVar", ty: "NovaType") -> bool:
-        """检查类型变量 tv 是否出现在类型 ty 中（用于防止递归类型）。
-
-        返回 True 表示 tv 出现在 ty 中（即发生检查失败，不能合一）。
-        """
-        ty_root = self._find(ty) if isinstance(ty, TypeVar) else ty
-        if isinstance(ty_root, TypeVar):
-            return tv is ty_root
-        if isinstance(ty_root, ListType):
-            return self._occur_check(tv, ty_root.elem_type)
-        if isinstance(ty_root, MapType):
-            return self._occur_check(tv, ty_root.key_type) or self._occur_check(
-                tv, ty_root.value_type
-            )
-        if isinstance(ty_root, TupleType):
-            return any(self._occur_check(tv, e) for e in ty_root.elements)
-        if isinstance(ty_root, FnType):
-            return any(
-                self._occur_check(tv, p) for p in ty_root.param_types
-            ) or self._occur_check(tv, ty_root.return_type)
-        if isinstance(ty_root, ADTType):
-            return any(self._occur_check(tv, p) for p in ty_root.type_params)
-        return False
-
-    def _unify(self, a: "NovaType", b: "NovaType") -> bool:
-        """合一两个类型，返回是否合一成功。
-
-        合一成功后，替换表 self._subst 会被更新。
-        合一失败时返回 False（不抛异常，由调用者决定错误处理）。
-
-        算法：
-        1. 首先通过 _find 找到两个类型的根
-        2. 如果任一根是 TypeVar，则将其绑定到另一个类型
-        3. 否则按结构递归合一（通过 _UNIFY_DISPATCH 调度表分发）
-        4. 发生检查：防止创建无限递归类型
-        """
-        a_root = self._find(a) if isinstance(a, TypeVar) else a
-        b_root = self._find(b) if isinstance(b, TypeVar) else b
-
-        # 情况 0：ERROR_T 宽容合一（ErrorExpr 下游产物，与任何类型兼容）
-        if a_root is ERROR_T or b_root is ERROR_T:
-            return True
-
-        # 情况 1：两侧都是未绑定的 TypeVar
-        if isinstance(a_root, TypeVar) and isinstance(b_root, TypeVar):
-            if a_root is b_root:
-                return True  # 同一个变量，无需绑定
-            # 将较小 id 的绑定到较大 id 的（任意选择，保持稳定）
-            self._subst[id(a_root)] = b_root
-            return True
-
-        # 情况 2：左侧是未绑定的 TypeVar
-        if isinstance(a_root, TypeVar):
-            if self._occur_check(a_root, b_root):
-                return False  # 无限类型
-            self._subst[id(a_root)] = b_root
-            return True
-
-        # 情况 3：右侧是未绑定的 TypeVar
-        if isinstance(b_root, TypeVar):
-            if self._occur_check(b_root, a_root):
-                return False  # 无限类型
-            self._subst[id(b_root)] = a_root
-            return True
-
-        # 情况 4-9：结构类型合一，通过调度表分发
-        if type(a_root) is type(b_root):
-            handler_name = _UNIFY_DISPATCH.get(type(a_root))
-            if handler_name is not None:
-                return getattr(self, handler_name)(a_root, b_root)
-
-        # 情况 10：不兼容的类型构造器
-        return False
-
-    # ------------------------------------------------------------------
-    # 结构类型合一 handler（被 _UNIFY_DISPATCH 调度表调用）
-    # ------------------------------------------------------------------
-
-    def _unify_prim(self, a: PrimType, b: PrimType) -> bool:
-        """合一两个基本类型"""
-        return a.name == b.name
-
-    def _unify_list(self, a: ListType, b: ListType) -> bool:
-        """合一两个列表类型"""
-        return self._unify(a.elem_type, b.elem_type)
-
-    def _unify_map(self, a: MapType, b: MapType) -> bool:
-        """合一两个 Map 类型"""
-        return self._unify(a.key_type, b.key_type) and self._unify(
-            a.value_type, b.value_type
-        )
-
-    def _unify_tuple(self, a: TupleType, b: TupleType) -> bool:
-        """合一两个元组类型"""
-        if len(a.elements) != len(b.elements):
-            return False
-        return all(
-            self._unify(e1, e2) for e1, e2 in zip(a.elements, b.elements)
-        )
-
-    def _unify_fn(self, a: FnType, b: FnType) -> bool:
-        """合一两个函数类型"""
-        if len(a.param_types) != len(b.param_types):
-            return False
-        return all(
-            self._unify(p1, p2)
-            for p1, p2 in zip(a.param_types, b.param_types)
-        ) and self._unify(a.return_type, b.return_type)
-
-    def _unify_adt(self, a: ADTType, b: ADTType) -> bool:
-        """合一两个代数数据类型"""
-        if a.name != b.name:
-            return False
-        if len(a.type_params) != len(b.type_params):
-            return False
-        return all(
-            self._unify(p1, p2)
-            for p1, p2 in zip(a.type_params, b.type_params)
-        )
-
-    def _apply_subst(self, ty: "NovaType") -> "NovaType":
-        """将替换表应用到类型上，返回所有类型变量都被替换后的类型。
-
-        递归遍历类型结构，将每个 TypeVar 替换为其最终绑定（通过 _find）。
-        如果 TypeVar 未绑定，则保持不变。
-        """
-        if isinstance(ty, TypeVar):
-            root = self._find(ty)
-            if root is ty:
-                return ty  # 未绑定，返回自身
-            return self._apply_subst(root)  # 递归应用（确保完全展开）
-        if isinstance(ty, ListType):
-            return ListType(self._apply_subst(ty.elem_type))
-        if isinstance(ty, MapType):
-            return MapType(
-                self._apply_subst(ty.key_type), self._apply_subst(ty.value_type)
-            )
-        if isinstance(ty, TupleType):
-            return TupleType([self._apply_subst(e) for e in ty.elements])
-        if isinstance(ty, FnType):
-            return FnType(
-                [self._apply_subst(p) for p in ty.param_types],
-                self._apply_subst(ty.return_type),
-            )
-        if isinstance(ty, ADTType):
-            return ADTType(ty.name, [self._apply_subst(p) for p in ty.type_params])
-        # PrimType 等不可变类型直接返回
-        return ty
-
     def _fresh_type_var(self, prefix: str = "t") -> "TypeVar":
         """创建一个新的类型变量（带唯一计数器）。"""
         return TypeVar(f"{prefix}_{TypeVar._counter}")
@@ -2479,7 +2513,7 @@ class TypeChecker:
     def _collect_free_typevars(self, ty: "NovaType", out: Set[int]) -> None:
         """递归遍历类型结构，收集所有未绑定的 TypeVar 的 id 到 out 集合。"""
         if isinstance(ty, TypeVar):
-            root = self._find(ty)
+            root = self._unifier.find(ty)
             if isinstance(root, TypeVar):
                 out.add(id(root))
             else:
@@ -2545,7 +2579,7 @@ class TypeChecker:
         对非 TypeVar 构造器递归重建以避免共享可变子结构（若有）。
         """
         if isinstance(ty, TypeVar):
-            root = self._find(ty)
+            root = self._unifier.find(ty)
             if isinstance(root, TypeVar):
                 # HM generalize / instantiate 协作打标：
                 #   root 在 env_free 内 → 被外层约束 → 不打标，保持共享引用，
@@ -2620,9 +2654,9 @@ class TypeChecker:
         成功时替换表会被更新（产生新的类型约束），失败时返回 False。
         这是对旧 _types_compatible 的升级版本，TypeVar 不再被直接放行。
         """
-        a_resolved = self._apply_subst(a)
-        b_resolved = self._apply_subst(b)
-        return self._unify(a_resolved, b_resolved)
+        a_resolved = self._unifier.apply_subst(a)
+        b_resolved = self._unifier.apply_subst(b)
+        return self._unifier.unify(a_resolved, b_resolved)
 
     def _detect_leaking_tvars(self, ty: "NovaType") -> List["TypeVar"]:
         """检测解析后类型中仍残留的未绑定 TypeVar（TypeVar 泄漏栅栏）。
@@ -2652,7 +2686,7 @@ class TypeChecker:
             if t is ERROR_T:
                 return  # ErrorExpr 哨兵，不是真实类型泄漏
             if isinstance(t, TypeVar):
-                root = self._find(t)
+                root = self._unifier.find(t)
                 if isinstance(root, TypeVar):
                     if not root.is_generalized and id(root) not in seen:
                         seen.add(id(root))
@@ -2686,7 +2720,7 @@ class TypeChecker:
         友好的 TypeCheckError，帮助用户定位需要加类型注解的位置。
         ERROR_T 哨兵在此被正确跳过，不触发次生泄漏误报。
         """
-        resolved = self._apply_subst(ty)
+        resolved = self._unifier.apply_subst(ty)
         leaking = self._detect_leaking_tvars(resolved)
         if leaking:
             for tv in leaking:

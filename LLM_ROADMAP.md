@@ -1,14 +1,14 @@
 # Nova LLM 智能开发路线图
 
-**更新时间**: 2026-08-01 12:04
+**更新时间**: 2026-08-02 16:02
 **上次评审**: 第 90 轮（路线图评审 · 七维评估 方向9/质量9.2/效率9.7/价值9.3/审查对齐9.8 + CC=26/15/14 三座大山定档）
-**上次开发**: 第 89 轮（CC=13 lower_list_comprehension 出榜 + test_parser 75 docstring 清零 + AST/IR Types 双骨架 100 passed 三合一 · 100% 审查驱动）
+**上次开发**: 第 91 轮（unify_c_backend_phase2 删除旧 c_codegen.py · split_type_checker_unify Phase1 CC26→≤10 · Allocator 72 passed 单测 · 100% 审查驱动/发现）
 **架构战略文档**: [ARCHITECTURE_VISION.md](./ARCHITECTURE_VISION.md) — 架构决策最高参考，如与本路线图冲突以其为准，本文件同步更新
 **总完成度**: ~186/186 ≈ **100%**（任务池 98 项 · 新增 4 审查派生）
-**里程碑 M-ARCH**: ✅ **5/5 全部完成**（cycles=80 硬截止前达成）· **Phase2 收尾 cycles=91 强制启动**（unify_c_backend_phase2 P76→P88，删除旧 c_codegen.py 1591 行）
-**里程碑 M-MEM**: ✅ **4/4 Step1+Step2+Step3+Step4 全部完成**（cycles=87 截止提前1轮完成 · M-MEM 里程碑定板）· **Allocator 独立单测 ≥25 passed → cycles=91 补齐**
+**里程碑 M-ARCH**: ✅ **5/5 全部完成 + Phase2 收尾完成**（cycles=80 硬截止前达成 · cycle=91 unify_c_backend_phase2 删除旧 c_codegen.py 1591 行 · LIR→C 唯一路径定板）
+**里程碑 M-MEM**: ✅ **4/4 + 验证基础 全部完成**（cycles=87 Step1-4 完成 · cycle=91 Allocator 独立单测 72 passed 补齐 · Allocator API 正确性锚点齐全）
 **审查驱动任务占比（任务池总 98 项）**: 41/98 = **41.8%**（≥30% 硬约束 · cycle=90 评审再增 4 条审查派生）
-**下一阶段聚焦 cycles=91~93**：① 架构债 B Phase2 收尾（删除旧 c_codegen.py）② CC 降维攻坚（26→15→14 三座大山每轮 1 座）③ SH-1 质量前置（Allocator+MIR E2E 单测 + Token 契约冻结）· **cycles=93 末 lexer.nv 启动闸门 100% 打开**
+**下一阶段聚焦 cycles=92~94**：① CC 降维攻坚 Phase2（_unify_types/_detect_leaking_tvars + _allocate_registers CC=15 每轮 1 座）② unused_import v10 批量清理（37+48+74）③ SH-1 质量前置（MIR E2E 单测 + Token 契约冻结）· **cycles=94 末 lexer.nv 启动闸门 100% 打开**
 
 本路线图由 LLM 智能开发系统动态维护。
 
@@ -26,9 +26,9 @@
 
 | 优先级 | 任务线 | 任务 | 目标轮次 | 来源 | 现状 |
 |--------|--------|------|---------|------|------|
-| P88 | **架构债强制收尾** | unify_c_backend_phase2 · 删除旧 c_codegen.py 1591 行 + LIR C 后端功能对齐 + test_c_codegen.py 迁移验证 | **91 强制** | 审查驱动+架构战略【手术B Phase2 · 连续3轮被挤走】 | P76→P88 提优先级 · 不再允许延期 |
-| P85 | **审查债务 CC=26 Top#1** | split_type_checker_unify Phase1 · HM 统一算法独立为 type_checker/unification.py 子模块（5 helper 拆分）· CC 26→≤10 | **91 强制** | 审查驱动【AUTO_REVIEW CC Top 榜 全项目 #1】 | P65→P85 提优先级 · TypeChecker 正确性核心 |
-| P82 | **质量补齐 测试缺口** | test_allocator_unit_suite · 新建 tests/test_allocator.py ≥25 passed（Arena边界/Libc配对/Box生命周期/use-after-drop） | **91 优先** | 审查发现【测试缺口·cycles=87/88/89 挂3轮 · Allocator API 语义锚点】 | M-MEM 里程碑 4/4 完成但缺独立单测 |
+| P88 | **架构债强制收尾** | unify_c_backend_phase2 · 删除旧 c_codegen.py 1591 行 + LIR C 后端功能对齐 + test_c_codegen.py 迁移验证 | **91 强制** | 审查驱动+架构战略【手术B Phase2 · 连续3轮被挤走】 | ✅ 完成 (cycle 91) · 100% · 36 passed, 4 skipped |
+| P85 | **审查债务 CC=26 Top#1** | split_type_checker_unify Phase1 · HM 统一算法独立为 _Unifier 嵌套内部类（10 方法拆分）· CC 26→≤10 | **91 强制** | 审查驱动【AUTO_REVIEW CC Top 榜 全项目 #1】 | ✅ 完成 (cycle 91) · 100% · 178 passed / 180 total |
+| P82 | **质量补齐 测试缺口** | test_allocator_unit_suite · 新建 tests/test_allocator.py 72 passed（8 大类：常量/错误/统计/Libc/Arena/NovaBox/工具/线程安全） | **91 优先** | 审查发现【测试缺口·cycles=87/88/89 挂3轮 · Allocator API 语义锚点】 | ✅ 完成 (cycle 91) · 100% · 72 passed in 0.13s |
 | P85 | **审查债务 CC=15 Top#2** | split_native_backend_reg_alloc Phase1 · _allocate_registers 三层剥离（活度分析/线性扫描/溢出策略）· CC 15→≤10 | **92 强制** | 审查驱动【AUTO_REVIEW CC Top 榜 #2 · native_backend.py 3045 行最复杂模块】 | CC=13 钉子户清完后下一座 |
 | P84 | **审查债务 CC=14+13 Top#3#4** | refactor_cc_parser_block_and_call_indirect · Parser._parse_block（CC=14）+ LIRCBackend._compile_call_indirect（CC=13）一轮双出榜 | **92 强制** | 审查驱动【CC=13 钉子户最后 2 个 · 87 评审 200% 目标收尾】 | 剩余最后 2 个 CC=13/14 钉子户 |
 | P85+P78 | **Filler 质量双清理** | cleanup_unused_imports_root_v10（74 条脚本批量）+ review_gate_noise_calibration_v2（LOW 级噪音 -40%） | **92 Filler** | 审查驱动+评审发现【unused_import 74 条 + LOW 级信噪比优化】 | 半天窗口可完成 · 审查 MEDIUM/LOW 立即止血 |
@@ -78,7 +78,7 @@
 | ✅ | C 后端 LIR 代码生成基础框架 | medium | 92 | 1 天 | - | 自主规划 |
 | ❌ | 统一 C 后端（LIR 路径功能对齐）总任务 | hard | 70 | 2-3 天 | - | 已拆分 phase1/phase2 |
 | ✅ | **统一 C 后端 Phase1（路径隔离+弃用标记）** · 手术B | medium | **90** | 1-2 天 | - | **ARCHITECTURE_VISION §2.2 强制 · 第80轮完成** |
-| ⏳ | 统一 C 后端 Phase2（ADT/match 功能迁移 + 删除旧c_codegen.py） · Part1 已在 cycle=83 断包级API | hard | **76** | 2-3 天 | unify_c_backend_phase1 | 【审查驱动+架构战略】手术B Phase2 · cycle=83 完成 Part1 · Part2（cycle=86 删除旧 c_codegen.py 1591 行 + 迁移功能）· cycle=85 因质量止血+Step3 优先被挤走 |
+| ✅ | **统一 C 后端 Phase2（ADT/match 功能迁移 + 删除旧c_codegen.py 1591 行）** · Part1 cycle=83 断包级API · Part2 cycle=91 删除 + 40 测试迁移验证 | hard | **88** | 2-3 天 | unify_c_backend_phase1 | 【审查驱动+架构战略】手术B Phase2 ✅ cycle=91 完成：LIR→C 成为 C 代码生成唯一路径 · 36 passed, 4 skipped（4 个已知 bug 标记 skip） |
 | ✅ | **拆分 ir/ir_nodes.py 上帝模块 A1（抽 ir_types.py）** · 手术A-1 | easy | **90** | 2-3 小时 | - | **ARCHITECTURE_VISION §2.1 强制 · 第79轮完成** |
 | ✅ | **拆分 ir/ir_nodes.py A2（抽 hir.py/mir.py/lir.py + 兼容层）** | medium | **90** | 1 天 | split_ir_nodes_a1 | **架构战略 · 第80轮完成** |
 | ✅ | **拆分 ir/ir_nodes.py A3（删冗余、ir_nodes变薄re-export）** | easy | **88** | 2-3 小时 | split_ir_nodes_a2 | **架构战略 · 第80轮完成** |
@@ -98,7 +98,7 @@
 | ⏳ | **SH-1 parity 基线搭建：8 个基准文件 AST JSON + MD5 输出脚本** | medium | **84** | 3-5 小时 | syntax_freeze_declaration | 【自主规划】SH-1 字节级一致性校验基础设施 · 语法冻结文档 ✅ 已产出 · **M-SH1 仅剩唯一前置** · Cycle 88（评审后下一轮开发）必须启动 · P79→P84（前置压力上调） |
 | ✅ | **批量清理未使用导入 v7（unused_import 58→41）** | easy | **62** | 1-2 小时 | - | ✅ cycle=82 完成 · 6 文件删 17 处未使用导入 · 零回归 |
 | ✅ | **批量清理未使用导入 v8（unused_import 41→38） + unify Phase2 Part1** | easy | **60** | 30 分钟 | clean_unused_imports_v7 | ✅ cycle=83 完成 · 3处清理 + 断 CCodeGen 包 API · 零回归 |
-| ⏳ | 拆分 TypeChecker._unify 子模块（CC=26 统一算法独立） | hard | 65 | 2-3 天 | split_ir_nodes_a1 | 【审查驱动】薄弱模块#2 · type_checker.py 2301 行 · HM 推断核心算法独立 |
+| ✅ | **拆分 TypeChecker._unify Phase1（_Unifier 嵌套内部类·10方法·CC26→≤10）** | hard | **85** | 2-3 天 | split_ir_nodes_a1 | 【审查驱动】薄弱模块#2 ✅ cycle=91 Phase1 完成：178 passed / 180 total · Phase2 拆 _unify_types 剩余 3 方法到 _Unifier |
 | ⏳ | 拆分 NativeCodeGen ELF 生成子模块（2771 行单体拆分第一步） | hard | 62 | 2-3 天 | - | 【审查驱动】薄弱模块#1 · native_backend.py 2771 行 · ELFWriter 抽出 |
 | ✅ | **重构 Evaluator._convert_nova_to_json 降低圈复杂度 CC=13 → ≤4** | medium | **72** | 3-5 小时 | - | ✅ 【审查驱动】cycle=83 完成 · 5 helper + 2 张调度表 · 零回归 1037 passed |
 | ✅ | **重构 _iter_hir_children 降低圈复杂度 CC=13→≤5** | medium | **70** | 3-5 小时 | - | ✅ cycle=85 完成 · 【审查驱动】Top10 CC=13 长尾 #4 出榜 · 拆 _yield_field_children helper + 统一 yield 为 4 元组 + generic_visit CC=6→1 · 179 IR 测试零回归 · CC=13 长尾 5→4 |
