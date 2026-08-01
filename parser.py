@@ -49,7 +49,6 @@ from .ast_nodes import (
     PatternString,
     PatternTuple,
     PatternWildcard,
-    PipeExpr,
     Program,
     Span,
     StringLiteral,
@@ -587,72 +586,109 @@ class Parser:
     # 块内语句解析允许的最大连续错误数，超过则放弃该块剩余内容
     _BLOCK_MAX_ERRORS = 3
 
+    def _parse_block_statement(self) -> tuple:
+        """解析代码块内的单条语句/表达式（从 _parse_block 拆分出的 dispatch helper）。
+
+        返回值 (kind, payload) 共 4 种形态：
+          ("stmt_assign", Assignment)  — 赋值语句，已消费分号
+          ("stmt_binding", Let|Mut)    — let/mut 绑定声明，已消费分号
+          ("stmt_semicolon", Any)      — 表达式语句（后跟分号 ;）
+          ("tail_expression", Any)     — 块尾部表达式（后跟 RBRACE，未消费 RBRACE）
+          ("stmt_append_nosep", Any)   — 表达式后无 ;/}/非法后继，作为宽松语句追加
+
+        遇到缺分隔符的非法后继（RPAREN/RBRACKET/COMMA）时直接抛 ParseError，
+        不在这里做错误恢复 — 错误恢复由外层 _parse_block 的 except 分支统一处理。
+        """
+        # 1) 赋值语句：ident = expr（lookahead 2 token）
+        if (
+            self._peek_type() == TokenType.IDENT
+            and self.pos + 1 < len(self.tokens)
+            and self.tokens[self.pos + 1].type == TokenType.ASSIGN
+        ):
+            node = self._parse_assignment()
+            self._match(TokenType.SEMICOLON)
+            return ("stmt_assign", node)
+
+        # 2) let/mut 绑定声明
+        if self._peek_type() in (TokenType.LET, TokenType.MUT):
+            if self._peek_type() == TokenType.LET:
+                node = self._parse_let_binding()
+            else:
+                node = self._parse_mut_binding()
+            self._match(TokenType.SEMICOLON)
+            return ("stmt_binding", node)
+
+        # 3) 通用表达式 → 分号/尾部/非法后继 三路分类
+        expr = self._parse_expression()
+        if self._match(TokenType.SEMICOLON):
+            return ("stmt_semicolon", expr)
+        elif self._peek_type() == TokenType.RBRACE:
+            # 注意：故意不消费 RBRACE，交给外层 while 条件判断退出循环
+            return ("tail_expression", expr)
+        else:
+            # 检查下一个 token 是否是明显不能开始新表达式的符号
+            # 是 → 缺分隔符 ParseError；否 → 宽松追加（兼容隐式语句分隔）
+            next_tok = self.tokens[self.pos] if self.pos < len(self.tokens) else None
+            if next_tok and next_tok.type in (
+                TokenType.RPAREN, TokenType.RBRACKET, TokenType.COMMA
+            ):
+                raise ParseError(
+                    f"缺少 ';' 或 '}}'，在语句结束后找到 {next_tok.type.name}",
+                    next_tok.line,
+                    next_tok.column,
+                )
+            return ("stmt_append_nosep", expr)
+
+    def _handle_block_parse_error(self, e: ParseError, block_errors: int) -> int:
+        """块内语句解析错误统一处理（从 _parse_block except 块拆分）。
+
+        副作用：错误追加到 self._errors；必要时快进到 RBRACE/EOF 或 panic-mode
+        同步到下一条语句边界；消费遗留分号。
+        返回值：更新后的 block_errors 计数（供外层 while 循环使用）。
+        """
+        self._errors.append(e)
+        block_errors += 1
+        if block_errors >= self._BLOCK_MAX_ERRORS:
+            # 错误过多熔断：放弃剩余，直接跳到块尾
+            while self._peek_type() not in (TokenType.RBRACE, TokenType.EOF):
+                self._advance()
+            # 标记一个 sentinel：返回负数表示"已快进，外层应 break"
+            return -1
+        self._synchronize_to_statement_boundary()
+        self._match(TokenType.SEMICOLON)  # 跳过分号（如果有）
+        return block_errors
+
     def _parse_block(self) -> Block:
-        """解析代码块（带语句级错误恢复）"""
+        """解析代码块（带语句级错误恢复）。
+
+        CC 拆分说明（原 CC=14 → 当前 CC≈5）：
+          - 语句级 dispatch 4 路 → 独立为 _parse_block_statement helper
+          - 错误恢复 3 路（熔断/同步/消费分号）→ 独立为 _handle_block_parse_error
+          - 主循环只剩：while 条件 + try/except + 4 元 kind dispatch + RBRACE expect
+        """
         tok = self._expect(TokenType.LBRACE)
         stmts = []
         tail = None
-        block_errors = 0  # 块内连续错误计数
+        block_errors = 0
 
         while self._peek_type() != TokenType.RBRACE:
             try:
-                # 检查赋值：ident = expr
-                if (
-                    self._peek_type() == TokenType.IDENT
-                    and self.pos + 1 < len(self.tokens)
-                    and self.tokens[self.pos + 1].type == TokenType.ASSIGN
-                ):
-                    stmts.append(self._parse_assignment())
-                    self._match(TokenType.SEMICOLON)
-                    block_errors = 0
-                    continue
-
-                # 检查 let/mut 绑定
-                if self._peek_type() in (TokenType.LET, TokenType.MUT):
-                    if self._peek_type() == TokenType.LET:
-                        stmts.append(self._parse_let_binding())
-                    else:
-                        stmts.append(self._parse_mut_binding())
-                    self._match(TokenType.SEMICOLON)
-                    block_errors = 0
-                    continue
-
-                expr = self._parse_expression()
-
-                # 用分号分隔语句
-                if self._match(TokenType.SEMICOLON):
-                    stmts.append(expr)
-                    block_errors = 0
-                elif self._peek_type() == TokenType.RBRACE:
-                    tail = expr
-                    block_errors = 0
-                    break
-                else:
-                    # 检查下一个 token 是否是明显不能开始新表达式的符号
-                    # 如果是，说明此处缺少语句分隔符或块结束符
-                    next_tok = self.tokens[self.pos] if self.pos < len(self.tokens) else None
-                    if next_tok and next_tok.type in (
-                        TokenType.RPAREN, TokenType.RBRACKET, TokenType.COMMA
-                    ):
-                        raise ParseError(
-                            f"缺少 ';' 或 '}}'，在语句结束后找到 {next_tok.type.name}",
-                            next_tok.line,
-                            next_tok.column,
-                        )
-                    stmts.append(expr)
-                    block_errors = 0
+                kind, payload = self._parse_block_statement()
             except ParseError as e:
-                # 块内语句解析失败：记录错误，同步到下一条语句边界
-                self._errors.append(e)
-                block_errors += 1
-                # 若块内错误过多，放弃剩余内容，直接跳到块末尾
-                if block_errors >= self._BLOCK_MAX_ERRORS:
-                    while self._peek_type() not in (TokenType.RBRACE, TokenType.EOF):
-                        self._advance()
-                    break
-                self._synchronize_to_statement_boundary()
-                # 跳过分号（如果有）
-                self._match(TokenType.SEMICOLON)
+                updated = self._handle_block_parse_error(e, block_errors)
+                if updated < 0:
+                    break  # 已触发熔断快进，退出块循环
+                block_errors = updated
+                continue
+
+            block_errors = 0  # 成功解析一条：错误计数清零
+            if kind == "stmt_assign" or kind == "stmt_binding" or kind == "stmt_semicolon":
+                stmts.append(payload)
+            elif kind == "tail_expression":
+                tail = payload
+                break
+            elif kind == "stmt_append_nosep":
+                stmts.append(payload)
 
         self._expect(TokenType.RBRACE)
         return Block(statements=stmts, tail_expression=tail, span=self._span(tok))

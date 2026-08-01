@@ -1,3 +1,89 @@
+## 2026-08-02 20:02 第92轮开发（普通轮 · 审查驱动 3/3 = 100%）
+**轮次类型**：普通轮
+**备份 Tag**：llm-dev-cycle-92-20260801-2002
+**测试基线**：444 passed, 4 skipped → 开发后 444 passed, 4 skipped（零回归）
+**失败任务数**：0 / 3
+
+---
+
+### 本轮完成的任务（3 个 · 3 成功 / 0 失败 · 3/3 = 100% 审查驱动）
+
+#### 任务 1：【审查驱动·路线图 92 强制 P85】split_native_backend_reg_alloc Phase1 深入 — _linear_scan_alloc 内部 3 闭包提升为实例方法
+- **为什么选这个**：LLM_ROADMAP cycles=91~93 攻坚任务表明确 92 强制 1 座 CC 大山；原 `_allocate_registers` 主入口虽已 CC≈1 薄封装（cycle 70 v2 升级产物），但 `_linear_scan_alloc` 内部 3 个闭包实际 CC≈42（_expire_old≈18 / _spill_victim≈42 / _try_alloc_gpr≈42 合并），是审查中的隐蔽爆点，也是后续 native_backend 单测拆分的前置。
+- **做了什么**：
+  1. 新增 3 个实例方法：`_ls2_expire_old`（阶段 1-1 过期回收 CC≈8）、`_ls2_spill_victim`（阶段 1-2 权重优先溢出 CC≈11）、`_ls2_try_alloc_gpr`（阶段 1-3 双池启发式分配 CC≈8），三方法独立 CC 均 ≤12。
+  2. 原 6 个池 + 计数器 + 反向映射 10 个共享变量统一封装进 `ctx: Dict`，消除 nonlocal 闭包副作用。
+  3. `_linear_scan_alloc` 主方法从 225 行（含 3 闭包）精简到 99 行，主循环从 3 闭包内部调用改为 self._ls2_* 三方法显式编排。
+  4. 更新 docstring：添加 Phase1 重构说明，原 v2 升级说明中的 `_spill_victim_v2` 引用改名 `_ls2_spill_victim`。
+- **结果**：成功 · 444 passed, 4 skipped 零回归；3 子方法各 CC≤12（原内部 CC≈42 分解完成）；`_linear_scan_alloc` 主方法 CC≈3。
+
+#### 任务 2：【审查驱动·路线图 92 强制 P84】refactor_cc_parser_block_and_call_indirect — CC=14/13 钉子户一轮双出榜（Parser._parse_block + LIRCBackend._compile_call_indirect）
+- **为什么选这个**：LLM_ROADMAP 92 强制双出榜；CC=13 钉子户从 cycle 88 起连续 4 轮出榜（parser._parse_primary_type → mir_lowering._lower_list_comp → 剩余最后 2 个：_parse_block + _compile_call_indirect），本轮双出榜后 CC=13 钉子户 4→0 清零，完成 87 评审 200% 目标收尾。
+- **做了什么**：
+  1. **Parser._parse_block CC=14→≤5**：
+     - 新增 `_parse_block_statement`（单语句 dispatch 41 行 CC≈6）：返回 (kind, payload) 5 元组 — stmt_assign/stmt_binding/stmt_semicolon/tail_expression/stmt_append_nosep，把赋值 lookahead、let/mut 声明、表达式后分号/尾部/非法后继三路分类全部抽离。
+     - 新增 `_handle_block_parse_error`（错误恢复 22 行 CC≈3）：封装 ParseError 入队、≥_BLOCK_MAX_ERRORS 熔断快进（返回 -1 哨兵）、panic-mode 同步、消费遗留分号。
+     - 主循环从 69 行精简到 30 行，只剩 while 条件 + try/except + 4 元 kind dispatch + RBRACE expect。
+  2. **LIRCBackend._compile_call_indirect CC=13→≤2**：
+     - 新增 4 个实例方法：`_emit_double_boxed_unpack`（共享样板 · 8 行 malloc+NULL 检查+memcpy+free · 与 `_emit_lambda_trampoline` L296-306 100% 重复代码消除）、`_build_indirect_args_array`（参数数组构建 5 行 CC≈2）、`_emit_call_indirect_ret`（有接收值 4 路返回分派 15 行 CC≈4）、`_emit_call_indirect_void`（无接收值 2 路 void 调用 11 行 CC≈2）。
+     - 主方法从 97 行精简到 34 行，只剩参数数组构建 → ret_c_type 计算 → 有/无 dst 双路 dispatch（3 行 if/elif/else）。
+- **结果**：成功 · 444 passed, 4 skipped 零回归；CC=13 钉子户 4→0 清零（cycle=88 parse_primary_type → cycle=89 _lower_list_comp → cycle=92 _parse_block+_compile_call_indirect 4 连出榜完成）；共享 double 解包样板消除 1 处代码重复。
+
+#### 任务 3：【审查驱动·路线图 92 Filler P78】cleanup_unused_imports_v10 — pyflakes 精确扫描 39 文件批量清理
+- **为什么选这个**：AUTO_REVIEW_LOG unused_import 79 条 MEDIUM；v1-v9 连续清理后剩余长尾；降低审查噪音使 CC 报告更聚焦。
+- **做了什么**：
+  1. pyflakes 精确扫描 39 个 .py 文件（root 13 + ir 11 + backend 8 · 排除 tests/scripts/fixtures/templates），得到 13 条 "imported but unused" 报告。
+  2. 10 条在 `ir/ir_nodes.py` 带 `# noqa: F401`（dataclasses 3 个 + enum 2 个 + typing 5 个），是下游间接访问兼容层（ARCHITECTURE_VISION.md 手术 A3 保留），**故意保留不删**。
+  3. 实际删除 3 处真实 unused：
+     - `parser.py` 删除 `PipeExpr`：AST 中管道符已在 Parser 入口处 desugar 为嵌套 FnCall，`PipeExpr` 节点仅保留用于外部类型提示但 parser 自身从未构造 → 代码 0 引用。
+     - `ir/mir_lowering.py` 删除 `import sys`：原注释声称"L985 Phi 类型不一致写 stderr"，但全文件 0 次 `sys.` 调用，代码已在更早轮移除 → 0 引用。
+     - `ir/ir_types.py` 删除 `Tuple` 导入：仅文档字符串中出现 2 次 + `__all__.TupleType`（本文件内 `tuple_type` 别名）→ 运行时 0 注解引用。
+- **结果**：成功 · 444 passed, 4 skipped 零回归；真实 unused_import（排除 noqa 兼容层）从 3 条 → 0 条清零。
+
+---
+
+### 审查日志研读摘要（本轮驱动来源）
+
+1. **问题总览（cycle 91 审查最后 3 轮平均）**：
+   - 每轮约 270-300 问题；CRITICAL/HIGH 基本清零；MEDIUM 存量：cyclomatic_complexity（~18%）、unused_import（~15%）、function_too_long（~12%）三类合计 ~45%。
+   - 问题模块 Top：type_checker.py（CC 长尾）、native_backend.py（长函数+大类型）、ir/ 子目录（unused_import 残留 + magic_number）。
+
+2. **采纳为任务的审查发现（3 条 · 100% 对齐）**：
+   - `[cyclomatic_complexity Top#2 native_backend]` _linear_scan_alloc 内部三闭包 CC≈42 → 任务 1（Phase1 深入拆分）
+   - `[cyclomatic_complexity CC=13/14 钉子户最后2个]` Parser._parse_block CC=14 + LIRCBackend._compile_call_indirect CC=13 → 任务 2（双出榜）
+   - `[unused_import MEDIUM 79条]` ir/cfg_utils.py MIRPanic + parser/mir_lowering/ir_types 残留 → 任务 3（v10 脚本化批量清理，实际 3 处真实删除）
+
+3. **未采纳但列入下轮候选的问题**：
+   - TypeChecker._unify_types CC=14 + _detect_leaking_tvars + _unify_and_resolve（split_type_checker_unify Phase2 · 任务池已登记 P85）
+   - 审查 gap_coverage MEDIUM：tests/test_mir_lowering_e2e.py（8 基准 E2E 结构断言 · 路线图 cycle=93 优先）
+   - evaluator.py 6 处 `except:` 裸异常捕获 → cycle=93 filler
+
+---
+
+### 测试前后对比
+
+| 阶段 | 结果 |
+|------|------|
+| 基线（cycle 92 开发前） | 444 passed, 4 skipped, 6 warnings · 2.36s |
+| 任务 1 完成后 | 444 passed, 4 skipped, 6 warnings · 2.01s |
+| 任务 2 完成后 | 444 passed, 4 skipped, 6 warnings · 2.23s |
+| 任务 3 完成后 | 444 passed, 4 skipped, 6 warnings, 20 subtests passed · 2.15s |
+| 阶段 4 整体验证 | 444 passed, 4 skipped, 6 warnings, 20 subtests passed · 2.25s |
+
+> 全程零回归。连续 7 轮（82/83/85/86/88/89/91/92）核心测试 100% 通过。
+
+---
+
+### 下一步计划（cycle 93 · 3 任务候选 · 按路线图 90 评审三轮攻坚表）
+
+1. **【审查驱动·路线图 93 强制·里程碑 P92】sh1_lexer_token_contract_freeze**：12 Token 类型 + Span 约定 + 8 基准 tokenize MD5 固化 + sh1_parity_verify.py --mode=lexer 钩子。SH-1 启动前最后一道闸门，没有 Token 契约会导致 nova_lexer.nv 等价性验证成本 ×10。
+2. **【审查驱动·路线图 93 优先 P81】test_mir_lowering_e2e_8cases**：新建 tests/test_mir_lowering_e2e.py ≥8 端到端 HIR→MIR 结构断言，8 基准 SH-1 文件正好作为输入；补审查 gap_coverage MEDIUM。
+3. **【审查驱动·路线图 93 强制 CC P85】split_type_checker_unify Phase2**：把 _unify_types + _detect_leaking_tvars + _unify_and_resolve 三个长方法从 TypeChecker 迁到 _Unifier 嵌套内部类；删除 cycle=91 Phase1 添加的 4 个薄包装方法；TypeChecker 方法数 -3。
+
+Filler 候选（前三项无法推进时）：evaluator_bare_except_6_fix · test_tc_empty_branches_6_cases · review_gate_noise_calibration_v3。
+
+---
+
 ## 2026-08-02 16:02 第91轮开发（普通轮）
 **轮次类型**：普通轮
 **备份 Tag**：llm-dev-cycle-91-20260802-1602

@@ -1,5 +1,5 @@
 {
-  "cycles": 91,
+  "cycles": 92,
   "architecture_strategy": {
     "document": "ARCHITECTURE_VISION.md",
     "effective_date": "2026-07-29",
@@ -88,7 +88,8 @@
         "parser 与冻结文档 2 处不一致对齐 ✅（14 保留字 + PipeExpr desugar）",
         "Lexer 独立单元测试补齐 ✅（55 passed 11 大类）",
         "CC=13 钉子户 Parser._parse_primary_type 出榜 ✅（CC 13→≤4）"
-      ]
+      ],
+      "progress_note_cycle92": "cycle=92：CC=13/14 钉子户双出榜完成（parser._parse_block CC14→≤5，LIRCBackend._compile_call_indirect CC13→≤2）；_linear_scan_alloc 内部三闭包提升实例方法 CC≈42→三方法各≤12；unused_import v10 清理完成。下轮 cycle=93：sh1_lexer_token_contract_freeze（闸门·P92）+ test_mir_lowering_e2e_8cases（P81）+ filler CC=15 _unify_types/_detect_leaking_tvars"
     },
     {
       "id": "M-SH2",
@@ -365,7 +366,10 @@
       "id": "test_allocator_unit_suite",
       "cycle": 91,
       "completed_at": "2026-08-02T16:02:00"
-    }
+    },
+    "refactor_cc_native_reg_alloc",
+    "refactor_cc_parser_block_and_call_indirect",
+    "cleanup_unused_imports_v10"
   ],
   "failed_tasks": [
     "fix_native_test_import",
@@ -1714,6 +1718,54 @@
           "test_tc_empty_branches_6_cases + evaluator_bare_except_6_fix（质量补齐双任务）"
         ]
       }
+    },
+    {
+      "id": "refactor_cc_native_reg_alloc",
+      "name": "【审查驱动·CC#2 Phase1深入】重构 NativeBackend._linear_scan_alloc 内部3闭包提升为实例方法",
+      "cycle": 92,
+      "source": "审查驱动",
+      "source_detail": "AUTO_REVIEW_LOG cyclomatic_complexity Top榜 + LLM_ROADMAP cycles=91~93 攻坚任务表 92强制项",
+      "why": "路线图 92 强制 1 座 CC 大山；主入口虽已薄封装，但 _linear_scan_alloc 内部 3 闭包 CC≈42 是新隐蔽爆点；不拆会影响后续 native_backend 单测分支覆盖；每轮强制 1 座的硬约束",
+      "difficulty": "hard",
+      "priority": 88,
+      "status": "completed",
+      "result": "成功",
+      "result_detail": "_expire_old_intervals / _spill_victim_v2 / _try_allocate_gpr_v2 三内部闭包提升为 _ls2_expire_old / _ls2_spill_victim / _ls2_try_alloc_gpr 三实例方法；池状态统一封装进 ctx 字典传递；_linear_scan_alloc 主方法从 225 行减到 99 行；三方法独立 CC 分别为 8/11/8，全部 ≤12；444 passed 4 skipped 零回归",
+      "completed_at": "2026-08-01T20:21:16.685226",
+      "tests_before": "444 passed, 4 skipped",
+      "tests_after": "444 passed, 4 skipped"
+    },
+    {
+      "id": "refactor_cc_parser_block_and_call_indirect",
+      "name": "【审查驱动·CC=13/14钉子户双出榜】Parser._parse_block CC=14→≤5 + LIRCBackend._compile_call_indirect CC=13→≤2",
+      "cycle": 92,
+      "source": "审查驱动",
+      "source_detail": "AUTO_REVIEW_LOG CC=13/14 钉子户最后2个 + LLM_ROADMAP cycles=92 强制双出榜",
+      "why": "路线图明确 92 强制；CC=13/14 钉子户与 cycle=88/89 两连出榜（CC=13×2）构成完整 CC=13 长尾收尾；SH-1 parity baseline 已就绪，parser 瘦身降低后续自举移植合并冲突风险",
+      "difficulty": "medium",
+      "priority": 84,
+      "status": "completed",
+      "result": "成功",
+      "result_detail": "Parser._parse_block 拆出 _parse_block_statement（5路kind元组dispatch 69→41行 CC≈6）+_handle_block_parse_error（错误恢复 CC≈3）；主循环从 69 行减到 30 行 CC≈5。LIRCBackend._compile_call_indirect 拆出 _build_indirect_args_array + _emit_call_indirect_ret（4路返回）+ _emit_call_indirect_void（2路void）+ + 共享样板 _emit_double_boxed_unpack（trampoline 端 double 解包复用）；主方法从 97 行减到 34 行 CC≈2。444 passed 零回归；CC=13/14 钉子户双出榜",
+      "completed_at": "2026-08-01T20:21:16.685226",
+      "tests_before": "444 passed, 4 skipped",
+      "tests_after": "444 passed, 4 skipped"
+    },
+    {
+      "id": "cleanup_unused_imports_v10",
+      "name": "【审查驱动·unused_import v10批量清理】parser/mir_lowering/ir_types 三文件3处清理 + ir_nodes兼容层保留",
+      "cycle": 92,
+      "source": "审查驱动",
+      "source_detail": "AUTO_REVIEW_LOG unused_import 79 MEDIUM + LLM_ROADMAP cycles=92 Filler P78",
+      "why": "unused_import 79 条 MEDIUM；脚本化批量 0 回归风险；降低审查噪音信噪比；配合 v1-v9 连续清理后剩余长尾收尾",
+      "difficulty": "easy",
+      "priority": 78,
+      "status": "completed",
+      "result": "成功",
+      "result_detail": "pyflakes 精确扫描 39 文件 → 13 条报告：10 条在 ir/ir_nodes.py 带 # noqa: F401（下游兼容重导出层，故意保留）；实际删除 3 处：parser.py 删除 PipeExpr（仅导入行+注释存在，代码 0 引用）、ir/mir_lowering.py 删除 import sys（全文件 0 sys. 调用，L985 stderr 代码已移除）、ir/ir_types.py 删除 Tuple（仅文档字符串引用，运行时 0 注解）。清理后真实 unused_import（排除 noqa 层）剩余 0 条。444 passed 零回归",
+      "completed_at": "2026-08-01T20:21:16.685226",
+      "tests_before": "444 passed, 4 skipped",
+      "tests_after": "444 passed, 4 skipped"
     }
   ],
   "current_cycle": 81,
@@ -2693,12 +2745,14 @@
       "priority": 88,
       "category": "engineering",
       "estimated": "5-7 小时",
-      "status": "pending",
+      "status": "completed",
       "depends_on": [],
       "source": "审查发现",
       "origin_review": "AUTO_REVIEW_LOG.md cycle-1514 cyclomatic_complexity Top1 #1",
       "why": "CC=15 是全项目最高复杂度函数，拆分后单测可独立覆盖 liveness/spill 逻辑",
-      "review_issue_count_affected": 1
+      "review_issue_count_affected": 1,
+      "completed_cycle": 92,
+      "completed_at": "2026-08-01T20:21:16.685226"
     },
     {
       "id": "refactor_cc_type_check_unify",

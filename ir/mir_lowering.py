@@ -6,7 +6,6 @@ HIR -> MIR 降级器
 """
 
 from typing import Optional
-import sys  # noqa: F401  — 用于 Phi 类型不一致告警写 stderr（L985）
 
 from .ir_nodes import (
     BOOL_TYPE,

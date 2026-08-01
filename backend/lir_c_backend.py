@@ -817,18 +817,86 @@ class LIRCBackend:
         else:
             self._emit(f"{c_name}({args_str});")
 
+    # ------------------------------------------------------------------
+    # _compile_call_indirect 拆分出的子方法（原 CC=13 → 4 方法均 ≤4）
+    # ------------------------------------------------------------------
+    def _emit_double_boxed_unpack(self, dst_c_expr: str,
+                                  call_c_expr: str, free_after: bool) -> None:
+        """【共享样板】double 装箱返回值解包：tmp_ptr = call; if non-NULL memcpy+free else 0.0。
+
+        被 _compile_call_indirect 的 double 返回路径（L862-881）和
+        _emit_lambda_trampoline（L296-306）两处调用，原代码重复度 100%。
+        NULL 检查防止 nova_closure_call 在闭包异常时返回 NULL 导致段错误；
+        free_after=False 用于 trampoline 场景（caller 端负责释放）。
+        """
+        tmp_ptr = f"_nova_ret_ptr_{self._tmp_counter()}"
+        self._emit(f"void* {tmp_ptr} = {call_c_expr};")
+        self._emit(f"if ({tmp_ptr} != NULL) {{")
+        self._indent_level += 1
+        self._emit(f"memcpy(&{dst_c_expr}, {tmp_ptr}, sizeof(double));")
+        if free_after:
+            self._emit(f"free({tmp_ptr});")
+        self._indent_level -= 1
+        self._emit("} else {")
+        self._indent_level += 1
+        self._emit(f"{dst_c_expr} = 0.0;")
+        self._indent_level -= 1
+        self._emit("}")
+
+    def _build_indirect_args_array(self, instr: LIRCallIndirect,
+                                   args_array: str, arg_count: int) -> None:
+        """【间接调用子步骤1】构建 void* args[N] 参数数组并填充每个参数的 (void*) 装箱。"""
+        self._emit(f"void* {args_array}[{max(arg_count, 1)}];")
+        for i in range(arg_count):
+            if i + 1 < len(instr.src_locs):
+                arg_var = self._loc_var_name(instr.src_locs[i + 1][0])
+                self._emit(f"{args_array}[{i}] = (void*){arg_var};")
+
+    def _emit_call_indirect_ret(self, closure_var: str, args_array: str,
+                                arg_count: int, dst: str,
+                                ret_c_type: str) -> None:
+        """【间接调用子步骤2】有接收值 dst 的 4 路返回分派（int64/double/bool/default）。"""
+        base_call = (f"nova_closure_call((NovaClosure*){closure_var}, "
+                     f"{args_array}, {arg_count})")
+        if ret_c_type == "int64_t":
+            self._emit(f"{dst} = (int64_t)(intptr_t){base_call};")
+        elif ret_c_type == "double":
+            # trampoline 端 malloc+memcpy 装箱；调用端 memcpy 解包 + free + NULL 安全
+            self._emit_double_boxed_unpack(dst, base_call, free_after=True)
+        elif ret_c_type == "bool":
+            # 先 (intptr_t) 再 (bool)，与 trampoline 端 (void*)(intptr_t)bool_val 语义对齐
+            self._emit(f"{dst} = (bool)(intptr_t){base_call};")
+        else:
+            self._emit(f"{dst} = ({ret_c_type}){base_call};")
+
+    def _emit_call_indirect_void(self, closure_var: str, args_array: str,
+                                 arg_count: int, ret_c_type: str) -> None:
+        """【间接调用子步骤3】无接收值 dst 的 2 路 void 调用。
+
+        注意：即使忽略返回值，double 返回仍需 free 配对（trampoline 端
+        只要是 double 返回就 malloc），否则会内存泄漏。free(NULL) 安全。
+        """
+        base_call = (f"nova_closure_call((NovaClosure*){closure_var}, "
+                     f"{args_array}, {arg_count})")
+        if ret_c_type == "double":
+            tmp_ptr = f"_nova_ret_ptr_{self._tmp_counter()}"
+            self._emit(f"void* {tmp_ptr} = {base_call};")
+            self._emit(f"free({tmp_ptr});")
+        else:
+            self._emit(f"{base_call};")
+
     def _compile_call_indirect(self, instr: LIRCallIndirect, dst: str):
-        """编译间接调用（闭包/函数指针调用）
+        """编译间接调用（闭包/函数指针调用）。
+
+        CC 拆分说明（原 CC=13 → 当前方法 CC≈2）：
+          - 参数数组构建 → _build_indirect_args_array
+          - 有接收值 4 路返回分派 → _emit_call_indirect_ret
+          - 无接收值 2 路 void 调用 → _emit_call_indirect_void
+          - double malloc+memcpy 解包样板 → _emit_double_boxed_unpack（共享）
 
         使用 nova_closure_call 运行时函数，将参数打包为 void* 数组。
         第一个 src_loc 是闭包对象，后续是参数。
-        返回值根据 dst_loc 的类型进行正确的 C 类型转换。
-
-        修复说明：
-        1. double 返回值使用 malloc+memcpy 装箱，有 dst 时需在 memcpy 前做 NULL 检查（
-           防止 nova_closure_call 返回 NULL 导致段错误），无 dst 时仍需 free 避免泄漏。
-        2. bool 返回值在 trampoline 端以 (void*)(intptr_t) 装箱，调用端需先转
-           (intptr_t) 再转 (bool)，避免 (bool)void* 把高位非零指针误判为真。
+        返回值根据 dst_loc 类型进行正确的 C 类型转换。
         """
         if not instr.src_locs or len(instr.src_locs) < 1:
             return
@@ -836,84 +904,28 @@ class LIRCBackend:
         closure = self._loc_var_name(instr.src_locs[0][0])
         arg_count = instr.arg_count
 
-        # 构建参数数组
+        # 步骤 1：构建参数数组
         args_array = f"nova_args_{self._tmp_counter()}"
-        self._emit(f"void* {args_array}[{max(arg_count, 1)}];")
+        self._build_indirect_args_array(instr, args_array, arg_count)
 
-        for i in range(arg_count):
-            if i + 1 < len(instr.src_locs):
-                arg_var = self._loc_var_name(instr.src_locs[i + 1][0])
-                self._emit(f"{args_array}[{i}] = (void*){arg_var};")
-
-        # 计算返回的 C 类型（即使 dst 为空也需要知道，因为 double 返回涉及 malloc/free 配对）
+        # 步骤 2：计算返回 C 类型（即使 dst 为空也需知道 — double 涉及 malloc/free 配对）
         ret_c_type = None
         if instr.dst_loc:
             ret_c_type = self._nova_type_to_c(instr.dst_loc[1])
 
-        # 根据返回类型和是否有接收值，选择转换方式
-        # nova_closure_call 返回 void*，需要转换为实际的 C 类型
+        # 步骤 3：有/无接收值 双路 dispatch（每路内部再 dispatch 到 helper）
         if dst and instr.dst_loc:
-            if ret_c_type == "int64_t":
-                cast_expr = f"(int64_t)(intptr_t)"
-                self._emit(
-                    f"{dst} = {cast_expr}nova_closure_call((NovaClosure*){closure}, "
-                    f"{args_array}, {arg_count});"
-                )
-            elif ret_c_type == "double":
-                # 浮点类型：trampoline 端 malloc+memcpy 装箱为 void*，
-                # 调用端临时指针 + memcpy 解包，并 free。
-                # 做 NULL 检查：nova_closure_call 在闭包为空/异常时可能返回 NULL，
-                # 直接 memcpy 会段错误，此时置默认 0.0 并跳过 free。
-                tmp_ptr = f"_nova_ret_ptr_{self._tmp_counter()}"
-                self._emit(
-                    f"void* {tmp_ptr} = nova_closure_call((NovaClosure*){closure}, "
-                    f"{args_array}, {arg_count});"
-                )
-                self._emit(f"if ({tmp_ptr} != NULL) {{")
-                self._indent_level += 1
-                self._emit(f"memcpy(&{dst}, {tmp_ptr}, sizeof(double));")
-                self._emit(f"free({tmp_ptr});")
-                self._indent_level -= 1
-                self._emit("} else {")
-                self._indent_level += 1
-                self._emit(f"{dst} = 0.0;")
-                self._indent_level -= 1
-                self._emit("}")
-            elif ret_c_type == "bool":
-                # 严谨：先 (intptr_t) 再 (bool)，与 trampoline 端
-                # (void*)(intptr_t)bool_val 的装箱方式语义匹配。
-                cast_expr = f"(bool)(intptr_t)"
-                self._emit(
-                    f"{dst} = {cast_expr}nova_closure_call((NovaClosure*){closure}, "
-                    f"{args_array}, {arg_count});"
-                )
-            else:
-                cast_expr = f"({ret_c_type})"
-                self._emit(
-                    f"{dst} = {cast_expr}nova_closure_call((NovaClosure*){closure}, "
-                    f"{args_array}, {arg_count});"
-                )
+            self._emit_call_indirect_ret(closure, args_array,
+                                         arg_count, dst, ret_c_type)
         elif dst:
+            # dst 存在但 dst_loc 缺失（退化 fallback）
             self._emit(
-                f"{dst} = (NovaValue*)nova_closure_call((NovaClosure*){closure}, "
-                f"{args_array}, {arg_count});"
+                f"{dst} = (NovaValue*)nova_closure_call("
+                f"(NovaClosure*){closure}, {args_array}, {arg_count});"
             )
         else:
-            # 无接收值（dst 为 None）：仍需关心 double 返回的 free 配对，
-            # 因为 trampoline 端只要是 double 返回就会 malloc，即使调用端忽略结果。
-            if ret_c_type == "double":
-                tmp_ptr = f"_nova_ret_ptr_{self._tmp_counter()}"
-                self._emit(
-                    f"void* {tmp_ptr} = nova_closure_call((NovaClosure*){closure}, "
-                    f"{args_array}, {arg_count});"
-                )
-                # free(NULL) 在 C 标准中是安全的 no-op，因此无需 NULL 分支。
-                self._emit(f"free({tmp_ptr});")
-            else:
-                self._emit(
-                    f"nova_closure_call((NovaClosure*){closure}, "
-                    f"{args_array}, {arg_count});"
-                )
+            self._emit_call_indirect_void(closure, args_array,
+                                          arg_count, ret_c_type)
 
     # ------------------------------------------------------------------
     # 辅助方法
