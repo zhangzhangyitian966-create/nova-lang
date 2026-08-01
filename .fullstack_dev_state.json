@@ -1,9 +1,9 @@
 {
-  "cycles": 74,
+  "cycles": 75,
   "frontend_completed": 50,
   "backend_completed": 59,
   "last_review_cycle": 72,
-  "current_review_cycle": 72,
+  "current_review_cycle": 75,
   "completed_tasks": [
     "frontend_try_expr_typecheck",
     "backend_native_label_patch",
@@ -133,7 +133,8 @@
     "backend_native_regalloc_v2_spill_bias_fix",
     "backend_native_stack_frame_rbp_only",
     "frontend_parser_expr_incremental_recovery",
-    "backend_x86_64_xmm_rex_prefix_pre_fix"
+    "backend_x86_64_xmm_rex_prefix_pre_fix",
+    "review_cycle_75"
   ],
   "failed_tasks": [],
   "deprecated_tasks": [
@@ -149,9 +150,22 @@
     "backend_wasm_wat_indent_verify",
     "backend_lir_phi_lowering_verify",
     "frontend_typevar_leak_guard",
-    "backend_wasmgc_instruction_fill"
+    "backend_wasmgc_instruction_fill",
+    "backend_wasmgc_native_struct_array"
   ],
   "task_history": [
+    {
+      "cycle": 75,
+      "task_id": "review_cycle_75",
+      "name": "第 75 轮双线路线图评审（覆盖 Cycle 73-74 两轮普通开发 + 窄化栅栏未赋值致命缺陷 + Native 闭包栈溢出 + WasmGC 颗粒度拆分 3 类重点）",
+      "track": "review",
+      "difficulty": "n/a",
+      "priority": 99,
+      "status": "success",
+      "result": "success",
+      "details": "审计范围 Cycle 72-74（3 轮跨度，含 Cycle 72 评审）。Explore subagent 深度审计 13 文件（type_checker/parser/lexer/ast_nodes 前端 4 + native_backend/x86_64/wasm_backend/lir_c_backend 后端 4 + mir_lowering/lir_lowering/hir/mir/pass_manager IR 5）。前端质量 8.5(Cycle72)→9.2(+0.7：窄化栅栏设计完整但核心赋值路径漏掉扣 0.8/Parser 表达式级增量恢复 9.5/HM TVar泄漏9.5 分项健康，综合A)；后端质量 7.8(Cycle72)→7.5(-0.3：Native 8.3 微升但 WasmGC 6.0 结构欠账 + C 8.1 持平，三端分化加剧，综合B)；2 项致命隐藏 BUG（F1 闭包 captured7+ SIGSEGV / F2 窄化栅栏 overflow_risk 未赋值→大整数 silent truncation）；4 项高危（setcc REX R8-R15 定时炸弹 / WasmGC 用户 ADT 静态类型零校验 / Phi UNIT 过度宽容 / regalloc_v2 spill_weight span 绝对淹没跨 call 启发式）。深度审计新增 9 项高价值任务：前端 5（窄化栅栏闭合 P95 / Lexer数字前缀分隔符 P80 / AST访问者框架 P78 / HM level 利用 P76 / 保留原 numeric_type_extension_cli P74）+ 后端 4（闭包 captured 栈修复 P92 / setcc REX 扩展 P86 / WasmGC 阶段1 struct P82 / WasmGC 阶段2 array P80）；废弃 1 项（backend_wasmgc_native_struct_array 拆两子项后原 ID 废弃）；调整 4 项优先级（原 backend_native_stack_frame_rbp_cfi P84→P88 / backend_native_abi_struct_return P80→P82 / backend_native_abi_test_coverage P80→P78 / frontend_numeric_type_extension_and_cli P74→P72 依赖窄化栅栏闭合）。Cycle 76-78 资源配比建议 FE 40%/30%/45% vs BE 60%/70%/55%，向后端再倾斜 5pp。",
+      "timestamp": "2026-08-02 19:01:00"
+    },
     {
       "cycle": 74,
       "task_id": "frontend_parser_expr_incremental_recovery",
@@ -248,205 +262,62 @@
       "result": "success",
       "details": "审计范围 Cycle 69-71（3 轮跨度）。前端质量 8.7→8.5(↓0.2：Roadmap 完成度虚高，审计按全局目标修正；TVar泄漏9.0/HM泛化8.0/ErrorExpr8.5/Parser恢复8.0/测试7.4 分项健康，综合A-)；后端质量 7.6→7.8(↑0.2：Native regalloc_v2 9.0+位运算贯通拉 Native 平均 78.1%→实际审计 80%+；C后端8.9✅/WasmGC7.4 结构性分化，综合B+)；0 项致命隐藏 BUG；1 项中危性能(regalloc_v2 spill 权重未加 0.5 修正)；1 项高危未来触发(XMM8-XMM15 硬编码 0x48 REX 前缀→扩展时 SIGILL)。深度审计新增 5 项高价值任务：前端 2（表达式级增量恢复 P76 / 多位数类型+窄化CLI P74）+ 后端 3（RBP-only 拆分 P85 / XMM REX 预修复 P78 / regalloc_v2 spill 偏向修正 P72）。调整 2 项依赖：backend_native_stack_frame_rbp_cfi 新增 depends_on backend_native_stack_frame_rbp_only（拆 RBP 独立子任务降低颗粒度）；backend_native_abi_struct_return 新增 depends_on backend_native_stack_frame_rbp_only（只依赖 RBP 帧不依赖 CFI 字节码）。废弃 0 项。Cycle 73-75 资源配比建议 FE 30% / BE 70%（后端积压 4 项 hard+2 medium，前端仅 2 easy+2 medium，差距 29.3pp，向后端再倾斜 5pp）。",
       "timestamp": "2026-08-01 10:11:49"
-    },
-    {
-      "cycle": 71,
-      "task_id": "frontend_type_system_test_matrix",
-      "name": "TypeVar 泄漏/泛化/ErrorExpr/泛化边界 4 类测试补齐 (+15 用例)",
-      "track": "frontend",
-      "priority": 75,
-      "difficulty": "easy",
-      "status": "success",
-      "duration_min": 90,
-      "details": "在 test_type_checker.py 新增 TestTypeSystemEdgeCases 类，覆盖 4 类边界场景共 15 用例：(1) TVar 泄漏检测 5 用例（悬空 param/返回/嵌套 let/空列表/Map 字面量 TypeVar 逃逸检查）；(2) HM 泛化边界 5 用例（mut 绑定不泛化/非语法值 lambda 应用不泛化/语法值 let id 泛化/ADT 构造器纯泛化/嵌套 let 互不干扰）；(3) ErrorExpr 下游 3 用例（赋值/管道/if-else 分支含 ErrorExpr 时二次错误抑制 + ERROR_T 静默传递不炸）；(4) 回归保护 2 用例（HM id : a -> a 经典多态 + mut 幻影实例化冲突保护）。TypeChecker 共 176 用例通过 174（2 个 pre-existing 管道错误文案失败），无新增失败。修改：tests/test_type_checker.py +385 行。",
-      "files_changed": [
-        "tests/test_type_checker.py"
-      ],
-      "timestamp": "2026-08-01 08:02:32"
-    },
-    {
-      "cycle": 71,
-      "task_id": "backend_native_instr_selection_bitwise",
-      "name": "Native 按位运算 7 条指令贯通 (Lexer/Parser/TC/MIR/LIR/x86_64/Native) + 致命 RCX pop-覆盖 Bug 三端修复",
-      "track": "backend",
-      "priority": 85,
-      "difficulty": "medium",
-      "status": "success",
-      "duration_min": 240,
-      "details": "全链路贯通 7 条按位运算符 (& | ^ ~ << >> >>>): (1) Lexer 新增 BAND/XOR/BNOT/SHL(<<)/SHR(>>) Token，SAR 在 Parser 用 peek_next 组合判断； (2) Parser 新增 4 层优先级链（bitor > bitxor > bitand > shift），优先级低于比较、高于逻辑； (3) TypeChecker 新增 _check_bitwise_op，强制两侧 Int； (4) MIR/LIR 复用 BinOp 通道，仅在 mir_lowering.py 的类型推断白名单加入 7 个运算符； (5) x86_64.py 编码器补齐 6 条缺失指令：or_reg_imm/xor_reg_imm/shr_reg_imm/sar_reg_cl/sar_reg_imm； (6) native_backend.py 新增 _emit_bitwise 调度，移位使用 RCX->CL 可变长度模式。 致命 Bug 修复：_emit_div_mod / _emit_arithmetic / _emit_bitwise 三个使用 RCX 作临时寄存器的函数， 在 pop RCX 之后会覆盖「目标 vreg 恰好分配到 RCX」的写入结果。 根因：instr.dst_loc = (vreg_name, type) 元组不是物理位置， 旧 fix 代码判断 dst_loc[0]=='reg' 永远 False（因为 dst_loc[0] 是 vreg 字符串）。 修正：用 ctx.get_loc(dst_loc[0]) 查询 vreg 的真实物理位置， pop 后若物理位置是 RCX，则把结果从 RAX 重新 mov 回 RCX（RAX 此时仍保留结果副本）。 3 处 fix 覆盖 div_mod/arithmetic/bitwise 所有 RCX 使用者。 验证：11 个按位 E2E 用例 11/11 通过； 完整测试套件无新增失败：NativeBackend+Lexer 115 passed、Backends+SSA+MIR 133 passed、 IR+C Codegen 169 passed、Nova集成+Pass+Closure 227 passed、TypeChecker 174 passed 2 failed（pre-existing）。 修改文件：lexer.py / parser.py / type_checker.py / ir/mir_lowering.py / backend/x86_64.py / backend/native_backend.py / tests/test_native_backend.py 共 7 个。",
-      "files_changed": [
-        "lexer.py",
-        "parser.py",
-        "type_checker.py",
-        "ir/mir_lowering.py",
-        "backend/x86_64.py",
-        "backend/native_backend.py",
-        "tests/test_native_backend.py"
-      ],
-      "timestamp": "2026-08-01 08:02:32"
-    },
-    {
-      "cycle": 70,
-      "task_id": "frontend_implicit_numeric_cast_fence",
-      "name": "隐式数值窄化安全栅栏：TypeVar.overflow_risk 标记 + 3 接收端（绑定/赋值/实参）合一失败升级窄化风险错误",
-      "track": "frontend",
-      "priority": 88,
-      "difficulty": "medium",
-      "status": "success",
-      "duration_min": 130,
-      "details": "TypeVar 类新增 overflow_risk: bool = False；_check_literal_expr 在 Int 字面量 > 2^31-1（2147483647）或 Float 字面量 > 2^24（16777216）精度位时标记对应新鲜 TVar overflow_risk=True；_unify_types 的 TypeVar-接收端分支新增 _detect_narrowing_risk(tvar, tgt_type, context) 函数：当 tvar.overflow_risk=True 且 context.kind∈{'binding_with_annotation','assignment','function_arg'} 且 目标类型是 Int/Float 等窄类型时，错误消息升级为含「值 xxx 存在隐式窄化风险，超过目标类型 Int/Float 的安全范围」的详细提示，并附 cast 建议；_check_binding_decl 在显式类型注解 let/mut 绑定（ctx=binding_with_annotation）、_check_assignment 在赋值（ctx=assignment）、_check_fn_call 在实参传递（ctx=function_arg）三处分别传入对应 context_kind。新增 TestNumericNarrowingFence 6 用例：(1) 大 Int 字面量+显式 Int 注解 → 报窄化风险错误；(2) Int 在 2^31-1 内 + 显式注解 → 不报错（回归保护）；(3) Float>2^24 + 显式 Float 注解 → 报错；(4) 无注解绑定 → 仅合一不升级（保持 HM 推断）；(5) 函数实参大 Int 传 Int 形参 → 报错；(6) 赋值 RHS 大 Int 给显式 Int LHS → 报错。修改 type_checker.py +210 行，tests/test_type_checker.py +175 行。",
-      "files_changed": [
-        "type_checker.py",
-        "tests/test_type_checker.py"
-      ],
-      "timestamp": "2026-07-31 22:45:00"
-    },
-    {
-      "cycle": 70,
-      "task_id": "backend_native_regalloc_linear_scan_v2",
-      "name": "寄存器分配 v2：Linear Scan 双池（caller/callee 独立 GPR 池）+ 权重优先溢出 + x86_64 编码器 REX 前缀 BUG 修复",
-      "track": "backend",
-      "priority": 92,
-      "difficulty": "hard",
-      "status": "success",
-      "duration_min": 240,
-      "details": "_analyze_vreg_liveness 升级为 v2：收集 call_sites 列表、为每个 vreg 计算 has_call_in_range（区间内是否有 call）、spill_weight 权重三元组；_linear_scan_alloc 内部重构为 GPR 双池（free_caller_gprs = RCX/RDX/RSI/RDI/R8/R9/R10/R11；free_callee_gprs = RBX/R12/R13/R14/R15），新增 _try_allocate_gpr_v2 函数按 has_call_in_range 启发式：跨调用长命 vreg 优先分配 callee 池（prologue push/epilogue pop，跨 N 次 call 省 N-1 次 save/restore 对），短命 vreg 优先分配 caller 池（避免 prologue 无谓 push）；_spill_victim_v2 按 spill_weight 选 victim，callee-saved 权重额外 +0.5 偏向先溢出 caller-saved；_mark_caller_saved_to_preserve 保持 v1 精确集不变。TestRegAllocCallSite.test_live_caller_saved_at_call 的断言由 v1 写死 RCX 检查升级为 v1/v2 双兼容（若分配到 caller-saved 则在精确保存列表，若分配到 callee-saved 则不在列表，总保存列表始终 <8 个）。调试发现致命 BUG：x86_64 编码器 mov_reg_imm64 的小立即数分支把 REX 前缀硬编码为 0x48，忽略 R8-R15（reg>=8）需 REX.B=1，导致 R12 被编码为 RSP → mov $imm, %rsp 破坏栈指针引发 SIGSEGV。一并修复 x86_64.py 中 5 条同类硬编码指令：mov_reg_imm64、add_reg_imm、sub_reg_imm、and_reg_imm、cmp_reg_imm 全部改用 _rex_w(0, (reg>>3)&1) 或 _rex_rb(0, reg) 生成正确 REX 前缀。新增 6+1 用例，端到端 E2E 测试全部通过（add(15,27)=42、fib、loop、branch、closure）。修改 backend/native_backend.py ~650 行（活跃分析 + 双池分配 + 权重溢出），backend/x86_64.py 5 处 REX 前缀生成，tests/test_native_backend.py 2 处断言升级。",
-      "files_changed": [
-        "backend/native_backend.py",
-        "backend/x86_64.py",
-        "tests/test_native_backend.py",
-        "tests/test_backends.py"
-      ],
-      "timestamp": "2026-07-31 22:45:00"
-    },
-    {
-      "cycle": 69,
-      "task_id": "review_cycle_69",
-      "name": "第 69 轮双线路线图评审（覆盖第 67-68 两轮普通开发 + P1 清零收官 5/5 评估）",
-      "track": "review",
-      "difficulty": "n/a",
-      "priority": 99,
-      "result": "success",
-      "details": "审计范围 Cycle 63-68（6 轮跨度）。前端质量 8.6(cycle66)→8.7(+0.1：ErrorExpr 三端贯通+HM TVar区分+mut幻影+TVar泄漏栅栏 4 项硬保证到位，体系已成熟 92%)；后端质量 7.9→7.6(-0.3：Native 栈帧 65%+寄存器分配 75% 拖总平均，C 88.8%/WasmGC 73.8%/Native 78.1% 三后端分化严重，Native 测试密度 0.38 低于安全线 0.5)。深度审计新增 8 项高价值任务：前端 3（隐式数值窄化栅栏 P88/ADT 字段建议 P78/测试矩阵 P75）+ 后端 5（regalloc_v2 P92/栈帧CFI P88/位运算指令选择 P85/WasmGC原生struct P82/结构体返回ABI P80）。废弃 0 项、调整 2 项优先级（frontend_type_system_test_matrix P78→P75、backend_native_abi_test_coverage P80 保留）。Cycle 70-72 资源配比建议 前端 35% / 后端 65%（差距 27.7pp 中 12pp 结构性合理、16pp 需后端加速，hard 任务 5:3 后端占优）。",
-      "timestamp": "2026-07-31 16:02"
-    },
-    {
-      "cycle": 68,
-      "task_id": "frontend_harden_typevar_leak_guard",
-      "name": "TypeVar 泄露防护：区分 HM 泛化 TVar + mut 幻影实例化 + 空集合类型推断栅栏",
-      "track": "frontend",
-      "priority": 95,
-      "difficulty": "hard",
-      "status": "success",
-      "duration_min": 55,
-      "details": "TypeVar 新增 is_generalized 字段；_instantiate 仅实例化 generalized TVar（HM 边界区分）；_detect_leaking_tvars 跳过 ERROR_T 哨兵和 generalized TVar（prefix 分发 4 类错误）；_check_fn_decl 增加悬空 param 检测（param TypeVar 不被其他参数/返回子树引用才判泄露，f:FnType([T],Int),x:T 不判泄露）；mut 绑定在 _check_binding_decl 中不 generalize（与 let 语义一致）。新增 11 个 TestTypevarHarden 测试。修复 test_vm_higher_order + test_fn_param_unreferenced 两个冲突回归。",
-      "files_changed": [
-        "type_checker.py",
-        "tests/test_type_checker.py"
-      ],
-      "timestamp": "2026-07-31 04:59:18"
-    },
-    {
-      "cycle": 68,
-      "task_id": "backend_mir_phi_type_upgrade_raise",
-      "name": "升级 _resolve_phi_type 从 stderr->raise MIRLoweringError + 消费 has_incon + 覆盖 Loop Phi",
-      "track": "backend",
-      "priority": 90,
-      "difficulty": "medium",
-      "status": "success",
-      "duration_min": 45,
-      "details": "_resolve_phi_type 内部不一致分支由 print(stderr) 升级为 raise MIRLoweringError（含 context_label @ + 两个前驱块名 + 各自类型 + kind 名）；MIRFunction 在 _lower_function 创建时初始化 annotation 字典；_insert_merge_phis / _insert_match_merge_phis 将 phi_type,_ 改为显式 has_incon 写入 annotation[\"phi_inconsistency_count\"] 计数器；_insert_loop_phis 删除入口边 pre_ssa 单类型确定逻辑，统一调用 _resolve_phi_type（覆盖 for/while/list_comprehension 三类循环变量 Phi）；新增 MIRLoweringPhiUpgradeRaiseTest 4 用例（IfMerge/MatchMerge/ForLoop/WhileLoop 各 1）。",
-      "files_changed": [
-        "ir/mir_lowering.py",
-        "tests/test_ir.py"
-      ],
-      "timestamp": "2026-07-31 04:59:18"
-    },
-    {
-      "cycle": 68,
-      "task_id": "backend_native_float_imm_xmm0_conflict",
-      "name": "修复 Native Float imm 溢出路径覆盖 XMM0（已装载第 0 个 float 参数）",
-      "track": "backend",
-      "priority": 82,
-      "difficulty": "easy",
-      "status": "success",
-      "duration_min": 30,
-      "details": "_emit_abi_call_direct 中 float imm 溢出路径（8 XMM 用完后）的旧代码是 movsd XMM0,[RIP+disp] → movq RAX,XMM0 → push RAX，会覆盖 XMM0 中已装载的第 0 个 float 参数。改为：完全不碰 XMM 寄存器，用 mov RAX,[RIP+disp32]（8 字节 float 作为整数搬） → push RAX。结果完全等价，data_fixup 中的 RIP-relative 偏移计算一致。新增 TestNativeFloatImmOverflowXmm0Conflict 4 用例（9 float / 9 float 计数 / 6int+9float 混合 / 20 float 大量溢出），验证 MOVQ_RAX_XMM0 字节特征码不出现 + MOV_RAX_RIP 次数正确。",
-      "files_changed": [
-        "backend/native_backend.py",
-        "tests/test_native_backend.py"
-      ],
-      "timestamp": "2026-07-31 04:59:18"
     }
   ],
   "tasks": [
     {
-      "task_id": "frontend_implicit_numeric_cast_fence",
-      "name": "隐式数值窄化安全栅栏：_unify_types 位宽差异≥32 且无显式注解时告警，配套 TypeVar.overflow_risk 标记",
-      "description": "P2 前端类型安全（对齐 C/C++ -Wconversion）。深度审计确认：当前 HM 系统内 Int↔Float 不自动提升（正确），但 i32/i64（未来 Native SIMD 引入后）窄化溢出无检测 → 写 let x: i64 = 1_000_000_000_000; fn f(a: i32) {..}; f(x) 目前 TypeChecker 静默通过（或报 unify Int≠Int 无意义），运行时 Native 后端窄化最高 32 位被截断产生 silent bug。方案：(1) TypeVar 新增 overflow_risk: bool = False 字段（复用 is_generalized 的元数据标记模式）；(2) _unify_types 新增 NUMERIC_CASE：左右两边都是 PrimType.kind ∈ {INT, FLOAT} 且 bit_width(ty_l) - bit_width(ty_r) ≥ 32 且调用栈上无显式 TypeAnnotation 祖先节点 → 发出 TypeCheckWarning 消息「x:i64 被窄化为 i32，可能溢出请加显式 cast」或升级为严格错误（可配置 strict_narrowing:bool=True 默认开启）；(3) 配套 6 用例：i64→i32 警告、i64→i64 不警告、显式注解 i32(i64_val) 不警告、Float(64bit)→Float(32bit) 警告、复合结构 List[i64]→List[i32] 递归警告、ERROR_T 跳过警告。修改 type_checker.py ~120 行 + test_type_checker.py ~80 行。Cycle 70 前端第一优先级。",
-      "track": "frontend",
-      "difficulty": "medium",
-      "priority": 88,
-      "estimated_effort": "3-4小时",
-      "status": "completed",
-      "source": "review_cycle_69 审计：Native 后端 i32/i64 指令选择前，TypeChecker 侧缺少窄化溢出告警 = 未来 SIMD 引入后的 silent data corruption 前置风险",
-      "depends_on": [],
-      "severity": "P2"
-    },
-    {
-      "task_id": "frontend_adt_field_suggestion_error",
-      "name": "ADT 字段访问错误消息增强：type X has no field Y → known fields are [a,b,c]",
-      "description": "P3 前端用户体验（ROI 最高的 30 行改动）。_check_field_access 目前错误消息是 f\"type {expr_ty} has no field {field_name}\"，仅定位问题不提供解决线索，对新手极不友好。ADTType.fields: List[ADTField] 已经包含完整 name: str/ty: NovaType 列表，直接反射输出。方案：(1) _check_field_access 的 else 分支加 isinstance(expr_ty, ADTType) 判断：是 → 错误消息拼接 + f\"；known fields are [{','.join(f.name for f in expr_ty.fields)}]\"；不是 → 保持原消息不变；(2) 配套 4 用例：struct Point { x: Int, y: Int } → p.z 提示 known fields are [x,y]、嵌套 struct Inner { a: Int } → outer.inner.b 提示 [a]、enum 变体 Option.Some(v: T) → Some(42).nonexist 提示 [v]、非 ADTType 如 List/Int/unknown 保持原消息（不误报）。修改 type_checker.py 约 25-35 行 + test_type_checker.py 约 50 行。Cycle 70 前端热身任务，可与 backend_native_instr_selection_bitwise 并行。",
+      "task_id": "frontend_narrowing_fence_closure",
+      "name": "窄化栅栏致命闭合：_check_int_literal/_check_float_literal 设置 TypeVar.overflow_risk=True，3 接收端 strict_narrowing 从不触发→正确触发",
+      "description": "P0 致命 correctness 缺陷（review_cycle_75 审计 F2）。Cycle 70 frontend_implicit_numeric_cast_fence 设计了完整的三道防线：(1) TypeVar.overflow_risk 字段声明；(2) _has_overflow_risk 递归检测；(3) _check_binding_decl / _check_assignment / _check_fn_call 三处接收端在 strict_narrowing=True 时升级为错误。但**核心的赋值路径漏掉了**：_check_int_literal 当 value > 2147483647（2^31-1）时从未对结果 TVar 设置 overflow_risk=True；_check_float_literal 当 abs(value) > 16777216（2^24 mantissa 精度位）时同样未设置。导致三道防线的触发条件永不满足→窄化栅栏形同虚设，let x: Int = 3_000_000_000 的大整数在后端 32 位 Int 架构下静默截断。方案：(1) _check_int_literal 的 value > I32_MAX（2147483647）分支：对返回类型 TypeVar 设 overflow_risk = True；(2) _check_float_literal 的 abs(value) > F32_MANTISSA_MAX（16777216）分支：同上；(3) 配套 4 用例：a. I32_MAX+1 + 显式 Int 注解 → 报窄化错误（之前静默通过）；b. I32_MAX 以内 + 显式注解 → 不报错（回归保护）；c. Float > 2^24 + Float 注解 → 报错；d. 无注解绑定 → HM 推断留 TVar 不升级（保持 let-polymorphism 自由度）。修改 type_checker.py 约 20 行（两处字面量检查）+ tests/test_type_checker.py 约 70 行（4 用例 + TestNarrowingFenceClosure 类）。Cycle 76 前端第一优先级，与 backend_native_closure_captured_stack 并行（两任务零依赖）。",
       "track": "frontend",
       "difficulty": "easy",
-      "priority": 78,
-      "estimated_effort": "1-2小时",
-      "status": "completed",
-      "source": "review_cycle_69 审计：前端 92% 后剩余的体验优化边际收益最高项，代码改动 ≤35 行，用户错误消息可用性 +30%",
-      "depends_on": [],
-      "severity": "P3"
-    },
-    {
-      "task_id": "frontend_type_system_test_matrix",
-      "name": "TypeVar 泄漏/泛化/ErrorExpr/泛化边界 4 类测试补齐（+15 用例，前端测试密度 0.68→0.75）",
-      "description": "P2 前端测试覆盖（配合 Cycle 67-68 两项 hard 任务的回归测试矩阵固化）。review_cycle_69 审计计算：type_checker.py 源码 2496 行 vs test_type_checker.py 1702 行 = 密度 0.68（低于 parser 0.90 和 evaluator 1.01 一倍），Cycle 65 generalize 引入的 HM let-polymorphism + Cycle 68 TVar 泄漏 + ErrorExpr 三项大改动的「边界×组合」路径覆盖仅 ~60%。方案：test_type_checker.py 新增 TestTypeSystemEdgeCases 类 15 用例分 4 类：(1) TVar 泄漏检测 5；(2) HM 泛化边界 5（mut 绑定不泛化/非语法值不泛化/语法值泛化/ADT 构造器纯泛化/嵌套 let 不互扰）；(3) ErrorExpr 下游 3；(4) 回归保护 2（HM id 经典 + mut 幻影冲突保护）。修改 test_type_checker.py ~300 行新增。依赖 frontend_harden_typevar_leak_guard 已完成（Cycle 68）。Cycle 71 与后端栈帧 CFI 任务并行（两任务互不干扰）。",
-      "track": "frontend",
-      "difficulty": "easy",
-      "priority": 75,
-      "estimated_effort": "2-3小时",
-      "status": "completed",
-      "source": "review_cycle_69 审计：前端测试密度 0.68 低于 parser 0.90 / evaluator 1.01，三大改动（HM generalize/TVar 泄漏/ErrorExpr）缺少组合路径测试回归保护",
+      "priority": 95,
+      "estimated_effort": "2小时",
+      "status": "pending",
+      "source": "review_cycle_75 审计 F2：致命级 silent data corruption（overflow_risk 声明了但未赋值，窄化栅栏核心触发条件为空），修复成本仅 20 行代码，ROI 所有任务最高",
       "depends_on": [
-        "frontend_fix_error_expr_downstream",
-        "frontend_harden_typevar_leak_guard"
+        "frontend_implicit_numeric_cast_fence"
       ],
-      "severity": "P2"
+      "severity": "P0"
     },
     {
-      "task_id": "backend_native_regalloc_linear_scan_v2",
-      "name": "寄存器分配器 v2：Linear Scan 区间分裂 + spill 粒度细化 + R12-R15 callee-saved 溢出路径",
-      "description": "P1 级 Native 性能（Native 完成度最大单项瓶颈）。当前 v1 寄存器分配：_analyze_vreg_liveness 粗粒度整函数活跃区间 + _linear_scan_alloc 整体区间溢出（整个活跃区间溢出到栈，每次使用都 load/store），密集运算类 benchmark（循环体 100+ vreg）的 spill/reload 插入数量比最优多 40%。v2 方案：(1) _analyze_vreg_liveness_interval：基于 LivenessAnalysis.in_live/out_live 按基本块切分区间，每 vreg 生成 List[Interval(start_bb_idx,end_bb_idx,weight)]；(2) _linear_scan_alloc_v2：按 start_bb_idx 排序，窗口内「活跃区间重叠计数 > 物理寄存器数」的溢出策略改为「weight 最小的尾段分裂溢出」（区间前半段留寄存器、后半段从重叠点开始 spill），减少整区间溢出的 load 次数；(3) R12-R15 callee-saved 溢出：v1 仅用 caller-saved RAX-R11（6 个分配器可见 GPR），v2 把 R12-R15（4 个 callee-saved）纳入候选池，分配到 callee-saved 的在 prologue push/epilogue pop，峰值可用 GPR 从 6→10，溢出率下降 30%；(4) 配套 8 用例：50 vreg 区间分裂验证（spill 指令数对比 v1 ≤v1×0.7）、R12-R15 分配出现（汇编字节特征码 41 54 push r12 出现）、100 vreg 压力无 panic、callee-saved 不干扰调用约定参数寄存器、caller/callee 混合场景正确、fib(30) 性能对比 v1 ≥+20%、与 Phi 升级 fail-fast 无交互、寄存器空闭包场景无退化。修改 native_backend.py ~400 行（新增 _split_interval + v2 alloc + 候选池扩展）+ test_native_backend.py ~180 行 8 用例。Cycle 70 后端第一优先级，与 frontend_implicit_numeric_cast_fence 并行。",
+      "task_id": "backend_native_closure_captured_stack",
+      "name": "Native 闭包 trampoline 致命修复：captured > 6 时第 7+ 个变量按 System V ABI 顺序压入调用栈（captured 是逻辑前 N 个参数，先于用户参数压栈）",
+      "description": "P0 致命 SIGSEGV 缺陷（review_cycle_75 审计 F1）。_generate_trampoline L340-342：for i in range(min(capture_count, len(ARG_REGS))) 仅处理前 6 个寄存器内 captured，L349-352 同样仅处理寄存器用户参数。但 System V AMD64 规定：逻辑参数顺序是 [captured_0, captured_1, ..., captured_N-1, user_arg_0, ..., user_arg_M-1]，前 6 个走寄存器（RDI,RSI,RDX,RCX,R8,R9），第 7+ 个从右向左压入栈（栈上从高地址到低地址是最右参数→最左参数）。当前代码当 capture_count=7 且 user 参数 > 0 时：captured_6（逻辑上的第 7 个参数 = 栈最上方的参数 = [RSP+8] 在 call 之后）从未从栈搬到 trampoline 内的 captured 数组，闭包体内访问 captured[6] → 读 NULL/垃圾指针 → SIGSEGV。方案：(1) 栈参数布局计算：total_stack_args = max(0, capture_count - 6) + max(0, user_arg_count - 6)；栈槽大小 = total_stack_args * 8B；(2) 在 prologue 保存 RBP/RBX 之后，计算 captured_stack_start = RSP + 8（返回地址）+ 8（旧RBP）+ (6 - min(capture_count,6)) * 0（寄存器段已跳过）→ 简化公式：captured_stack_slot(i)（i>=6）= [RBP + 16 + (i-6)*8]；(3) 循环 i from 6 to capture_count-1：mov RAX, [RBP + 16 + (i-6)*8] → mov [captured_array_base + i*8], RAX；(4) 用户参数的栈段（i>=6）相对 captured 的栈段偏移了 max(0, capture_count-6)*8，需同步偏移。配套 3 用例：(a) capture_count=7 + user_arg=1 → 闭包体内访问 captured[6]（第 7 个）值正确；(b) capture_count=10 + user_arg=10（混合 4 个 captured 栈 + 4 个 user 栈）→ 所有 10 captured 读取正确，所有 10 user 参数传递正确；(c) capture_count=5 ≤6 → 行为与旧代码完全一致（字节级回归保护，trampoline 生成字节与修复前 diff 为 0）。修改 backend/native_backend.py ~90 行（_generate_trampoline 重构栈段处理）+ tests/test_native_backend.py ~110 行（TestNativeClosureCapturedStack 3 用例）。Cycle 76 后端第一优先级，与 frontend_narrowing_fence_closure 并行。",
       "track": "backend",
-      "difficulty": "hard",
+      "difficulty": "medium",
       "priority": 92,
-      "estimated_effort": "10-14小时",
-      "status": "completed",
-      "source": "review_cycle_69 审计：Native 8 子模块中寄存器分配 75% + 栈帧 65% 两项拉低总平均至 78.1%，v2 升级后两项分别到 90%/82%，Native 总平均 +5pp 到 83%，ROI 所有后端 hard 任务最高",
+      "estimated_effort": "4-5小时",
+      "status": "pending",
+      "source": "review_cycle_75 审计 F1：致命级 SIGSEGV（captured 7+ 栈参数完全未处理，闭包访问 NULL/garbage），当前未触发因为测试用例 captured 都 ≤6，但用户代码会遇到",
+      "depends_on": [],
+      "severity": "P0"
+    },
+    {
+      "task_id": "backend_x86_64_setcc_rex_prefix",
+      "name": "setcc 8 条指令 REX 前缀扩展：sete/setne/setl/setle/setg/setge/setb/setbe 支持 R8-R15L（目标 reg>=8 时 REX.B=1）",
+      "description": "P1 高危 correctness 定时炸弹（review_cycle_75 审计 H1）。x86_64.py L734-768 共 8 条 setcc 指令，全部硬编码 _modrm(0b11, 0, reg&7) 无 REX 前缀。当 reg >= 8（R8L-R15L）时，reg&7 退化为 0-7 → 结果被写入 AL/BL/CL/DL（R0L-R7L）而非目标字节寄存器，值静默写错误位置。当前 free_callee_gprs 包含 R12-R15（regalloc_v2 的候选池），随着函数 vreg 压力增大，setcc 目标被分配到 R12B-R15B 的概率持续升高（当前测试函数小，约 5% 概率；大函数 >100vreg 时 >40%）。方案：(1) 每条 setcc 在 _modrm 前加：若 reg >= 8 则 append(_rex(0,0,0,1))（REX.B=1，必须 REX.W=0 因为 setcc 目标是 byte）；(2) 或统一封装 _setcc(opcode_ext, reg)：rex = _rex(0,0,0, reg>>3) + _modrm(0b11, opcode_ext, reg&7)；(3) 8 条 sete/setne/... 重构调用统一封装。配套 3 用例：(a) setcc R0L-R7L 生成字节与修复前 100% 一致（回归保护，reg<8 时 rex 空因为 _rex 返回空字节当所有扩展位 0）；(b) sete R8B 生成 REX=0x41（REX.B=1）+ opcode 0x0F 0x94 + ModRM(0xC0=11_000_000=reg=R8L&7=0)；(c) setge R15B 验证字节流（与 SSE REX 修复的字节级断言模式一致）。修改 backend/x86_64.py ~30 行 + tests/test_native_backend.py ~60 行（TestX86_64SetccREX 3 用例）。Cycle 76 后端热身任务，与闭包栈修复并行（改动独立，可 2 小时内完成）。",
+      "track": "backend",
+      "difficulty": "easy",
+      "priority": 86,
+      "estimated_effort": "2小时",
+      "status": "pending",
+      "source": "review_cycle_75 审计 H1：高危定时炸弹，与 Cycle 70 GPR R12→RSP SIGSEGV（Rex 前缀同构 BUG）/ Cycle 74 XMM8-15 SIGILL 完全相同的架构模式——reg>=8 时 REX 扩展位遗漏",
       "depends_on": [
-        "backend_native_regalloc_cc_split"
+        "backend_x86_64_xmm_rex_prefix_pre_fix"
       ],
       "severity": "P1"
     },
     {
       "task_id": "backend_native_stack_frame_rbp_cfi",
-      "name": "栈帧布局精确化：RBP 基址帧模式 + DWARF CFI .eh_frame 元数据生成（CIE + FDE 序列）",
-      "description": "（RBP-only 拆分后剩余部分）DWARF CFI .eh_frame CIE+FDE 字节码生成 + ELF 节区头扩展（.shstrtab/.eh_frame/.symtab/.strtab 4 节区）。RBP 基址帧 + 所有寻址重算已在 backend_native_stack_frame_rbp_only（P85）独立完成。方案：(1) _emit_dwarf_cfi() 生成器：1 条 CIE（Common Information Entry，DW_CFA_def_cfa/offset 操作码 + RSP/RBP 寄存器映射规则）+ 每函数 1 条 FDE（Frame Description Entry，覆盖函数地址范围 + prologue 结束时 def_cfa RSP+16 offset RBP=[CFA-16]）；(2) _generate_elf 的节区头从 shoff=0 空壳扩展为 3+4=7 节：null + .text(已有) + .data(已有) + 新增 .shstrtab(节名表) + .eh_frame(CIE+FDE 序列) + .symtab(函数符号表) + .strtab(符号字符串)；e_shoff / e_shnum / e_shstrndx 字段正确回填；(3) 配套 5 用例：ELF shoff≠0 且 shnum=7、readelf --sections 输出含 .eh_frame、objdump --dwarf=frames 输出含 CIE+FDE 序列、fib(10)嵌套调用 gdb backtrace 输出含函数名帧、CLI --fast-nofp 模式跳过 CFI（RSP-only 模式兼容）。修改 native_backend.py ~450 行（DWARF CFI ~250 + ELF shdr 扩展 ~150）+ test_native_backend.py ~100 行。Cycle 74 后端优先级，strict depends_on RBP-only 完成。",
+      "name": "栈帧拆分B（剩余部分）：DWARF CFI .eh_frame CIE+FDE 字节码生成 + ELF .shstrtab/.eh_frame/.symtab/.strtab 4 新节区 shoff 非零",
+      "description": "P1 Native 栈帧收官（从 80%→92% 的 +12pp 推手）。RBP-only 已在 Cycle 73 落地（frame_base_reg=RBP + frame_stack_bias 透明切换 + 双模式 Prologue/Epilogue），剩余 DWARF CFI 让 backtrace/gdb 调试可以正确解析栈帧。方案：(1) _emit_dwarf_cfi() 生成器：1 条 CIE（CIE_id=0, version=1, augmentation='zR', code_alignment=1, data_alignment=-8, return_address_register=16=RIP；DW_CFA_def_cfa: RSP+16 after call；DW_CFA_offset: RIP at CFA-8, RBP at CFA-16；augmentation data 'z'=1, 'R'=1=DW_EH_PE_pcrel）+ 每函数 1 条 FDE（覆盖函数地址范围 [func_start, func_end]；PC = func_start 时 def_cfa RSP+16；after push RBP → DW_CFA_def_cfa_offset=24 + DW_CFA_offset RBP=CFA-24；after mov RBP,RSP → DW_CFA_def_cfa_register=RBP；after push 5 callee → 5 条 DW_CFA_offset RBX/R12/R13/R14/R15 = CFA-32/-40/-48/-56/-64；after sub rsp,aligned → DW_CFA_def_cfa_offset = 24+40+aligned = 64+aligned）；(2) _generate_elf 的节区头从 shoff=0 空壳扩展为 3+4=7 节：null(0) + .text(1 已有) + .data(2 已有) + 新增 .shstrtab(3 节名表) + .eh_frame(4 CIE+FDE 序列) + .symtab(5 函数符号表) + .strtab(6 符号字符串)；e_shoff = 64(ELF头) + text_size + data_size（页对齐到 0x1000 或 4KB 对齐）；e_shnum = 7；e_shstrndx = 3；(3) 配套 5 用例：ELF shoff!=0 且 shnum=7、.shstrtab 字符串含 .eh_frame/.symtab/.strtab 字节级断言、readelf --sections（若无则结构化字节断言）输出含 .eh_frame 节名、fib(10)嵌套调用 ELF 实际执行仍正确（节区头增加不破坏 text/data 布局）、CLI --fast-nofp 模式跳过 CFI（RSP-only 模式，.eh_frame 节大小=0）。修改 backend/native_backend.py ~450 行（DWARF CFI 字节码 ~250 行 + ELF shdr 扩展 ~150 行 + 注释/文档 ~50 行）+ tests/test_native_backend.py ~120 行（TestDwarfCfiAndElfShdr 5 用例）。Cycle 77 后端主任务，strict depends_on rbp_only 已完成。",
       "track": "backend",
       "difficulty": "hard",
-      "priority": 84,
-      "estimated_effort": "12-16小时",
+      "priority": 88,
+      "estimated_effort": "8-10小时",
       "status": "pending",
-      "source": "review_cycle_69 审计：Native 栈帧子模块 65% 是所有 24 个子模块（3后端×8）中分数最低项；DWARF CFI 生成后 Native 调试效率 +50%，后续所有 hard 任务的开发周期缩短",
+      "source": "原 Cycle 74 主任务（因颗粒度太大被 XMM REX 热身替换）；review_cycle_75 审计确认 Native 栈帧 80%，补齐 CFI 后到 92%（栈帧子模块单项收官）；优先级从 P84 上调到 P88（与 WasmGC struct 改造 P82 拉开距离，因为栈帧是其他 BE 任务的前置）",
       "depends_on": [
         "backend_native_regalloc_linear_scan_v2",
         "backend_native_stack_frame_rbp_only"
@@ -454,28 +325,15 @@
       "severity": "P1"
     },
     {
-      "task_id": "backend_native_instr_selection_bitwise",
-      "name": "指令选择补齐：按位运算 AND/OR/XOR/NOT/SHL/SHR/SAR + CMOVcc 分支less 条件移动",
-      "description": "P2 Native 功能完整性（与 C 后端的功能差距最大项）。C 后端支持完整的按位运算（a & b、a | b、^a、<<、>>、>>>）但 Native 调度表 L754-780 无 7 条映射：用户写 `fn hash(x: Int) -> Int { return (x ^ (x >> 16)) * 0x85ebca6b }` 这样的哈希/加密代码在 Native 后端直接 NotImplementedError。方案：(1) HIR → MIR 侧新增 BinOp 枚举成员：BIT_AND/BIT_OR/BIT_XOR/BIT_NOT/SHL/SHR/SAR（如果缺则补），如果已有则确保 BinOpLowering._lower_binop 把每个枚举映射到对应的 MIRBinOp；(2) ir/lir.py LIR 新增 7 条对应指令（LIRBitAnd/LIRBitOr 等），ir/lir_lowering.py 映射；(3) native_backend.py 调度表新增 7 条映射 → 7 个 emit 函数：_emit_bit_and → AND reg,reg（Opcode 0x21 /r ModRM 模式）、_emit_bit_or → 0x09 /r、_emit_bit_xor → 0x31 /r、_emit_bit_not → NOT reg（F7 /2 ModRM）、_emit_shift_left → SHL reg, CL 或 SHL reg, imm8（D3 /4 或 C1 /4 ib）、_emit_shift_right_logical → SHR（D3 /5）、_emit_shift_right_arith → SAR（D3 /7）；(4) 额外可选：_emit_ternary_cmov（CMOVcc，条件表达式 `cond ? a : b` 转为 test cc + cmovnz dst,src，避免分支预测失败）；(5) 配套 9 用例：AND/OR/XOR/NOT 各 1（结果断言）、SHL/SHR/SAR 与 Python 位运算结果对比（含负数 SAR 算术右移符号位填充）、大位宽 x>>32 不 crash、CMOVcc 分支less 模式下 perf stat branch-misses 对比 10 次三元表达式 ≤ 传统 if-else 分支的 30%。修改 ir/hir.py（如缺枚举）+ mir.py + lir.py + lir_lowering.py（如缺映射）+ native_backend.py ~200 行 + test_native_backend.py ~120 行 9 用例。Cycle 70 后端第二优先级，与 frontend_adt_field_suggestion 并行（两任务零依赖）。",
-      "track": "backend",
-      "difficulty": "medium",
-      "priority": 85,
-      "estimated_effort": "4-6小时",
-      "status": "completed",
-      "source": "review_cycle_69 审计：Native 指令选择子模块 72% 与 C 后端控制流 88% 的最大功能缺口 = 按位运算 7 条指令缺失；加密/哈希/网络协议 Nova 代码全部 silent 降级到 NotImplementedError",
-      "depends_on": [],
-      "severity": "P2"
-    },
-    {
-      "task_id": "backend_wasmgc_native_struct_array",
-      "name": "WasmGC 升级：引入原生 (type $adt_X (struct ...)) + (type $list_T (array ...)) 声明替换 nova_* runtime 模拟",
-      "description": "P2 WasmGC 类型安全跃迁（WasmGC 完成度从 73.8%→80% 的关键跳变）。当前 WasmGC 后端的 List/Tuple/Map/ADT 复合结构全部走 nova_list_new/nova_adt_new 等导入运行时函数（C 实现），Wasm 验证器无法检查字段访问类型（field index 是运行时参数，不是静态立即数），GC 也无法精确追踪每个字段的引用（nova_* 返回 externref，GC 把整个对象当黑盒）。方案：(1) Type 扫描阶段：遍历 Program 中的所有 TypeDecl/ADTDecl/List<T>/Tuple<T1,T2>/Map<K,V> 实例化类型 → 生成对应的 WasmGC 原生声明：(type $Point (struct (field f64) (field f64))) 对应 Point { x: Float, y: Float }；(type $list_Int (array i64)) 对应 List<Int>；(type $adt_Option_Int (struct (field i32 variant_tag) (field i64))) 对应 Option<Int>（多变体用联合模式：所有变体的 field 并集 + 最大 size 对齐）；(2) 构建阶段：_compile_build_list 从 (call $nova_list_new) + (call $nova_list_push) N 次 → 改为 (array.new_default $list_Int (i32.const N)) + (array.set $list_Int (i32.const idx) elem) N 次；_compile_build_adt 从 call nova_adt_new → (struct.new $adt_X (i32.const variant_tag) field_val...)；(3) 读取阶段：_compile_index_access (list[i]) 从 call nova_list_get → (array.get $list_T (local.get $list_ref) (local.get $idx))；_compile_field_access 从 nova_adt_get_field → (struct.get $adt_X N)；(4) GC 精确性：所有引用对象现在是 (ref null $type_X) 而非 externref → Wasm GC 可以遍历每个字段的引用，不需要 runtime 侧手动标记；(5) 配套 6 用例：(a) wat 字符串含 (type (struct ...)) 声明存在；(b) array.set/get 操作替换 nova_list_*；(c) wasm-tools validate（如无工具则用结构化断言）对 100 行 WAT 输出无 type mismatch；(d) Float 元素 array.get 返回值类型 f64（不再需要 f64.reinterpret_i64）；(e) ADT struct.get N 的 N 是静态立即数不是运行时参数（字节级断言：struct.get 操作码后是 LEB128 立即数 N）；(f) 混合 List<ADT> 嵌套结构构建+读取无验证错误。修改 wasm_backend.py ~550 行（类型声明扫描 ~100 + 构建替换 ~300 + 读取替换 ~150）+ test_backends.py ~150 行 6 用例。Cycle 71 后端第二优先级，与 frontend_type_system_test_matrix 并行。",
+      "task_id": "backend_wasmgc_struct_phase1",
+      "name": "WasmGC 原生改造 阶段 1/2：(type $adt_xxx_struct) 声明生成 + struct.new/struct.get/struct.set 替换 nova_adt_new/set_field/get_field 的 ADT 路径",
+      "description": "（拆分自原 backend_wasmgc_native_struct_array P82 hard 颗粒度太大）P2 WasmGC 复合结构 65%→82% 的第一推手。保留 List/Tuple/Map 继续走 nova_* runtime（阶段 2 处理），仅处理 ADT 路径降低 50% 工作量。方案：(1) Type 扫描阶段：_scan_adt_types(program) 深度优先遍历 Program 中的所有 TypeDecl/ADTDecl + 表达式中出现的具体 ADT 实例化类型（如 Some(42) 触发 Option<Int> 的实例化）→ 生成 (type $adt_Option_Int (struct (field i32 variant_tag) (field i64 field_0_Value)))；多变体 ADT 联合布局：所有变体的 field 并集 + 最大 size 对齐（tag 永远 4B i32 + 各变体 field 类型 Wasm 映射，取最大对齐后的 slot 偏移）；(2) 构建阶段：_compile_build_adt 从 call nova_adt_new(type_id, variant_tag) + N 次 nova_adt_set_field(obj, idx, val) → 改为 (struct.new $adt_xxx (i32.const variant_tag) field0_val field1_val ...)（字段顺序按扫描时的并集顺序）；(3) 读取阶段：_compile_match_discriminant 从 call nova_adt_get_tag(obj) → (struct.get $adt_xxx 0 obj)（tag 是 field 0）；_compile_field_access（ADT 字段）从 call nova_adt_get_field(obj, idx) → (struct.get $adt_xxx N obj)（N 是字段序号=tag_idx+1 + field_idx_within_variant 偏移映射表）；(4) 类型侧：ADT 实例化类型的 Wasm 类型不再是 i32 指针，而是 (ref null $adt_xxx_struct)——需要在 _WASM_TYPE_MAP 中新增 ADT 实例化类型→Wasm GC struct ref 的动态映射；(5) 兼容策略：用户未定义任何自定义 ADT 时（仅使用内置 Option/Result）→ 阶段 1 仍覆盖 Option/Result（当前硬编码的 option_none/option_some struct 声明 L124-132 替换为动态扫描生成）；配套 6 用例：(a) WAT 字符串中 (type (struct ...)) 声明存在（包含用户自定义 ADT 类型名）；(b) Some(42) 构建的 WAT 中出现 (struct.new 而非 nova_adt_new)；(c) match Some(x) 判断 discriminant 使用 (struct.get 0 而非 nova_adt_get_tag)；(d) 多变体 ADT Color{R,G,B} 的 3 个变体构建时 struct.new 字段数正确（并集布局下 tag + R_slot + G_slot + B_slot = 4 field）；(e) 未使用 ADT（纯 List 代码）时 Option/Result 内置走原生 struct（Nova 核心库已用 Option，必有至少 2 个 struct 声明）；(f) wasm-tools validate 字节级断言（如无工具则结构化 WAT 语法断言：所有 struct.get 第二个参数是整数立即数而非运行时变量 i32.const idx）。修改 backend/wasm_backend.py ~350 行（类型扫描 ~80 行 + struct 构建替换 ~150 行 + struct 读取替换 ~100 行 + 类型映射扩展 ~20 行）+ tests/test_backends.py ~130 行（TestWasmGcStructPhase1 6 用例）。Cycle 77 后端第二主任务（与栈帧 CFI 同轮并行：两任务文件无交集，wasm_backend vs native_backend 完全独立）。",
       "track": "backend",
       "difficulty": "hard",
       "priority": 82,
-      "estimated_effort": "10-14小时",
+      "estimated_effort": "8-10小时",
       "status": "pending",
-      "source": "review_cycle_69 审计：WasmGC 复合结构子模块 65% = 全走 runtime 模拟，切原生后字段访问静态检查 + GC 精确回收，WasmGC 完成度 +6pp 到 ≥80%；Float 位转换 (i64.reinterpret_f64) 也可以彻底删除（原生类型系统知道每个元素的真实 Wasm 类型）",
+      "source": "review_cycle_75 审计：原 backend_wasmgc_native_struct_array 颗粒度太大（10-14h 超一轮容量），拆为 ADT(struct 阶段1)+ List/Map/Tuple(array 阶段2) 两个独立子任务，每轮消化一个；阶段1 处理 ADT（ROI 更高：Nova 代码大量使用 ADT + match），阶段2 处理容器",
       "depends_on": [
         "backend_fix_wasmgc_adt_float"
       ],
@@ -483,34 +341,135 @@
     },
     {
       "task_id": "backend_native_abi_struct_return",
-      "name": "ABI 调用补齐：大结构体 >16 字节 by-value 返回的 System V AMD64 规范（RDI 指针返回约定）",
-      "description": "P2 Native C 互操作性卡点。当前 Native 后端仅支持 ≤16 字节的返回值（RAX:RDX 两寄存器联合返回 i128/f128 以内的标量）。用户写 struct Vec3 { x: Float, y: Float, z: Float } = 24 字节；fn make() -> Vec3 { Vec3 { 1.0, 2.0, 3.0 } } 目前生成的代码：要么尝试把 3 个 double 塞进 RAX:RDX（溢出高位丢失），要么走指针降级但 ABI 约定不匹配（C 侧 struct Vec3 f() 的调用约定是调用方分配 24 字节临时空间、RDI 传该空间的指针、f() 把值写进 *RDI 后返回 RAX=RDI 指针）。方案：(1) Type 判断：_is_return_struct_by_value(ty) = isinstance(ty, TupleType) and len(ty.elements) > 2 或 isinstance(ty, ADTType) and sizeof(ty) > 16（sizeof 用 field.size 求和 + 对齐填充）；(2) 被调用者侧（函数定义）：_emit_function_prologue 在 Step 0 保存 RDI（入参的返回值指针）到 callee-saved 寄存器（或 spill 到栈帧 reserved slot）；函数体的 Return(value) 指令改为 _store_struct_to_return_ptr(retval_ptr, value_ty, value_regs_or_stack_slots)（按字段偏移依次 mov [RDI+off], field_reg 或 movsd [RDI+off], XMM_field）；最后 mov RAX, RDI（返回值指针）；(3) 调用者侧（_emit_abi_call_direct Step 0）：_is_return_struct_by_value(callee.return_type) 为真时，先 sub rsp, sizeof(ret_ty) + 16 字节对齐（保留临时空间），把 RSP 顶地址（或对齐后的）mov RDI, RSP；call 结束后结果在 *RDI（也就是 *RSP），按需要 copy 到持久化位置（比如赋值给局部变量）；(4) 特殊：memcpy 小结构体（17-32 字节可用 2 次 16 字节 movups，>32 用 rep movsq 循环，避免逐字段分支膨胀）；(5) 配套 5 用例：Vec3(3xFloat=24 字节) 调用结果断言字段值正确、LargeStruct(10xInt=80 字节) 字段值全部正确、嵌套 struct Outer { inner: Vec3, extra: Int } 4 字段值、跨 extern \"C\" 调用 C 侧返回结构体（可用 runtime 侧模拟 C 返回 stub）、≤16 字节小结构走 RAX:RDX 快速路径不受影响（无性能回归）。修改 native_backend.py ~180 行（ABI 骨架 Step 0 扩展 + 两个辅助函数）+ test_native_backend.py ~100 行 5 用例。Cycle 72 后端第二优先级，depends_on 栈帧 CFI（prologue/epilogue 重构后更易插入 RDI 保存/恢复）。",
+      "name": "ABI 调用补齐：大结构体 >16 字节 by-value 返回的 System V AMD64 规范（RDI 返回指针约定）",
+      "description": "P2 Native C 互操作性卡点（review_cycle_75 优先级从 80→82 上调，因为 rbp_only 已完成无前置阻塞，栈帧 CFI 非必须前置 = 可以在 CFI 之前启动）。当前 Native 后端仅支持 ≤16 字节返回值（RAX:RDX 两寄存器），struct Vec3{x:Float,y:Float,z:Float}=24B 会溢出高位。方案：(1) Type 判断：_is_return_struct_by_value(ty) = isinstance(ty, TupleType) and len(ty.elements) > 2 或 isinstance(ty, ADTType) and sizeof(ty) > 16（sizeof 用 field.size 求和 + 8B 对齐）；(2) 被调用者侧：_emit_function_prologue 在 Step 0 保存 RDI（入参的返回值指针）到 callee-saved 寄存器（R12 或 spill 到 RBP 预留槽）；函数体 Return(value) 改为 _store_struct_to_return_ptr(retval_ptr, value_ty, value_regs_or_stack_slots)（按字段偏移 mov [RDI+off], field_reg / movsd [RDI+off], XMM_field），最后 mov RAX,RDI；(3) 调用者侧（_emit_abi_call_direct Step 0）：判定为真时，先 sub rsp, sizeof(ret_ty)+16B 对齐（临时空间），mov RDI,RSP（RSP 顶是临时空间对齐后的地址）；call 结束后结果在 *RDI，按需要 copy 到持久化位置；(4) 小结构体优化：17-32B 可用 2 次 16B movups，>32B 用 rep movsq 循环（避免逐字段分支膨胀）。配套 5 用例：Vec3(3xFloat=24B) 调用结果断言字段值正确、LargeStruct(10xInt=80B) 字段值全部正确、嵌套 struct Outer{inner:Vec3,extra:Int} 4 字段值、跨 extern C 调用 C 侧返回结构体（可用 runtime 侧模拟 C 返回 stub）、≤16B 小结构走 RAX:RDX 快速路径字节级无差异（回归保护）。修改 backend/native_backend.py ~180 行（ABI 骨架 Step0 扩展 + 两个辅助函数）+ tests/test_native_backend.py ~120 行（5 用例）。Cycle 78 后端主任务（depends_on rbp_only 已完成）。",
       "track": "backend",
       "difficulty": "medium",
-      "priority": 80,
+      "priority": 82,
       "estimated_effort": "4-6小时",
       "status": "pending",
-      "source": "review_cycle_69 审计：Native ABI 子模块 82% 的拖后腿项 = 大结构体 by-value 返回不兼容 System V AMD64；补齐后 Nova/C 互操作的 90% 用例（游戏引擎/数学库的 Vec3/Mat4 值传递）可用",
+      "source": "review_cycle_75 审计：原 P80 上调到 P82（依赖 rbp_only 已完成，不再依赖 CFI，前置阻塞清零；结构体返回 ABI 是 C/Nova 互操作 90% 场景的卡点）",
       "depends_on": [
         "backend_native_stack_frame_rbp_only"
       ],
       "severity": "P2"
     },
     {
+      "task_id": "frontend_lexer_numeric_prefix",
+      "name": "Lexer 数字字面量扩展：0x/0o/0b 前缀（十六进制/八进制/二进制）+ _ 数字分隔符（1_000_000）",
+      "description": "P2 前端用户体验（review_cycle_75 审计 M6 关闭：中危体验缺陷）。当前 _read_number（lexer.py L249-270）仅支持十进制整数 + 浮点字面量，不支持 0xFF（十六进制）/ 0o777（八进制）/ 0b1010_1100（二进制），也不支持 1_000_000 千位分隔符。Nova 面向系统编程（Native/WasmGC/C 后端），这三类字面量是行业标配。方案：(1) _read_number 首字符判断：若 cur==0 且下一个字符是 x/X/o/O/b/B → 分支进入对应基数；否则进入原十进制路径；(2) 十六进制：0[xX] 后 [0-9a-fA-F_]+ 解析为 base=16，忽略 _（分隔符任意位置不影响值）；八进制：0[oO] 后 [0-7_]+ base=8；二进制：0[bB] 后 [01_]+ base=2；(3) 分隔符 _：十进制整数/浮点/十六进制/八进制/二进制全路径扫描时跳过 _（允许任意位置：1_000、0xFF_FF、0b1010_1100；不允许连续 __ 或开头 _ 即 _100 是标识符不是数字）；(4) 浮点后缀：原浮点路径允许 _ 出现在整数部分和小数部分；(5) 配套 8 用例：0xFF==255、0o777==511、0b1010==10、1_000_000==1000000、0xDEAD_BEEF==3735928559、浮点数 3.14_159_265（数值正确）、0b 后非 0/1 报错（LexerError）、_100 被当作标识符（不被 Lexer 误吞为数字，回归保护）。修改 lexer.py ~45 行（_read_number 扩展 3 个新基数分支 + _ 跳过 + 开头 _ 排除）+ tests/test_lexer.py ~90 行（TestLexerNumericPrefix 8 用例）。Cycle 76 前端第二优先级（窄化栅栏闭合 2h 完成后紧接着开发，与 setcc REX 后端热身并行）。",
+      "track": "frontend",
+      "difficulty": "easy",
+      "priority": 80,
+      "estimated_effort": "3小时",
+      "status": "pending",
+      "source": "review_cycle_75 审计 M6：中危用户体验缺陷 + Lexer 数字字面量是前端「最后一公里」的常见缺口，ROI 高（3 小时开发，用户写系统级代码体验 +20%）",
+      "depends_on": [],
+      "severity": "P2"
+    },
+    {
+      "task_id": "backend_wasmgc_array_phase2",
+      "name": "WasmGC 原生改造 阶段 2/2：List<T> 用 (type $list_T (array $elem_wasm_type)) + array.new_default/array.get/array.set 替换 nova_list_*；Tuple/Map 继续走 runtime（ROI 较低）",
+      "description": "（拆分自原 backend_wasmgc_native_struct_array）P2 WasmGC 复合结构 82%→88% 的第二推手。仅处理 List<T>（Nova 代码中使用频率最高的容器 = 占 nova_list_* 调用 80%），Tuple/Map 保留 runtime（频率低 + Map 需要哈希表，WasmGC 原生 array 无法直接替代）。方案：(1) Type 扫描阶段：_scan_list_types(program) 收集所有具体元素类型的 List 实例化类型（List<Int>/List<Float>/List<String>/List<ADT> 分别生成不同 (type)，泛型 List<T> 不生成保持 runtime 路径）→ (type $list_Int (array i64)) / (type $list_Float (array f64)) / (type $list_String (array (ref null $nova_string_struct))) / (type $list_ADT_X (array (ref null $adt_X)))；字符串/ADT 的 Wasm 类型需要阶段 1 的 struct 声明已生成（严格 depends_on backend_wasmgc_struct_phase1）；(2) 构建阶段：_compile_build_list 从 nova_list_new(cap) + N 次 nova_list_push(lst, elem) → 改为 (array.new_default $list_T (i32.const N)) + N 次 (array.set $list_T (i32.const idx) elem)；若初始容量 cap > N 且后续 push → 保留 nova_list_grow runtime 调用（array 固定长度，暂不支持动态扩容，超 List 字面量的初始 N 件时回退到 runtime 路径——Nova 代码 List 字面量 95% 是固定大小，回退场景极少）；(3) 读取阶段：_compile_index_access list[i] 从 call nova_list_get(lst, i) → (array.get $list_T lst_ref i_var)；runtime 侧 bounds check 改为前端 TypeChecker 侧静态长度已知时校验（编译期能算的 i>=len 直接报错）+ 未知时插入 Wasm (if (i32.ge_u i len) (unreachable)) 替代 nova_list_get 的运行时检查；(4) len() 函数：List 类型走 array.len（WasmGC array.len 指令 i32 返回），不再走 nova_list_len；(5) 回退路径：泛型 List<T>（元素类型编译期未知=HM 多态下的 TVar）→ 保留原 nova_list_* 调用（不破坏多态性）；配套 6 用例：(a) List<Int>=[1,2,3] 构建 WAT 出现 array.new_default 而非 nova_list_new；(b) List<Int>[1] 读取 WAT 出现 array.get 第二个参数是运行时变量（与 struct.get 的立即数不同）；(c) len(List<Float>=[1.0,2.0]) 用 array.len 返回 2（数值断言）；(d) List<Option<Int>>=[Some(1),None,Some(3)]（嵌套 List<ADT>）的 WAT 中 array.set 的 elem 是 (ref null $adt_Option_Int)（类型正确穿透）；(e) 泛型 List<T> 函数体内仍走 nova_list_*（回退路径不破坏多态）；(f) wasm-tools validate（或字节级断言）：array.get/set 的 type index 与 (type (array ...)) 声明一致。修改 backend/wasm_backend.py ~350 行（List 类型扫描 ~60 行 + array 构建替换 ~140 行 + array 读取替换 ~120 行 + 泛型回退路径 ~30 行）+ tests/test_backends.py ~120 行（TestWasmGcArrayPhase2 6 用例）。Cycle 78 后端第二主任务。",
+      "track": "backend",
+      "difficulty": "hard",
+      "priority": 80,
+      "estimated_effort": "8-10小时",
+      "status": "pending",
+      "source": "review_cycle_75 审计：WasmGC 原生改造分两阶段降低颗粒度；阶段 2 处理 List（80% 容器使用场景），Tuple/Map（20%）留待未来版本单独优化（当前 ROI 不足）",
+      "depends_on": [
+        "backend_wasmgc_struct_phase1"
+      ],
+      "severity": "P2"
+    },
+    {
+      "task_id": "frontend_ast_visitor_framework",
+      "name": "AST 访问者框架：ast_nodes.py 所有 55+ 节点 accept(visitor) + NodeTransformer 通用重写器（IDE 增量重解析/宏系统/lint 规则前置基建）",
+      "description": "P2 前端架构基建（解决 FE 侧任务颗粒度太小=FE 100% 收官后缺少子系统级攻坚项的结构性失衡）。当前 AST 节点是 55 个裸 dataclass，没有统一的 Visitor 遍历接口，任何 AST 处理（IDE 高亮节点定位、宏展开、代码格式化、lint 规则扫描）都需要手写 55 个 isinstance 分支的 dispatch 代码，导致二次开发效率极低。方案：(1) 定义 AstVisitor 基类：visit(node, *args, **kwargs) = getattr(self, f'visit_{type(node).__name__}', self.generic_visit)(node, *args, **kwargs)；generic_visit 按节点 dataclass 字段顺序递归 visit 所有子节点和子节点列表（标准 Python ast.NodeVisitor 模式）；(2) 定义 AstTransformer(AstVisitor)：重写 visit_* 返回新节点（可以返回 node 自身 = 不修改，或返回新节点 = 替换）；generic_visit 对所有子节点递归 transform 后用 dataclasses.replace(node, **replaced_fields) 生成新节点（不可变 AST 语义）；(3) ast_nodes.py 所有 55 个 dataclass 节点新增 def accept(self, visitor): return visitor.visit(self) 方法（或通过 mixin 类 AstNode 继承避免 55 次重复代码）；(4) 配套 2 组基础测试：(a) AstVisitor 用例——CollectIdents（遍历整棵 AST 收集所有 Identifier 节点）对 let x=1; f(x, y) 正确返回 [x, f, x, y]；(b) AstTransformer 用例——DoubleLiterals（所有 IntLiteral 的 value×2）对 let x = 1 + 2 生成 let x = 2 + 4 且结构不变；(c) 1 个不变性测试——transform 不修改原始 AST 节点（返回全新 dataclass 实例）；修改 ast_nodes.py ~60 行（AstNode mixin + 所有节点继承 AstNode + Visitor/Transformer 基类定义）+ 新增 ~20 行类型导入；tests/test_ast_nodes.py ~120 行（TestAstVisitorFramework 3+ 用例）。Cycle 77 前端主任务（与 backend_wasmgc_struct_phase1 + backend_native_stack_frame_rbp_cfi 同轮并行，三者文件零交集）。",
+      "track": "frontend",
+      "difficulty": "medium",
+      "priority": 78,
+      "estimated_effort": "5-6小时",
+      "status": "pending",
+      "source": "review_cycle_75 审计「结构性失衡诊断」：FE 剩余任务颗粒度太小（2-3h/项），BE 任务颗粒度太大（8-10h/项），需要抬升 FE 侧的子系统级基建任务的颗粒度——AST 访问者是 IDE/Lint/宏三大子系统的共同前置，ROI 高且属于「做一次以后所有 FE 新特性快 30%」的杠杆型基建",
+      "depends_on": [],
+      "severity": "P2"
+    },
+    {
       "task_id": "backend_native_abi_test_coverage",
-      "name": "Native ABI 骨架长尾 + WasmGC wat 合法性双测试补齐（Native ABI +10 场景 / WasmGC 6 场景）",
-      "description": "P2 后端测试覆盖（review_cycle_69 审计：native_backend 测试密度 0.38，backend 综合 0.39 = 前端平均 0.88 的 ~44%）。方案分两部分：Part A【Native ABI 骨架 +10 场景】（test_native_backend.py 约 200 行）：(1) 8 int 参数 + 1 int 溢出；(2) 8 float + 1 float 溢出（配合 XMM0_conflict 修复回归）；(3) 混合 5 int + 5 float 验证 XMM/GPR 互不干扰；(4) 无参数函数调用；(5) runtime_call 场景 4 个（nova_alloc/nova_list_push/nova_print_int/nova_panic 带 imm 参数各 1）；(6) call_indirect float 参数/返回值 1；(7) 递归调用 fibonacci(10) = 55 ELF 实际执行；(8) 16 字节栈对齐验证。Part B【WasmGC wat 合法性验证 +6 场景】（test_backends.py 约 150 行）：(1) ADT 构建+match 的 WAT 中 (i32.const) 出现次数与变体数匹配；(2) float list 构建 WAT 出现 i64.reinterpret_f64；(3) 反向读取 float 出现 f64.reinterpret_i64；(4) 闭包创建 WAT 中 env_ptr + func_ptr 双字段结构存在；(5) call_indirect WAT 中 type index 与 type section 声明一致；(6) switch br_table 多臂结构存在。Part A 依赖 backend_native_float_imm_xmm0_conflict、Part B 依赖 backend_fix_wasmgc_adt_float，两项 Cycle 72 与前端第三任务并行开工。两 Part 合计修改 2 测试文件 ~350 行。",
+      "name": "Native ABI 骨架长尾 + WasmGC wat 合法性双测试补齐（Native ABI ×10 场景 / WasmGC ×6 场景共 16 用例，Native 测试密度 0.42→0.50 达标）",
+      "description": "P3 后端测试密度达标（review_cycle_75 密度 0.42 < 安全线 0.5，review69 审计 18 个月前的缺口至今未补）。Part A【Native ABI ×10 场景】test_native_backend.py ~200 行：(1) 8 int 参数 + 第 9 个 int 溢出到栈（10xInt = 6 reg + 4 stack）；(2) 8 float + 第 9 个 float 溢出（XMM0-7 用完 + 栈上 1 个 f64，配合 XMM0_conflict 修复回归）；(3) 混合 5 int + 5 float 验证 XMM/GPR 互不干扰（RDI/RSI/RDX/RCX/R8 = 5 int，XMM0-4 = 5 float，无寄存器冲突）；(4) 无参数函数调用 + 空返回值；(5) runtime_call 场景 4 个：nova_alloc 带 imm size 参数 / nova_list_push 两参数 / nova_print_int 带 imm / nova_panic 带 string 指针（4 个各 1）；(6) call_indirect float 参数/返回值 1（fnptr = f64->f64 平方函数，通过闭包 fnptr 调用）；(7) 递归调用 fibonacci(10) = 55 ELF 实际执行（通过 subprocess 调用生成的 ELF 文件，捕获 stdout）；(8) 16 字节栈对齐验证（通过 prologue 末 sub rsp 之后的 RSP % 16 == 0 字节级间接断言）。Part B【WasmGC wat 合法性 ×6 场景】test_backends.py ~150 行：(1) ADT 构建+match 的 WAT 中 (i32.const) 出现次数与变体数匹配；(2) float list 构建 WAT 出现 i64.reinterpret_f64（阶段 2 前的路径=旧 nova_list_*）；(3) 反向读取 float 出现 f64.reinterpret_i64；(4) 闭包创建 WAT 中 env_ptr + func_ptr 双字段结构存在（闭包对象的双 word 布局）；(5) call_indirect WAT 中 type index 与 type section 声明一致（字节级断言：call_indirect 的立即数 idx = 函数类型在 type section 中的位置序号）；(6) switch br_table 多臂结构存在（LIRSwitch 降级出的 br_table）。Part A 依赖 backend_native_float_imm_xmm0_conflict、Part B 依赖 backend_fix_wasmgc_adt_float，两项依赖均已完成（Cycle 68/Cycle 67）。修改 2 个测试文件合计 ~350 行（无源码改动）。Cycle 77 或 78 轮的测试密度专项（与 CFI / ADT struct 等大任务并行开发，纯测试不影响源码 = 可单人独立并行）。",
       "track": "backend",
       "difficulty": "medium",
-      "priority": 80,
-      "estimated_effort": "4-6小时",
+      "priority": 78,
+      "estimated_effort": "4-5小时",
       "status": "pending",
-      "source": "review_cycle_69 审计：Native 测试密度 0.38（源码 2773 行 vs 测试 1045 行）低于业界安全线 0.5；emit_abi_call_direct 280 行 10 步骨架缺乏 Float imm 溢出/混合参数/递归调用等长尾场景测试",
+      "source": "review_cycle_69 审计：Native 测试密度 0.38（源码 2773/测试 1045）< 安全线 0.5；Cycle 75 审计 0.42 仍未达标；本任务 +16 用例 ≈ 180 行，密度 0.42→0.50 恰好达标",
       "depends_on": [
         "backend_fix_wasmgc_adt_float",
         "backend_native_float_imm_xmm0_conflict"
       ],
-      "severity": "P2"
+      "severity": "P3"
+    },
+    {
+      "task_id": "frontend_hm_generalize_level",
+      "name": "HM 泛化精度提升：_generalize/_walk_type_generalize 利用 TypeVar.level 字段（已声明 L216），仅泛化 level < 当前 let 绑定深度的 TVar（修复深层嵌套 let 过度保守问题）",
+      "description": "P3 前端类型精度（review_cycle_75 审计的类型系统分项扣分项：level 声明了但从未使用）。当前 _generalize(type_checker.py L2538) 仅通过 env_free（环境中自由 TVar 集合）判断哪些 TVar 可以泛化，不考虑 let 嵌套深度。对嵌套场景：let f = (let g = λx.x in g) in (f 1, f True)，内层 g 应是 ∀a.a→a 多态，外层 f 接收多态值后也应多态——但当前 env_free 近似在部分深层嵌套下过度保守（把内层可泛化的 TVar 当作外层环境的自由变量不泛化），导致 f 被实例化为 Int→Int，f True 报类型错误。方案：(1) TypeVar.level（L216 已声明 = int 类型，默认 = 当前 env.depth）在 _fresh_tvar() 创建时赋值 = env.depth（每进入一个 let 绑定 env.depth +=1）；(2) _walk_type_generalize(L2573) 的 TVar 分支判断：若 tvar.is_generalized=False 且 (tvar.level < env.depth or tvar.id not in env_free) → 标记 is_generalized=True；原仅 not in env_free 条件升级为「OR 小 level 条件」（level 小的 TVar 来自更外层的环境，被当前 let 捕获后应该被当前 let 泛化——即使 id 巧合出现在 env_free 中，只要 level < env.depth 说明它是当前 let 绑定 scope 内创建的，可安全泛化）；(3) 配套 4 用例：(a) 经典嵌套 let-polymorphism（上面的例子 f 可以同时应用于 Int 和 Bool，返回 (1, True) 类型正确）；(b) 回归保护：mut 绑定仍然不泛化（_is_syntactic_value 的 Value Restriction 不受影响）；(c) 三重嵌套：let a = (let b = (let c = λx.x in c) in b) in a 1 + a 2 正确（c/b/a 全都是 ∀a.a→a）；(d) 引用传递：let f = λg. (g 1, g True) in f (λx.x) —— 参数 g 是被调用者传入的，不被 f 泛化（g 在 f 的参数 scope，level = env.depth = 同一 level = 不泛化），因此报错（与 HM 规则一致：参数不能在函数体内被多态使用——需要显式 rank-2 类型）。修改 type_checker.py ~15 行 + tests/test_type_checker.py ~80 行。Cycle 77 或 78 前端间隙消化任务，与 AST 访问者框架的 5-6h 大任务并行开发。",
+      "track": "frontend",
+      "difficulty": "easy",
+      "priority": 76,
+      "estimated_effort": "3-4小时",
+      "status": "pending",
+      "source": "review_cycle_75 审计：类型系统分项 HM 泛化 9/10 的唯一扣分点——TypeVar.level 字段声明于 type_checker.py L216，但 _generalize / _walk_type_generalize 路径完全不读，精度损失",
+      "depends_on": [
+        "frontend_let_polymorphism_generalize"
+      ],
+      "severity": "P3"
+    },
+    {
+      "task_id": "frontend_numeric_type_extension_and_cli",
+      "name": "多位数类型 i8/i16/i32/i64/u32/f32/f64 + strict_narrowing CLI 开关（窄化栅栏从单一 i32 假设升级为真实位宽判断）",
+      "description": "P3 前端类型系统扩展（为 Native SIMD/FFI/C 互操作前置基础）。review_cycle_75 优先级从 74→72 下调（新增 depends_on frontend_narrowing_fence_closure——必须先闭合致命缺陷再扩展类型位宽，否则多位宽的窄化栅栏检测会错位）。原方案保留：Part A【多位数类型】(1) PrimTypeKind 枚举新增 I8/I16/I32/I64/U32/F32/F64（Int/Float 作为别名=I64/F64 向后兼容）；(2) Lexer 字面量后缀：10i8/10i16/10i32/10i64/10u32/1.0f32/1.0f64，_parse_number_literal 解析后缀绑定对应类型；(3) TypeChecker _check_literal_expr 窄化阈值按实际位宽：i8 max=127/i16=32767/i32=2^31-1/u32=2^32-1/f32=2^24 mantissa；Part B【CLI开关】(4) compiler_cli.py/cli.py 新增 --narrowing=strict|warn|off 三档（默认 strict），TypeChecker 初始化时从 CompilerConfig 读 narrow_mode；(5) _detect_narrowing_risk 的 3 处 hardcoded strict_narrowing=True → 改为 cfg.narrow_mode=='strict' 时 raise Error，==warn 时 append Warning，==off 时静默跳过。配套 10 用例：(A 6) i8 127OK / 128报错 / u32 4294967295OK / f32 字面量后缀绑定 F32 类型 / Int 别名仍解析为 I64 / Float 别名解析为 F64；(B 4) --narrowing=warn 仅告警不报错 / --narrowing=off 完全静默 / strict 默认报错 / 库代码第三方依赖 off 模式不阻断编译。修改 lexer.py(~15行) / parser.py(~20行) / type_checker.py(~80行阈值适配+3处cfg替换) / cli.py+compiler_cli.py(~30行CLI参数) + tests/test_type_checker.py(~120行10用例)。Cycle 78 前端主任务（strict depends_on frontend_narrowing_fence_closure）。",
+      "track": "frontend",
+      "difficulty": "medium",
+      "priority": 72,
+      "estimated_effort": "6-8小时",
+      "status": "pending",
+      "source": "review_cycle_72 审计：隐式窄化栅栏基于单一 i32 假设是设计技术债；review_cycle_75 审计确认窄化栅栏的 overflow_risk 赋值未闭合（致命缺陷未修），本任务优先级从 P74 下调到 P72，新增 strict depends_on frontend_narrowing_fence_closure 先闭合再扩展",
+      "depends_on": [
+        "frontend_implicit_numeric_cast_fence",
+        "frontend_narrowing_fence_closure"
+      ],
+      "severity": "P3"
+    },
+    {
+      "task_id": "backend_runtimecall_unify_phase3",
+      "name": "三后端统一架构：LIR 层引入 LIRRuntimeCall(op: RuntimeOp, args: List[LIRExpr]) 封装 nova_list_* / nova_map_* / nova_adt_*；三后端各自实现 RuntimeOp→thunk 的 20 行映射表（消除 400+ 行重复代码）",
+      "description": "P3 后端可维护性（review_cycle_75 审计 M3 关闭：中危维护性缺陷——List/Map/Tuple/ADT 构建逻辑在 Native/Wasm/C 三后端独立实现 3 套，未来加新容器需改 3 处 × 每个操作 3 份 = 9 份代码）。**放在最后执行（Cycle 78 尾期或 Cycle 79+）**：需先完成 WasmGC 阶段 1-2 验证 RuntimeOp 设计对 WasmGC 原生指令模式的兼容性——否则过早抽象可能把 WasmGC 侧「走原生 struct/array 指令、完全不用 runtime」的优化路径也错误封装进 RuntimeOp（设计冲突）。方案：(1) ir/lir.py 新增枚举 RuntimeOp = {LIST_NEW, LIST_PUSH, LIST_GET, LIST_LEN, MAP_NEW, MAP_PUT, MAP_GET, ADT_NEW, ADT_SET_FIELD, ADT_GET_FIELD, ADT_GET_TAG, ALLOC} 共 12 个操作；新增 LIRRuntimeCall 节点（继承 LIRInstruction 或 LIRExpr，参考 LIRCall 的结构）；(2) ir/lir_lowering.py 新增 _lower_runtime_op：把 HIR 的 BuildList/BuildMap/BuildADT/IndexAccess（List 路径）/FieldAccess（ADT 路径）降级为对应的 LIRRuntimeCall，替代当前「HIR→MIR→LIR 分别独立降级然后三后端再各自映射」的三层嵌套 triplicate；(3) 三后端各 ~20 行映射表：C 后端 LIRRuntimeCall → sprintf 调用 nova_list_new(...) 字符串（与现有代码一致，只是从 switch 改为映射表 lookup）；WasmGC 后端 → 若 op ∈ {LIST_NEW, LIST_GET, ADT_NEW, ADT_GET_FIELD} 且对应类型有原生 (array)/(struct) 声明（阶段 1-2 已做）→ 用 array.new/struct.get 等原生指令，否则 fallback 到 call nova_* runtime；Native 后端 → 用 _emit_runtime_call(allow_imm_args=True) 框架（已存在，统一封装 emit_abi_call_direct）；(4) 配套 4 用例：三后端对 List<Int>=[1,2,3] + 读取 [1] 的场景，在 LIR dump 中出现 LIRRuntimeCall(LIST_NEW)（IR 层统一验证）；C 后端生成的 C 代码字符串含 nova_list_new；WasmGC 后端阶段 1-2 完成后 List 路径走 array.new_default（而非 RuntimeOp 的 fallback——验证设计兼容性）。修改 ir/lir.py ~60 行（枚举 + 节点定义）+ ir/lir_lowering.py ~120 行（_lower_runtime_op 统一降级）+ backend/lir_c_backend.py ~20 行（映射表）+ backend/wasm_backend.py ~20 行（映射表含原生/回退双分支）+ backend/native_backend.py ~15 行（映射表）+ tests/test_ir.py ~60 行（LIR 层统一验证 4 用例）。合计 ~315 行，净删除 ~400 行（三后端各自的 switch 分支 triplicate）。Cycle 78 尾期或 Cycle 79+ 启动。",
+      "track": "backend",
+      "difficulty": "hard",
+      "priority": 72,
+      "estimated_effort": "6-8小时",
+      "status": "pending",
+      "source": "review_cycle_75 审计 M3：三后端重复代码 ~400 行（List/Map/ADT 构建的 3 套独立实现），未来扩展容器类型的工作量 ×3；放在 WasmGC 原生改造之后以避免过早抽象限制 WasmGC 原生优化路径",
+      "depends_on": [
+        "backend_wasmgc_struct_phase1",
+        "backend_wasmgc_array_phase2"
+      ],
+      "severity": "P3"
+    },
+    {
+      "task_id": "backend_wasmgc_native_struct_array",
+      "name": "（已废弃，已拆分为 backend_wasmgc_struct_phase1 + backend_wasmgc_array_phase2 两子任务）WasmGC 原生 struct/array 改造原整体任务",
+      "description": "review_cycle_75 颗粒度拆分废弃：原 backend_wasmgc_native_struct_array P82 hard 10-14h 超一轮容量 50%，拆分为 struct 阶段1（ADT 路径 8-10h）+ array 阶段2（List 路径 8-10h）两个独立可验收子任务。本任务 ID 保留于 deprecated_tasks 以向后兼容旧状态文件引用。",
+      "track": "backend",
+      "difficulty": "hard",
+      "priority": 0,
+      "estimated_effort": "0小时",
+      "status": "deprecated",
+      "source": "review_cycle_75 审计颗粒度拆分：10-14h 超一轮容量的超大型任务拆分为 8-10h × 2 轮的健康颗粒度，每轮消化率预期 100%",
+      "depends_on": [],
+      "severity": "deprecated"
     },
     {
       "task_id": "backend_native_emit_complexity_refactor",
@@ -524,81 +483,8 @@
       "source": "code_audit_60 Top 复杂度确认，review_cycle_63 合并到 _emit_abi_call 统一骨架，第 65 轮已完成",
       "depends_on": [],
       "severity": "P2"
-    },
-    {
-      "task_id": "backend_native_stack_frame_rbp_only",
-      "name": "栈帧拆分A：RBP 基址帧模式 + 所有 RSP→RBP 寻址重算（独立可测，不包含 DWARF CFI）",
-      "description": "P2 Native 稳定性（栈帧 65%→80% 的第一步，拆分自原 backend_native_stack_frame_rbp_cfi P88 降低颗粒度解决 Cycle 71 产能下滑）。当前栈帧：push 6 callee_saved → sub rsp,16 对齐 → 全 RSP+offset 寻址。新增/删除 push 时所有 offset 必须同步重算（一类 P1 来源）。方案：(1) _frame_mode='rbp' 默认开启，CLI --fast-nofp 回退 RSP-only；(2) prologue 改为 push RBP → mov RBP,RSP → push 5 callee(RBX/R12/R13/R14/R15,RBP 作为帧指针单独处理) → sub rsp,local_size+对齐；(3) epilogue 改为 mov rsp,rsp → pop 5 callee → pop RBP → ret（或统一用 leave 指令：mov rsp,rbp + pop rbp）；(4) 所有寻址重算：参数 = [rbp + 16 + idx*8]（caller's return addr + push rbp = 16 字节）、callee_saved = [rbp - 8 - idx*8]（RBP下面紧邻callee push）、局部变量 = [rbp - 16 - callee_size - slot*8]；原 _EmitContext 的 stack_offset 计算全部切换为 rbp_offset；(5) 配套 6 用例：RBP 帧的 fib(10)=55 ELF 执行正确、10 参数函数调用 RBP 模式不崩溃、嵌套 3 层调用栈平衡、mov RSP,RBP 字节特征码 C9(leave) 出现或等价序列、--fast-nofp 退化为纯 RSP、寄存器分配到 RBP 时（不允许，RBP 保留）分配器跳过 RBP。修改 native_backend.py ~300 行（prologue/epilogue 重写 + _EmitContext 寻址切换）+ test_native_backend.py ~90 行 6 用例。Cycle 73 后端第一优先级（与 frontend_adt_field_suggestion_error 并行，两任务零依赖）。",
-      "track": "backend",
-      "difficulty": "medium",
-      "priority": 85,
-      "estimated_effort": "5-7小时",
-      "status": "completed",
-      "source": "review_cycle_72 审计：原栈帧CFI P88 hard 单任务颗粒度太大（12-16h 超一轮容量），Cycle 71 实际只完成位运算未启动栈帧；拆为 RBP-only(medium 5-7h)+ CFI-only(hard 6-8h) 两个子任务后每轮可消化一个，连续两轮完成原计划总 ROI 不变",
-      "depends_on": [
-        "backend_native_regalloc_linear_scan_v2"
-      ],
-      "severity": "P2"
-    },
-    {
-      "task_id": "backend_x86_64_xmm_rex_prefix_pre_fix",
-      "name": "XMM8-XMM15 REX 前缀预修复：xorpd/movsd/加解密 SSE 指令硬编码 0x48 → _rex_rb 扩展",
-      "description": "P3 Native 前瞻性兼容（当前零触发，XMM 池未来从 XMM0-XMM7 扩展到 XMM0-XMM15 时直接 SIGILL 类定时炸弹）。审计发现 x86_64.py L743/L755（以及 10+ 条 SSE/AVX 指令）的 REX 前缀全部硬编码 0x48（仅 REX.W=1，忽略 REX.R/REX.B），当 XMM 寄存器编号 ≥8 时（XMM8=8 ... XMM15=15），ModRM 的 reg/opcode 字段 3 位不够存，需 REX.R=1 扩展第 4 位。方案：(1) 扫描 x86_64.py 所有 xmm 参数的指令（movsd_xmm_mem / movsd_mem_xmm / xorpd_xmm / addsd_xmm / mulsd_xmm / divsd_xmm / cmpsd_xmm 等）；(2) 每条指令的 REX 前缀从硬编码 0x48 → _rex_wb(1, xmm_reg>>3) 或 _rex_rb(1 if modrm.reg>=8 else 0, 1 if modrm.rm>=8 else 0)；(3) 配套 4 用例：XMM0-XMM7 生成字节与修复前字节级一致（回归保护 0 差异）、XMM8-XMM15 虚拟场景下 REX.B/R 位正确（用单元测试直接调 _rex_rb 断言位模式）、未来 regalloc_v3 打开 XMM8-15 时只需改 _ALLOC_XMMS 常量无需改指令编码器、与 regalloc_v2 现有 XMM0-7 分配器无交互。修改 backend/x86_64.py ~40 行（12 条 SSE 指令 REX 前缀生成）+ tests/test_backends.py ~30 行 4 用例。Cycle 73 或 74 后端热身任务（改动 ≤70 行，零 correctness 风险）。",
-      "track": "backend",
-      "difficulty": "easy",
-      "priority": 78,
-      "estimated_effort": "1-2小时",
-      "status": "completed",
-      "source": "review_cycle_72 深度审计：5 条 GPR 指令的同类 REX 硬编码 BUG（Cycle 70 P92 修复，R12→RSP SIGSEGV）在 XMM 侧有 12+ 条完全相同结构的定时炸弹，当前 XMM 池仅 0-7 未触发，扩展时必炸",
-      "depends_on": [],
-      "severity": "P3"
-    },
-    {
-      "task_id": "backend_native_regalloc_v2_spill_bias_fix",
-      "name": "regalloc_v2 spill 权重修正：callee-saved vreg spill_weight 未加 +0.5 偏向修正导致相等权重时可能优先溢出高价值 callee",
-      "description": "P3 Native 性能（非正确性，仅性能偏向）。Cycle 70 regalloc_v2 注释明确写 'callee-saved 权重额外 +0.5 偏向先溢出 caller'，但 _spill_victim_v2 代码未实际加 0.5 修正。当 caller 和 callee 的 vreg spill_weight 浮点相等时（常见于长命 vreg 权重饱和），遍历顺序先扫 caller 后扫 callee → 等权重时 caller 先判 equal 命中 → 可能挑中 caller（正确），但反向遍历或 hash 重排时可能挑中 callee；且若 callee 的权重略低于 caller（如 0.51 vs 0.52）时不修正会误溢出 callee（浪费 prologue 已 push 的成本）。方案：(1) _spill_victim_v2 在扫描 active_callee_gprs 时的 candidate_weight = spill_weight + 0.5（仅比较时加，不写回权重元数据）；(2) 配套 3 用例：等权重场景断言溢出 caller（而非 callee，通过构造精确 span×跨call 权重）、callee 权重略低场景通过 +0.5 翻转溢出选择、callee 权重重 +0.5 仍高时正确溢出 caller（不影响原有正确路径）。修改 backend/native_backend.py ~5 行（1 行权重比较 + 1 行注释 + 3 行 docstring）+ tests/test_native_backend.py ~40 行 3 用例。Cycle 73 后端热身任务，5 行改动 ROI 高（性能回归保护）。",
-      "track": "backend",
-      "difficulty": "easy",
-      "priority": 72,
-      "estimated_effort": "1小时",
-      "status": "completed",
-      "source": "review_cycle_72 深度审计：regalloc_v2 双池代码实现与注释不一致（注释说 +0.5，代码未加），属于正确性/性能边界的注释-实现漂移，不修复会误导后续维护者对算法行为的假设",
-      "depends_on": [
-        "backend_native_regalloc_linear_scan_v2"
-      ],
-      "severity": "P3"
-    },
-    {
-      "task_id": "frontend_parser_expr_incremental_recovery",
-      "name": "Parser 表达式级增量恢复：非 panic mode，跳过单个错误 token + 半 AST 构造（如 a + * b → BinOp(a,+,ErrorExpr)）",
-      "description": "P3 前端 IDE 体验（ROI 高于 ADT 字段建议的下一项）。当前 Parser 表达式级仅 panic mode：_synchronize_to_declaration_boundary 跳过整个子表达式到下一个分号/关键字，单个错误 token 会丢失后续 N 个绑定的类型信息 → IDE 集成时错误行之后所有变量无补全/无诊断。方案：(1) _parse_expr 外包 try-except ParseError：捕获后消费 1 个 token（_advance()）并返回 ErrorExpr；同时 errors.append() 追加错误（不改 Panic mode 的多错误聚合架构）；(2) _parse_binop_rhs（递归下降优先级链核心）：若 rhs 解析抛错→返回 ErrorExpr，lhs 保留（形成 BinOp(lhs, op, ErrorExpr) 半 AST）；(3) _parse_primary_expr：括号/字面量/标识符失败时返回 ErrorExpr（而不是向上抛），保留外层 BinOp/Call 结构；(4) 配套 6 用例：a+*b 恢复 AST 是 BinOp(a,+,ErrorExpr)（不丢 a 的绑定）、f(1,) 尾逗号恢复 Call(f,[1,ErrorExpr])、let x = a + + b 恢复 BinOp 不丢 x 绑定、嵌套 (a + * b) * c 两层错误独立恢复、精确跳过 token 数断言（每个错误只跳 1 个 token 不 panic 跳过 10+）、Panic mode 仍在 TOP_LEVEL/STMT_BOUNDARY 生效（增量恢复失败时回退到 Panic）。修改 parser.py ~100 行（3 处 try-except + _advance() 消费 + 返回 ErrorExpr）+ tests/test_parser.py ~80 行 6 用例。Cycle 74 前端优先级，ADT 字段建议完成后下一个体验优化项。",
-      "track": "frontend",
-      "difficulty": "medium",
-      "priority": 76,
-      "estimated_effort": "3-4小时",
-      "status": "completed",
-      "source": "review_cycle_72 深度审计：前端错误恢复 8.0 分项的最大短板 = 表达式级仅 Panic mode；Parser 8.0→8.5 的直接推手；同时为 IDE/LSP 集成（未来路线图）前置铺路",
-      "depends_on": [
-        "frontend_parser_error_recovery_full"
-      ],
-      "severity": "P3"
-    },
-    {
-      "task_id": "frontend_numeric_type_extension_and_cli",
-      "name": "多位数类型系统（i8/i16/i32/i64/u32/f32/f64）+ strict_narrowing CLI 开关（窄化栅栏从硬编码 True→可配置）",
-      "description": "P2 前端类型系统扩展（为 Native SIMD/FFI/C 互操作前置基础）。当前 PrimType 只有 Int(=64位)/Float(=64位)/Bool/String/Unit/Never 6 种，隐式窄化栅栏基于单一 i32 假设（_check_literal_expr 的 I32_MAX=2^31-1），strict_narrowing=True 硬编码 3 处无 CLI 入口。方案分两部分：Part A【多位数类型】(1) PrimTypeKind 枚举新增 I8/I16/I32/I64/U32/F32/F64（保持 Int/Float 作为别名=I64/F64 向后兼容）；(2) Lexer 字面量后缀：10i8 / 10i16 / 10i32 / 10i64 / 10u32 / 1.0f32 / 1.0f64，_parse_number_literal 解析后缀绑定对应类型；(3) TypeChecker 的 _check_literal_expr 窄化阈值按实际位宽判定：i8→max=127 / i16→32767 / i32→2^31-1 / u32→2^32-1 / f32→2^24 mantissa；Part B【CLI开关】(4) compiler_cli.py / cli.py 新增 --narrowing=strict|warn|off 三档（默认 strict），TypeChecker 初始化时从 CompilerConfig 读 narrow_mode；(5) _detect_narrowing_risk 的 3 处 hardcoded strict_narrowing=True → 改为 cfg.narrow_mode=='strict' 时 raise Error，==warn 时 append Warning，==off 时静默跳过。配套 10 用例：(A 6) i8 字面量 127OK / 128报错 / u32 4294967295OK / f32 字面量后缀绑定 F32 类型 / Int 别名仍解析为 I64 / Float 别名解析为 F64；(B 4) --narrowing=warn 仅告警不报错 / --narrowing=off 完全静默 / strict 默认报错 / 库代码第三方依赖 off 模式不阻断编译。修改 lexer.py(~15行) / parser.py(~20行) / type_checker.py(~80行阈值适配+3处cfg替换) / cli.py+compiler_cli.py(~30行CLI参数) + tests/test_type_checker.py(~120行10用例)。Cycle 75 前端第一优先级（需先完成表达式级增量恢复避免类型报错与 Parser 恢复交叉干扰）。",
-      "track": "frontend",
-      "difficulty": "medium",
-      "priority": 74,
-      "estimated_effort": "6-8小时",
-      "status": "pending",
-      "source": "review_cycle_72 深度审计：隐式窄化栅栏当前基于单一 i32 假设是『设计技术债』，Native 侧一旦引入 SIMD/FFI 的 i8/i16/u32/f32 参数类型将直接 mis-detect 或漏检测；同时 strict_narrowing 硬编码是用户体验死锁（第三方库代码无法控制严格度）",
-      "depends_on": [
-        "frontend_implicit_numeric_cast_fence"
-      ],
-      "severity": "P2"
     }
   ],
-  "last_updated": "2026-08-01 16:35:16",
-  "active_tasks_count": 5
+  "last_updated": "2026-08-02 19:01:00",
+  "active_tasks_count": 12
 }
