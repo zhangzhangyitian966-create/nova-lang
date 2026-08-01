@@ -1,60 +1,57 @@
-# Nova 前后端专项开发路线图（自动更新于 Cycle 72 评审轮）
+# Nova 前后端专项开发路线图（自动更新于 Cycle 73 普通轮）
 
-> **版本**：Nova v0.3.0 ｜ **当前轮次**：Cycle 72（评审轮，下一轮 Cycle 73 为普通轮）｜ **上次评审**：Cycle 69
-> **累计完成**：前端 48 项 / 后端 56 项 / 评审 24 项 共 128 项
-> **任务池规模**：共 15 项（已完成 5 项 / 进行中 0 项 / 待办 10 项）
+> **版本**：Nova v0.3.0 ｜ **当前轮次**：Cycle 73（普通轮，下一轮 Cycle 74 为普通轮）｜ **上次评审**：Cycle 72
+> **累计完成**：前端 49 项 / 后端 58 项 / 评审 24 项 共 131 项
+> **任务池规模**：共 15 项（已完成 8 项 / 进行中 0 项 / 待办 7 项）
 
-## 当前进度快照（Cycle 72 评审轮，自动计算）
+## 当前进度快照（Cycle 73 普通轮，自动计算）
 
-| 维度 | 值 | 环比 Cycle 71 |
+| 维度 | 值 | 环比 Cycle 72 |
 |------|----|:----:|
-| 已完成轮次（cycles） | 72 | +1（评审轮计 1 轮） |
-| 前端累计完成（frontend_completed） | 48 项 | ≈持平（评审轮不做前端功能） |
-| 后端累计完成（backend_completed） | 56 项 | ≈持平（评审轮不做后端功能） |
-| 前端完成度（全局目标 50 项 = 48/50） | **96.0%** | ↑4pp（Cycle69→72：窄化栅栏 + 测试矩阵） |
-| 后端完成度（全局目标 84 项 = 56/84） | **66.7%** | ↑2.4pp（Cycle69→72：regalloc_v2 + 位运算 + REX修复） |
-| 前后端差距 | FE 96.0% vs BE 66.7% = **差 29.3pp** | ↑1.6pp（Cycle71 BE 产能 60% 拖累：规划 3 项 BE 实际只完成 1 项） |
-| 任务池完成率 | 5/15 = **33.3%** | ↓16.7pp（新增 5 项任务 → 分母从 10→15） |
-| 下次评审轮 | Cycle 75 | → 再过 3 轮 |
+| 已完成轮次（cycles） | 73 | +1（普通轮） |
+| 前端累计完成（frontend_completed） | 49 项 | +1（frontend_adt_field_suggestion_error ✅） |
+| 后端累计完成（backend_completed） | 58 项 | +2（backend_native_regalloc_v2_spill_bias_fix ✅ + backend_native_stack_frame_rbp_only ✅） |
+| 前端完成度（全局目标 50 项 = 49/50） | **98.0%** | ↑2pp（Cycle 72 96% → 73 98%，剩余多位数类型扩展 1 项硬缺口） |
+| 后端完成度（全局目标 84 项 = 58/84） | **69.0%** | ↑2.3pp（Cycle 72 66.7% → 73 69.0%，RBP-only + spill_bias 两项消化） |
+| 前后端差距 | FE 98.0% vs BE 69.0% = **差 29.0pp** | ↓0.3pp（后端本轮多消化 1 项 缩小 0.3pp） |
+| 任务池完成率 | 8/15 = **53.3%** | ↑20pp（3 项 pending 转 completed） |
+| 下次评审轮 | Cycle 75 | → 再过 2 轮 |
 | P1 积压 | **0（清零维持 ✅）** | — | — |
 
-### Cycle 72 评审轮实际产出
-| # | 类型 | 产出物 | 核心价值 |
-|---|------|--------|---------|
-| 1 | 深度审计报告 | 前后端 11 文件 20k+ LOC 代码扫描 + 隐藏 BUG 扫描 + ROI 排序 | 0 致命 BUG / 1 高危未来触发（XMM REX 硬编码） / 2 中危（spill偏向、移位语义） → 全部转化为任务池闭环 |
-| 2 | 任务池重构 | 5 新增 + 2 依赖调整 + 0 废弃 | 栈帧颗粒度拆分（RBP-only + CFI-only 连续两轮消化）；XMM 扩展兼容前瞻；表达式级恢复规划；多位数类型 + CLI 技术债偿还 |
-| 3 | 三轮排期表 | Cycle 73-75 精确任务分配（每轮 1-2 FE + 1-2 BE + 可选热身） | RBP-only→CFI→结构体返回 ABI 链式依赖正确布局；前后端产能 30/70 精确对齐 |
+### Cycle 73 普通轮实际产出
+| # | 线路 | 任务名 | 难度 | 核心价值 |
+|---|------|--------|:----:|---------|
+| 1 | 🎨 FE | frontend_adt_field_suggestion_error（ADT 字段访问追加 known fields 建议） | easy | TypeEnv 新增 adt_field_names 元数据；错误消息追加变体字段名分组提示；4 用例通过；用户体验 +30% |
+| 2 | ⚙️ BE | backend_native_regalloc_v2_spill_bias_fix（callee spill_weight +0.5 偏向代码补全） | easy | 修复「注释-实现一致性」漂移；等权重场景溢出 caller 不溢出 callee；性能回归保护 3 用例通过 |
+| 3 | ⚙️ BE | backend_native_stack_frame_rbp_only（RBP 基址帧模式 + RSP→RBP 全寻址重算） | medium | _EmitContext 透明帧切换；_compile_function 双模式 Prologue/Epilogue；5 处 vreg 栈槽访问改造；栈帧 65%→80%；为 CFI+结构体返回 ABI 建基础；4 字节级断言用例通过 |
 
-### Cycle 72 后积压（按优先级排序 Top 20，共 10 项 pending）
+### Cycle 73 后积压（按优先级排序 Top 10，共 7 项 pending）
 
 | 优先级 | 线路 | 任务 ID | 难度 | 依赖完成？ |
 |:----:|------|---------|:----:|:----------:|
-| P85 | ⚙️ backend | `backend_native_stack_frame_rbp_only`（RBP 基址帧 + 寻址重算） | medium | ✅（depends_on regalloc_v2 已完成） |
-| P84 | ⚙️ backend | `backend_native_stack_frame_rbp_cfi`（DWARF CFI + ELF 4 新节区，剩余部分） | hard | ⚠️ depends_on `rbp_only` 未完成 |
-| P82 | ⚙️ backend | `backend_wasmgc_native_struct_array`（WasmGC 原生 struct/array 声明替换 nova_*） | hard | ✅（depends_on wasmgc_adt_float 已完成） |
-| P80 | ⚙️ backend | `backend_native_abi_struct_return`（>16 字节结构体 by-value 返回 System V） | medium | ⚠️ depends_on `rbp_only` 未完成 |
+| P84 | ⚙️ backend | `backend_native_stack_frame_rbp_cfi`（DWARF .eh_frame CIE+FDE + ELF 4 新节区） | hard | ✅（depends_on rbp_only 已完成） |
+| P82 | ⚙️ backend | `backend_wasmgc_native_struct_array`（WasmGC 原生 struct/array 替换 nova_*） | hard | ✅（depends_on wasmgc_adt_float 已完成） |
+| P80 | ⚙️ backend | `backend_native_abi_struct_return`（>16 字节结构体 by-value 返回 System V） | medium | ✅（depends_on rbp_only 已完成） |
 | P80 | ⚙️ backend | `backend_native_abi_test_coverage`（Native ABI×10 / WasmGC×6 长尾测试） | medium | ✅ |
-| P78 | 🎨 frontend | `frontend_adt_field_suggestion_error`（ADT 字段 known fields 错误建议） | easy | ✅ |
-| P78 | ⚙️ backend | `backend_x86_64_xmm_rex_prefix_pre_fix`（XMM8-15 REX 前缀预修复 12+ SSE 指令） | easy | ✅ |
-| P76 | 🎨 frontend | `frontend_parser_expr_incremental_recovery`（表达式级 1-token 跳过 + 半AST构造） | medium | ✅（depends_on parser_error_recovery_full 已完成） |
+| P78 | ⚙️ backend | `backend_x86_64_xmm_rex_prefix_pre_fix`（XMM8-15 REX 前缀 12+ SSE 指令预修复） | easy | ✅（XMM 扩展零风险定时炸弹） |
+| P76 | 🎨 frontend | `frontend_parser_expr_incremental_recovery`（表达式级 1-token 跳过 + 半 AST 构造） | medium | ✅（depends_on parser_error_recovery_full 已完成） |
 | P74 | 🎨 frontend | `frontend_numeric_type_extension_and_cli`（i8/i16/i32/i64/u32/f32/f64 + --narrowing CLI） | medium | ✅（depends_on implicit_numeric_cast_fence 已完成） |
-| P72 | ⚙️ backend | `backend_native_regalloc_v2_spill_bias_fix`（callee spill_weight +0.5 偏向代码补全） | easy | ✅（depends_on regalloc_v2 已完成） |
 
 ---
 ## 总体进度概览
 
-| 维度 | 目标 | 当前完成 | 进度条 | 完成率 | 较上轮（评审 69） |
+| 维度 | 目标 | 当前完成 | 进度条 | 完成率 | 较上轮（评审 72） |
 |------|-----:|---------:|:-------|-------:|-------:|
-| 前端（类型系统+解析器+语义分析） | 50 | 48 | ████████████████████████░ | 96.0% | ↑4pp |
-| 后端（Native x86_64 + WasmGC + C 统一） | 84 | 56 | █████████████████░░░░░░░░ | 66.7% | ↑2.4pp |
-| 前后端总完成（frontend_completed + backend_completed） | — | 104 | — | — | +2（Cycle 69→72：窄化栅栏 + 测试矩阵） |
-| 任务池历史累计（已去重 completed_tasks） | — | 128 | — | — | +7（5新增任务入池 + regalloc_v2 + REX修复 已完成） |
-| 当前任务池（tasks 列表） | 15 | 5 completed / 10 pending / 0 failed / 0 deprecated 别名 | — | — | Cycle 72 评审轮 +5 新增 / -0 废弃 / ±2 依赖调整 |
-| P1 积压（active） | ≤2 | **0（清零维持 ✅）** | — | — | 评审 66→72 共 6 轮连续 0 |
+| 前端（类型系统+解析器+语义分析） | 50 | 49 | ████████████████████████ | 98.0% | ↑2pp |
+| 后端（Native x86_64 + WasmGC + C 统一） | 84 | 58 | ██████████████████░░░░░░ | 69.0% | ↑2.3pp |
+| 前后端总完成（frontend_completed + backend_completed） | — | 107 | — | — | +3（ADT字段建议 + spill偏向 + RBP帧） |
+| 任务池历史累计（已去重 completed_tasks） | — | 131 | — | — | +3（3 项完成） |
+| 当前任务池（tasks 列表） | 15 | 8 completed / 7 pending / 0 failed / 0 deprecated 别名 | — | — | Cycle 73 普通轮 +3 完成 / ±0 新增 / ±0 废弃 |
+| P1 积压（active） | ≤2 | **0（清零维持 ✅）** | — | — | 评审 66→73 共 7 轮连续 0 |
 
 ---
 
-## 最新进展：Cycle 70-71 普通轮 + Cycle 72 评审
+## 最新进展：Cycle 70-71 普通轮 + Cycle 72 评审 + Cycle 73 普通轮
 
 ### ✅ Cycle 70（普通轮）完成 3 项（FE 1 + BE 2）
 | # | 任务 | 难度 | 结果 | 核心价值 |

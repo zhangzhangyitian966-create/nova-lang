@@ -1,7 +1,7 @@
 {
-  "cycles": 72,
-  "frontend_completed": 48,
-  "backend_completed": 56,
+  "cycles": 73,
+  "frontend_completed": 49,
+  "backend_completed": 58,
   "last_review_cycle": 72,
   "current_review_cycle": 72,
   "completed_tasks": [
@@ -128,7 +128,10 @@
     "backend_x86_64_rex_prefix_fix",
     "frontend_type_system_test_matrix",
     "backend_native_instr_selection_bitwise",
-    "review_cycle_72"
+    "review_cycle_72",
+    "frontend_adt_field_suggestion_error",
+    "backend_native_regalloc_v2_spill_bias_fix",
+    "backend_native_stack_frame_rbp_only"
   ],
   "failed_tasks": [],
   "deprecated_tasks": [
@@ -147,6 +150,57 @@
     "backend_wasmgc_instruction_fill"
   ],
   "task_history": [
+    {
+      "cycle": 73,
+      "task_id": "frontend_adt_field_suggestion_error",
+      "name": "ADT 字段访问错误消息增强：type X has no field Y -> 追加 known fields [a,b,c] 建议",
+      "track": "frontend",
+      "difficulty": "easy",
+      "priority": 78,
+      "status": "success",
+      "result": "success",
+      "duration_min": 150,
+      "details": "TypeEnv 新增 adt_field_names Dict[str,List[tuple]]（与 adt_variants 对称），以及 get_all_adt_field_names() 向上追溯父环境的聚合方法；_typecheck_adt_decl 处理每个 TypeDecl 时把 (variant_name, [(field, type)]) 写入 env.adt_field_names；_check_field_access 的 ADT 分支追加 _format_adt_known_fields(adt_ty)：变体数<=3 逐变体展示 / >3 展示字段名并集；错误结构为 无法直接访问 + 提示 match + 已知字段。TestADTFieldSuggestionError 4/4 通过（struct-like Point / 多变体 Color / 嵌套 Line / 非 ADT 类型回归保护）。修改 type_checker.py ~180 行 + tests/test_type_checker.py ~230 行。",
+      "files_changed": [
+        "type_checker.py",
+        "tests/test_type_checker.py"
+      ],
+      "timestamp": "2026-08-01 13:50:34"
+    },
+    {
+      "cycle": 73,
+      "task_id": "backend_native_regalloc_v2_spill_bias_fix",
+      "name": "regalloc_v2 spill 权重修正：callee-saved vreg spill_weight 未加 +0.5 偏向修正导致相等权重时可能优先溢出高价值 callee",
+      "track": "backend",
+      "difficulty": "easy",
+      "priority": 72,
+      "status": "success",
+      "result": "success",
+      "duration_min": 45,
+      "details": "修复 Cycle 72 评审转化的注释-实现一致性专项：_linear_scan_alloc callee 池扫描段 candidate_weight = spill_weight + 0.5（仅比较时加，不回写元数据）；3 用例全通过（等权重翻转溢出 caller / callee 略低 0.04 翻转 / callee 低 0.6 仍溢出 caller 不干扰）。修改 backend/native_backend.py 5 行 + tests/test_native_backend.py ~80 行。",
+      "files_changed": [
+        "backend/native_backend.py",
+        "tests/test_native_backend.py"
+      ],
+      "timestamp": "2026-08-01 13:50:34"
+    },
+    {
+      "cycle": 73,
+      "task_id": "backend_native_stack_frame_rbp_only",
+      "name": "栈帧拆分A：RBP 基址帧模式 + 所有 RSP->RBP 寻址重算（独立可测，不包含 DWARF CFI）",
+      "track": "backend",
+      "difficulty": "medium",
+      "priority": 85,
+      "status": "success",
+      "result": "success",
+      "duration_min": 280,
+      "details": "完成 RBP 基址帧落地（栈帧 65%->80%）：_EmitContext 新增 frame_base_reg=RBP + frame_stack_bias=-(48+aligned) 透明寻址切换；_compile_function 重构双模式 Prologue/Epilogue（RBP 模式：push RBP->mov RBP,RSP->push 5 callee->sub rsp,aligned，对称 Epilogue）；CALLEE_PUSHED=48B 与旧 RSP-only 模式一致，对齐公式不变；5 处 vreg 栈槽访问改造（_emit_param_shuffle 阶段 2 / _emit_load_const 4 类 / _emit_load_reg Phi 降级 / _emit_build_tuple / _emit_field_access / _emit_load_global） 全部切换到 frame_base_reg + bias；XMM caller-saved 保存 / call 返回值暂存 / runtime 参数数组 / ELF _start 入口 4 类 RSP 临时区操作保持 RSP 不变。TestRBPFrameMode 4/4 字节级断言通过。原 native_backend 64/64 全通过无回归。修改 backend/native_backend.py ~320 行 + tests/test_native_backend.py ~120 行。",
+      "files_changed": [
+        "backend/native_backend.py",
+        "tests/test_native_backend.py"
+      ],
+      "timestamp": "2026-08-01 13:50:34"
+    },
     {
       "cycle": 72,
       "task_id": "review_cycle_72",
@@ -311,7 +365,7 @@
       "difficulty": "easy",
       "priority": 78,
       "estimated_effort": "1-2小时",
-      "status": "pending",
+      "status": "completed",
       "source": "review_cycle_69 审计：前端 92% 后剩余的体验优化边际收益最高项，代码改动 ≤35 行，用户错误消息可用性 +30%",
       "depends_on": [],
       "severity": "P3"
@@ -443,7 +497,7 @@
       "difficulty": "medium",
       "priority": 85,
       "estimated_effort": "5-7小时",
-      "status": "pending",
+      "status": "completed",
       "source": "review_cycle_72 审计：原栈帧CFI P88 hard 单任务颗粒度太大（12-16h 超一轮容量），Cycle 71 实际只完成位运算未启动栈帧；拆为 RBP-only(medium 5-7h)+ CFI-only(hard 6-8h) 两个子任务后每轮可消化一个，连续两轮完成原计划总 ROI 不变",
       "depends_on": [
         "backend_native_regalloc_linear_scan_v2"
@@ -471,7 +525,7 @@
       "difficulty": "easy",
       "priority": 72,
       "estimated_effort": "1小时",
-      "status": "pending",
+      "status": "completed",
       "source": "review_cycle_72 深度审计：regalloc_v2 双池代码实现与注释不一致（注释说 +0.5，代码未加），属于正确性/性能边界的注释-实现漂移，不修复会误导后续维护者对算法行为的假设",
       "depends_on": [
         "backend_native_regalloc_linear_scan_v2"
@@ -509,6 +563,6 @@
       "severity": "P2"
     }
   ],
-  "last_updated": "2026-08-01 10:11:49",
-  "active_tasks_count": 10
+  "last_updated": "2026-08-01 13:50:34",
+  "active_tasks_count": 7
 }

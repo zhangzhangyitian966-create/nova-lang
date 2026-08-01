@@ -2082,5 +2082,138 @@ fn main() {
         )
 
 
+class TestADTFieldSuggestionError(unittest.TestCase):
+    """ADT 字段访问错误消息增强：type X has no field Y → 追加 known fields 建议。
+
+    覆盖 4 类场景：单变体 struct / 内置多变体 Option / 嵌套 struct / 非 ADT 不误报。
+    """
+
+    # ============================================================
+    # 工具：完整 Lexer→Parser→TypeChecker 管道
+    # ============================================================
+    def _run_pipeline(self, source: str):
+        from nova.lexer import Lexer
+        from nova.parser import Parser
+        lex = Lexer(source)
+        parser = Parser(lex.tokenize(), source=source)
+        prog = parser.parse()
+        tc = TypeChecker(source=source)
+        try:
+            tc.check_program(prog)
+        except Exception as e:
+            return e
+        return None
+
+    # ============================================================
+    # 用例 1/4：单变体 struct（Point{P(x,y)}）访问不存在字段 z → 提示 P(x, y)
+    # ============================================================
+    def test_struct_single_variant_known_fields_suggestion(self):
+        """struct-like 单变体 ADT：Point{P(x,y)} 访问 .z → known fields 列出 P(x,y)。"""
+        src = """
+type Point {
+    P(x: Int, y: Int)
+}
+fn main() {
+    let p = P(10, 20)
+    let v = p.z
+    0
+}
+"""
+        err = self._run_pipeline(src)
+        self.assertIsNotNone(err, "Point.z 不存在应触发 ADT 字段访问错误")
+        msg = str(err)
+        self.assertTrue(
+            "已知字段" in msg,
+            f"ADT 字段访问错误应包含 '已知字段' 建议；实际消息：{msg}"
+        )
+        self.assertTrue(
+            "x" in msg and "y" in msg,
+            f"Point 错误消息应列出 x, y 字段；实际：{msg}"
+        )
+
+    # ============================================================
+    # 用例 2/4：用户自定义多变体 Shape(Circle(r) / Rect(w,h)) → 逐变体列出字段
+    # ============================================================
+    def test_multi_variant_shape_known_fields_suggestion(self):
+        """用户自定义多变体 ADT：Shape { Circle(r), Rect(w,h) } 访问 .diameter → 逐变体列出。"""
+        src = """
+type Shape {
+    Circle(radius: Float)
+    Rect(width: Float, height: Float)
+}
+fn main() {
+    let s = Circle(3.14)
+    let v = s.diameter
+    0
+}
+"""
+        err = self._run_pipeline(src)
+        self.assertIsNotNone(err, "Shape.diameter 不存在应触发字段访问错误")
+        msg = str(err)
+        self.assertTrue(
+            "已知字段" in msg,
+            f"多变体 Shape 字段访问错误应包含 '已知字段'；实际：{msg}"
+        )
+        self.assertTrue(
+            "Circle" in msg and "radius" in msg,
+            f"Shape 应提示 Circle(radius) 变体；实际：{msg}"
+        )
+        self.assertTrue(
+            "Rect" in msg and "width" in msg and "height" in msg,
+            f"Shape 应提示 Rect(width, height) 变体；实际：{msg}"
+        )
+
+    # ============================================================
+    # 用例 3/4：嵌套 struct Outer{O(inner,extra)} → outer.notexist 列出 O(inner, extra)
+    # ============================================================
+    def test_nested_struct_outer_then_inner_suggestion(self):
+        """嵌套 ADT：Outer 访问不存在字段 → 列出 Outer 的全部字段名（inner/extra）。"""
+        src = """
+type Inner {
+    I(a: Int)
+}
+type Outer {
+    O(inner: Inner, extra: Int)
+}
+fn main() {
+    let o = O(I(1), 99)
+    let v = o.notexist
+    0
+}
+"""
+        err = self._run_pipeline(src)
+        self.assertIsNotNone(err, "Outer.notexist 应触发字段访问错误")
+        msg = str(err)
+        self.assertTrue(
+            "已知字段" in msg,
+            f"嵌套 Outer ADT 错误应含 '已知字段'；实际：{msg}"
+        )
+        self.assertTrue(
+            "inner" in msg and "extra" in msg,
+            f"Outer 错误应列出 inner/extra 字段；实际：{msg}"
+        )
+
+    # ============================================================
+    # 用例 4/4：非 ADT 类型（Int / Bool / List / Tuple）→ 不触发 known fields 建议
+    #   Int.foo → 原消息 "类型 Int 不支持字段访问"，不应误报 "已知字段"
+    # ============================================================
+    def test_non_adt_no_false_positive_known_fields(self):
+        """非 ADT 类型触发字段访问错误：错误消息不应误含 '已知字段'（None guard 防崩溃）。"""
+        src = "fn main() { let x = 42.foo; 0 }"
+        err = self._run_pipeline(src)
+        self.assertIsNotNone(err, "Int.foo 应触发不支持字段访问错误")
+        msg = str(err)
+        # 非 ADT 分支不应出现 "已知字段"（避免误导用户）
+        self.assertFalse(
+            "已知字段" in msg,
+            f"非 ADT 类型 Int.foo 错误不应误含 '已知字段'；实际：{msg}"
+        )
+        # 原消息必须仍存在（回归保护：错误消息主路径不被破坏）
+        self.assertTrue(
+            "不支持字段访问" in msg,
+            f"Int.foo 错误应保留原 '不支持字段访问' 消息；实际：{msg}"
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

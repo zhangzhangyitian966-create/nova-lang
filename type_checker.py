@@ -254,6 +254,9 @@ class TypeEnv:
         self.adt_variants: Dict[str, List[tuple]] = (
             {}
         )  # adt_name -> [(variant_name, [field_types])]
+        self.adt_field_names: Dict[str, List[tuple]] = (
+            {}
+        )  # adt_name -> [(variant_name, [(field_name, field_type)])]
         self.aliases: Dict[str, NovaType] = {}
 
     def define(self, name: str, ty: NovaType, mutable: bool = False):
@@ -282,6 +285,14 @@ class TypeEnv:
         if self.parent:
             result.update(self.parent.get_all_adt_variants())
         result.update(self.adt_variants)
+        return result
+
+    def get_all_adt_field_names(self) -> Dict[str, List[tuple]]:
+        """获取当前环境及所有父环境的 ADT 变体字段名信息（含字段名，用于错误消息建议）"""
+        result = {}
+        if self.parent:
+            result.update(self.parent.get_all_adt_field_names())
+        result.update(self.adt_field_names)
         return result
 
     def child(self) -> "TypeEnv":
@@ -341,6 +352,39 @@ class TypeChecker:
         source = self._source if self._source else None
         raise TypeCheckError(message, line=line, column=column, source=source)
 
+    def _format_adt_known_fields(self, adt_ty: "ADTType") -> str:
+        """根据 ADT 类型生成 known fields 提示字符串（多变体取字段名并集，None guard 防止空 ADT 崩溃）。
+
+        返回格式示例：
+        - 单变体 struct Point { x, y }: "[x, y]"
+        - 多变体 Option { Some(v), None }: "Some(v) / None(无字段)"
+        - 无字段名信息: ""
+        """
+        if not isinstance(adt_ty, ADTType):
+            return ""
+        all_variants = self.env.get_all_adt_field_names().get(adt_ty.name)
+        if not all_variants:
+            return ""
+        # 收集所有变体的字段名（按变体分组展示）
+        parts = []
+        all_field_names = set()
+        for vname, fields in all_variants:
+            if fields:
+                names = [fn for fn, _ in fields]
+                all_field_names.update(names)
+                parts.append(f"{vname}({', '.join(names)})")
+            else:
+                parts.append(f"{vname}(无字段)")
+        if not parts:
+            return ""
+        # 变体数 <= 3 时逐变体展示；>3 时只展示字段名并集
+        if len(all_variants) <= 3:
+            return " / ".join(parts)
+        sorted_names = sorted(all_field_names)
+        if not sorted_names:
+            return ""
+        return "[" + ", ".join(sorted_names) + "]"
+
     def _setup_builtins(self):
         """注册内置函数和类型的类型签名"""
         # 注册基本类型到环境中（供 _from_ast_type 查找）
@@ -353,9 +397,17 @@ class TypeChecker:
 
         # 内置 Option 和 Result
         self.env.adt_variants["Option"] = [("Some", [TypeVar("T")]), ("None", [])]
+        self.env.adt_field_names["Option"] = [
+            ("Some", [("v", TypeVar("T"))]),
+            ("None", []),
+        ]
         self.env.adt_variants["Result"] = [
             ("Ok", [TypeVar("T")]),
             ("Err", [TypeVar("E")]),
+        ]
+        self.env.adt_field_names["Result"] = [
+            ("Ok", [("value", TypeVar("T"))]),
+            ("Err", [("error", TypeVar("E"))]),
         ]
 
         # print: (a) -> Unit
@@ -688,12 +740,18 @@ class TypeChecker:
         adt_ty = ADTType(decl.name)
         self.env.types[decl.name] = adt_ty
         variants = []
+        variants_with_names = []
         for variant in decl.variants:
             field_types = []
+            field_name_type_pairs = []
             for fname, ftype_ast in variant.fields:
-                field_types.append(self._from_ast_type(ftype_ast))
+                fty = self._from_ast_type(ftype_ast)
+                field_types.append(fty)
+                field_name_type_pairs.append((fname, fty))
             variants.append((variant.name, field_types))
+            variants_with_names.append((variant.name, field_name_type_pairs))
         self.env.adt_variants[decl.name] = variants
+        self.env.adt_field_names[decl.name] = variants_with_names
 
         # 注册每个变体为构造函数
         for vname, ftypes in variants:
@@ -1329,11 +1387,14 @@ class TypeChecker:
 
         # --- ADT 类型：静态阶段无法直接字段访问 ---
         if isinstance(target_ty, ADTType):
-            self._error(
+            hint = self._format_adt_known_fields(target_ty)
+            base_msg = (
                 f"无法直接访问 ADT 类型 {target_ty} 的字段 '{field_name}'\n"
-                f"  提示：请使用 match 表达式进行模式匹配来访问 ADT 字段",
-                expr=expr
+                f"  提示：请使用 match 表达式进行模式匹配来访问 ADT 字段"
             )
+            if hint:
+                base_msg += f"\n  已知字段：{hint}"
+            self._error(base_msg, expr=expr)
 
         # --- 其他类型：不支持字段访问 ---
         self._error(

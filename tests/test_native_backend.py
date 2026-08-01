@@ -1093,5 +1093,106 @@ class TestNativeFloatImmOverflowXmm0Conflict(unittest.TestCase):
         )
 
 
+class TestRBPFrameMode(unittest.TestCase):
+    """v2 RBP 基址帧模式：默认启用，调试器/回溯友好。
+
+    验证 4 个要点：
+    (1) 每个函数机器码开头包含 push RBP → mov RBP,RSP 标准 prologue
+    (2) 每个函数机器码结尾包含 pop RBP → ret 标准 epilogue
+    (3) 5 个 callee-saved（RBX/R12-R15）被 push/pop 保护（共 5+1=6 push）
+    (4) LIRFunction 元属性 _native_frame_mode / _native_frame_stack_bias 被填充
+    """
+
+    PUSH_RBP = bytes([0x55])
+    MOV_RBP_RSP = bytes([0x48, 0x89, 0xe5])
+    POP_RBP = bytes([0x5d])
+    RET = bytes([0xc3])
+
+    def _build_and_compile(self, body_instrs):
+        """构造无参函数 + 分配 + 编译，返回 (code, func)。"""
+        from nova.ir.ir_types import INT_TYPE
+        from nova.ir.lir import LIRFunction, LIRModule
+        from nova.backend.native_backend import NativeCodeGen
+        lir = LIRModule(name="rbp_test")
+        fn = LIRFunction("rbp_func", [], INT_TYPE)
+        fn.body = body_instrs
+        lir.functions["rbp_func"] = fn
+        cg = NativeCodeGen()
+        cg._collect_constants(lir)
+        code = cg._compile_function(fn)
+        return code, fn
+
+    def test_prologue_contains_push_mov_sequence(self):
+        """prologue 必须以 push RBP ; mov RBP,RSP 开头（gdb 自动识别帧链）。"""
+        from nova.ir.lir import LIRLoadConst, LIRReturn
+        code, _ = self._build_and_compile([
+            LIRLoadConst(value=42, const_type="int"),
+            LIRReturn(),
+        ])
+        self.assertTrue(
+            code.startswith(self.PUSH_RBP + self.MOV_RBP_RSP),
+            f"prologue 必须包含 push RBP + mov RBP,RSP 序列；实际前 8 字节：{code[:8].hex()}"
+        )
+
+    def test_epilogue_contains_pop_rbp_ret(self):
+        """epilogue 必须以 pop RBP ; ret 结尾（gdb frame 恢复）。"""
+        from nova.ir.lir import LIRLoadConst, LIRReturn
+        code, _ = self._build_and_compile([
+            LIRLoadConst(value=0, const_type="int"),
+            LIRReturn(),
+        ])
+        self.assertTrue(
+            code.endswith(self.POP_RBP + self.RET),
+            f"epilogue 必须以 pop RBP + ret 结尾；实际末尾 8 字节：{code[-8:].hex()}"
+        )
+
+    def test_callee_saved_count_is_six(self):
+        """RBP 模式 push 数：push RBP + 5 callee（RBX/R12-15） = 6 push。
+
+        相比旧 RSP-only 模式也是 6 push，栈对齐偏移保持 48B ≡ 8 mod 16。
+        """
+        from nova.ir.lir import LIRLoadConst, LIRReturn
+        code, _ = self._build_and_compile([
+            LIRLoadConst(value=7, const_type="int"),
+            LIRReturn(),
+        ])
+        push_ops = [
+            bytes([0x55]),          # push rbp
+            bytes([0x53]),          # push rbx
+            bytes([0x41, 0x54]),    # push r12
+            bytes([0x41, 0x55]),    # push r13
+            bytes([0x41, 0x56]),    # push r14
+            bytes([0x41, 0x57]),    # push r15
+        ]
+        # 只检查 prologue 区域（前 32 字节）
+        head = code[:32]
+        found = sum(1 for op in push_ops if op in head)
+        self.assertGreaterEqual(
+            found, 6,
+            f"prologue 应包含 6 个 callee push（RBP+RBX+R12-15）；实际找到 {found}；head={head.hex()}"
+        )
+
+    def test_frame_mode_meta_attributes_set(self):
+        """LIRFunction._native_frame_mode 与 _native_frame_stack_bias 必须被填充。"""
+        from nova.ir.lir import LIRLoadConst, LIRReturn
+        _, func = self._build_and_compile([
+            LIRLoadConst(value=1, const_type="int"),
+            LIRReturn(),
+        ])
+        self.assertEqual(
+            getattr(func, "_native_frame_mode", None), "rbp",
+            "func._native_frame_mode 应为 'rbp'（v2 默认帧模式）"
+        )
+        self.assertIsInstance(
+            getattr(func, "_native_frame_stack_bias", None), int,
+            "func._native_frame_stack_bias 必须是 int（RBP 寻址公式需要）"
+        )
+        # bias = -(48 + aligned) → 必须是负数且 ≤ -48
+        self.assertLessEqual(
+            func._native_frame_stack_bias, -48,
+            f"frame_stack_bias 必须 ≤ -48（48B callee push + aligned ≥ 0）；实际 {func._native_frame_stack_bias}"
+        )
+
+
 if __name__ == '__main__':
     unittest.main()

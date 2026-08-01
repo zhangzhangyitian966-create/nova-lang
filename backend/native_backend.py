@@ -24,6 +24,7 @@ from .x86_64 import (
     R14,
     R15,
     RAX,
+    RBP,
     RBX,
     RCX,
     RDI,
@@ -114,14 +115,23 @@ _ALLOC_CALLEE_GPRS = _ALLOC_GPRS[8:]  # RBX, R12, R13, R14, R15
 
 
 class _EmitContext:
-    """封装指令发射阶段的上下文：发射器、函数名、寄存器分配、跳转/标签信息。"""
+    """封装指令发射阶段的上下文：发射器、函数名、寄存器分配、跳转/标签信息。
 
-    def __init__(self, e, func_name, vreg_alloc, label_offsets, jump_fixups):
+    v2 RBP 帧模式：新增 frame_base_reg + frame_stack_bias 两个成员。
+    RBP 模式下栈槽寻址公式：[frame_base_reg + frame_stack_bias + stack_offset]
+      = [RBP - (push_RBP(8)+push_5callee(40)+aligned_sub) + stack_offset]
+      等价于纯 RSP 模式的 [RSP + stack_offset]（prologue 末尾 RSP 位置对齐）。
+    """
+
+    def __init__(self, e, func_name, vreg_alloc, label_offsets, jump_fixups,
+                 frame_base_reg=RSP, frame_stack_bias: int = 0):
         self.e = e
         self.func_name = func_name
         self.vreg_alloc = vreg_alloc
         self.label_offsets = label_offsets
         self.jump_fixups = jump_fixups
+        self.frame_base_reg = frame_base_reg
+        self.frame_stack_bias = frame_stack_bias
 
     def get_loc(self, vreg_name):
         """获取虚拟寄存器的物理位置：("reg", phys_reg) 或 ("stack", offset)"""
@@ -133,7 +143,7 @@ class _EmitContext:
         )
 
     def load_to_reg(self, vreg_name, target_reg, is_float=False):
-        """将 vreg 的值加载到目标物理寄存器。"""
+        """将 vreg 的值加载到目标物理寄存器（RBP/RSP 帧模式透明切换）。"""
         loc = self.get_loc(vreg_name)
         if loc[0] == "reg":
             if loc[1] != target_reg:
@@ -142,13 +152,14 @@ class _EmitContext:
                 else:
                     self.e.mov_reg_reg64(target_reg, loc[1])
         else:
+            eff_offset = self.frame_stack_bias + loc[1]
             if is_float:
-                self.e.movsd_reg_mem(target_reg, RSP, loc[1])
+                self.e.movsd_reg_mem(target_reg, self.frame_base_reg, eff_offset)
             else:
-                self.e.mov_reg_mem(target_reg, RSP, loc[1])
+                self.e.mov_reg_mem(target_reg, self.frame_base_reg, eff_offset)
 
     def store_from_reg(self, vreg_name, source_reg, is_float=False):
-        """将源物理寄存器的值存储到 vreg 的位置。"""
+        """将源物理寄存器的值存储到 vreg 的位置（RBP/RSP 帧模式透明切换）。"""
         loc = self.get_loc(vreg_name)
         if loc[0] == "reg":
             if loc[1] != source_reg:
@@ -157,10 +168,11 @@ class _EmitContext:
                 else:
                     self.e.mov_reg_reg64(loc[1], source_reg)
         else:
+            eff_offset = self.frame_stack_bias + loc[1]
             if is_float:
-                self.e.movsd_mem_reg(RSP, loc[1], source_reg)
+                self.e.movsd_mem_reg(self.frame_base_reg, eff_offset, source_reg)
             else:
-                self.e.mov_mem_reg(RSP, loc[1], source_reg)
+                self.e.mov_mem_reg(self.frame_base_reg, eff_offset, source_reg)
 
 
 # ============================================================
@@ -398,58 +410,94 @@ class NativeCodeGen:
     def _compile_function(self, func: LIRFunction) -> bytes:
         """编译单个函数为机器码。
 
-        栈帧布局（System V AMD64 ABI）：
+        帧模式（v2 新增）：FRAME_MODE = 'rbp' 默认开启；CLI --fast-nofp 可退回 RSP-only。
+        ━━━ RBP 基址帧布局（默认，调试器友好 / 参数偏移恒定）━━━
           高地址
-          ┌──────────────────┐
-          │ 调用者栈帧        │ ← call 前 RSP
-          │ 返回地址 (8B)     │ ← call 压入
-          ├──────────────────┤ ← 函数入口 RSP ≡ 8 (mod 16)
-          │ callee-saved (48B)│ ← 6 个 push (RBX, RBP, R12-15)
-          ├──────────────────┤ ← push 后 RSP ≡ 8 (mod 16) (8+48=56)
-          │ 对齐填充 (0-15B) │ ← 确保 sub 后 RSP ≡ 0 (mod 16)
-          ├──────────────────┤
-          │ 溢出槽区         │ ← 虚拟寄存器溢出位置
-          │ [stack_offset]   │   RSP 正偏移寻址
-          ├──────────────────┤ ← sub 后 RSP ≡ 0 (mod 16)
-          │ (可能预留参数区) │
-          └──────────────────┘ ← 当前 RSP
+          ├─────────────────────┤
+          │ 调用者参数 7..N      │  [RBP + 16 + 0], [RBP + 16 + 8], ...
+          │ 返回地址 (8B)        │  [RBP + 8]
+          │ 旧 RBP (8B)          │  [RBP]  ← push RBP → mov RBP,RSP 后 RBP 指向此处
+          ├─────────────────────┤
+          │ RBX  callee-saved    │  [RBP - 8]
+          │ R12  callee-saved    │  [RBP - 16]
+          │ R13  callee-saved    │  [RBP - 24]
+          │ R14  callee-saved    │  [RBP - 32]
+          │ R15  callee-saved    │  [RBP - 40]
+          ├─────────────────────┤  ← RBP - 40 - (stack_size+8 对齐到 16) = 最终 RSP
+          │ 对齐填充 + 溢出槽区  │  栈槽 stack_offset 寻址：[RBP - 48 - aligned + stack_offset]
           低地址
+
+        ━━━ RSP-only 帧布局（--fast-nofp，节省 2 指令 / 函数）━━━
+          原布局（注释）保持不变：6 callee push → sub rsp, aligned → body → add rsp,aligned → 6 pop
         """
         e = X86_64Emitter()
-
-        # 函数序言：保存 callee-saved 寄存器（6 个，48 字节）
-        for reg in CALLEE_SAVED:
-            e.push_reg(reg)
-
-        # 计算 16 字节对齐的栈帧大小
-        # push 6 个 callee-saved = 48 字节
-        # 函数入口 RSP ≡ 8 (mod 16)，push 后 RSP ≡ 8 + 48 = 56 ≡ 8 (mod 16)
-        # 需要 sub (stack_size + 8) 向上对齐到 16，使 RSP ≡ 0 (mod 16)
-        if func.stack_size > 0:
-            total = func.stack_size + 8  # +8 补偿 push 后的 8 (mod 16) 偏移
-            aligned = (total + 15) & ~15
-            func._native_frame_pad = aligned - 8  # 实际填充量（对齐贡献）
-            e.sub_rsp_imm(aligned)
-        else:
-            func._native_frame_pad = 0
-
-        # 编译函数体
-        self._compile_body(e, func, func.name)
-
-        # 函数尾声：恢复栈帧，恢复 callee-saved，返回
+        # --- 帧模式：v2 默认 'rbp'（预留 'rsp' 模式回退路径，默认走 RBP）---
+        FRAME_MODE = "rbp"  # TODO: 后续从 CompilerConfig.frame_mode / CLI --fast-nofp 读取
+        CALLEE_PUSHED = 8 + 5 * 8  # push RBP(8B) + 5 callee(40B) = 48B ≡ RSP 模式 6 callee(48B)
+        # 计算 16 字节对齐填充（RBP/RSP 两模式 CALLEE_PUSHED=48B ≡ 8 mod 16 相同，故对齐公式一致）
+        aligned = 0
         if func.stack_size > 0:
             total = func.stack_size + 8
             aligned = (total + 15) & ~15
-            e.add_rsp_imm(aligned)
+            func._native_frame_pad = aligned - 8
+        else:
+            func._native_frame_pad = 0
 
-        for reg in reversed(CALLEE_SAVED):
-            e.pop_reg(reg)
+        # --- 函数序言（Prologue）：RBP 模式 vs RSP-only 分岔 ---
+        frame_stack_bias = 0  # 用于 _EmitContext 寻址
+        if FRAME_MODE == "rbp":
+            # (1) 标准帧指针建立序列：被 gdb/lldb/backtrace 等工具自动识别
+            e.push_reg(RBP)
+            e.mov_reg_reg64(RBP, RSP)
+            # (2) 保存 5 个 callee-saved（RBP 已单独 push，_ALLOC_CALLEE_GPRS = RBX/R12-R15）
+            for reg in _ALLOC_CALLEE_GPRS:
+                e.push_reg(reg)
+            # (3) 为局部变量 + 对齐填充开辟栈空间
+            if aligned > 0:
+                e.sub_rsp_imm(aligned)
+            # 计算 RBP → 栈槽基准的偏移（负值，因为局部变量在 RBP 下方）：
+            #   栈槽 stack_offset=0 对应最高地址 = RBP - 48 - aligned + 0
+            frame_stack_bias = -(CALLEE_PUSHED + aligned)
+            func._native_frame_mode = "rbp"
+            func._native_frame_stack_bias = frame_stack_bias
+        else:
+            # RSP-only 回退模式（保持 v1 行为，零改动）
+            for reg in CALLEE_SAVED:
+                e.push_reg(reg)
+            if aligned > 0:
+                e.sub_rsp_imm(aligned)
+            func._native_frame_mode = "rsp"
+            func._native_frame_stack_bias = 0
 
-        e.ret()
+        # --- 编译函数体 ---
+        self._compile_body(e, func, func.name, frame_mode=FRAME_MODE,
+                           frame_stack_bias=frame_stack_bias)
+
+        # --- 函数尾声（Epilogue）：与 Prologue 对称 ---
+        if FRAME_MODE == "rbp":
+            # (1) 快速收尾：mov rsp,rbp → pop 5 callee → pop rbp → ret
+            if aligned > 0:
+                # leave 指令 = mov rsp,rbp + pop rbp 二合一；但 5 callee 必须在 pop rbp 之前 pop
+                # 所以用显式序列：add rsp,aligned（等价 mov rsp,rsp+aligned 但这里是到 callee 顶）
+                e.add_rsp_imm(aligned)
+            # 反向 pop 5 callee
+            for reg in reversed(_ALLOC_CALLEE_GPRS):
+                e.pop_reg(reg)
+            e.pop_reg(RBP)
+            e.ret()
+        else:
+            if aligned > 0:
+                total = func.stack_size + 8
+                aligned_v = (total + 15) & ~15
+                e.add_rsp_imm(aligned_v)
+            for reg in reversed(CALLEE_SAVED):
+                e.pop_reg(reg)
+            e.ret()
 
         return bytes(e.code)
 
-    def _compile_body(self, e: X86_64Emitter, func: LIRFunction, func_name: str):
+    def _compile_body(self, e: X86_64Emitter, func: LIRFunction, func_name: str,
+                      frame_mode: str = "rsp", frame_stack_bias: int = 0):
         """编译函数体指令（寄存器分配 + 两阶段汇编）。
 
         三阶段协调器：
@@ -457,11 +505,16 @@ class NativeCodeGen:
         2. 参数入口搬运（ABI 寄存器 → 分配位置）
         3. 发射指令（调度表分发）
         4. 回填跳转偏移
+
+        frame_mode='rbp' 时 frame_base_reg=RBP，frame_stack_bias=-(48+aligned)
+          → 栈槽寻址 [RBP + frame_stack_bias + stack_offset] 等价于 RSP-only [RSP + stack_offset]
         """
         vreg_alloc, label_offsets, jump_fixups = self._allocate_registers(func)
+        base_reg = RBP if frame_mode == "rbp" else RSP
         ctx = _EmitContext(
             e=e, func_name=func_name, vreg_alloc=vreg_alloc,
             label_offsets=label_offsets, jump_fixups=jump_fixups,
+            frame_base_reg=base_reg, frame_stack_bias=frame_stack_bias,
         )
         # 函数入口：将 ABI 参数寄存器搬运到寄存器分配器分配的位置
         self._emit_param_shuffle(e, func, ctx)
@@ -528,15 +581,27 @@ class NativeCodeGen:
                 else:
                     e.mov_reg_mem(dst_val, RSP, i * 8)
             else:
-                # 目标在栈槽（dst_val 是相对于 RSP 的偏移）
-                # 需要调整偏移以反映 temp_size 的 sub_rsp
-                adjusted_offset = dst_val + temp_size
+                # 目标在栈槽（dst_val = 寄存器分配器的 stack offset）
+                # RBP 模式：帧基址 = RBP（不受 sub/add rsp 临时区影响）
+                #   → [RBP + frame_stack_bias + dst_val]  直接寻址固定栈槽
+                # RSP 模式：帧基址 = RSP（已被 sub temp_size 下沉）
+                #   → [RSP + dst_val + temp_size]  =  sub 之前的 RSP + dst_val（旧行为）
                 if is_float:
                     e.movsd_reg_mem(XMM0, RSP, i * 8)
-                    e.movsd_mem_reg(RSP, adjusted_offset, XMM0)
+                    if ctx.frame_base_reg != RSP:
+                        e.movsd_mem_reg(ctx.frame_base_reg,
+                                        ctx.frame_stack_bias + dst_val, XMM0)
+                    else:
+                        adjusted_offset = dst_val + temp_size
+                        e.movsd_mem_reg(RSP, adjusted_offset, XMM0)
                 else:
                     e.mov_reg_mem(RAX, RSP, i * 8)
-                    e.mov_mem_reg(RSP, adjusted_offset, RAX)
+                    if ctx.frame_base_reg != RSP:
+                        e.mov_mem_reg(ctx.frame_base_reg,
+                                      ctx.frame_stack_bias + dst_val, RAX)
+                    else:
+                        adjusted_offset = dst_val + temp_size
+                        e.mov_mem_reg(RSP, adjusted_offset, RAX)
 
         # 释放临时区域
         e.add_rsp_imm(temp_size)
@@ -780,8 +845,10 @@ class NativeCodeGen:
             for reg, last in active_callee_gprs.items():
                 vn = reg_to_vreg.get(("callee", reg))
                 w = (vreg_info.get(vn, {}).get("spill_weight", 1.0) if vn else 0.0)
+                # callee-saved 权重额外 +0.5 偏向优先溢出 caller-saved（避免浪费 prologue 已 push 的 callee-saved）
+                if vn is not None:
+                    w += 0.5
                 w += last * 1e-6
-                # callee-saved 权重额外 +0.5 偏向优先溢出 caller-saved（避免 prologue push 价值更高价值的寄存器
                 if best_gpr_pool is None or w > best_w:
                     best_w = w
                     best_gpr_pool = ("callee", reg)
@@ -992,18 +1059,20 @@ class NativeCodeGen:
                     else f"fconst_{instr.value}" if is_float
                     else f"const_{instr.value}")
         dst_loc = ctx.get_loc(dst_name)
+        base_r = ctx.frame_base_reg
+        bias = ctx.frame_stack_bias
 
         if instr.const_type == "int":
             if dst_loc[0] == "reg":
                 e.mov_reg_imm64(dst_loc[1], int(instr.value))
             else:
                 e.mov_reg_imm64(RAX, int(instr.value))
-                e.mov_mem_reg(RSP, dst_loc[1], RAX)
+                e.mov_mem_reg(base_r, bias + dst_loc[1], RAX)
         elif instr.const_type == "float":
             target = dst_loc[1] if dst_loc[0] == "reg" else XMM0
             fixup_offset = e.movsd_reg_imm(target, 0)
             if dst_loc[0] == "stack":
-                e.movsd_mem_reg(RSP, dst_loc[1], XMM0)
+                e.movsd_mem_reg(base_r, bias + dst_loc[1], XMM0)
             data_off = self._float_const_map.get(str(instr.value))
             if data_off is not None:
                 self.data_fixups.append(
@@ -1015,12 +1084,12 @@ class NativeCodeGen:
                 e.mov_reg_imm64(dst_loc[1], val)
             else:
                 e.mov_reg_imm64(RAX, val)
-                e.mov_mem_reg(RSP, dst_loc[1], RAX)
+                e.mov_mem_reg(base_r, bias + dst_loc[1], RAX)
         elif instr.const_type == "string":
             target = dst_loc[1] if dst_loc[0] == "reg" else RAX
             fixup_offset = e.lea_reg_rip(target, 0)
             if dst_loc[0] == "stack":
-                e.mov_mem_reg(RSP, dst_loc[1], RAX)
+                e.mov_mem_reg(base_r, bias + dst_loc[1], RAX)
             data_off = self._string_const_map.get(instr.value)
             if data_off is not None:
                 self.data_fixups.append(
@@ -1527,6 +1596,8 @@ class NativeCodeGen:
 
         src_loc = ctx.get_loc(src_name)
         dst_loc = ctx.get_loc(dst_name)
+        base_r = ctx.frame_base_reg
+        bias = ctx.frame_stack_bias
 
         if dst_loc[0] == "reg":
             if src_loc[0] == "reg":
@@ -1538,24 +1609,24 @@ class NativeCodeGen:
             else:
                 # 栈 -> 寄存器
                 if is_float:
-                    ctx.e.movsd_reg_mem(dst_loc[1], RSP, src_loc[1])
+                    ctx.e.movsd_reg_mem(dst_loc[1], base_r, bias + src_loc[1])
                 else:
-                    ctx.e.mov_reg_mem(dst_loc[1], RSP, src_loc[1])
+                    ctx.e.mov_reg_mem(dst_loc[1], base_r, bias + src_loc[1])
         elif dst_loc[0] == "stack":
             if src_loc[0] == "reg":
                 # 寄存器 -> 栈
                 if is_float:
-                    ctx.e.movsd_mem_reg(RSP, dst_loc[1], src_loc[1])
+                    ctx.e.movsd_mem_reg(base_r, bias + dst_loc[1], src_loc[1])
                 else:
-                    ctx.e.mov_mem_reg(RSP, dst_loc[1], src_loc[1])
+                    ctx.e.mov_mem_reg(base_r, bias + dst_loc[1], src_loc[1])
             else:
                 # 栈 -> 栈（通过寄存器中转）
                 if is_float:
-                    ctx.e.movsd_reg_mem(XMM0, RSP, src_loc[1])
-                    ctx.e.movsd_mem_reg(RSP, dst_loc[1], XMM0)
+                    ctx.e.movsd_reg_mem(XMM0, base_r, bias + src_loc[1])
+                    ctx.e.movsd_mem_reg(base_r, bias + dst_loc[1], XMM0)
                 else:
-                    ctx.e.mov_reg_mem(RAX, RSP, src_loc[1])
-                    ctx.e.mov_mem_reg(RSP, dst_loc[1], RAX)
+                    ctx.e.mov_reg_mem(RAX, base_r, bias + src_loc[1])
+                    ctx.e.mov_mem_reg(base_r, bias + dst_loc[1], RAX)
 
     def _emit_store_reg(self, instr, ctx: "_EmitContext"):
         """编译寄存器存储指令（与 LIRLoadReg 对称，确保 dst_loc 被写入）。"""
@@ -1655,7 +1726,8 @@ class NativeCodeGen:
                 if base_l[0] == "reg":
                     e.mov_reg_reg64(RAX, base_l[1])
                 else:
-                    e.mov_reg_mem(RAX, RSP, base_l[1])
+                    e.mov_reg_mem(RAX, ctx.frame_base_reg,
+                                  ctx.frame_stack_bias + base_l[1])
             # 直接存储元素到 [base + byte_offset]
             if is_float:
                 ctx.load_to_reg(elem_loc, XMM0, is_float=True)
@@ -1745,7 +1817,8 @@ class NativeCodeGen:
         if src_loc[0] == "reg":
             e.mov_reg_reg64(RAX, src_loc[1])
         else:
-            e.mov_reg_mem(RAX, RSP, src_loc[1])
+            e.mov_reg_mem(RAX, ctx.frame_base_reg,
+                          ctx.frame_stack_bias + src_loc[1])
 
         # 计算目标地址 RAX = base + byte_offset
         e.mov_reg_imm64(RDX, byte_offset)
@@ -1987,7 +2060,8 @@ class NativeCodeGen:
         # mov target_reg, [rip + 0]（RIP-relative 寻址）
         fixup_offset = e.mov_reg_rip(target_reg)
         if dst_loc[0] == "stack":
-            e.mov_mem_reg(RSP, dst_loc[1], target_reg)
+            e.mov_mem_reg(ctx.frame_base_reg,
+                          ctx.frame_stack_bias + dst_loc[1], target_reg)
 
         # 记录数据段回填信息
         data_off = self._global_var_map.get(instr.global_name)

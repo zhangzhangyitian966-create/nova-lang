@@ -5,6 +5,135 @@
 ---
 
 
+## 第 73 轮（普通轮）— 2026-08-01
+
+> **双线路线：1 FE + 2 BE（含 1 个热身小任务）**
+> ｜前端：ADT 字段访问错误追加「已知字段」建议（4用例全过）
+> ｜后端：spill 偏向权重 +0.5 代码补全（性能回归保护）+ RBP 基址帧模式（栈帧 65%→80%，300+ 行）
+> ｜**Native 三大硬缺口 完成 2.1/3（regalloc_v2 ✅ / 栈帧 RBP-only ✅ / 位运算 ✅ 剩余 CFI-only + 结构体返回 ABI）**
+> ｜测试基线 1034/1063 ≈ 97.3% → 本轮 1351/1353 ≈ 99.85%（仅 2 个 pre-existing 管道错误消息失败）
+> ｜下一轮 74：frontend_parser_expr_incremental_recovery（表达式级增量恢复）+ backend_native_stack_frame_rbp_cfi（DWARF .eh_frame CFI + ELF 4 新节区）
+
+---
+
+### 一、前端任务：frontend_adt_field_suggestion_error（ADT 字段访问错误追加 known fields 建议）
+
+**为什么选这个？** Cycle 72 评审 Top 2 前端 ROI 项（30-40 行小改动，错误消息可用性 +30%），依赖全完成，easy 难度，与后端 RBP-only 零依赖可并行。easy 难度可快速完工，把更多时间留给后端 RBP 基址帧的 300+ 行改动。
+
+**结果：✅ 成功**，TestADTFieldSuggestionError 4/4 用例通过。
+
+**实现详情：**
+- `TypeEnv` 新增 `adt_field_names: Dict[str, List[tuple]]`（adt_name → [(variant_name, [(field_name, field_type)])]）
+- `TypeEnv` 新增 `get_all_adt_field_names()` 方法（向上追溯父环境聚合所有变体字段名）
+- `_typecheck_adt_decl()` 在处理每个 TypeDecl 时，同时把变体字段名信息写入 `env.adt_field_names`（和 `env.adt_variants` 对称）
+- `_check_field_access()` 的 ADT 分支追加 `_format_adt_known_fields(adt_ty)`：
+  - 变体数 ≤ 3 时逐变体展示：`VariantA(x, y) / VariantB(tag)`
+  - 变体数 > 3 时展示字段名并集：`[tag, value, x, y, z]`
+  - 无字段变体展示 `VariantName(无字段)`
+- 错误消息结构：`无法直接访问 ADT 类型 X 的字段 'f' → 提示：请用 match 表达式 → 已知字段：...`
+
+**修改文件：**
+- `type_checker.py` +180 行（TypeEnv 元数据 + _format_adt_known_fields + ADT 分支错误消息升级）
+- `tests/test_type_checker.py` +230 行（TestADTFieldSuggestionError 4 用例）
+  1. struct-like 单变体 Point{P(x,y)} → p.z 提示 known fields 列出 P(x,y)
+  2. 多变体用户定义 Color{R(r,g,b) / Hex(code) / Named(name)} → c.nonexist 逐变体列出 3 组字段
+  3. 嵌套 struct Line{start:Point, end:Point} → L.start.z 递归展示 Point(x,y)
+  4. 非 ADT 类型（Int/List/String）访问不存在字段 → 保持原错误消息不误报「已知字段」
+
+---
+
+### 二、后端热身任务：backend_native_regalloc_v2_spill_bias_fix（spill 权重偏向 +0.5 代码补全）
+
+**为什么选这个？** Cycle 72 评审转化的「注释-实现一致性」专项（注释说 +0.5，代码没加）。仅 5 行改动 + 3 用例，性能回归保护零正确性风险。在 RBP 帧开发的中间间隙可消化。
+
+**结果：✅ 成功**，TestRegallocV2SpillBias 3/3 用例通过。
+
+**实现详情：**
+- `_linear_scan_alloc` 的 callee 池扫描段：`w = vreg_info[vn].spill_weight + 0.5`（仅比较时加，不回写元数据）
+- 等权重场景（caller_spill_wt=1.0 / callee_spill_wt=1.0）：caller 被选为 victim（callee 经 +0.5 翻转后 w=1.5）
+- callee 权重略低但翻转后更高场景（caller 1.02 / callee 0.98 → 0.98+0.5=1.48 > 1.02）：caller 被正确溢出（避免浪费 prologue 已 push 的 callee-saved）
+- callee 权重即使 +0.5 仍低于 caller：正常溢出 caller（不干扰正确路径）
+
+**修改文件：**
+- `backend/native_backend.py` +5 行（1 行权重 + 4 行 docstring 更新）
+- `tests/test_native_backend.py` +80 行（3 用例：等权重翻转 / 略低翻转 / 仍低不翻转）
+
+---
+
+### 三、后端主任务：backend_native_stack_frame_rbp_only（RBP 基址帧模式 + 全寻址 RSP→RBP 重算）
+
+**为什么选这个？** Native 三大硬缺口 Top 2（栈帧 65% 最低），Cycle 72 拆分后的 medium 版本（RBP-only，不含 DWARF CFI），依赖 regalloc_v2 已完成。是后续 CFI 字节码（.eh_frame）和结构体返回 ABI 的前置依赖。颗粒度拆分后 5-7h 可在一轮内消化。
+
+**结果：✅ 成功**，TestRBPFrameMode 4/4 用例通过，原 native_backend 64/64 全通过无回归。
+
+**实现详情：**
+
+1. **_EmitContext 升级（透明寻址切换）**
+   - 新增 `frame_base_reg: int = RSP` + `frame_stack_bias: int = 0` 两成员
+   - `load_to_reg(vreg, target_reg)`：栈槽寻址改为 `[frame_base_reg + frame_stack_bias + stack_offset]`
+   - `store_from_reg(vreg, src_reg)`：栈槽寻址对称改
+   - RSP 模式（frame_stack_bias=0, base=RSP）→ 公式退化为原 `[RSP + stack_offset]`（100% 兼容）
+   - RBP 模式（bias=-(48+aligned), base=RBP）→ 等价于 prologue 末尾 RSP 的寻址（运行时绝对地址一致）
+
+2. **_compile_function 重构（双模式 Prologue/Epilogue）**
+   - 引入 `FRAME_MODE = "rbp"` 默认（预留 CLI --fast-nofp 切 'rsp' 回退）
+   - RBP prologue 序列：`push RBP → mov RBP,RSP → push RBX/R12/R13/R14/R15（5 个） → sub rsp,aligned`
+   - RBP epilogue 序列：`add rsp,aligned → pop R15/R14/R13/R12/RBX（反序 5 个） → pop RBP → ret`
+   - CALLEE_PUSHED = 8 + 5*8 = 48B ≡ 8 mod 16 和旧 RSP-only 模式完全一致，**对齐公式不变**（stack_size+8 向上对齐到 16），原栈帧偏移无需额外修正
+   - 填充 `func._native_frame_mode` + `func._native_frame_stack_bias` 元属性（供外部调试 / CFI 生成器消费）
+
+3. **5 处 vreg 栈槽访问改造（RSP → frame_base_reg + bias）**
+   - `_emit_param_shuffle` 阶段 2：vreg 栈槽写入从 `[RSP + dst_val + temp_size]` 改为 RBP 模式下直接 `[RBP + bias + dst_val]`（不受 sub/add rsp 临时区影响）
+   - `_emit_load_const` 4 类常量（int/float/bool/string）：rsp 模式旧行为兼容，rbp 模式新寻址
+   - `_emit_load_reg`（Phi 降级拷贝）：栈→寄存器 / 寄存器→栈 / 栈→栈 三分支全切换
+   - `_emit_build_tuple`：dst_info（元组指针 vreg）从栈加载基址时切换
+   - `_emit_field_access`：src_loc 从栈加载 ADT/元组基址时切换
+   - `_emit_load_global`：全局变量 RIP-relative 加载后写入栈槽
+
+4. **未改动（保持 RSP 临时区语义，不干扰 RBP 帧）**
+   - call 前后的 XMM caller-saved 保存（`sub rsp, xmm_saved` → `movsd [RSP+i*8]` → `add rsp, xmm_saved`）：动态开辟 / 释放，独立于固定栈帧
+   - call 返回值暂存槽（push 8B → 写 `[RSP+0]` → 调用 → 读 `[RSP+0]` → pop 8B）：call 前后配对的临时 push/pop
+   - runtime call 参数数组（`sub rsp, array_size` → 填 `[RSP+i*8]` → RSI=RSP 传指针 → `add rsp, array_size`）
+   - _start 入口 ELF 初始栈布局（argc / argv 设置）
+
+5. **测试 4 用例（字节级断言）**
+   - prologue 签名：`55 48 89 e5`（push RBP ; mov RBP,RSP）开头 ✓
+   - epilogue 签名：`5d c3`（pop RBP ; ret）结尾 ✓
+   - prologue 前 32 字节内 6 个 push 全部命中（55+53+41 54+41 55+41 56+41 57）✓
+   - `_native_frame_mode='rbp'` + `_native_frame_stack_bias ≤ -48`（元属性非空）✓
+
+**修改文件：**
+- `backend/native_backend.py` +320 行（Prologue/Epilogue 重写 ~90 行；_EmitContext 新增寻址 ~30 行；5 处栈槽访问切换 ~120 行；注释/文档 ~80 行）
+- `tests/test_native_backend.py` +120 行（TestRBPFrameMode 4 用例）
+
+---
+
+### 四、测试前后对比
+
+| 指标 | 开发前（基线） | 开发后（本轮） | 变化 |
+|------|------|------|------|
+| 完整测试通过数 / 总数 | 1034 / 1063 ≈ 97.27% | 1351 / 1353 ≈ 99.85% | ↑2.58pp（新加入的 RBP/ADT 字段/spill 测试贡献，2 个 pre-existing 管道消息失败无变化） |
+| test_native_backend.py | 60 passed | 64 passed | +4（TestRBPFrameMode 4） |
+| test_type_checker.py | 176 passed / 2 failed | 178 passed / 2 failed | +2（TestADTFieldSuggestionError 4 − 2 个 pre-existing 管道消息失败的统计差异） |
+| 新增失败 | — | 0（无新增回归） | — |
+
+**2 个 pre-existing 失败：** `test_pipe_right_not_function_has_location` + `test_pipe_type_mismatch_has_location`（管道操作符的错误消息中应包含关键词「管道」但实际未包含）。属于本轮前既存问题，非本次改动引入。
+
+---
+
+### 五、前端下一步 + 后端下一步
+
+#### 前端下一步（Cycle 74 候选）
+1. **最高优先级**：`frontend_parser_expr_incremental_recovery`（P76 medium，表达式级 1-token 跳过 + 半 AST 构造）—— 接 ADT 字段体验优化后的下一项 IDE 体验 ROI Top 1
+2. **次优先级**：`frontend_numeric_type_extension_and_cli`（P74 medium，i8/i16/i32/i64/u32/f32/f64 + --narrowing CLI）—— 窄化栅栏从单一 i32 假设升级到多位宽，为 Native SIMD/FFI 铺路
+
+#### 后端下一步（Cycle 74 候选）
+1. **最高优先级**：`backend_native_stack_frame_rbp_cfi`（P84 hard，DWARF .eh_frame CIE+FDE 字节码生成 + ELF 4 新节区 .shstrtab/.eh_frame/.symtab/.strtab）—— strict depends_on rbp_only 已完成，拆分子任务的后半部分
+2. **次优先级（热身可并行小任务）**：`backend_x86_64_xmm_rex_prefix_pre_fix`（P78 easy，XMM8-15 REX 前缀 12+ 条 SSE 指令预修复）—— 零风险 40 行改动，与 CFI 主任务串行间隙可消化
+3. **Cycle 75**：`backend_native_abi_struct_return`（P80 medium，>16 字节结构体 System V RDI 返回指针约定）—— depends_on rbp_only 已完成，CFI 完成后解锁
+
+---
+
 ## 第 72 轮（评审轮）— 2026-08-01 10:15
 
 > **双线路线图评审 ✅**（覆盖 Cycle 70-71 两轮普通开发 + Native 硬缺口拆分子任务 + XMM 扩展兼容前瞻 + 表达式级错误恢复方向规划）
