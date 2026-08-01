@@ -1937,6 +1937,13 @@ class TypeChecker:
         ">=": "_check_comparison_op",
         "&&": "_check_logical_op",
         "||": "_check_logical_op",
+        # === 按位运算符 (Cycle 70) ===
+        "&": "_check_bitwise_op",
+        "|": "_check_bitwise_op",
+        "^": "_check_bitwise_op",
+        "<<": "_check_bitwise_op",
+        ">>": "_check_bitwise_op",
+        ">>>": "_check_bitwise_op",
     }
 
     def _check_binary_op(self, expr: BinaryOp) -> NovaType:
@@ -2011,6 +2018,23 @@ class TypeChecker:
             self._error(f"'{op}' 右侧必须是 Bool，得到 {right_ty}", expr=expr)
         return BOOL_T
 
+    def _check_bitwise_op(self, op: str, left_ty: NovaType, right_ty: NovaType, expr=None) -> NovaType:
+        """检查按位操作 (& | ^ << >> >>>)：仅支持 Int 类型。
+
+        移位操作左右都必须是 Int（右操作数在运行时被截断为低 6 位）。
+        """
+        if not self._unify_types(left_ty, INT_T):
+            self._error(
+                f"按位操作符 '{op}' 左侧必须是 Int，得到 {left_ty}",
+                expr=expr,
+            )
+        if not self._unify_types(right_ty, INT_T):
+            self._error(
+                f"按位操作符 '{op}' 右侧必须是 Int，得到 {right_ty}",
+                expr=expr,
+            )
+        return INT_T
+
     def _check_unary_op(self, expr: UnaryOp) -> NovaType:
         """检查一元操作"""
         operand_ty = self.check_expr(expr.operand)
@@ -2024,6 +2048,10 @@ class TypeChecker:
             if self._unify_types(operand_ty, BOOL_T):
                 return BOOL_T
             self._error(f"一元 '!' 需要 Bool，得到 {operand_ty}", expr=expr)
+        if expr.op == "~":
+            if self._unify_types(operand_ty, INT_T):
+                return INT_T
+            self._error(f"按位取反 '~' 需要 Int，得到 {operand_ty}", expr=expr)
         self._error(f"未知的一元操作符 '{expr.op}'", expr=expr)
 
     def _infer_fn_type(self, fn: FnDef) -> FnType:

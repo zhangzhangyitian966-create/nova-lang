@@ -942,11 +942,59 @@ class Parser:
     # ----------------------------------------------------------
 
     def _parse_and_expr(self):
-        left = self._parse_equality_expr()
+        left = self._parse_bitor_expr()
         while self._match(TokenType.AND):
             tok = self.tokens[self.pos - 1]
-            right = self._parse_equality_expr()
+            right = self._parse_bitor_expr()
             left = BinaryOp(op="&&", left=left, right=right, span=self._span(tok))
+        return left
+
+    # ----------------------------------------------------------
+    # 按位或 (|) — PIPE token 在二元上下文 = 按位或；在主表达式起始 = lambda 起始
+    # ----------------------------------------------------------
+
+    def _parse_bitor_expr(self):
+        left = self._parse_bitxor_expr()
+        while self._match(TokenType.PIPE):
+            tok = self.tokens[self.pos - 1]
+            right = self._parse_bitxor_expr()
+            left = BinaryOp(op="|", left=left, right=right, span=self._span(tok))
+        return left
+
+    # ----------------------------------------------------------
+    # 按位异或 (^)
+    # ----------------------------------------------------------
+
+    def _parse_bitxor_expr(self):
+        left = self._parse_bitand_expr()
+        while self._match(TokenType.XOR):
+            tok = self.tokens[self.pos - 1]
+            right = self._parse_bitand_expr()
+            left = BinaryOp(op="^", left=left, right=right, span=self._span(tok))
+        return left
+
+    # ----------------------------------------------------------
+    # 按位与 (&)
+    # ----------------------------------------------------------
+
+    def _parse_bitand_expr(self):
+        left = self._parse_shift_expr()
+        while self._match(TokenType.BAND):
+            tok = self.tokens[self.pos - 1]
+            right = self._parse_shift_expr()
+            left = BinaryOp(op="&", left=left, right=right, span=self._span(tok))
+        return left
+
+    # ----------------------------------------------------------
+    # 移位 (<<, >>, >>>)
+    # ----------------------------------------------------------
+
+    def _parse_shift_expr(self):
+        left = self._parse_equality_expr()
+        while self._peek_type() in (TokenType.SHL, TokenType.SHR, TokenType.SAR):
+            tok = self._advance()
+            right = self._parse_equality_expr()
+            left = BinaryOp(op=tok.value, left=left, right=right, span=self._span(tok))
         return left
 
     # ----------------------------------------------------------
@@ -1012,7 +1060,7 @@ class Parser:
         return left
 
     # ----------------------------------------------------------
-    # 一元操作符 (-, !)
+    # 一元操作符 (-, !, ~)
     # ----------------------------------------------------------
 
     def _parse_unary_expr(self):
@@ -1025,6 +1073,10 @@ class Parser:
             self._advance()
             operand = self._parse_unary_expr()
             return UnaryOp(op="!", operand=operand, span=self._span(tok))
+        if tok.type == TokenType.BNOT:
+            self._advance()
+            operand = self._parse_unary_expr()
+            return UnaryOp(op="~", operand=operand, span=self._span(tok))
         return self._parse_postfix_expr()
 
     # ----------------------------------------------------------

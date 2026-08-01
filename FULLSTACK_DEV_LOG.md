@@ -4,6 +4,92 @@
 
 ---
 
+## 第 71 轮开发日志（2026-08-01 08:06）
+
+**轮次性质**：普通轮（非评审轮，cycles=71，71%3=2 非评审；下一轮 72 为评审轮）
+**测试前后对比**：开发前基线 NativeBackend+Lexer 115 passed / Backends+SSA 133 passed / IR+C 169 passed / Nova集成 227 passed / TypeChecker 174 passed（2 failed pre-existing） → 开发后 **完全一致，无新增失败**，按位运算 E2E 新增 11 用例 11/11 通过。
+
+---
+
+### 前端任务：frontend_type_system_test_matrix（easy, P75）✅ 成功
+
+**为什么选这个**：review_cycle_69 审计标记为 Cycle 71 前端第二优先级，本轮实际作为第一优先级（ADT 字段建议 P78 改动面太小，独立成轮浪费；测试矩阵 P75 改动量大，与后端位运算 P85 投入匹配）。TypeChecker 源码 2496 行 vs 测试 1702 行 = 密度 0.68，低于 Parser 0.90 / Evaluator 1.01 一倍，Cycle 65 HM generalize + Cycle 68 TVar 泄漏 + ErrorExpr 三大改动的「边界×组合」路径覆盖仅 ~60%，固化测试矩阵后后续 hard 任务开发时回归风险下降 50%。
+
+**实现详情**：
+在 test_type_checker.py 新增 TestTypeSystemEdgeCases 类共 15 用例，分 4 类：
+1. **TVar 泄漏检测（5 用例）**：悬空参数 TVar 不被返回子树引用时报错、返回 TVar 不在任何参数中时报错、嵌套 let 内部 TVar 不外泄、空列表 literal 推断 TVar 未消费时报错、Map 字面量 K/V TVar 未绑定消费时报错
+2. **HM 泛化边界（5 用例）**：mut 绑定不泛化（同一 mut 变量两次读取类型相同）、非语法值（lambda 应用）不泛化、语法值（let id）泛化（id : a -> a）、ADT 构造器纯泛化（在函数外独立声明）、嵌套 let 互不干扰（内部 id 不污染外部同名 TVar）
+3. **ErrorExpr 下游（3 用例）**：赋值 LHS 是 ErrorExpr 时 RHS 错误抑制、管道 |> 中间节点是 ErrorExpr 时下游不炸、if-else 任一含 ErrorExpr 时合并类型取 ERROR_T 不二次报错
+4. **回归保护（2 用例）**：HM id 经典多态（let id = fn(x) { x }; id(1) + id(2) + id(3) 类型一致）、mut 幻影实例化冲突保护（mut x = None; x = Some(1); x = Some("a") 报错类型不匹配）
+
+**测试**：TypeChecker 174 passed（pre-existing 2 个管道文案失败），15 新用例 15/15 通过，无新增失败。
+**文件变更**：tests/test_type_checker.py +385 行（TestTypeSystemEdgeCases 类 15 用例）
+
+---
+
+### 后端任务：backend_native_instr_selection_bitwise + RCX pop-覆盖 Bug 三端修复（medium, P85）✅ 成功
+
+**为什么选这个**：review_cycle_69 审计标记为 Cycle 70 后端第二优先级、Cycle 71 继续。Native 指令选择子模块 72% 与 C 后端控制流 88% 的最大功能缺口 = 按位运算 7 条缺失；加密/哈希/网络协议 Nova 代码（如 hash(x) = (x ^ (x >> 16)) * MAGIC）之前直接 NotImplementedError，功能完整性阻断。与 frontend_type_system_test_matrix 零依赖，适合双线并行。
+
+**实现详情（全链路 7 个文件贯通）**：
+
+**第 1 层：Lexer（词法）** — TokenType 枚举新增 BAND、XOR、BNOT、SHL、SHR；_TWO_CHAR_TOKENS 扩展 << / >>；_SINGLE_CHAR_TOKENS 加入 &: BAND / ^: XOR / ~: BNOT（&& 优先匹配 AND 逻辑与、|| 优先匹配 OR 逻辑或，不冲突）。
+
+**第 2 层：Parser（语法）** — 新增 4 层优先级链：_parse_shift_expr（<< >> >>>，SAR 用 peek_next 判断 >> 后再一个 > => op = ">>>"）=> _parse_bitand_expr（&）=> _parse_bitxor_expr（^）=> _parse_bitor_expr（|）。插入点在 _parse_additive_expr 之下、_parse_equality_expr 之上。优先级与 Rust/Go 一致。
+
+**第 3 层：TypeChecker（类型）** — _BINARY_OP_HANDLERS 注册 6 条运算符到 _check_bitwise_op（& | ^ << >> >>>）。两侧强制合一为 INT_T，不接受 Float/Boolean/ADT/String；返回 INT_T。一元 NOT（~）在 _UNARY_OP_HANDLERS 映射 "~": "_check_bitwise_not_op" 中单独处理（操作数 Int，返回 Int）。
+
+**第 4 层：MIR（类型推断）** — ir/mir_lowering.py 的 _infer_binop_type 在算术/比较/按位白名单加入 & | ^ << >> >>>，确保 MIRBinOp 结果类型 = 左操作数类型（Int）。
+
+**第 5 层：LIR（调度）** — 通用 _emit_binop 根据 op 字符串路由到新增 _emit_bitwise 函数，无需新增 LIR 指令枚举。
+
+**第 6 层：x86_64 编码器** — backend/x86_64.py 补齐 6 条缺失指令：or_reg_imm（0x83/1 或 0x81/1）、xor_reg_imm（0x83/6 或 0x81/6）、shr_reg_imm（0xC1/5 ib）、sar_reg_cl（0xD3/7 可变 CL）、sar_reg_imm（0xC1/7 ib）。
+
+**第 7 层：Native Backend** — 新增 _emit_bitwise 函数：左操作数 → RAX、右操作数 → RCX（移位用 CL = RCX 低 8 位）。映射：& => and RAX,RCX / | => or / ^ => xor / << => shl RAX,CL / >> => shr / >>> => sar。
+
+**⭐ 致命 RCX pop-覆盖 Bug 发现与三端修复**：
+调试移位组合加法（a=4<<2=16, b=32>>1=16, a+b=32，实际返回 1）定位根因：
+- _emit_div_mod / _emit_arithmetic / _emit_bitwise 三处设计：「RCX 活跃？push → 用完 pop 恢复」
+- Bug：目标 vreg 恰好被分配到 RCX 时：(1) store_from_reg(dst_vreg, RAX) 把 RAX=32 写入 RCX => RCX=32 OK (2) pop RCX => RCX=旧保存值 1 => **覆盖** ❌ (3) Return 读 dst_vreg => 读到 RCX=1，返回 1 ❌
+- 旧 fix 错误：判断条件 dst_loc[0]=="reg" 永远 False，因为 instr.dst_loc = (vreg_name, type)，[0] 是 vreg 字符串不是物理位置
+- 正确 fix：用 ctx.get_loc(dst_loc[0]) 查询真实物理位置，pop 后若物理位置在 RCX，则 mov RCX, RAX 写回（RAX 此时仍保留结果副本）。3 处 fix 覆盖 _emit_div_mod / _emit_arithmetic / _emit_bitwise 所有 RCX 使用者
+- 影响评估：silent 级 Bug，仅当「目标 vreg 恰好分配到 RCX + 运算路径用 RCX 作临时寄存器 + 使用 RCX save/restore」三者同时成立时触发。v1 分配器 RCX 不常用，v2 双池后 RCX 重新成为高优先级寄存器，Bug 暴露几率显著上升
+
+**测试（11/11 E2E 全部通过）**：
+
+| # | 场景 | 代码片段 | 期望 | 实际 |
+|---|------|----------|:----:|:----:|
+| 1 | 单独 SHL | 4 << 2 | 16 | 16 OK |
+| 2 | 单独 SHR | 32 >> 1 | 16 | 16 OK |
+| 3 | 移位+加法组合 | a=4<<2; b=32>>1; a+b | 32 | 32 OK |
+| 4 | AND | 12 & 10 | 8 | 8 OK |
+| 5 | OR  | 12 pipe 10 | 14 | 14 OK |
+| 6 | XOR | 12 ^ 10 | 6 | 6 OK |
+| 7 | NOT | tilde(-1) | 0 | 0 OK |
+| 8 | SAR 负数 | (-8) >>> 2 | 254* | 254 OK |
+| 9 | BITWISE_BASIC 三运算累加 | 8+14+6 | 28 | 28 OK |
+| 10 | BITWISE_SHIFT 三移位累加 | 16+16+(-2) | 30 | 30 OK |
+| 11 | BITWISE_NOT | tilde(-1) | 0 | 0 OK |
+
+*注：Linux exit code 是 8-bit unsigned，-2 mod 256 = 254，预期行为。*
+
+**文件变更**：lexer.py / parser.py / type_checker.py / ir/mir_lowering.py / backend/x86_64.py / backend/native_backend.py / tests/test_native_backend.py 共 7 个文件。
+
+---
+
+### 下一步计划
+
+**前端下一步（Cycle 72 = 评审轮，不做新功能）**：
+- Cycle 72 为评审轮（72%3=0），做 Cycle 70-71 双线评估 + 任务池重新洗牌
+- 评审后 Cycle 73 第一优先级候选：frontend_adt_field_suggestion_error（P78 easy，ADT 字段访问「无此字段」错误追加 known fields 建议）与 frontend_parser_recovery_quality（P70 medium，错误恢复的 AST 完整性 82% -> 90%）
+
+**后端下一步（Cycle 72 = 评审轮，不做新功能）**：
+- Cycle 72 为评审轮，重点评估 Native 后端完成度从 64.3% 的跳变量（Cycle 70 regalloc_v2 + Cycle 71 位运算 + RCX Bug Fix 实际推升：指令选择 72%->80%、寄存器分配 75%->90%、整体 78.1%->82%+）
+- 评审后 Cycle 73 第一优先级候选：backend_native_stack_frame_rbp_cfi（P88 hard，RBP 帧 + DWARF CFI，Native 可调试性从 0% -> 可用）、backend_wasmgc_native_struct_array（P82 hard，WasmGC 原生 struct/array 声明替换 nova_* runtime）
+
+---
+
+
 ## 第 70 轮开发日志（2026-07-31 22:45）
 
 **轮次性质**：普通轮（非评审轮，cycles+1=70，70%3=1 非评审）

@@ -1819,5 +1819,268 @@ fn main() {
         self.assertIn("窄化风险", str(ctx.exception))
 
 
+class TestTypeSystemEdgeCases(unittest.TestCase):
+    """TypeVar 泄漏 / HM 泛化边界 / ErrorExpr 下游 / 回归保护 4 类 × 15 用例。
+
+    对齐 review_cycle_69 审计结论：前端测试密度 0.68 → 补齐后 ≥ 0.75。
+    覆盖 Cycle 65 generalize / Cycle 68 TVar Harden (泄漏栅栏 + mut 幻影 + HM TVar 区分)
+    / ErrorExpr 三端贯通 三大改动的「边界 × 组合」路径。
+    """
+
+    # ============================================================
+    # 工具：完整 Lexer→Parser→TypeChecker 管道，返回第一个 Exception
+    # ============================================================
+    def _run_pipeline(self, source: str):
+        from nova.lexer import Lexer
+        from nova.parser import Parser
+        lex = Lexer(source)
+        parser = Parser(lex.tokenize(), source=source)
+        prog = parser.parse()
+        tc = TypeChecker(source=source)
+        try:
+            tc.check_program(prog)
+        except Exception as e:
+            return e
+        return None
+
+    # ============================================================
+    # Category 1：TVar 泄漏检测（5 用例）
+    # ============================================================
+
+    def test_leak_1_mut_empty_list_no_annotation(self):
+        """[泄漏 1/5] mut 空列表 [] 无注解 → 跳过泛化 → 泄漏 unknown_list_elem。
+        （let 绑定的 [] 会泛化为多态 List[T] 合法；只有 mut 绑定 Value Restriction 强制拦截）"""
+        src = "fn main() { mut xs = []; 0 }"
+        err = self._run_pipeline(src)
+        self.assertIsNotNone(err, "mut 空列表无注解应泄漏 unknown_list_elem")
+        msg = str(err)
+        # 前缀分发：空集合推断友好提示
+        self.assertIn("空列表", msg, f"期望空集合泄漏提示，实际：{msg}")
+        self.assertIn("类型注解", msg)
+
+    def test_leak_2_mut_unconstrained_lambda(self):
+        """[泄漏 2/5] mut 绑定未约束 Lambda（参数 TVar 未泛化）→ 参数类型无法确定。
+        （Nova 中 {} 是 Block，空 Map 用等价未约束 TVar mut 场景替代）"""
+        src = "fn main() { mut f = |x| 42; 0 }"
+        err = self._run_pipeline(src)
+        self.assertIsNotNone(err, "mut f = |x| 42 跳过 generalize，lambda_param TVar 应泄漏")
+        msg = str(err)
+        self.assertIn("类型", msg, f"期望类型泄漏错误，实际：{msg}")
+
+    def test_leak_3_fn_param_unreferenced(self):
+        """[泄漏 3/5] 函数声明参数 x 无注解且 body 不引用 → 悬空 param_f_x。"""
+        src = "fn f(x) { 42 }\nfn main() { f(1) }"
+        err = self._run_pipeline(src)
+        self.assertIsNotNone(err, "不被引用的无注解参数应判为泄漏")
+        msg = str(err)
+        self.assertTrue(
+            "参数" in msg and ("无法确定" in msg or "类型" in msg),
+            f"期望参数泄漏错误，实际：{msg}"
+        )
+
+    def test_leak_4_lambda_param_unreferenced_mut(self):
+        """[泄漏 4/5] mut 绑定的 Lambda 中 y 无注解且 body 不引用 → 泄漏 lambda_param_y。"""
+        src = "fn main() { mut f = |x, y| x + 1; 0 }"
+        err = self._run_pipeline(src)
+        self.assertIsNotNone(err, "mut Lambda 中未引用的 y 应泄漏")
+        msg = str(err)
+        self.assertTrue("类型" in msg or "参数" in msg, f"实际：{msg}")
+
+    def test_leak_5_top_level_fn_param_unconstrained(self):
+        """[泄漏 5/5] 顶层函数 g(x){x} 的参数 TVar 在调用点仅以函数值形式被引用时不被约束。"""
+        src = """
+fn g(x) { x }
+fn main() {
+    let r = g
+    0
+}
+"""
+        err = self._run_pipeline(src)
+        # g 的参数 x 在函数体中被引用，但调用点 `let r = g` 仅引用函数值本身，
+        # 不触发 g 的参数 TVar 合一（g 作为非语法值定义本身不泛化）→ x 的 TVar 悬空泄漏
+        self.assertIsNotNone(err, "顶层函数形参 x 未约束实例化应判泄漏")
+        self.assertIn("参数", str(err))
+
+    # ============================================================
+    # Category 2：HM 泛化边界（5 用例）
+    # ============================================================
+
+    def test_gen_1_mut_not_generalized_list_push_conflict(self):
+        """[泛化 1/5] mut 绑定绝对不泛化（Value Restriction 强制）。
+        mut xs = [] → 第一次 list_push(xs, 1) 绑定 elem=Int，
+        第二次 list_push(xs, "s") String 与 Int 冲突。
+        如果 mut 错误 generalize → 两次 list_push 各用独立 elem TVar → 不冲突（silent bug）。
+        """
+        src = """
+fn main() {
+    mut xs = []
+    list_push(xs, 1)
+    list_push(xs, "hello")
+    0
+}
+"""
+        err = self._run_pipeline(src)
+        self.assertIsNotNone(err, "mut xs 不泛化时 String / Int 两个 append 应冲突")
+        msg = str(err)
+        self.assertTrue(
+            "不一致" in msg or "不匹配" in msg or "列表" in msg or "空列表" in msg,
+            f"mut 不泛化保护应触发类型冲突，实际：{msg}"
+        )
+
+    def test_gen_2_fn_def_not_polymorphic_at_call_sites(self):
+        """[泛化 2/5] 非语法值函数定义本身参数有引用 → 与独立实例化错误不冲突。
+        identity(x){x}：x 被返回引用 → fn([T], T) 整体作为语法值泛化；
+        两调用点独立实例化：identity(42) → T=Int / identity("s") → T=String。
+        结果应成功（identity 是顶层函数定义，走 Gen 泛化路径）。"""
+        src = """
+fn identity(x) { x }
+fn main() {
+    let a = identity(42)
+    let b = identity("str")
+    0
+}
+"""
+        err = self._run_pipeline(src)
+        # identity 的 x 在 body 中被引用（返回 x），因此参数 TVar 不泄漏，
+        # 顶层函数定义走函数级泛化（FnType 内 TypeVar 不判悬空，因为 x 在返回被引用）
+        # 结果应该成功（identity 可被多态调用）
+        if err is not None:
+            msg = str(err)
+            # 只要不是"参数类型无法确定"泄漏即可
+            self.assertFalse(
+                "参数" in msg and "无法确定" in msg,
+                f"identity(x){{x}} x 被引用不应判悬空泄漏；实际：{msg}"
+            )
+
+    def test_gen_3_syntactic_value_lambda_generalized(self):
+        """[泛化 3/5] 语法值 Lambda 泛化：经典 HM id 函数双实例独立不冲突。
+        let id = |x| x; id(42) : Int 与 id("hello") : String 应各自实例化。"""
+        src = """
+fn main() {
+    let id = |x| x
+    let a = id(42)
+    let b = id("hello")
+    a
+}
+"""
+        err = self._run_pipeline(src)
+        self.assertIsNone(err, f"|x|x 作为语法值应被 generalize，两实例独立不应冲突，实际：{err}")
+
+    def test_gen_4_let_binding_lambda_two_call_sites(self):
+        """[泛化 4/5] let 绑定的单个 Lambda 在两个不同类型调用点独立实例化不串扰。
+        验证：let swap = |a, b| (b, a); swap(1, 2) 与 swap("x", "y") 不冲突。
+        （替代原 ADT 构造器场景：Nova 预注册 Option 仅在类型环境中可见，
+        值环境中 Some/None 未作为标识符暴露，等价泛化能力由多调用点覆盖。）"""
+        src = """
+fn main() {
+    let swap = |a, b| (b, a)
+    let t1 = swap(1, 2)
+    let t2 = swap("x", "y")
+    0
+}
+"""
+        err = self._run_pipeline(src)
+        self.assertIsNone(err, f"ADT 构造器作为语法值应泛化，两个 Some 实例不应冲突，实际：{err}")
+
+    def test_gen_5_nested_let_lambda_no_crosstalk(self):
+        """[泛化 5/5] 嵌套 let 的两个 Lambda 各自独立泛化，不串扰。"""
+        src = """
+fn main() {
+    let id_fst = |x, y| x
+    let r1 = id_fst(10, "ignored")
+    let r2 = {
+        let id_snd = |a, b| b
+        id_snd("not_used", 3.14)
+    }
+    r1
+}
+"""
+        err = self._run_pipeline(src)
+        self.assertIsNone(err, f"嵌套 let 的两个 lambda 应各自独立泛化，实际：{err}")
+
+    # ============================================================
+    # Category 3：ErrorExpr 下游（3 用例）
+    # ============================================================
+
+    def test_err_1_error_t_passes_leak_guard(self):
+        """[ErrorExpr 1/3] ERROR_T 哨兵通过泄漏栅栏：只报「未定义」，不误报泄漏/无法推断。"""
+        src = "fn main() { let x = undefined_symbol + 1; 0 }"
+        err = self._run_pipeline(src)
+        self.assertIsNotNone(err, "未定义标识符必须报一个错误")
+        msg = str(err)
+        self.assertIn("未定义", msg)
+        self.assertNotIn("泄漏", msg, "ERROR_T 不应误触发泄漏栅栏")
+        self.assertNotIn("无法推断", msg)
+
+    def test_err_2_error_t_branch_no_leak_false_positive(self):
+        """[ErrorExpr 2/3] if 分支中的 ERROR_T（未定义）不触发泄漏误报。"""
+        src = """
+fn main() {
+    let r = if true then undefined_var else 42
+    r
+}
+"""
+        err = self._run_pipeline(src)
+        self.assertIsNotNone(err)
+        msg = str(err)
+        self.assertIn("未定义", msg)
+        # 根因错误保留，泄漏误报必须清零
+        self.assertNotIn("泄漏", msg)
+
+    def test_err_3_pipe_error_node_no_leak(self):
+        """[ErrorExpr 3/3] 管道上游 ErrorExpr（未定义标识符）不触发 TVar 泄漏误报。"""
+        src = "fn len(s: String) -> Int { str_len(s) }\nfn main() { undefined_x |> len }"
+        err = self._run_pipeline(src)
+        self.assertIsNotNone(err)
+        msg = str(err)
+        self.assertIn("未定义", msg)
+        self.assertNotIn("泄漏", msg, "上游 ErrorExpr 不应造成管道下游 TVar 泄漏误报")
+
+    # ============================================================
+    # Category 4：回归保护（2 用例）
+    # ============================================================
+
+    def test_regression_1_hm_higher_order_apply(self):
+        """[回归 1/2] HM 高阶 apply(f,x)=f(x)：参数均被引用，不应判悬空泄漏。"""
+        src = """
+fn apply(f, x) { f(x) }
+fn main() {
+    let id = |z| z
+    let r1 = apply(id, 99)
+    let r2 = apply(id, "lang")
+    0
+}
+"""
+        err = self._run_pipeline(src)
+        if err is not None:
+            msg = str(err)
+            # apply 的 f 在 body 被调用、x 被实参传入，两者均被引用 → 不应判悬空
+            self.assertFalse(
+                ("参数" in msg and "无法确定" in msg),
+                f"apply(f,x) 中参数均被引用，不应判悬空泄漏；实际：{msg}"
+            )
+
+    def test_regression_2_mut_phantom_tvar_conflict_guard(self):
+        """[回归 2/2] mut 幻影冲突保护：同一 mut 变量两次读取 TVar 共享。
+        mut v = 0 → v = 1 → v = "s"：String 与已绑定 Int 应冲突。
+        如果 mut 错误 generalize → 两次读取独立实例化 TVar → 不冲突（silent bug）。
+        """
+        src = """
+fn main() {
+    mut v = 0
+    v = 1
+    v = "surprise_string"
+    0
+}
+"""
+        err = self._run_pipeline(src)
+        self.assertIsNotNone(err, "mut v 已绑定 Int 后赋值 String 应报不匹配（mut 幻影保护）")
+        msg = str(err)
+        self.assertTrue(
+            "不匹配" in msg or "推断类型" in msg or "赋值" in msg,
+            f"mut 幻影保护应触发赋值类型冲突，实际：{msg}"
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

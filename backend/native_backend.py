@@ -1046,6 +1046,8 @@ class NativeCodeGen:
             self._emit_arithmetic(op, left_name, right_name, is_float, dst_loc, ctx)
         elif op in ("==", "!=", "<", ">", "<=", ">="):
             self._emit_comparison(op, left_name, right_name, is_float, dst_loc, ctx)
+        elif op in ("&", "|", "^", "<<", ">>", ">>>"):
+            self._emit_bitwise(op, left_name, right_name, is_float, dst_loc, ctx)
 
     def _is_rcx_live(self, vreg_name, ctx):
         """检查 RCX 是否被分配给某个活跃虚拟寄存器（且不是当前操作数）。
@@ -1085,6 +1087,12 @@ class NativeCodeGen:
                 ctx.store_from_reg(dst_loc[0], RAX)
             if need_save_rcx:
                 e.pop_reg(RCX)
+                # FIX Cycle 70：若 dst 恰好分配到 RCX，pop 覆盖了刚写入的结果
+                # 注意 instr.dst_loc = (vreg_name, type)，需通过 vreg_alloc 查物理位置
+                if dst_loc:
+                    dst_phys = ctx.get_loc(dst_loc[0])
+                    if dst_phys[0] == "reg" and dst_phys[1] == RCX:
+                        e.mov_reg_reg64(RCX, RAX)
 
     def _emit_arithmetic(self, op, left_name, right_name, is_float, dst_loc, ctx):
         """编译算术运算（加/减/乘）。"""
@@ -1109,6 +1117,11 @@ class NativeCodeGen:
                 ctx.store_from_reg(dst_loc[0], RAX)
             if need_save_rcx:
                 e.pop_reg(RCX)
+                # FIX Cycle 70：若 dst 恰好分配到 RCX，pop 覆盖了刚写入的结果
+                if dst_loc:
+                    dst_phys = ctx.get_loc(dst_loc[0])
+                    if dst_phys[0] == "reg" and dst_phys[1] == RCX:
+                        e.mov_reg_reg64(RCX, RAX)
 
     def _emit_comparison(self, op, left_name, right_name, is_float, dst_loc, ctx):
         """编译比较运算（==, !=, <, >, <=, >=）。"""
@@ -1139,6 +1152,54 @@ class NativeCodeGen:
         if dst_loc:
             ctx.store_from_reg(dst_loc[0], RAX)
 
+    def _emit_bitwise(self, op, left_name, right_name, is_float, dst_loc, ctx):
+        """编译按位运算（AND/OR/XOR/SHL/SHR/SAR）。
+
+        与算术运算同模式：左操作数加载到 RAX、右操作数到 RCX。
+        移位操作右操作数如果是变量，需要放到 CL（RCX 低 8 位）。
+        移位操作如果右操作数是立即数，目前 LIR 会以虚拟寄存器形式传递（因为
+        LIR 调度表 src_locs 是 vreg 名），如果需要立即数优化，可在后续在
+        LIR → Native 之间增加常量折叠 pass。
+        """
+        e = ctx.e
+        if is_float:
+            # Float 位运算（NaN boxing 场景）暂不支持，静默返回
+            return
+
+        # 移位操作的特殊路径：右操作数如果是变量形式放入 RCX 后取 CL
+        is_shift = op in ("<<", ">>", ">>>")
+        need_save_rcx = self._is_rcx_live(right_name, ctx)
+        if need_save_rcx:
+            e.push_reg(RCX)
+        ctx.load_to_reg(left_name, RAX)
+        ctx.load_to_reg(right_name, RCX)
+
+        if op == "&":
+            e.and_reg_reg(RAX, RCX)
+        elif op == "|":
+            e.or_reg_reg(RAX, RCX)
+        elif op == "^":
+            e.xor_reg_reg(RAX, RCX)
+        elif op == "<<":
+            # shl %cl, %rax：左移 RCX 低 8 位
+            e.shl_reg_cl(RAX)
+        elif op == ">>":
+            # shr %cl, %rax：逻辑右移（无符号，填 0）
+            e.shr_reg_cl(RAX)
+        elif op == ">>>":
+            # sar %cl, %rax：算术右移（符号位扩展，Nova 语义上 >>> = SAR）
+            e.sar_reg_cl(RAX)
+
+        if dst_loc:
+            ctx.store_from_reg(dst_loc[0], RAX)
+        if need_save_rcx:
+            e.pop_reg(RCX)
+            # FIX Cycle 70：若 dst 恰好分配到 RCX，pop 覆盖了刚写入的结果
+            if dst_loc:
+                dst_phys = ctx.get_loc(dst_loc[0])
+                if dst_phys[0] == "reg" and dst_phys[1] == RCX:
+                    e.mov_reg_reg64(RCX, RAX)
+
     def _emit_unary_op(self, instr, ctx: "_EmitContext"):
         """编译一元运算指令（取负/逻辑非）。"""
         e = ctx.e
@@ -1164,6 +1225,12 @@ class NativeCodeGen:
             e.sete(RAX)
             e.movzx_reg32_reg8(RAX, RAX)
             ctx.store_from_reg(dst_name, RAX)
+        elif instr.op == "~":
+            # 按位取反 NOT：仅 Int 类型支持，Float 静默跳过
+            if not is_float:
+                ctx.load_to_reg(src_name, RAX)
+                e.not_reg(RAX)
+                ctx.store_from_reg(dst_name, RAX)
 
     # ============================================================
     # 通用 ABI 调用骨架（第 65 轮 backend_native_emit_abi_call_refactor 新增）

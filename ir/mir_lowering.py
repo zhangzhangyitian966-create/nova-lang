@@ -410,8 +410,9 @@ class MIRLowering:
         left_ty = self.ssa_types.get(left_ssa)
         right_ty = self.ssa_types.get(right_ssa)
         if left_ty and right_ty and left_ty.kind == right_ty.kind:
-            # 算术/比较运算保持操作数类型
-            if op in ("+", "-", "*", "/", "%", "==", "!=", "<", ">", "<=", ">=", "&&", "||"):
+            # 算术/比较/按位运算保持操作数类型
+            if op in ("+", "-", "*", "/", "%", "==", "!=", "<", ">", "<=", ">=", "&&", "||",
+                       "&", "|", "^", "<<", ">>", ">>>"):
                 return left_ty
         return NovaType(IRType.TYPE_VAR)
 

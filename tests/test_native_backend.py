@@ -848,6 +848,43 @@ class TestNativeE2EExecution(unittest.TestCase):
         """端到端：闭包 make_adder(5)(10)=15"""
         self.assertEqual(self._compile_and_run(self._CLOSURE), 15)
 
+    # === 按位运算 E2E 测试 (Cycle 70: backend_native_instr_selection_bitwise) ===
+    _BITWISE_BASIC = (
+        "fn main() -> Int {\n"
+        "    let a = 12\n"      # 0b1100
+        "    let b = 10\n"      # 0b1010
+        "    let and_r = a & b\n"   # 0b1000 = 8
+        "    let or_r  = a | b\n"   # 0b1110 = 14
+        "    let xor_r = a ^ b\n"   # 0b0110 = 6
+        "    and_r + or_r + xor_r\n"  # 8 + 14 + 6 = 28
+        "}"
+    )
+    _BITWISE_SHIFT = (
+        "fn main() -> Int {\n"
+        "    let shl_r = 4 << 2\n"      # 4 * 4 = 16
+        "    let shr_r = 32 >> 1\n"     # 32 / 2 = 16
+        "    let sar_r = (-8) >>> 2\n"  # 算术右移：-8 /4 = -2
+        "    shl_r + shr_r + sar_r\n"   # 16 + 16 + (-2) = 30
+        "}"
+    )
+    _BITWISE_NOT = (
+        "fn main() -> Int {\n"
+        "    ~(-1)\n"  # ~(-1) = 0（64 位补码下 -1 = 全 1，取反 = 全 0）
+        "}"
+    )
+
+    def test_e2e_bitwise_and_or_xor(self):
+        """端到端：按位 AND/OR/XOR — 12&10=8, 12|10=14, 12^10=6, 合计 28"""
+        self.assertEqual(self._compile_and_run(self._BITWISE_BASIC), 28)
+
+    def test_e2e_bitwise_shift(self):
+        """端到端：移位 SHL/SHR/SAR — 4<<2=16, 32>>1=16, (-8)>>>2=-2, 合计 30"""
+        self.assertEqual(self._compile_and_run(self._BITWISE_SHIFT), 30)
+
+    def test_e2e_bitwise_not(self):
+        """端到端：按位取反 ~(-1) = 0"""
+        self.assertEqual(self._compile_and_run(self._BITWISE_NOT), 0)
+
 
 class TestRegAllocCallSite(unittest.TestCase):
     """寄存器分配器调用点活跃区间切口测试

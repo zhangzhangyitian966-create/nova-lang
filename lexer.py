@@ -65,12 +65,19 @@ class TokenType(Enum):
     AND = auto()  # &&
     OR = auto()  # ||
     NOT = auto()  # !
-    PIPE = auto()  # | (lambda 参数分隔)
+    PIPE = auto()  # | (lambda 参数分隔 / 按位或，按上下文区分)
     PIPE_GT = auto()  # |> (管道操作符)
     ARROW = auto()  # ->
     FAT_ARROW = auto()  # =>
     QUESTION = auto()  # ? (错误传播)
     ASSIGN = auto()  # =
+    # === 按位运算符 (Cycle 70) ===
+    BAND = auto()  # & (按位与)
+    XOR = auto()  # ^ (按位异或)
+    BNOT = auto()  # ~ (按位取反)
+    SHL = auto()  # << (左移)
+    SHR = auto()  # >> (逻辑右移)
+    SAR = auto()  # >>> (算术右移)
 
     # 标点符号
     LPAREN = auto()  # (
@@ -153,8 +160,8 @@ class Lexer:
         "-": {">": TokenType.ARROW},
         "=": {"=": TokenType.EQ, ">": TokenType.FAT_ARROW},
         "!": {"=": TokenType.NEQ},
-        "<": {"=": TokenType.LTE},
-        ">": {"=": TokenType.GTE},
+        "<": {"=": TokenType.LTE, "<": TokenType.SHL},
+        ">": {"=": TokenType.GTE, ">": TokenType.SHR},
         "&": {"&": TokenType.AND},
         "|": {"|": TokenType.OR, ">": TokenType.PIPE_GT},
     }
@@ -173,6 +180,9 @@ class Lexer:
         "|": TokenType.PIPE,
         "?": TokenType.QUESTION,
         "=": TokenType.ASSIGN,
+        "&": TokenType.BAND,   # & (按位与)：双字符 && 优先匹配
+        "^": TokenType.XOR,    # ^ (按位异或)
+        "~": TokenType.BNOT,   # ~ (按位取反)
         "(": TokenType.LPAREN,
         ")": TokenType.RPAREN,
         "[": TokenType.LBRACKET,
@@ -393,8 +403,14 @@ class Lexer:
             second_map = self._TWO_CHAR_TOKENS.get(ch)
             if second_map and next_ch in second_map:
                 token_type = second_map[next_ch]
+                val = ch + next_ch
                 self._advance()
-                return Token(token_type, ch + next_ch, start_line, start_col)
+                # === 三字符 token 后处理 (Cycle 70) ===
+                # >> 之后再遇到 > → >>> 算术右移 (SAR)
+                if token_type == TokenType.SHR and self._peek() == ">":
+                    self._advance()
+                    return Token(TokenType.SAR, ">>>", start_line, start_col)
+                return Token(token_type, val, start_line, start_col)
 
         # 单字符 token（表驱动）
         token_type = self._SINGLE_CHAR_TOKENS.get(ch)

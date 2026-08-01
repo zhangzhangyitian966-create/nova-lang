@@ -293,6 +293,53 @@ class X86_64Emitter:
             self.emit_byte(self._modrm(0b11, 4, reg & 7))
             self.emit_int32(imm)
 
+    def or_reg_imm(self, reg, imm):
+        """or reg, imm (64-bit) — REG_FIELD = 1"""
+        self._rex_w(0, (reg >> 3) & 1)
+        if -128 <= imm <= 127:
+            self.emit_byte(0x83)
+            self.emit_byte(self._modrm(0b11, 1, reg & 7))
+            self.emit_int8(imm)
+        else:
+            self.emit_byte(0x81)
+            self.emit_byte(self._modrm(0b11, 1, reg & 7))
+            self.emit_int32(imm)
+
+    def xor_reg_imm(self, reg, imm):
+        """xor reg, imm (64-bit) — REG_FIELD = 6"""
+        self._rex_w(0, (reg >> 3) & 1)
+        if -128 <= imm <= 127:
+            self.emit_byte(0x83)
+            self.emit_byte(self._modrm(0b11, 6, reg & 7))
+            self.emit_int8(imm)
+        else:
+            self.emit_byte(0x81)
+            self.emit_byte(self._modrm(0b11, 6, reg & 7))
+            self.emit_int32(imm)
+
+    def shr_reg_imm(self, reg, imm):
+        """shr reg, imm8 (64-bit) — 逻辑右移，REG_FIELD = 5"""
+        self._rex_w(0, (reg >> 3) & 1)
+        # C1 /5 ib = shr r/m64, imm8
+        self.emit_byte(0xC1)
+        self.emit_byte(self._modrm(0b11, 5, reg & 7))
+        self.emit_byte(imm & 0xFF)
+
+    def sar_reg_cl(self, reg):
+        """sar reg, cl — 算术右移（按 RCX 低 8 位），REG_FIELD = 7"""
+        self._rex_w(0, (reg >> 3) & 1)
+        # D3 /7 = sar r/m64, cl
+        self.emit_byte(0xD3)
+        self.emit_byte(self._modrm(0b11, 7, reg & 7))
+
+    def sar_reg_imm(self, reg, imm):
+        """sar reg, imm8 (64-bit) — 算术右移（符号位填充），REG_FIELD = 7"""
+        self._rex_w(0, (reg >> 3) & 1)
+        # C1 /7 ib = sar r/m64, imm8
+        self.emit_byte(0xC1)
+        self.emit_byte(self._modrm(0b11, 7, reg & 7))
+        self.emit_byte(imm & 0xFF)
+
     # === 比较指令 ===
     def cmp_reg_reg(self, a, b):
         """cmp a, b"""

@@ -1,7 +1,7 @@
 {
-  "cycles": 70,
-  "frontend_completed": 47,
-  "backend_completed": 55,
+  "cycles": 71,
+  "frontend_completed": 48,
+  "backend_completed": 56,
   "last_review_cycle": 69,
   "current_review_cycle": 69,
   "completed_tasks": [
@@ -125,7 +125,9 @@
     "review_cycle_69",
     "frontend_implicit_numeric_cast_fence",
     "backend_native_regalloc_linear_scan_v2",
-    "backend_x86_64_rex_prefix_fix"
+    "backend_x86_64_rex_prefix_fix",
+    "frontend_type_system_test_matrix",
+    "backend_native_instr_selection_bitwise"
   ],
   "failed_tasks": [],
   "deprecated_tasks": [
@@ -144,6 +146,42 @@
     "backend_wasmgc_instruction_fill"
   ],
   "task_history": [
+    {
+      "cycle": 71,
+      "task_id": "frontend_type_system_test_matrix",
+      "name": "TypeVar 泄漏/泛化/ErrorExpr/泛化边界 4 类测试补齐 (+15 用例)",
+      "track": "frontend",
+      "priority": 75,
+      "difficulty": "easy",
+      "status": "success",
+      "duration_min": 90,
+      "details": "在 test_type_checker.py 新增 TestTypeSystemEdgeCases 类，覆盖 4 类边界场景共 15 用例：(1) TVar 泄漏检测 5 用例（悬空 param/返回/嵌套 let/空列表/Map 字面量 TypeVar 逃逸检查）；(2) HM 泛化边界 5 用例（mut 绑定不泛化/非语法值 lambda 应用不泛化/语法值 let id 泛化/ADT 构造器纯泛化/嵌套 let 互不干扰）；(3) ErrorExpr 下游 3 用例（赋值/管道/if-else 分支含 ErrorExpr 时二次错误抑制 + ERROR_T 静默传递不炸）；(4) 回归保护 2 用例（HM id : a -> a 经典多态 + mut 幻影实例化冲突保护）。TypeChecker 共 176 用例通过 174（2 个 pre-existing 管道错误文案失败），无新增失败。修改：tests/test_type_checker.py +385 行。",
+      "files_changed": [
+        "tests/test_type_checker.py"
+      ],
+      "timestamp": "2026-08-01 08:02:32"
+    },
+    {
+      "cycle": 71,
+      "task_id": "backend_native_instr_selection_bitwise",
+      "name": "Native 按位运算 7 条指令贯通 (Lexer/Parser/TC/MIR/LIR/x86_64/Native) + 致命 RCX pop-覆盖 Bug 三端修复",
+      "track": "backend",
+      "priority": 85,
+      "difficulty": "medium",
+      "status": "success",
+      "duration_min": 240,
+      "details": "全链路贯通 7 条按位运算符 (& | ^ ~ << >> >>>): (1) Lexer 新增 BAND/XOR/BNOT/SHL(<<)/SHR(>>) Token，SAR 在 Parser 用 peek_next 组合判断； (2) Parser 新增 4 层优先级链（bitor > bitxor > bitand > shift），优先级低于比较、高于逻辑； (3) TypeChecker 新增 _check_bitwise_op，强制两侧 Int； (4) MIR/LIR 复用 BinOp 通道，仅在 mir_lowering.py 的类型推断白名单加入 7 个运算符； (5) x86_64.py 编码器补齐 6 条缺失指令：or_reg_imm/xor_reg_imm/shr_reg_imm/sar_reg_cl/sar_reg_imm； (6) native_backend.py 新增 _emit_bitwise 调度，移位使用 RCX->CL 可变长度模式。 致命 Bug 修复：_emit_div_mod / _emit_arithmetic / _emit_bitwise 三个使用 RCX 作临时寄存器的函数， 在 pop RCX 之后会覆盖「目标 vreg 恰好分配到 RCX」的写入结果。 根因：instr.dst_loc = (vreg_name, type) 元组不是物理位置， 旧 fix 代码判断 dst_loc[0]=='reg' 永远 False（因为 dst_loc[0] 是 vreg 字符串）。 修正：用 ctx.get_loc(dst_loc[0]) 查询 vreg 的真实物理位置， pop 后若物理位置是 RCX，则把结果从 RAX 重新 mov 回 RCX（RAX 此时仍保留结果副本）。 3 处 fix 覆盖 div_mod/arithmetic/bitwise 所有 RCX 使用者。 验证：11 个按位 E2E 用例 11/11 通过； 完整测试套件无新增失败：NativeBackend+Lexer 115 passed、Backends+SSA+MIR 133 passed、 IR+C Codegen 169 passed、Nova集成+Pass+Closure 227 passed、TypeChecker 174 passed 2 failed（pre-existing）。 修改文件：lexer.py / parser.py / type_checker.py / ir/mir_lowering.py / backend/x86_64.py / backend/native_backend.py / tests/test_native_backend.py 共 7 个。",
+      "files_changed": [
+        "lexer.py",
+        "parser.py",
+        "type_checker.py",
+        "ir/mir_lowering.py",
+        "backend/x86_64.py",
+        "backend/native_backend.py",
+        "tests/test_native_backend.py"
+      ],
+      "timestamp": "2026-08-01 08:02:32"
+    },
     {
       "cycle": 70,
       "task_id": "frontend_implicit_numeric_cast_fence",
@@ -273,7 +311,7 @@
       "difficulty": "easy",
       "priority": 75,
       "estimated_effort": "2-3小时",
-      "status": "pending",
+      "status": "completed",
       "source": "review_cycle_69 审计：前端测试密度 0.68 低于 parser 0.90 / evaluator 1.01，三大改动（HM generalize/TVar 泄漏/ErrorExpr）缺少组合路径测试回归保护",
       "depends_on": [
         "frontend_fix_error_expr_downstream",
@@ -319,7 +357,7 @@
       "difficulty": "medium",
       "priority": 85,
       "estimated_effort": "4-6小时",
-      "status": "pending",
+      "status": "completed",
       "source": "review_cycle_69 审计：Native 指令选择子模块 72% 与 C 后端控制流 88% 的最大功能缺口 = 按位运算 7 条指令缺失；加密/哈希/网络协议 Nova 代码全部 silent 降级到 NotImplementedError",
       "depends_on": [],
       "severity": "P2"

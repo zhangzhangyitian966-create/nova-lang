@@ -1,9 +1,40 @@
-# Nova 前后端专项开发路线图（Roadmap）
+# Nova 前后端专项开发路线图（自动更新于 Cycle 71）
 
-> 自动生成于 2026-07-31 22:45｜第 **70** 轮｜**普通轮**（Cycle 70 开发：FE 隐式窄化栅栏 ✅ + BE 寄存器分配 v2 + REX 前缀 BUG 修复 ✅）｜测试基线 **616 passed（+82，无回归）**｜P1 积压 0（清零维持）｜剩余活跃任务 **6** 项（FE 2 / BE 4，BE 中 3 项 hard / 1 项 medium）｜下一轮 **71 = 普通轮**（栈帧 CFI P88 hard + ADT 字段建议 P78 + 位运算指令选择 P85 + 测试矩阵 P75 四线并行）
+> **版本**：Nova v0.3.0 ｜ **当前轮次**：Cycle 71（普通轮，下一轮 Cycle 72 为评审轮）｜ **上次评审**：Cycle 69
+> **累计完成**：前端 48 项 / 后端 56 项 / 共 123 项
+> **任务池规模**：共 10 项（已完成 5 项 / 进行中 0 项 / 待办 5 项）
+
+## 当前进度快照（Cycle 71，自动计算）
+
+| 维度 | 值 | 环比 Cycle 70 |
+|------|----|:----:|
+| 已完成轮次（cycles） | 71 | +1 |
+| 前端累计完成（frontend_completed） | 48 项 | +1 |
+| 后端累计完成（backend_completed） | 56 项 | +1 |
+| 前端完成度（粗估） | **98.0%** | ≈+1.0pp |
+| 后端完成度（粗估） | **93.3%** | ≈+1.0pp |
+| 前后端差距 | FE 98.0% vs BE 93.3% = **差 4.6pp** | +4.6pp |
+| 任务池完成率 | 5/10 = **50.0%** | +10.0pp |
+| 下次评审轮 | Cycle 72 | → 下一轮就是评审！ |
+
+### 本轮（Cycle 71）实际完成
+
+| # | 线路 | 任务 ID | 难度 | 优先级 | 结果 | 核心产出 |
+|---|------|---------|:----:|:----:|:----:|---------|
+| 1 | 🎨 前端 | frontend_type_system_test_matrix | easy | P75 | ✅ | TypeChecker +15 用例 4 类边界（TVar泄漏×5 / HM泛化×5 / ErrorExpr×3 / 回归×2） |
+| 2 | ⚙️ 后端 | backend_native_instr_selection_bitwise | medium | P85 | ✅ | 全链路贯通 7 条按位运算 + 致命 RCX pop-覆盖 Bug 三端修复（_emit_div_mod/_emit_arithmetic/_emit_bitwise） |
+
+### Cycle 71 后积压（按优先级排序 Top 20）
+
+| 优先级 | 线路 | 任务 ID | 难度 | 依赖完成？ |
+|:----:|------|---------|:----:|:----------:|
+| P88 | ⚙️ backend | `backend_native_stack_frame_rbp_cfi` | hard | ✅ |
+| P82 | ⚙️ backend | `backend_wasmgc_native_struct_array` | hard | ✅ |
+| P80 | ⚙️ backend | `backend_native_abi_struct_return` | medium | ⚠️ |
+| P80 | ⚙️ backend | `backend_native_abi_test_coverage` | medium | ✅ |
+| P78 | 🎨 frontend | `frontend_adt_field_suggestion_error` | easy | ✅ |
 
 ---
-
 ## 总体进度概览
 
 | 维度 | 目标 | 当前完成 | 进度条 | 完成率 | 较上轮（评审 66） |
