@@ -18084,3 +18084,201 @@ type_checker.py:413: in check_program
 ---
 
 *本报告由 Nova Auto Review v2.0 自动生成*
+
+---
+
+# 第 1515 轮 Nova 深度审查报告 (v2.0)
+
+> 生成时间: 2026-08-01 01:24:48
+> 审查版本: v0.3.0
+
+## 1. 审查概览
+
+| 指标 | 数值 |
+|------|------|
+| 扫描文件数 | 56 |
+| 代码行数 | 42,366 |
+| 函数总数 | 2559 |
+| 类总数 | 402 |
+| 发现问题数 | **1980** |
+| CRITICAL | 0 |
+| HIGH | 0 |
+| MEDIUM | 357 |
+| LOW | 1623 |
+
+### 严重程度分布
+
+- 🔴 **CRITICAL**: 0 个
+- 🟠 **HIGH**: 0 个
+- 🟡 **MEDIUM**: 357 个
+- 🟢 **LOW**: 1623 个
+
+## 2. 代码质量审查
+
+### 2.1 问题类型分布
+
+| 问题类型 | 数量 | 严重级别 |
+|----------|------|----------|
+| magic_number | 886 | LOW |
+| no_docstring | 622 | LOW |
+| unused_import | 314 | MEDIUM |
+| print_debug | 106 | LOW |
+| class_too_large | 22 | MEDIUM |
+| function_too_long | 10 | MEDIUM |
+| inconsistent_naming | 9 | LOW |
+| cyclomatic_complexity | 8 | MEDIUM |
+| too_broad_exception | 3 | MEDIUM |
+
+### 2.2 高优先级问题 (CRITICAL + HIGH)
+
+✅ 无高优先级问题
+
+### 2.3 各模块问题统计 (Top 10)
+
+| 模块 | 问题数 |
+|------|--------|
+| tests | 860 |
+| (root) | 371 |
+| ir | 364 |
+| backend | 329 |
+| runtime | 55 |
+| tree-sitter-nova | 1 |
+
+## 3. 架构审查
+
+### 3.1 模块概览
+
+- 模块总数: **56**
+- 平均依赖数: **1.21**
+- 循环依赖: **0** 个
+- sys.path hack: **0** 处
+
+### 3.2 循环依赖
+
+✅ 未发现循环依赖
+
+### 3.3 耦合度分析
+
+#### 高被依赖模块 (入度 Top 10)
+
+| 模块 | 入度 (被依赖数) |
+|------|----------------|
+| ir.ir_nodes | 9 |
+| errors | 8 |
+| ast_nodes | 7 |
+| lexer | 5 |
+| parser | 4 |
+| type_checker | 4 |
+| ir.ir_types | 4 |
+| environment | 3 |
+| compiler | 3 |
+| ir.hir | 2 |
+
+#### 高依赖模块 (出度 Top 10)
+
+| 模块 | 出度 (依赖数) |
+|------|--------------|
+| backend.compiler_pipeline | 10 |
+|  | 9 |
+| cli | 8 |
+| compiler_cli | 5 |
+| ir.ir_nodes | 4 |
+| evaluator | 4 |
+| parser | 3 |
+| ir.mir | 2 |
+| ir.pass_manager | 2 |
+| vm | 2 |
+
+### 3.5 代码量分布
+
+| 目录 | 文件数 | 行数 | 占比 |
+|------|--------|------|------|
+| tests | 20 | 15,066 | 35.6% |
+| (root) | 14 | 11,229 | 26.5% |
+| ir | 11 | 8,328 | 19.7% |
+| backend | 8 | 6,487 | 15.3% |
+| runtime | 2 | 1,177 | 2.8% |
+| tree-sitter-nova | 1 | 79 | 0.2% |
+
+## 4. 测试分析
+
+⚠️ 测试运行超时（>120s）
+
+## 5. 复杂度分析
+
+- 函数总数: **2553**
+- 平均圈复杂度: **2.1**
+- 最高复杂度: **41**
+
+### 5.1 复杂度分布
+
+| 复杂度区间 | 函数数 |
+|------------|--------|
+| 1-5 (简单) | 2359 |
+| 6-10 (中等) | 151 |
+| 11-15 (复杂) | 35 |
+| 16-25 (高复杂) | 5 |
+| 25+ (极复杂) | 3 |
+
+### 5.2 Top 10 最复杂函数
+
+| 排名 | 函数 | 文件 | 圈复杂度 |
+|------|------|------|----------|
+| 1 | TypeChecker._check_fn_decl | `type_checker.py` | 23 |
+| 2 | Parser._parse_block | `parser.py` | 14 |
+| 3 | TypeChecker._has_overflow_risk | `type_checker.py` | 14 |
+| 4 | TypeChecker._detect_leaking_tvars | `type_checker.py` | 14 |
+| 5 | TypeChecker.rec | `type_checker.py` | 14 |
+| 6 | LIRCBackend._compile_call_indirect | `backend/lir_c_backend.py` | 13 |
+| 7 | NovaType.__repr__ | `ir/ir_types.py` | 13 |
+| 8 | MIRLowering._lower_list_comprehension | `ir/mir_lowering.py` | 13 |
+| 9 | Parser._parse_primary_type | `parser.py` | 13 |
+| 10 | ArenaAllocator.realloc | `runtime/allocator.py` | 13 |
+
+## 7. 增量质量门禁
+
+❌ **门禁失败** — 发现 2 个增量质量问题
+
+- 检查文件数（有变更）: 5
+- 门禁问题数: 2
+
+### 7.1 门禁问题详情
+
+1. **[gate_new_magic_number]** `type_checker.py:500`
+   - 增量门禁：新增魔法数字 70，建议定义为命名常量；如确需保留可在行尾加 # noqa: gate_new_magic_number
+   - 代码: `窄化栅栏（frontend_implicit_numeric_cast_fence，Cycle 70）：`
+
+2. **[gate_new_magic_number]** `type_checker.py:816`
+   - 增量门禁：新增魔法数字 70，建议定义为命名常量；如确需保留可在行尾加 # noqa: gate_new_magic_number
+   - 代码: `用于后续窄化栅栏（frontend_implicit_numeric_cast_fence，Cycle 70）`
+
+### 7.2 门禁问题类型分布
+
+| 问题类型 | 数量 |
+|----------|------|
+| gate_new_magic_number | 2 |
+
+---
+
+## 8. 改进建议
+
+### P0 - 立即修复
+
+✅ 无 P0 级问题
+
+### P1 - 高优先级
+
+- 修复 2 个增量质量门禁问题（新增代码 docstring/魔法数字/命名规范）
+
+### P2 - 中优先级
+
+- 处理 357 个 MEDIUM 级别问题（函数过长、圈复杂度、未使用导入等）
+
+### P3 - 低优先级 / 优化
+
+- 清理 1623 个 LOW 级别问题（TODO、命名规范、魔法数字等）
+- 重构 Top 10 复杂函数中 1 个 CC>15 的函数
+
+---
+
+*本报告由 Nova Auto Review v2.0 自动生成*
