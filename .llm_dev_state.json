@@ -1,5 +1,5 @@
 {
-  "cycles": 88,
+  "cycles": 89,
   "architecture_strategy": {
     "document": "ARCHITECTURE_VISION.md",
     "effective_date": "2026-07-29",
@@ -335,7 +335,22 @@
     "gate_and_cc_fixes_mix",
     "sh1_parity_baseline_build",
     "refactor_cc_parse_primary_type",
-    "test_lexer_unit_tests"
+    "test_lexer_unit_tests",
+    {
+      "id": "refactor_cc_lowering_lower_list_comp",
+      "cycle": 89,
+      "completed_at": "2026-08-01 04:24"
+    },
+    {
+      "id": "test_parser_docstring_bulk_74",
+      "cycle": 89,
+      "completed_at": "2026-08-01 04:24"
+    },
+    {
+      "id": "test_ast_nodes_ir_types_bundle",
+      "cycle": 89,
+      "completed_at": "2026-08-01 04:24"
+    }
   ],
   "failed_tasks": [
     "fix_native_test_import",
@@ -1568,6 +1583,33 @@
       "architecture_debt_ratio": 1.0,
       "review_alignment_ratio": 1.0,
       "next_step_hint": "启动 M-MEM Allocator API Step1（cycles=81）"
+    },
+    {
+      "id": "refactor_cc_lowering_lower_list_comp",
+      "cycle": 89,
+      "status": "completed",
+      "source": "审查驱动【AUTO_REVIEW cycle=1515 cyclomatic_complexity: MIRLowering._lower_list_comprehension CC=13 Top1】",
+      "why": "CC 榜 Top1 钉子户，连续 4+ 轮在榜，且为编译核心路径（列表推导式），出榜收益高，难度 Easy（拆 4 helper）。",
+      "result": "拆为 4 个 helper（_lc_setup_entry / _lc_build_header / _lc_build_body_and_latches / _lc_fill_phis_and_finish），主函数仅 4 次顺序调用，CC 13→≤4；MIR 语义 100% 不变，全测试零回归。",
+      "completed_at": "2026-08-01 04:24"
+    },
+    {
+      "id": "test_parser_docstring_bulk_74",
+      "cycle": 89,
+      "status": "completed",
+      "source": "审查驱动【AUTO_REVIEW cycle=1515 no_docstring + gate_docstring_quality: test_parser.py 74 例英文字面量级 docstring】",
+      "why": "test_parser.py 是最大单测文件（148 用例），74 例英文极简 docstring 被 gate_docstring_quality 持续标记，批量修复一次即可清空该类问题，性价比极高。",
+      "result": "脚本批量升级 75 条 docstring：从英文极简描述（如 'Int literal'）改为中文语义断言（如 '测试整数字面量解析：输入 42 → 应产出 IntLiteral 节点，value=42'），零行为变更，全测试通过。",
+      "completed_at": "2026-08-01 04:24"
+    },
+    {
+      "id": "test_ast_nodes_ir_types_bundle",
+      "cycle": 89,
+      "status": "completed",
+      "source": "审查发现【cycle=1515 gap_coverage: test_ast_nodes.py + test_ir_types.py 两个 SH-1 P0 文件缺失】",
+      "why": "AST 节点与 IR 类型是编译前后端的骨架接口，缺测试直接影响重构安全（任何节点字段变更无单测兜底）。87 评审 cycle=89 明确建议补此二文件。",
+      "result": "新建 tests/test_ast_nodes.py（50 用例，覆盖 Span/7Literal/Identifier/BinaryOp/UnaryOp/Pipe/Try/Param/Lambda/FnDef/FnCall/Let/Mut/Assign/If/For/While/Break/Continue/10Pattern*/ListExpr/ListComp/Tuple/Map/FieldAccess/Block/Import/Export/TypeDef/VariantDef/AliasDef/Program/10Type* 共 58 类节点）；新建 tests/test_ir_types.py（50 用例，覆盖 IRType15枚举/NovaType 等价+哈希+repr/8单例/9工厂/8兼容别名/嵌套/公开API）。合计 100 新用例 100% 通过。",
+      "completed_at": "2026-08-01 04:24"
     }
   ],
   "current_cycle": 81,
@@ -2441,14 +2483,15 @@
     {
       "id": "test_parser_docstring_bulk_74",
       "name": "test_parser.py 74 例测试函数批量补全 docstring（门禁修复）",
-      "status": "pending",
+      "status": "completed",
       "priority": 86,
       "difficulty": "easy",
       "source": "审查驱动【Cycle-1512 门禁失败 74 例 no_docstring】",
       "why": "Cycle-1512 门禁首次失败主因（74 例）：test_parser.py 新增测试函数全缺 docstring；SH-1 前质量闸门必须恢复",
       "estimate": "1-2 小时",
       "depends_on": [],
-      "added_cycle": 84
+      "added_cycle": 84,
+      "completed_at": "2026-08-01 04:24"
     },
     {
       "id": "tune_gate_magic_number_exemption",
@@ -2524,12 +2567,13 @@
       "priority": 88,
       "category": "engineering",
       "estimated": "3-4 小时",
-      "status": "pending",
+      "status": "completed",
       "depends_on": [],
       "source": "审查发现",
       "origin_review": "AUTO_REVIEW_LOG.md cycle-1514 cyclomatic_complexity Top10",
       "why": "CC=13 是审查中反复出现的 MEDIUM 钉子户，拆分后可一次性消除反复报告",
-      "review_issue_count_affected": 1
+      "review_issue_count_affected": 1,
+      "completed_at": "2026-08-01 04:24"
     },
     {
       "id": "refactor_cc_native_reg_alloc",
@@ -2888,6 +2932,16 @@
       "origin_review": "AUTO_REVIEW_LOG.md cycle-1514 no_docstring LOW",
       "why": "117 处 LOW 级 docstring 缺失占审查报告 LOW 项大头，批量补齐后信噪比提升明显",
       "review_issue_count_affected": 117
+    },
+    {
+      "id": "test_ast_nodes_ir_types_bundle",
+      "cycle_added": 89,
+      "status": "completed",
+      "priority": "high",
+      "source": "审查发现【cycle=1515 gap_coverage: test_ast_nodes.py + test_ir_types.py 两个 SH-1 P0 文件缺失】",
+      "why": "AST 节点与 IR 类型是编译前后端的骨架接口，缺测试直接影响重构安全（任何节点字段变更无单测兜底）。87 评审 cycle=89 明确建议补此二文件。",
+      "depends_on": [],
+      "completed_at": "2026-08-01 04:24"
     }
   ],
   "current_subtests": 31,
@@ -2907,5 +2961,16 @@
     "syntax_freeze_declared": true,
     "syntax_freeze_version": "v0.4.0",
     "syntax_freeze_effective_cycle": 87
+  },
+  "last_cycle": {
+    "cycle": 89,
+    "completed_at": "2026-08-01 04:24",
+    "baseline_tests_passed": 440,
+    "baseline_tests_total": 440,
+    "final_tests_passed": 595,
+    "final_tests_total": 595,
+    "tasks_completed": 3,
+    "tasks_failed": 0,
+    "review_driven_tasks": 3
   }
 }

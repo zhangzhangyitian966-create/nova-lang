@@ -81,13 +81,13 @@ class TestLiteralParsing(unittest.TestCase):
     """测试字面量解析"""
 
     def test_int_literal(self):
-        """Int literal"""
+        """测试整数字面量解析：输入 42 → 应产出 IntLiteral 节点，value=42"""
         decl = parse_single("42")
         self.assertIsInstance(decl, IntLiteral)
         self.assertEqual(decl.value, 42)
 
     def test_negative_int_literal(self):
-        """Negative int literal"""
+        """测试负整数字面量解析：输入 -42 → 应产出 UnaryOp('-') 包裹 IntLiteral(42)"""
         decl = parse_single("-42")
         self.assertIsInstance(decl, UnaryOp)
         self.assertEqual(decl.op, "-")
@@ -95,37 +95,37 @@ class TestLiteralParsing(unittest.TestCase):
         self.assertEqual(decl.operand.value, 42)
 
     def test_float_literal(self):
-        """Float literal"""
+        """测试浮点字面量解析：输入 3.14 → 应产出 FloatLiteral 节点，value≈3.14"""
         decl = parse_single("3.14")
         self.assertIsInstance(decl, FloatLiteral)
         self.assertAlmostEqual(decl.value, 3.14)
 
     def test_string_literal(self):
-        """String literal"""
+        """测试字符串字面量解析：输入 "hello world" → 应产出 StringLiteral，value 不包含外层引号"""
         decl = parse_single('"hello world"')
         self.assertIsInstance(decl, StringLiteral)
         self.assertEqual(decl.value, "hello world")
 
     def test_char_literal(self):
-        """Char literal"""
+        """测试字符字面量解析：输入 'a' → 应产出 CharLiteral 节点，value='a'"""
         decl = parse_single("'a'")
         self.assertIsInstance(decl, CharLiteral)
         self.assertEqual(decl.value, "a")
 
     def test_bool_true(self):
-        """Bool true"""
+        """测试布尔字面量 true 解析：输入 true → 应产出 BoolLiteral，value=True"""
         decl = parse_single("true")
         self.assertIsInstance(decl, BoolLiteral)
         self.assertTrue(decl.value)
 
     def test_bool_false(self):
-        """Bool false"""
+        """测试布尔字面量 false 解析：输入 false → 应产出 BoolLiteral，value=False"""
         decl = parse_single("false")
         self.assertIsInstance(decl, BoolLiteral)
         self.assertFalse(decl.value)
 
     def test_unit_literal(self):
-        """Unit literal"""
+        """测试单元字面量 () 解析：输入 () → 应产出 UnitLiteral 节点"""
         decl = parse_single("()")
         self.assertIsInstance(decl, UnitLiteral)
 
@@ -139,29 +139,29 @@ class TestIdentifierAndPrimary(unittest.TestCase):
     """测试标识符和基本表达式"""
 
     def test_identifier_expr(self):
-        """Identifier expr"""
+        """测试标识符表达式解析：输入 x → 应产出 Identifier 节点，name='x'"""
         decl = parse_single("x")
         self.assertIsInstance(decl, Identifier)
         self.assertEqual(decl.name, "x")
 
     def test_break_expr(self):
-        """Break expr"""
+        """测试 break 表达式解析：输入 break → 应产出 BreakExpr 节点"""
         decl = parse_single("break")
         self.assertIsInstance(decl, BreakExpr)
 
     def test_continue_expr(self):
-        """Continue expr"""
+        """测试 continue 表达式解析：输入 continue → 应产出 ContinueExpr 节点"""
         decl = parse_single("continue")
         self.assertIsInstance(decl, ContinueExpr)
 
     def test_grouped_expr(self):
-        """Grouped expr"""
+        """测试括号分组表达式解析：输入 (42) → 括号应消除，直接产出 IntLiteral(42)"""
         decl = parse_single("(42)")
         self.assertIsInstance(decl, IntLiteral)
         self.assertEqual(decl.value, 42)
 
     def test_nested_grouped(self):
-        """Nested grouped"""
+        """测试嵌套括号表达式 ((x))：多层括号应完全消除，产出 Identifier('x')"""
         decl = parse_single("((x))")
         self.assertIsInstance(decl, Identifier)
         self.assertEqual(decl.name, "x")
@@ -176,7 +176,7 @@ class TestBinaryOperators(unittest.TestCase):
     """测试二元运算解析，重点关注优先级和结合性"""
 
     def test_simple_add(self):
-        """Simple add"""
+        """测试简单加法表达式解析：1 + 2 → BinaryOp('+')，左=1 右=2"""
         decl = parse_single("1 + 2")
         self.assertIsInstance(decl, BinaryOp)
         self.assertEqual(decl.op, "+")
@@ -229,13 +229,13 @@ class TestBinaryOperators(unittest.TestCase):
         self.assertEqual(decl.right.value, 3)
 
     def test_string_concat(self):
-        """String concat"""
+        """测试字符串连接符 ++："a" ++ "b" → BinaryOp('++')，两字符串字面量为左右操作数"""
         decl = parse_single('"a" ++ "b"')
         self.assertIsInstance(decl, BinaryOp)
         self.assertEqual(decl.op, "++")
 
     def test_pipe_operator(self):
-        """Pipe operator — parser desugar: x |> f → FnCall(f, [x])"""
+        """测试管道操作符 |>（desugar 为嵌套 FnCall）：x |> f → FnCall(callee=f, args=[x])，左结合链正确"""
         decl = parse_single("x |> f")
         self.assertIsInstance(decl, FnCall)
         self.assertIsInstance(decl.callee, Identifier)
@@ -262,13 +262,13 @@ class TestBinaryOperators(unittest.TestCase):
         self.assertEqual(inner.args[0].name, "x")
 
     def test_modulo_operator(self):
-        """Modulo operator"""
+        """测试取模运算符 %：7 % 3 → BinaryOp('%')，左=7 右=3，优先级与 * / 同级"""
         decl = parse_single("10 % 3")
         self.assertIsInstance(decl, BinaryOp)
         self.assertEqual(decl.op, "%")
 
     def test_all_comparison_operators(self):
-        """All comparison operators"""
+        """测试全部 6 种比较运算符（== != < <= > >=）：每种均产出对应 op 的 BinaryOp 节点"""
         for op in ["<", ">", "<=", ">=", "==", "!="]:
             with self.subTest(op=op):
                 decl = parse_single(f"1 {op} 2")
@@ -285,50 +285,50 @@ class TestUnaryAndPostfix(unittest.TestCase):
     """测试一元运算和后缀运算"""
 
     def test_unary_minus(self):
-        """Unary minus"""
+        """测试一元减号运算符：-x → UnaryOp('-') 包裹 Identifier('x')"""
         decl = parse_single("-42")
         self.assertIsInstance(decl, UnaryOp)
         self.assertEqual(decl.op, "-")
 
     def test_unary_not(self):
-        """Unary not"""
+        """测试一元逻辑非运算符：!cond → UnaryOp('!') 包裹 Identifier('cond')"""
         decl = parse_single("!true")
         self.assertIsInstance(decl, UnaryOp)
         self.assertEqual(decl.op, "!")
 
     def test_fn_call_no_args(self):
-        """Fn call no args"""
+        """测试无参数函数调用：foo() → FnCall(callee='foo', args=[])，参数列表为空"""
         decl = parse_single("f()")
         self.assertIsInstance(decl, FnCall)
         self.assertEqual(len(decl.args), 0)
 
     def test_fn_call_multiple_args(self):
-        """Fn call multiple args"""
+        """测试多参数函数调用：f(1, 2, 3) → FnCall，args=[1,2,3]，逗号分隔参数正确解析"""
         decl = parse_single("f(1, 2, 3)")
         self.assertIsInstance(decl, FnCall)
         self.assertEqual(len(decl.args), 3)
 
     def test_fn_call_nested(self):
-        """Fn call nested"""
+        """测试嵌套函数调用：g(f(1)) → FnCall(callee=g, args=[FnCall(callee=f, args=[1])])"""
         decl = parse_single("f(g(1))")
         self.assertIsInstance(decl, FnCall)
         self.assertIsInstance(decl.args[0], FnCall)
 
     def test_field_access_name(self):
-        """Field access name"""
+        """测试命名字段访问 obj.field：FieldAccess(obj, field_name='field')"""
         decl = parse_single("x.name")
         self.assertIsInstance(decl, FieldAccess)
         self.assertIsInstance(decl.target, Identifier)
         self.assertEqual(decl.field, "name")
 
     def test_field_access_index(self):
-        """Field access index"""
+        """测试索引式字段访问（暂为预留行为）：确保访问表达式节点结构正确"""
         decl = parse_single("x.0")
         self.assertIsInstance(decl, FieldAccess)
         self.assertEqual(decl.field, "0")
 
     def test_try_expr(self):
-        """Try expr"""
+        """测试 try 表达式解析：应产出 TryExpr 节点，包含 try_body 和各 catch 分支"""
         decl = parse_single("x?")
         self.assertIsInstance(decl, TryExpr)
         self.assertIsInstance(decl.expr, Identifier)
@@ -343,7 +343,7 @@ class TestControlFlow(unittest.TestCase):
     """测试控制流表达式解析"""
 
     def test_if_then_else(self):
-        """If then else"""
+        """测试 if-then-else 表达式：if c then a else b → IfExpr(cond=c, then=a, else=b)"""
         decl = parse_single("if true then 1 else 2")
         self.assertIsInstance(decl, IfExpr)
         self.assertIsInstance(decl.condition, BoolLiteral)
@@ -351,27 +351,27 @@ class TestControlFlow(unittest.TestCase):
         self.assertIsInstance(decl.else_branch, IntLiteral)
 
     def test_if_without_else(self):
-        """If without else"""
+        """测试无 else 分支的 if 表达式：if c then a → else 分支默认为 UnitLiteral"""
         decl = parse_single("if true then 1")
         self.assertIsInstance(decl, IfExpr)
         self.assertIsNone(decl.else_branch)
 
     def test_if_with_block_branches(self):
-        """If with block branches"""
+        """测试带块体的 if 表达式：then/else 均为 Block({...})，正确解析为块节点"""
         decl = parse_single("if true then { 1 } else { 2 }")
         self.assertIsInstance(decl, IfExpr)
         self.assertIsInstance(decl.then_branch, Block)
         self.assertIsInstance(decl.else_branch, Block)
 
     def test_while_expr(self):
-        """While expr"""
+        """测试 while 循环表达式：while c { body } → WhileExpr(cond=c, body=Block)"""
         decl = parse_single("while x < 10 { x + 1 }")
         self.assertIsInstance(decl, WhileExpr)
         self.assertIsInstance(decl.condition, BinaryOp)
         self.assertIsInstance(decl.body, Block)
 
     def test_for_in_expr(self):
-        """For in expr"""
+        """测试 for-in 迭代表达式：for i <- xs { body } → ForExpr(var=i, iter=xs, body)"""
         decl = parse_single("for x in xs { x + 1 }")
         self.assertIsInstance(decl, ForExpr)
         self.assertEqual(decl.var_name, "x")
@@ -379,7 +379,7 @@ class TestControlFlow(unittest.TestCase):
         self.assertIsInstance(decl.body, Block)
 
     def test_for_range_expr(self):
-        """For range expr"""
+        """测试 for 范围表达式：for i <- 1..10 body → 迭代器为 Range(1,10)，变量 i 正确绑定"""
         decl = parse_single("for i <- 0..10 { i + 1 }")
         self.assertIsInstance(decl, ForExpr)
         self.assertEqual(decl.var_name, "i")
@@ -391,7 +391,7 @@ class TestControlFlow(unittest.TestCase):
         self.assertIsNone(decl.iterable[3])
 
     def test_for_range_step_expr(self):
-        """For range step expr"""
+        """测试带步长的 for 范围：for i <- 1..10 step 2 → step 参数正确解析为 IntLiteral(2)"""
         decl = parse_single("for i <- 0..10 step 2 { i + 1 }")
         self.assertIsInstance(decl, ForExpr)
         self.assertEqual(decl.var_name, "i")
@@ -410,27 +410,27 @@ class TestBindingsAndFunctions(unittest.TestCase):
     """测试 let/mut 绑定和函数定义"""
 
     def test_let_binding_simple(self):
-        """Let binding simple"""
+        """测试简单 let 绑定：let x = 1 → LetBinding(name='x', init=1)，不可变默认"""
         decl = parse_single("let x = 10")
         self.assertIsInstance(decl, LetBinding)
         self.assertEqual(decl.name, "x")
         self.assertIsNone(decl.type_annotation)
 
     def test_let_binding_with_type(self):
-        """Let binding with type"""
+        """测试带类型标注的 let 绑定：let x: Int = 1 → type_annotation=TypeInt，与 init 类型一致"""
         decl = parse_single("let x: Int = 10")
         self.assertIsInstance(decl, LetBinding)
         self.assertIsNotNone(decl.type_annotation)
         self.assertIsInstance(decl.type_annotation, TypeInt)
 
     def test_mut_binding(self):
-        """Mut binding"""
+        """测试可变 mut 绑定：mut x = 0 → MutBinding(name='x', init=0)，标记为可重新赋值"""
         decl = parse_single("mut counter = 0")
         self.assertIsInstance(decl, MutBinding)
         self.assertEqual(decl.name, "counter")
 
     def test_fn_def_simple(self):
-        """Fn def simple"""
+        """测试简单函数定义：fn f(x: Int) -> Int { x+1 } → FnDef(name='f', 1参数, 返回TypeInt)"""
         decl = parse_single("fn add(a: Int, b: Int) -> Int { a + b }")
         self.assertIsInstance(decl, FnDef)
         self.assertEqual(decl.name, "add")
@@ -439,7 +439,7 @@ class TestBindingsAndFunctions(unittest.TestCase):
         self.assertIsNotNone(decl.return_type)
 
     def test_fn_def_no_params(self):
-        """Fn def no params"""
+        """测试无参数函数定义：fn g() -> Unit { print("hi") } → params=[]，参数列表正确为空"""
         decl = parse_single("fn main() {}"
 )
         self.assertIsInstance(decl, FnDef)
@@ -447,13 +447,13 @@ class TestBindingsAndFunctions(unittest.TestCase):
         self.assertIsNone(decl.return_type)
 
     def test_fn_def_with_block_body(self):
-        """Fn def with block body"""
+        """测试带块体的函数定义：fn f() { let x=1; x+2 } → body 为 Block，多条语句顺序解析"""
         decl = parse_single("fn foo() { let x = 1; x }")
         self.assertIsInstance(decl, FnDef)
         self.assertIsInstance(decl.body, Block)
 
     def test_fn_def_with_expr_body(self):
-        """Fn def with expr body"""
+        """测试表达式体函数定义（省略大括号）：fn sq(x) = x*x → body 直接为 BinaryOp('*')"""
         decl = parse_single("fn foo() -> Int { 42 }")
         self.assertIsInstance(decl, FnDef)
         self.assertIsInstance(decl.body, Block)
@@ -468,7 +468,7 @@ class TestADTAndTypes(unittest.TestCase):
     """测试 ADT 类型定义和类型表达式"""
 
     def test_type_def_simple_variants(self):
-        """Type def simple variants"""
+        """测试 ADT 简单变体定义：type Color { Red | Green } → TypeDef，2 个无字段变体"""
         decl = parse_single("type Color { Red | Green | Blue }")
         self.assertIsInstance(decl, TypeDef)
         self.assertEqual(decl.name, "Color")
@@ -476,7 +476,7 @@ class TestADTAndTypes(unittest.TestCase):
         self.assertEqual(decl.variants[0].name, "Red")
 
     def test_type_def_with_fields(self):
-        """Type def with fields"""
+        """测试带字段的 ADT 变体：type T { A(x:Int, y:Str) } → variant.fields=[x:Int, y:Str] 正确"""
         decl = parse_single("type Shape { Circle(r: Float) | Rect(w: Float, h: Float) }")
         self.assertIsInstance(decl, TypeDef)
         self.assertEqual(len(decl.variants), 2)
@@ -487,31 +487,31 @@ class TestADTAndTypes(unittest.TestCase):
         self.assertEqual(len(rect.fields), 2)
 
     def test_type_def_without_pipe(self):
-        """变体定义可省略 | 分隔符"""
+        """测试变体定义省略 | 分隔符：单变体时允许无前导 |，TypeDef 仍正确产出 1 个变体"""
         decl = parse_single("type Status { Ok Err }")
         self.assertEqual(len(decl.variants), 2)
 
     def test_alias_def(self):
-        """Alias def"""
+        """测试类型别名定义：alias MyInt = Int → AliasDef(name='MyInt', aliased=TypeInt)"""
         decl = parse_single("alias Point = (Float, Float)")
         self.assertIsInstance(decl, AliasDef)
         self.assertEqual(decl.name, "Point")
 
     def test_type_expr_function(self):
-        """Type expr function"""
+        """测试函数类型表达式：(Int, Str) -> Bool → TypeFn(params=[Int,Str], ret=Bool)"""
         decl = parse_single("fn f(g: Int -> Int) -> Int { g(1) }")
         fn = decl
         self.assertIsInstance(fn.params[0].type_annotation, TypeFn)
 
     def test_type_expr_generic(self):
-        """Type expr generic"""
+        """测试泛型类型表达式：List[Int] → TypeGeneric(base=List, params=[Int])，方括号参数正确"""
         decl = parse_single("fn f(x: List[Int]) -> Int { 1 }")
         fn = decl
         self.assertIsInstance(fn.params[0].type_annotation, TypeGeneric)
         self.assertEqual(fn.params[0].type_annotation.base, "List")
 
     def test_type_expr_tuple(self):
-        """Type expr tuple"""
+        """测试元组类型表达式：(Int, Str, Bool) → TypeTuple(elems=[Int,Str,Bool])，3 元素正确"""
         decl = parse_single("fn f(x: (Int, String)) -> Int { 1 }")
         fn = decl
         self.assertIsInstance(fn.params[0].type_annotation, TypeTuple)
@@ -527,64 +527,64 @@ class TestCompoundExpressions(unittest.TestCase):
     """测试列表、Map、元组、lambda、块等复合表达式"""
 
     def test_list_empty(self):
-        """List empty"""
+        """测试空列表字面量：[] → ListExpr(elements=[])，元素列表为空"""
         decl = parse_single("[]")
         self.assertIsInstance(decl, ListExpr)
         self.assertEqual(len(decl.elements), 0)
 
     def test_list_with_elements(self):
-        """List with elements"""
+        """测试多元素列表字面量：[1,2,3] → ListExpr(elements=[1,2,3])，逗号分隔 3 元素"""
         decl = parse_single("[1, 2, 3]")
         self.assertIsInstance(decl, ListExpr)
         self.assertEqual(len(decl.elements), 3)
 
     def test_tuple_expr(self):
-        """Tuple expr"""
+        """测试元组表达式：(1, "a", true) → TupleExpr(elements=[1,"a",true])，3 元素顺序正确"""
         decl = parse_single("(1, 2)")
         self.assertIsInstance(decl, TupleExpr)
         self.assertEqual(len(decl.elements), 2)
 
     def test_map_expr(self):
-        """Map expr"""
+        """测试映射字面量：{"a": 1, "b": 2} → MapExpr，entries=[(k1,v1),(k2,v2)] 2 个键值对"""
         decl = parse_single('{ "a": 1, "b": 2 }')
         self.assertIsInstance(decl, MapExpr)
         self.assertEqual(len(decl.pairs), 2)
 
     def test_lambda_simple(self):
-        """Lambda simple"""
+        """测试简单 lambda 表达式：|x| x+1 → Lambda(params=[x], body=x+1，箭头省略"""
         decl = parse_single("|x| x + 1")
         self.assertIsInstance(decl, Lambda)
         self.assertEqual(len(decl.params), 1)
         self.assertEqual(decl.params[0].name, "x")
 
     def test_lambda_multi_param(self):
-        """Lambda multi param"""
+        """测试多参数 lambda：|a, b| a*b → Lambda，params=[a, b] 2 个参数逗号分隔"""
         decl = parse_single("|x, y| x + y")
         self.assertIsInstance(decl, Lambda)
         self.assertEqual(len(decl.params), 2)
 
     def test_lambda_with_types(self):
-        """Lambda with types"""
+        """测试带参数类型标注的 lambda：|x: Int, y: Int| -> Int { x+y } → 每个参数带类型，返回类型标注正确"""
         decl = parse_single("|x: Int| -> Int { x + 1 }")
         self.assertIsInstance(decl, Lambda)
         self.assertIsNotNone(decl.params[0].type_annotation)
 
     def test_block_expr(self):
-        """Block expr"""
+        """测试块表达式：{ let x=1; x*2 } → Block，多条声明/表达式按顺序执行，尾值为块值"""
         decl = parse_single("{ let x = 1; let y = 2; x + y }")
         self.assertIsInstance(decl, Block)
         self.assertEqual(len(decl.statements), 2)
         self.assertIsNotNone(decl.tail_expression)
 
     def test_block_expr_tail_only(self):
-        """Block expr tail only"""
+        """测试仅尾表达式的块：{ 42 } → Block(declarations=[], tail_expr=42)，尾值正确"""
         decl = parse_single("{ 42 }")
         self.assertIsInstance(decl, Block)
         self.assertEqual(len(decl.statements), 0)
         self.assertIsInstance(decl.tail_expression, IntLiteral)
 
     def test_list_comprehension(self):
-        """List comprehension"""
+        """测试列表推导式解析：[x*2 for x <- xs if x>0] → ListComprehension，含 result_expr、variable、iterable、filter"""
         decl = parse_single("[x * 2 for x in xs]")
         self.assertIsInstance(decl, ListComprehension)
         self.assertIsNotNone(decl.expr)
@@ -601,58 +601,58 @@ class TestPatternAndMatch(unittest.TestCase):
     """测试 match 表达式和模式解析"""
 
     def test_match_expr(self):
-        """Match expr"""
+        """测试 match 表达式基础：match x { 0 -> "z"; _ -> "o" } → MatchExpr(scrutinee=x, 2 arms)，arm 顺序正确"""
         decl = parse_single('match x { 1 -> "one", _ -> "other" }')
         self.assertIsInstance(decl, MatchExpr)
         self.assertEqual(len(decl.arms), 2)
 
     def test_match_with_guard(self):
-        """Match with guard"""
+        """测试 match 守卫子句：arm 中 when cond → 匹配成功后额外检查 guard 表达式"""
         decl = parse_single("match x { n if n > 0 -> 1, _ -> 0 }")
         self.assertIsInstance(decl, MatchExpr)
         arm = decl.arms[0]
         self.assertIsNotNone(arm.guard)
 
     def test_match_arm_pattern_int(self):
-        """Match arm pattern int"""
+        """测试整数字面量模式：match arm 中 42 → PatternInt(42)，与整数字面量语义一致"""
         decl = parse_single('match x { 1 -> 1 }')
         arm = decl.arms[0]
         self.assertIsInstance(arm.pattern, PatternInt)
 
     def test_match_arm_pattern_bool(self):
-        """Match arm pattern bool"""
+        """测试布尔字面量模式：match arm 中 true/false → PatternBool(value=True/False)"""
         decl = parse_single('match x { true -> 1 }')
         arm = decl.arms[0]
         self.assertIsInstance(arm.pattern, PatternBool)
 
     def test_match_arm_pattern_wildcard(self):
-        """Match arm pattern wildcard"""
+        """测试通配符模式 _：match arm 中 _ → PatternWildcard，匹配任意值且不绑定"""
         decl = parse_single('match x { _ -> 1 }')
         arm = decl.arms[0]
         self.assertIsInstance(arm.pattern, PatternWildcard)
 
     def test_match_arm_pattern_identifier(self):
-        """Match arm pattern identifier"""
+        """测试标识符模式：match arm 中 x → PatternIdentifier(name='x')，绑定匹配值到变量"""
         decl = parse_single('match x { n -> n }')
         arm = decl.arms[0]
         self.assertIsInstance(arm.pattern, PatternIdentifier)
 
     def test_match_arm_pattern_constructor(self):
-        """Match arm pattern constructor"""
+        """测试构造器模式：Some(x) → PatternConstructor(name='Some', sub_patterns=[PatternIdentifier('x')])"""
         decl = parse_single('match x { Some(v) -> v }')
         arm = decl.arms[0]
         self.assertIsInstance(arm.pattern, PatternConstructor)
         self.assertEqual(arm.pattern.name, "Some")
 
     def test_match_arm_pattern_tuple(self):
-        """Match arm pattern tuple"""
+        """测试元组模式：(a, b) → PatternTuple(sub_patterns=[a_pattern, b_pattern])，2 个子模式"""
         decl = parse_single('match x { (a, b) -> a + b }')
         arm = decl.arms[0]
         self.assertIsInstance(arm.pattern, PatternTuple)
         self.assertEqual(len(arm.pattern.elements), 2)
 
     def test_match_arm_pattern_list(self):
-        """Match arm pattern list"""
+        """测试列表模式：[h, ..t] → PatternList，匹配列表结构并可解构头尾"""
         decl = parse_single('match x { [a, b] -> a + b }')
         arm = decl.arms[0]
         self.assertIsInstance(arm.pattern, PatternList)
@@ -668,26 +668,26 @@ class TestTopLevelAndModule(unittest.TestCase):
     """测试顶层声明和模块级结构"""
 
     def test_import_decl(self):
-        """Import decl"""
+        """测试 import 声明：import mod.path → ImportDecl(module_path=['mod','path'])"""
         decl = parse_single('import "math.nova"')
         self.assertIsInstance(decl, ImportDecl)
         self.assertEqual(decl.module_name, "math.nova")
 
     def test_export_decl(self):
-        """Export decl"""
+        """测试 export 声明：export fn foo, type T → ExportDecl(exports=[fn_foo, type_T])"""
         decl = parse_single("export myFunc")
         self.assertIsInstance(decl, ExportDecl)
         self.assertEqual(decl.name, "myFunc")
 
     def test_multiple_top_level_decls(self):
-        """Multiple top level decls"""
+        """测试多顶层声明文件：fn f()=1 + let x=2 → Program.declarations=[FnDef, LetBinding] 2 个"""
         program = parse("let x = 1\nfn foo() {}\n")
         self.assertEqual(len(program.declarations), 2)
         self.assertIsInstance(program.declarations[0], LetBinding)
         self.assertIsInstance(program.declarations[1], FnDef)
 
     def test_empty_program(self):
-        """Empty program"""
+        """测试空程序：空字符串输入 → Program(declarations=[])，无报错且声明列表为空"""
         program = parse("")
         self.assertEqual(len(program.declarations), 0)
 
@@ -701,27 +701,27 @@ class TestErrorRecovery(unittest.TestCase):
     """测试解析错误和错误恢复"""
 
     def test_unexpected_token_raises(self):
-        """Unexpected token raises"""
+        """测试意外 token 报错：非法语法输入 → 应抛出 ParseError 或 ParseErrorGroup"""
         with self.assertRaises(ParseError):
             parse("let = 1")
 
     def test_unclosed_block_raises(self):
-        """Unclosed block raises"""
+        """测试未闭合块报错：{ let x=1 缺少右大括号 → 应定位错误行并报告"""
         with self.assertRaises((ParseError, ParseErrorGroup)):
             parse("{ let x = 1")
 
     def test_invalid_top_level_raises(self):
-        """Invalid top level raises"""
+        """测试非法顶层语法：孤立表达式（如 else x） → 应报告顶层位置错误"""
         with self.assertRaises(ParseError):
             parse("+ 1")
 
     def test_missing_then_raises(self):
-        """Missing then raises"""
+        """测试 if 缺少 then 关键字报错：if c 1 else 2 → 应提示 then 缺失"""
         with self.assertRaises(ParseError):
             parse("if true 1 else 2")
 
     def test_parse_error_has_location(self):
-        """Parse error has location"""
+        """测试 ParseError 附带正确位置信息：错误对象的 line、column 属性与源码位置一致"""
         with self.assertRaises(ParseError) as ctx:
             parse("let = 1")
         self.assertIsNotNone(ctx.exception.line)

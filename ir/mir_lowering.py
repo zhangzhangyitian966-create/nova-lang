@@ -1623,60 +1623,36 @@ class MIRLowering:
 
         return phi_results
 
-    def _lower_list_comprehension(self, hir_expr, block):
-        """
-        降级列表推导式：[result_expr | variable <- iterable, filter?]
 
-        用索引遍历实现，循环变量正确绑定到当前元素。
-        编译结构：
-          list = []                    // 空列表
-          iter = iterable              // 可迭代对象
-          len = list_length(iter)      // 长度
-          i = 0                        // 索引
-          goto header
-          header:
-            phi_i = phi(entry: i, latch: i_next)
-            phi_list = phi(entry: list, latch: list_next)
-            phi_x = phi(...)           // 循环中被修改的变量
-            cond = phi_i < len
-            if cond goto body else goto exit
-          body:
-            elem = list_get(iter, phi_i)   // 当前元素
-            variable = elem                // 绑定循环变量
-            // 可选 filter 检查
-            // 计算 result_expr
-            list_next = list_append(phi_list, result)
-            i_next = phi_i + 1
-            goto header
-          exit:
-            return phi_list
+    # ── _lower_list_comprehension 拆分 helpers（CC=13 → 主函数 ≤4） ──
 
-        SSA 策略（与 while 循环/for 循环一致）：
-        1. 进入循环前保存 env 快照（pre_env）
-        2. 处理完循环体后，比较 env 找出被修改的变量
-        3. 在 header 块开头为每个被修改的变量插入 Phi 节点
-        4. Phi 的 sources: 入口边(pre值) + 所有回边(latch块的值)
-        5. 替换 header 和 body 中对这些变量的引用为 Phi 结果
+    def _lc_setup_entry(self, hir_expr, block):
+        """列表推导式 Helper A：入口块初始化（空列表/可迭代对象/长度/索引=0/env快照）。
+
+        返回 (list_init_ssa, iter_ssa, len_ssa, idx_init_ssa, pre_env,
+               header_block, body_block, exit_block) 共 8 元组，
+               并设置 block.terminator = Jump(header_block)。
         """
         header_block = MIRBasicBlock(self._new_block())
         body_block = MIRBasicBlock(self._new_block())
         exit_block = MIRBasicBlock(self._new_block())
 
-        # 1. 在入口块创建空列表、计算可迭代对象和长度
+        # 空列表 MIRListBuild
         empty_list_instr = MIRListBuild(hir_expr.ir_type)
         empty_list_instr.elements = []
         list_init_ssa = self._emit(empty_list_instr)
 
+        # 可迭代对象降级
         iter_ssa = self._lower_expr(hir_expr.iterable, block)
 
         # 调用 list_length 获取长度
-        len_instr = MIRCall(INT_TYPE)  # list_length 返回整数
+        len_instr = MIRCall(INT_TYPE)
         len_instr.callee = "list_length"
         len_instr.args = [iter_ssa or ""]
         len_ssa = self._emit(len_instr)
 
-        # 索引变量初始值 0
-        idx_init_instr = MIRConst(INT_TYPE)  # 索引是整数
+        # 索引初始值 0
+        idx_init_instr = MIRConst(INT_TYPE)
         idx_init_instr.value = 0
         idx_init_instr.const_type = "int"
         idx_init_ssa = self._emit(idx_init_instr)
@@ -1684,14 +1660,24 @@ class MIRLowering:
         # 进入循环前保存 env 快照
         pre_env = dict(self.env)
 
-        # 2. 跳转到循环头
+        # 跳转到循环头
         block.terminator = MIRJump(header_block.label)
+        return (
+            list_init_ssa, iter_ssa, len_ssa, idx_init_ssa, pre_env,
+            header_block, body_block, exit_block,
+        )
 
-        # 3. 循环头：Phi 节点 + 条件分支
+    def _lc_build_header(self, header_block, idx_init_ssa, list_init_ssa, len_ssa,
+                         body_block, exit_block, list_ir_type):
+        """列表推导式 Helper B：循环头构建（idx_phi + list_phi + i<len 比较 + Branch）。
+
+        返回 (idx_phi, list_phi, idx_phi_ssa, list_phi_ssa)。
+        副作用：设置 header_block.terminator = MIRBranch。
+        """
         self.current_block = header_block
 
-        # 索引 Phi（先占位，稍后填充 sources）
-        idx_phi = MIRPhi(INT_TYPE)  # 索引是整数类型
+        # 索引 Phi（占位，sources 稍后由 _lc_fill_phis 填充）
+        idx_phi = MIRPhi(INT_TYPE)
         idx_phi.result_name = self._new_ssa()
         idx_phi.sources = []
         header_block.instructions.append(idx_phi)
@@ -1699,30 +1685,31 @@ class MIRLowering:
         self.ssa_types[idx_phi_ssa] = INT_TYPE
 
         # 列表 Phi（循环携带的列表值）
-        list_phi = MIRPhi(hir_expr.ir_type)
+        list_phi = MIRPhi(list_ir_type)
         list_phi.result_name = self._new_ssa()
         list_phi.sources = []
         header_block.instructions.append(list_phi)
         list_phi_ssa = list_phi.result_name
-        self.ssa_types[list_phi_ssa] = hir_expr.ir_type
+        self.ssa_types[list_phi_ssa] = list_ir_type
 
-        # 比较 i < len
-        cmp_instr = MIRBinOp(BOOL_TYPE)  # 比较结果为布尔类型
+        # i < len 比较 + 条件分支
+        cmp_instr = MIRBinOp(BOOL_TYPE)
         cmp_instr.op = "<"
         cmp_instr.left = idx_phi_ssa
         cmp_instr.right = len_ssa
         cmp_ssa = self._emit(cmp_instr)
-
         header_block.terminator = MIRBranch(cmp_ssa, body_block.label, exit_block.label)
+        return idx_phi, list_phi, idx_phi_ssa, list_phi_ssa
 
-        # 压入循环上下文（break → exit, continue → header）
-        self.loop_stack.append((header_block.label, exit_block.label))
+    def _lc_build_body_and_latches(self, hir_expr, header_block, body_block,
+                                   exit_block, iter_ssa, idx_phi_ssa, list_phi_ssa):
+        """列表推导式 Helper C：循环体构建（元素绑定 + filter 双分支/单分支 + latch 收集）。
 
-        # 4. 循环体
+        返回 (latch_blocks, latch_inc_ssas, latch_list_ssas) 三元组。
+        副作用：压入/弹出 loop_stack；如有 filter_true/filter_false 块则加入 all_blocks。
+        """
+        # ── 元素类型推导 + list_get 绑定循环变量 ──
         self.current_block = body_block
-
-        # 获取当前元素: list_get(iter, i)
-        # 元素类型从可迭代对象的列表类型中提取
         elem_type = UNIT_TYPE
         iter_type = hir_expr.iterable.ir_type
         if iter_type.kind.name == "LIST" and iter_type.params:
@@ -1731,19 +1718,18 @@ class MIRLowering:
         get_instr.callee = "list_get"
         get_instr.args = [iter_ssa or "", idx_phi_ssa]
         elem_ssa = self._emit(get_instr)
-
-        # 绑定循环变量到当前元素
         self.env[hir_expr.variable] = elem_ssa
 
-        # 收集所有回边块及其对应的值
-        # latch_blocks: [(block_obj, {var_name: ssa_val}), ...]
+        # 收集 latch 块
         latch_blocks = []
-        # 每个 latch 块对应的索引递增 SSA 和列表值 SSA
         latch_inc_ssas = []
         latch_list_ssas = []
 
+        # 压入循环上下文（break → exit, continue → header）
+        self.loop_stack.append((header_block.label, exit_block.label))
+
         if hir_expr.filter is not None:
-            # 有 filter：先判断 filter 条件
+            # ── 有 filter：filter_true + filter_false 双分支 ──
             filter_block = MIRBasicBlock(self._new_block())
             filter_false_block = MIRBasicBlock(self._new_block())
 
@@ -1752,94 +1738,126 @@ class MIRLowering:
                 filter_ssa or "", filter_block.label, filter_false_block.label
             )
 
-            # --- filter 为真：计算 result_expr 并 append ---
+            # filter 为真：result_expr + append + idx++
             self.current_block = filter_block
             result_ssa = self._lower_expr(hir_expr.result_expr, filter_block)
-
             append_instr = MIRListAppend(hir_expr.ir_type)
             append_instr.list_ssa = list_phi_ssa
             append_instr.element_ssa = result_ssa or ""
-            new_list_ssa = self._emit(append_instr)
-
-            # 索引递增（复用 helper，原 8 行内联 → 1 行调用）
+            new_list_ssa_t = self._emit(append_instr)
             inc_ssa_t = self._emit_idx_increment(idx_phi_ssa)
-
             filter_block.terminator = MIRJump(header_block.label)
-
-            # 记录 filter_true 分支
             latch_blocks.append((filter_block, dict(self.env)))
             latch_inc_ssas.append(inc_ssa_t)
-            latch_list_ssas.append(new_list_ssa)
+            latch_list_ssas.append(new_list_ssa_t)
 
-            # --- filter 为假：跳过 append，索引仍然递增 ---
+            # filter 为假：仅 idx++（list 值不变 = list_phi_ssa）
             self.current_block = filter_false_block
-
             inc_ssa_f = self._emit_idx_increment(idx_phi_ssa)
-
             filter_false_block.terminator = MIRJump(header_block.label)
-
             self.all_blocks.extend([filter_block, filter_false_block])
-
-            # 记录 filter_false 分支
             latch_blocks.append((filter_false_block, dict(self.env)))
             latch_inc_ssas.append(inc_ssa_f)
             latch_list_ssas.append(list_phi_ssa)
         else:
-            # 无 filter：直接计算 result_expr 并 append
+            # ── 无 filter：直接 result_expr + append + idx++ ──
             result_ssa = self._lower_expr(hir_expr.result_expr, body_block)
-
             append_instr = MIRListAppend(hir_expr.ir_type)
             append_instr.list_ssa = list_phi_ssa
             append_instr.element_ssa = result_ssa or ""
             new_list_ssa = self._emit(append_instr)
-
-            # 索引递增（复用 helper，原 8 行内联 → 1 行调用）
             inc_ssa = self._emit_idx_increment(idx_phi_ssa)
-
             if body_block.terminator is None:
                 body_block.terminator = MIRJump(header_block.label)
-
-            # 记录 body 分支
             latch_blocks.append((body_block, dict(self.env)))
             latch_inc_ssas.append(inc_ssa)
             latch_list_ssas.append(new_list_ssa)
 
         # 弹出循环上下文
         self.loop_stack.pop()
+        return latch_blocks, latch_inc_ssas, latch_list_ssas
 
-        # 5. 使用通用方法插入循环 Phi 节点
+    def _lc_fill_phis_and_finish(self, idx_phi, list_phi, entry_block,
+                                 idx_init_ssa, list_init_ssa,
+                                 latch_blocks, latch_inc_ssas, latch_list_ssas,
+                                 pre_env, header_block_obj, hir_expr_variable,
+                                 body_block_obj, exit_block_obj):
+        """列表推导式 Helper D：通用循环 Phi 插入 + idx/list Phi sources 回填 + 收尾。
+
+        返回 list_phi.result_ssa（最终表达式结果）。
+        副作用：env 更新为 Phi 结果；header/body/exit 三块加入 all_blocks；
+        current_block 切换到 exit_block。
+        """
+        # 5. 通用方法插入用户变量的循环 Phi（跳过 idx/list 两个系统 Phi，exclude 循环变量）
         phi_results = self._insert_loop_phis(
             pre_env=pre_env,
-            entry_block_label=block.label,
-            header_block=header_block,
+            entry_block_label=entry_block.label,
+            header_block=header_block_obj,
             latch_blocks=latch_blocks,
-            phi_offset=2,  # idx_phi 在 0，list_phi 在 1
-            exclude_vars={hir_expr.variable},
+            phi_offset=2,
+            exclude_vars={hir_expr_variable},
         )
 
-        # 更新 env 中的值为 Phi 结果
+        # env 中的用户变量值 → Phi 结果
         for var_name, phi_result in phi_results.items():
             self.env[var_name] = phi_result
 
-        # 填充 idx_phi 的 sources
-        idx_phi_sources = [(block.label, idx_init_ssa)]
-        for (latch_block, _), inc_ssa_val in zip(latch_blocks, latch_inc_ssas):
-            idx_phi_sources.append((latch_block.label, inc_ssa_val))
-        idx_phi.sources = idx_phi_sources
+        # 填充 idx_phi sources: entry(idx_init) + N latch(idx_inc)
+        idx_phi.sources = [(entry_block.label, idx_init_ssa)] + [
+            (lb.label, inc_val) for (lb, _), inc_val in zip(latch_blocks, latch_inc_ssas)
+        ]
+        # 填充 list_phi sources: entry(list_init) + N latch(list_val)
+        list_phi.sources = [(entry_block.label, list_init_ssa)] + [
+            (lb.label, lv) for (lb, _), lv in zip(latch_blocks, latch_list_ssas)
+        ]
 
-        # 填充 list_phi 的 sources
-        list_phi_sources = [(block.label, list_init_ssa)]
-        for (latch_block, _), list_val_ssa in zip(latch_blocks, latch_list_ssas):
-            list_phi_sources.append((latch_block.label, list_val_ssa))
-        list_phi.sources = list_phi_sources
+        # 收尾：三块注册 + current_block 切换
+        self.all_blocks.extend([header_block_obj, body_block_obj, exit_block_obj])
+        self.current_block = exit_block_obj
+        return list_phi.result_name
 
-        # 6. exit 块：列表 Phi 的值就是结果
-        # 结果值就是 list_phi_ssa（header 中的 Phi）。
-        # 由于 header 支配 exit，exit 可以引用 list_phi_ssa。
+    def _lower_list_comprehension(self, hir_expr, block):
+        """
+        降级列表推导式：[result_expr | variable <- iterable, filter?]
 
-        self.all_blocks.extend([header_block, body_block, exit_block])
-        self.current_block = exit_block
-        return list_phi_ssa
+        编译结构（索引遍历，与 for/while SSA 策略一致）：
+          entry: list=[]; iter=X; len=length(iter); i=0; goto header
+          header: phi_i, phi_list, phi_user_vars...; if i<len goto body else goto exit
+          body:   elem = list_get(iter, i); bind variable;
+                  filter? filter_true(result+append) / filter_false(no append)
+                          : direct result+append;
+                  i++; goto header
+          exit:   return phi_list
+
+        【CC=13 → ≤4 拆分说明】
+        原 217 行单体函数拆为 4 个语义清晰的 helper，主函数仅含 4 次顺序调用：
+          _lc_setup_entry（初始化+三空块） → _lc_build_header（Phi+Branch）
+          → _lc_build_body_and_latches（元素绑定+filter分支+latch收集）
+          → _lc_fill_phis_and_finish（通用Phi插入+sources回填+收尾）
+        所有 if/for 等控制流全部移入 helper，主函数仅剩顺序结构，CC≤4 出榜。
+        """
+        # Step 1: 入口初始化（空列表/iter/len/i=0/pre_env + 三块创建 + Jump header）
+        (list_init, iter_ssa, len_ssa, idx_init, pre_env,
+         hdr_blk, body_blk, exit_blk) = self._lc_setup_entry(hir_expr, block)
+
+        # Step 2: 循环头 Phi 节点 + i<len 条件分支
+        idx_phi, list_phi, idx_phi_ssa, list_phi_ssa = self._lc_build_header(
+            hdr_blk, idx_init, list_init, len_ssa, body_blk, exit_blk, hir_expr.ir_type
+        )
+
+        # Step 3: 循环体（元素绑定 + filter 双分支/单分支 + latch 收集）
+        latch_blocks, latch_inc_ssas, latch_list_ssas = self._lc_build_body_and_latches(
+            hir_expr, hdr_blk, body_blk, exit_blk, iter_ssa, idx_phi_ssa, list_phi_ssa
+        )
+
+        # Step 4: 通用用户变量 Phi + idx/list Phi sources 回填 + 收尾
+        return self._lc_fill_phis_and_finish(
+            idx_phi=idx_phi, list_phi=list_phi, entry_block=block,
+            idx_init_ssa=idx_init, list_init_ssa=list_init,
+            latch_blocks=latch_blocks, latch_inc_ssas=latch_inc_ssas, latch_list_ssas=latch_list_ssas,
+            pre_env=pre_env, header_block_obj=hdr_blk, hir_expr_variable=hir_expr.variable,
+            body_block_obj=body_blk, exit_block_obj=exit_blk,
+        )
 
     def _lower_while_expr(self, hir_expr, block):
         """
