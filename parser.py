@@ -195,6 +195,50 @@ class Parser:
             self._advance()
 
     # ----------------------------------------------------------
+    # 表达式级增量恢复（非 Panic mode，仅替换单个失败子节点为 ErrorExpr）
+    # ----------------------------------------------------------
+
+    def _wrap_recover_right(self, parse_func, fallback_span_token=None, skip_tokens_on_error=0):
+        """调用 parse_func() 解析右操作数，失败时返回 ErrorExpr 并收集错误。
+
+        用于 BinOp 优先级链、管道操作符、后缀调用等场景的"左半部分已解析，
+        右半部分 ParseError"情况：保留已解析的左半 AST，把右半部分替换为
+        ErrorExpr 占位节点，避免整个表达式被顶层 Panic mode 丢弃。
+
+        注意：本函数**不会**触发 `_expr_nested_errors` 熔断计数
+        （因为我们已经就地精确恢复，不是嵌套雪崩）。
+
+        参数:
+            parse_func: 无参可调用对象，执行实际的右操作数解析
+            fallback_span_token: 当 ParseError 自身的 line/column 无效时，
+                用哪个 token 的 span 作为 ErrorExpr 的 fallback（通常是
+                该层级的运算符 token，如 PLUS/STAR 等）
+            skip_tokens_on_error: 解析失败后额外消费的 token 数。对于 BinOp
+                场景（操作符已被 _advance() 消费）通常为 0；对于 Call 参数等
+                场景（错误 token 仍在当前 pos，未被消费）需设为 1，防止
+                后续的 _expect/while 判断读到同一个错误 token 引发二次错误。
+        返回:
+            (result_node, caught_error_flag: bool)
+        """
+        try:
+            return parse_func(), False
+        except ParseError as e:
+            self._errors.append(e)
+            if e.line >= 0 and e.column >= 0:
+                err_span = Span(e.line, e.column)
+            elif fallback_span_token is not None:
+                err_span = self._span(fallback_span_token)
+            else:
+                err_span = self._span(self._cur())
+            # 可选：消费错误 token 或后续 skip_tokens_on_error 个，
+            # 使下一个 _peek_type() 不在同一个错误点上重复失败
+            for _ in range(skip_tokens_on_error):
+                if self._peek_type() == TokenType.EOF:
+                    break
+                self._advance()
+            return ErrorExpr(error=e, span=err_span), True
+
+    # ----------------------------------------------------------
     # 程序入口
     # ----------------------------------------------------------
 
@@ -666,7 +710,13 @@ class Parser:
         left = self._parse_for_while_expr()
         while self._match(TokenType.PIPE_GT):
             tok = self.tokens[self.pos - 1]
-            right = self._parse_for_while_expr()
+            # 增量恢复：管道右侧解析失败时（如 `a |> *`），用 ErrorExpr 替换，
+            # 保留左侧已解析的表达式，避免整个管道链被 Panic mode 丢弃
+            right, _ = self._wrap_recover_right(
+                lambda: self._parse_for_while_expr(),
+                fallback_span_token=tok,
+                skip_tokens_on_error=1,
+            )
             # desugar:  left |> right  ===  right(left)
             left = FnCall(callee=right, args=[left], span=self._span(tok))
         return left
@@ -933,7 +983,11 @@ class Parser:
         left = self._parse_and_expr()
         while self._match(TokenType.OR):
             tok = self.tokens[self.pos - 1]
-            right = self._parse_and_expr()
+            right, _ = self._wrap_recover_right(
+                lambda: self._parse_and_expr(),
+                fallback_span_token=tok,
+                skip_tokens_on_error=1,
+            )
             left = BinaryOp(op="||", left=left, right=right, span=self._span(tok))
         return left
 
@@ -945,7 +999,11 @@ class Parser:
         left = self._parse_bitor_expr()
         while self._match(TokenType.AND):
             tok = self.tokens[self.pos - 1]
-            right = self._parse_bitor_expr()
+            right, _ = self._wrap_recover_right(
+                lambda: self._parse_bitor_expr(),
+                fallback_span_token=tok,
+                skip_tokens_on_error=1,
+            )
             left = BinaryOp(op="&&", left=left, right=right, span=self._span(tok))
         return left
 
@@ -957,7 +1015,11 @@ class Parser:
         left = self._parse_bitxor_expr()
         while self._match(TokenType.PIPE):
             tok = self.tokens[self.pos - 1]
-            right = self._parse_bitxor_expr()
+            right, _ = self._wrap_recover_right(
+                lambda: self._parse_bitxor_expr(),
+                fallback_span_token=tok,
+                skip_tokens_on_error=1,
+            )
             left = BinaryOp(op="|", left=left, right=right, span=self._span(tok))
         return left
 
@@ -969,7 +1031,11 @@ class Parser:
         left = self._parse_bitand_expr()
         while self._match(TokenType.XOR):
             tok = self.tokens[self.pos - 1]
-            right = self._parse_bitand_expr()
+            right, _ = self._wrap_recover_right(
+                lambda: self._parse_bitand_expr(),
+                fallback_span_token=tok,
+                skip_tokens_on_error=1,
+            )
             left = BinaryOp(op="^", left=left, right=right, span=self._span(tok))
         return left
 
@@ -981,7 +1047,11 @@ class Parser:
         left = self._parse_shift_expr()
         while self._match(TokenType.BAND):
             tok = self.tokens[self.pos - 1]
-            right = self._parse_shift_expr()
+            right, _ = self._wrap_recover_right(
+                lambda: self._parse_shift_expr(),
+                fallback_span_token=tok,
+                skip_tokens_on_error=1,
+            )
             left = BinaryOp(op="&", left=left, right=right, span=self._span(tok))
         return left
 
@@ -993,7 +1063,11 @@ class Parser:
         left = self._parse_equality_expr()
         while self._peek_type() in (TokenType.SHL, TokenType.SHR, TokenType.SAR):
             tok = self._advance()
-            right = self._parse_equality_expr()
+            right, _ = self._wrap_recover_right(
+                lambda: self._parse_equality_expr(),
+                fallback_span_token=tok,
+                skip_tokens_on_error=1,
+            )
             left = BinaryOp(op=tok.value, left=left, right=right, span=self._span(tok))
         return left
 
@@ -1005,7 +1079,11 @@ class Parser:
         left = self._parse_comparison_expr()
         while self._peek_type() in (TokenType.EQ, TokenType.NEQ):
             tok = self._advance()
-            right = self._parse_comparison_expr()
+            right, _ = self._wrap_recover_right(
+                lambda: self._parse_comparison_expr(),
+                fallback_span_token=tok,
+                skip_tokens_on_error=1,
+            )
             left = BinaryOp(op=tok.value, left=left, right=right, span=self._span(tok))
         return left
 
@@ -1022,7 +1100,11 @@ class Parser:
             TokenType.GTE,
         ):
             tok = self._advance()
-            right = self._parse_cons_expr()
+            right, _ = self._wrap_recover_right(
+                lambda: self._parse_cons_expr(),
+                fallback_span_token=tok,
+                skip_tokens_on_error=1,
+            )
             left = BinaryOp(op=tok.value, left=left, right=right, span=self._span(tok))
         return left
 
@@ -1031,7 +1113,11 @@ class Parser:
         left = self._parse_additive_expr()
         while self._match(TokenType.PLUSPLUS):
             tok = self.tokens[self.pos - 1]
-            right = self._parse_additive_expr()
+            right, _ = self._wrap_recover_right(
+                lambda: self._parse_additive_expr(),
+                fallback_span_token=tok,
+                skip_tokens_on_error=1,
+            )
             left = BinaryOp(op="++", left=left, right=right, span=self._span(tok))
         return left
 
@@ -1043,7 +1129,11 @@ class Parser:
         left = self._parse_multiplicative_expr()
         while self._peek_type() in (TokenType.PLUS, TokenType.MINUS):
             tok = self._advance()
-            right = self._parse_multiplicative_expr()
+            right, _ = self._wrap_recover_right(
+                lambda: self._parse_multiplicative_expr(),
+                fallback_span_token=tok,
+                skip_tokens_on_error=1,
+            )
             left = BinaryOp(op=tok.value, left=left, right=right, span=self._span(tok))
         return left
 
@@ -1055,7 +1145,11 @@ class Parser:
         left = self._parse_unary_expr()
         while self._peek_type() in (TokenType.STAR, TokenType.SLASH, TokenType.PERCENT):
             tok = self._advance()
-            right = self._parse_unary_expr()
+            right, _ = self._wrap_recover_right(
+                lambda: self._parse_unary_expr(),
+                fallback_span_token=tok,
+                skip_tokens_on_error=1,
+            )
             left = BinaryOp(op=tok.value, left=left, right=right, span=self._span(tok))
         return left
 
@@ -1089,12 +1183,29 @@ class Parser:
         while True:
             # 函数调用 f(args...)
             if self._peek_type() == TokenType.LPAREN:
-                self._advance()
+                paren_tok = self._advance()
                 args = []
                 if self._peek_type() != TokenType.RPAREN:
-                    args.append(self._parse_expression())
+                    # 增量恢复：第一个参数解析失败时（如 `f(*)`），用 ErrorExpr 替换，
+                    # 保留 callee 已解析的表达式。skip_tokens_on_error=1：
+                    # 参数解析在 _parse_expression 内部失败通常没有消费错误 token，
+                    # 需要手动跳过 1 个，使后续 _match(COMMA) / _expect(RPAREN) 正常。
+                    arg0, _ = self._wrap_recover_right(
+                        lambda: self._parse_expression(),
+                        fallback_span_token=paren_tok,
+                        skip_tokens_on_error=1,
+                    )
+                    args.append(arg0)
                     while self._match(TokenType.COMMA):
-                        args.append(self._parse_expression())
+                        # 增量恢复：后续逗号参数单个失败不影响其他参数
+                        # （如 `f(1, *, 3)` 保留 arg0=1 arg1=ErrorExpr arg2=3）
+                        comma_tok = self.tokens[self.pos - 1]
+                        argn, _ = self._wrap_recover_right(
+                            lambda: self._parse_expression(),
+                            fallback_span_token=comma_tok,
+                            skip_tokens_on_error=1,
+                        )
+                        args.append(argn)
                 tok = self._expect(TokenType.RPAREN)
                 expr = FnCall(callee=expr, args=args, span=self._span(tok))
             # 字段访问 expr.field 或元组数字索引 expr.0
@@ -1383,17 +1494,36 @@ class Parser:
             self._advance()
             return UnitLiteral(span=self._span(tok))
 
-        first = self._parse_expression()
+        # 增量恢复：括号内第一个表达式失败（典型：`(a + *)`），
+        # 用 ErrorExpr 替换 first，保留括号外层的 BinOp/Call 结构。
+        # skip_tokens_on_error=1：错误 token 未消费时跳过 1 个，
+        # 保证后续 _match(COMMA) / _expect(RPAREN) 正常。
+        first, _ = self._wrap_recover_right(
+            lambda: self._parse_expression(),
+            fallback_span_token=tok,
+            skip_tokens_on_error=1,
+        )
 
         if self._match(TokenType.COMMA):
             # 元组
             elems = [first]
-            elems.append(self._parse_expression())
+            elem2, _ = self._wrap_recover_right(
+                lambda: self._parse_expression(),
+                fallback_span_token=self.tokens[self.pos - 1] if self.pos > 0 else None,
+                skip_tokens_on_error=1,
+            )
+            elems.append(elem2)
             while self._match(TokenType.COMMA):
-                elems.append(self._parse_expression())
+                elem_n, _ = self._wrap_recover_right(
+                    lambda: self._parse_expression(),
+                    fallback_span_token=self.tokens[self.pos - 1] if self.pos > 0 else None,
+                    skip_tokens_on_error=1,
+                )
+                elems.append(elem_n)
             self._expect(TokenType.RPAREN)
             return TupleExpr(elements=elems, span=self._span(tok))
         else:
-            # 分组表达式
+            # 分组表达式：即使 first 是 ErrorExpr 也正常检查 RPAREN
+            # （skip_tokens_on_error 已消费 1 个错误 token，RPAREN 应该在当前位置）
             self._expect(TokenType.RPAREN)
             return first

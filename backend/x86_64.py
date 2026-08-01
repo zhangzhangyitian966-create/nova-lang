@@ -30,6 +30,9 @@ XMM_RETURN_REG = 0  # XMM0
 # XMM 浮点寄存器
 XMM0, XMM1, XMM2, XMM3 = 0, 1, 2, 3
 XMM4, XMM5, XMM6, XMM7 = 4, 5, 6, 7
+# Cycle 74: 扩展 XMM 寄存器常量（XMM8-XMM15 仅在 SSE 指令有 REX 前缀时可访问）
+XMM8,  XMM9,  XMM10, XMM11 = 8,  9,  10, 11
+XMM12, XMM13, XMM14, XMM15 = 12, 13, 14, 15
 XMM_ARG_REGS = [XMM0, XMM1, XMM2, XMM3, XMM4, XMM5, XMM6, XMM7]
 
 
@@ -81,6 +84,20 @@ class X86_64Emitter:
     def _rex_rb(self, r, b):
         """REX 前缀（64位操作），r 和 b 可以 >= 8"""
         self._rex(1, (r >> 3) & 1, 0, (b >> 3) & 1)
+
+    def _rex_xmm(self, r_ext, b_ext):
+        """REX 前缀（SSE/SSE2 指令专用，W=0）。
+
+        注意：SSE 指令的操作宽度由 mandatory prefix（0xF2/0x66/0xF3）
+        决定，不是由 REX.W 决定，所以 REX.W=0。
+        仅在 r_ext 或 b_ext 不为 0 时才输出 REX 字节（与 _rex 保持一致：
+        rex==0x40 时不输出）。
+
+        参数:
+            r_ext: ModR/M.reg 字段的扩展位（即 (reg_num >> 3) & 1，范围 0 或 1）
+            b_ext: ModR/M.rm  字段的扩展位（即 (rm_num  >> 3) & 1，范围 0 或 1）
+        """
+        self._rex(0, r_ext & 1, 0, b_ext & 1)
 
     # === MOV 指令 ===
     def mov_reg_imm64(self, reg, imm):
@@ -379,10 +396,15 @@ class X86_64Emitter:
     def movsd_reg_imm(self, reg, value):
         """movsd reg, [rip + offset]  （加载浮点常量）
         返回需要回填的 32 位偏移位置
+
+        Cycle 74 FIX: 原实现当 reg>=8 时硬编码 `_rex(0, 0, 0, 1)`（REX.B=1），
+        但 reg 位于 ModR/M.reg 字段（_modrm(0b00, reg&7, 5) 中第二个参数），
+        需要 REX.R=(reg>>3)&1 而不是 REX.B。RIP-relative 的 rm=5（disp32 编码）
+        固定为 5<8，不需要 REX.B。原错误编码会使 REX 扩展 rm 侧（低 3 位=5，
+        加 B=1 后 rm=13→R13），在没有 R13 的场景下行为未定义。
         """
         self.emit_byte(0xF2)
-        if reg >= 8:
-            self._rex(0, 0, 0, 1)
+        self._rex_xmm((reg >> 3) & 1, 0)  # reg 在 ModR/M.reg 侧
         self.emit_byte(0x0F)
         self.emit_byte(0x10)
         self.emit_byte(self._modrm(0b00, reg & 7, 5))  # RIP-relative
@@ -488,59 +510,103 @@ class X86_64Emitter:
         self.emit_byte(self._modrm(0b11, xmm_reg & 7, gpr_reg & 7))
 
     def addsd_reg_reg(self, dst, src):
-        """addsd dst, src"""
+        """addsd dst, src
+
+        Cycle 74 FIX: 原实现缺少 REX 前缀，当 dst 或 src >= 8（XMM8-XMM15）
+        时无法访问扩展寄存器，操作数静默被折叠为低 3 位（XMM0-XMM7）。
+        修复：src 在 ModR/M.reg → REX.R；dst 在 ModR/M.rm → REX.B。
+        """
         self.emit_byte(0xF2)
+        self._rex_xmm((src >> 3) & 1, (dst >> 3) & 1)
         self.emit_byte(0x0F)
         self.emit_byte(0x58)
         self.emit_byte(self._modrm(0b11, src & 7, dst & 7))
 
     def subsd_reg_reg(self, dst, src):
-        """subsd dst, src"""
+        """subsd dst, src
+
+        Cycle 74 FIX: 同 addsd——缺少 REX 前缀导致 XMM8-XMM15 静默折叠。
+        """
         self.emit_byte(0xF2)
+        self._rex_xmm((src >> 3) & 1, (dst >> 3) & 1)
         self.emit_byte(0x0F)
         self.emit_byte(0x5C)
         self.emit_byte(self._modrm(0b11, src & 7, dst & 7))
 
     def mulsd_reg_reg(self, dst, src):
-        """mulsd dst, src"""
+        """mulsd dst, src
+
+        Cycle 74 FIX: 同 addsd——缺少 REX 前缀导致 XMM8-XMM15 静默折叠。
+        """
         self.emit_byte(0xF2)
+        self._rex_xmm((src >> 3) & 1, (dst >> 3) & 1)
         self.emit_byte(0x0F)
         self.emit_byte(0x59)
         self.emit_byte(self._modrm(0b11, src & 7, dst & 7))
 
     def divsd_reg_reg(self, dst, src):
-        """divsd dst, src"""
+        """divsd dst, src
+
+        Cycle 74 FIX: 同 addsd——缺少 REX 前缀导致 XMM8-XMM15 静默折叠。
+        """
         self.emit_byte(0xF2)
+        self._rex_xmm((src >> 3) & 1, (dst >> 3) & 1)
         self.emit_byte(0x0F)
         self.emit_byte(0x5E)
         self.emit_byte(self._modrm(0b11, src & 7, dst & 7))
 
     def xorpd_xmm(self, reg):
-        """xorpd xmm_reg, xmm_reg (清零)"""
+        """xorpd xmm_reg, xmm_reg (清零)
+
+        Cycle 74 FIX: 原实现缺少 REX 前缀，XMM8-XMM15 无法正确自清零（被
+        折叠为低 3 位）。reg 同时出现在 ModR/M.reg 和 ModR/M.rm 两侧，
+        所以 REX.R 和 REX.B 都需要填 (reg>>3)&1。
+        """
         self.emit_byte(0x66)
+        self._rex_xmm((reg >> 3) & 1, (reg >> 3) & 1)
         self.emit_byte(0x0F)
         self.emit_byte(0x57)
         self.emit_byte(self._modrm(0b11, reg & 7, reg & 7))
 
     def cvtsi2sd(self, xmm_reg, gpr_reg):
-        """cvtsi2sd xmm, gpr (int64 -> double)"""
+        """cvtsi2sd xmm, gpr (int64 -> double)
+
+        Cycle 74 FIX: 原实现只用 `_rex_rb(0, gpr_reg)`（REX.W=1, R=0,
+        B=(gpr>>3)&1），丢失了 xmm 在 ModR/M.reg 侧的 REX.R 扩展。
+        当 xmm_reg>=8 时，ModR/M.reg 的低 3 位被解释为 REX.R=0 下的寄存器，
+        即 XMM0-XMM7，会写入错误的寄存器（例如 xmm=8 写 XMM0 而不是 XMM8）。
+        正确的 REX 应为 W=1 + R=(xmm>>3)&1 + B=(gpr>>3)&1。注意 cvtsi2sd
+        当源是 64 位 GPR 时**必须**有 REX.W=1（区别于 32 位版本），所以这里
+        不能用 _rex_xmm（W=0）。
+        """
         self.emit_byte(0xF2)
-        self._rex_rb(0, gpr_reg)
+        self._rex(1, (xmm_reg >> 3) & 1, 0, (gpr_reg >> 3) & 1)
         self.emit_byte(0x0F)
         self.emit_byte(0x2A)
         self.emit_byte(self._modrm(0b11, xmm_reg & 7, gpr_reg & 7))
 
     def cvtsd2si(self, gpr_reg, xmm_reg):
-        """cvttsd2si gpr, xmm (double -> int64, 截断)"""
+        """cvttsd2si gpr, xmm (double -> int64, 截断)
+
+        Cycle 74 FIX: 原实现用 `_rex_rb(gpr_reg, 0)` 计算 REX.R=(gpr>>3)&1
+        和 REX.B=0，但 xmm 在 ModR/M.rm 侧，当 xmm>=8 时需要 REX.B=(xmm>>3)&1。
+        原 B=0 会把 XMM8-XMM15 折叠成 XMM0-XMM7，读取错误的寄存器。
+        注意：cvttsd2si 目标是 64 位 GPR 时必须 REX.W=1。
+        """
         self.emit_byte(0xF2)
-        self._rex_rb(gpr_reg, 0)
+        self._rex(1, (gpr_reg >> 3) & 1, 0, (xmm_reg >> 3) & 1)
         self.emit_byte(0x0F)
         self.emit_byte(0x2C)
         self.emit_byte(self._modrm(0b11, gpr_reg & 7, xmm_reg & 7))
 
     def ucomisd(self, a, b):
-        """ucomisd xmm_a, xmm_b"""
+        """ucomisd xmm_a, xmm_b
+
+        Cycle 74 FIX: 原实现缺少 REX 前缀。ucomisd ModR/M.reg = b，ModR/M.rm = a，
+        故 REX.R=(b>>3)&1，REX.B=(a>>3)&1。原 XMM8-XMM15 会静默折叠。
+        """
         self.emit_byte(0x66)
+        self._rex_xmm((b >> 3) & 1, (a >> 3) & 1)
         self.emit_byte(0x0F)
         self.emit_byte(0x2E)
         self.emit_byte(self._modrm(0b11, b & 7, a & 7))

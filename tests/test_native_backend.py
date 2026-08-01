@@ -16,6 +16,9 @@ from nova.backend.x86_64 import (
     R8,
     R9,
     XMM0,
+    XMM8,
+    XMM9,
+    XMM15,
 )
 from nova.backend.native_backend import (
     NativeCodeGen,
@@ -288,6 +291,148 @@ class TestX86_64Emitter(unittest.TestCase):
         self.assertEqual(code[0], 0x48)  # REX.W
         self.assertEqual(code[1], 0x85)  # TEST r/m64, r64
         self.assertEqual(code[2], 0xC0)  # ModR/M: mod=11, reg=RAX, rm=RAX
+
+    # ---- Cycle 74: XMM 指令 REX 前缀预修复验证 ----
+    # 修复 9 条 XMM/SSE 指令在寄存器 >=8（XMM8-XMM15、GPR R8-R15）
+    # 时缺少或错位的 REX 前缀。为每条指令验证：低寄存器不出 REX，
+    # 扩展寄存器出正确的 REX.R/REX.B 位。
+
+    def _first_rex(self, code):
+        """返回 mandatory prefix 后第一个 REX（0x40-0x4F）字节，没找到返回 None。"""
+        for b in code:
+            if 0x40 <= b <= 0x4F:
+                return b
+        return None
+
+    def test_movsd_reg_imm_xmm8_uses_rex_r_not_b(self):
+        """movsd xmm8, [rip+off] — REX.R=1（xmm 在 ModR/M.reg），不是旧的 REX.B=1"""
+        e = X86_64Emitter()
+        e.movsd_reg_imm(XMM8, 3.14)
+        code = list(e.get_code())
+        # 预期字节序列: 0xF2, REX=0x44 (0b0100_0100: 0100前缀 | R=1), 0x0F, 0x10, ModR/M(0b00_000_101=0x05), imm32=0000
+        self.assertEqual(code[0], 0xF2, msg=f"code={[hex(x) for x in code]}")
+        rex = self._first_rex(code)
+        self.assertIsNotNone(rex, msg=f"XMM8 需要 REX；code={[hex(x) for x in code]}")
+        # REX: 0x40 | (W<<3) | (R<<2) | (X<<1) | B → W=0, R=1, X=0, B=0 → 0x44
+        self.assertEqual(rex & 1, 0, msg="REX.B 不应为 1（rm=RIP=5<8）")
+        self.assertEqual((rex >> 2) & 1, 1, msg=f"REX.R 应为 1；实际 REX=0x{rex:02X}")
+        self.assertEqual((rex >> 3) & 1, 0, msg="REX.W 应为 0（SSE 宽度由 F2 决定）")
+        self.assertEqual(rex, 0x44)
+
+    def test_addsd_both_xmm_low_no_rex(self):
+        """addsd xmm0, xmm1 — 两寄存器都 <8，不输出 REX"""
+        e = X86_64Emitter()
+        e.addsd_reg_reg(XMM0, 1)
+        code = list(e.get_code())
+        rex = self._first_rex(code)
+        self.assertIsNone(rex, msg=f"XMM<8 不应有 REX；code={[hex(x) for x in code]}")
+
+    def test_addsd_src_xmm8_rex_r(self):
+        """addsd dst=xmm0, src=xmm8 → src 在 ModR/M.reg → REX.R=1"""
+        e = X86_64Emitter()
+        e.addsd_reg_reg(XMM0, XMM8)
+        code = list(e.get_code())
+        rex = self._first_rex(code)
+        self.assertIsNotNone(rex)
+        self.assertEqual((rex >> 2) & 1, 1, "REX.R=1 (src=xmm8)")
+        self.assertEqual(rex & 1, 0, "REX.B=0 (dst=xmm0<8)")
+
+    def test_addsd_dst_xmm15_rex_b(self):
+        """addsd dst=xmm15, src=xmm0 → dst 在 ModR/M.rm → REX.B=1"""
+        e = X86_64Emitter()
+        e.addsd_reg_reg(XMM15, XMM0)
+        code = list(e.get_code())
+        rex = self._first_rex(code)
+        self.assertIsNotNone(rex)
+        self.assertEqual(rex & 1, 1, "REX.B=1 (dst=xmm15)")
+        self.assertEqual((rex >> 2) & 1, 0, "REX.R=0 (src=xmm0<8)")
+
+    def test_subsd_mulsd_divsd_xmm8_xmm9_rex_rb(self):
+        """subsd/mulsd/divsd (XMM8, XMM9) → REX.R=1, REX.B=1 → REX=0x45"""
+        for fn_name, expected_opcode in [
+            ("subsd_reg_reg", 0x5C),
+            ("mulsd_reg_reg", 0x59),
+            ("divsd_reg_reg", 0x5E),
+        ]:
+            e = X86_64Emitter()
+            fn = getattr(e, fn_name)
+            fn(XMM8, XMM9)  # dst=xmm8(rm→B), src=xmm9(reg→R)
+            code = list(e.get_code())
+            self.assertEqual(code[0], 0xF2)
+            rex = self._first_rex(code)
+            self.assertEqual(rex, 0x45,
+                msg=f"{fn_name}: REX.R=1(src=9) REX.B=1(dst=8) → 0x45，实际 0x{rex:02X}；code={[hex(x) for x in code]}")
+            # 校验 opcode 位置（0x0F opcode 后）
+            after_rex = code.index(rex) + 1
+            self.assertEqual(code[after_rex], 0x0F)
+            self.assertEqual(code[after_rex + 1], expected_opcode,
+                msg=f"{fn_name}: opcode 应为 0x{expected_opcode:02X}")
+
+    def test_xorpd_xmm15_rex_rb(self):
+        """xorpd xmm15, xmm15 — reg 同时在 ModR/M 两侧，故 REX.R=1, REX.B=1"""
+        e = X86_64Emitter()
+        e.xorpd_xmm(XMM15)
+        code = list(e.get_code())
+        self.assertEqual(code[0], 0x66)  # mandatory prefix for xorpd
+        rex = self._first_rex(code)
+        self.assertIsNotNone(rex, msg=f"XMM15 需要 REX；code={[hex(x) for x in code]}")
+        self.assertEqual(rex & 1, 1, "REX.B=1")
+        self.assertEqual((rex >> 2) & 1, 1, "REX.R=1")
+        self.assertEqual(rex, 0x45)
+
+    def test_xorpd_xmm0_no_rex(self):
+        """xorpd xmm0, xmm0 — 低寄存器，无 REX"""
+        e = X86_64Emitter()
+        e.xorpd_xmm(XMM0)
+        code = list(e.get_code())
+        self.assertIsNone(self._first_rex(code),
+            msg=f"XMM<8 不应有 REX；code={[hex(x) for x in code]}")
+
+    def test_cvtsi2sd_xmm8_r9_w1_r1_b1(self):
+        """cvtsi2sd xmm8, r9 — REX.W=1 (64-bit gpr src) + R=1 (xmm=8) + B=1 (gpr=9) → 0x4D"""
+        e = X86_64Emitter()
+        e.cvtsi2sd(XMM8, R9)
+        code = list(e.get_code())
+        self.assertEqual(code[0], 0xF2)
+        rex = self._first_rex(code)
+        self.assertIsNotNone(rex, f"code={[hex(x) for x in code]}")
+        self.assertEqual((rex >> 3) & 1, 1, "cvtsi2sd 64-bit 需要 REX.W=1")
+        self.assertEqual((rex >> 2) & 1, 1, "REX.R=1 (xmm=8 在 ModR/M.reg)")
+        self.assertEqual(rex & 1, 1, "REX.B=1 (gpr=9 在 ModR/M.rm)")
+        self.assertEqual(rex, 0x4D)  # 0b0100_1101
+
+    def test_cvtsd2si_rax_xmm8_w1_r0_b1(self):
+        """cvttsd2si rax, xmm8 — REX.W=1 + R=0 (gpr=rax<8) + B=1 (xmm=8) → 0x49"""
+        e = X86_64Emitter()
+        e.cvtsd2si(RAX, XMM8)
+        code = list(e.get_code())
+        self.assertEqual(code[0], 0xF2)
+        rex = self._first_rex(code)
+        self.assertIsNotNone(rex, f"code={[hex(x) for x in code]}")
+        self.assertEqual((rex >> 3) & 1, 1, "REX.W=1 (64-bit gpr dst)")
+        self.assertEqual((rex >> 2) & 1, 0, "REX.R=0 (rax<8)")
+        self.assertEqual(rex & 1, 1, "REX.B=1 (xmm=8 在 ModR/M.rm)")
+        self.assertEqual(rex, 0x49)  # 0b0100_1001
+
+    def test_ucomisd_xmm8_xmm9_rex_r1_b1(self):
+        """ucomisd xmm_a=xmm8, xmm_b=xmm9 → ModR/M.reg=b=9→R=1, ModR/M.rm=a=8→B=1 → REX=0x45"""
+        e = X86_64Emitter()
+        e.ucomisd(XMM8, XMM9)
+        code = list(e.get_code())
+        self.assertEqual(code[0], 0x66)  # mandatory prefix
+        rex = self._first_rex(code)
+        self.assertIsNotNone(rex, f"code={[hex(x) for x in code]}")
+        self.assertEqual((rex >> 2) & 1, 1, "REX.R=1 (b=xmm9)")
+        self.assertEqual(rex & 1, 1, "REX.B=1 (a=xmm8)")
+        self.assertEqual(rex, 0x45)
+
+    def test_ucomisd_xmm0_xmm1_no_rex(self):
+        """ucomisd xmm0, xmm1 — 两寄存器都 <8，无 REX"""
+        e = X86_64Emitter()
+        e.ucomisd(XMM0, 1)
+        code = list(e.get_code())
+        self.assertIsNone(self._first_rex(code),
+            msg=f"XMM<8 不应有 REX；code={[hex(x) for x in code]}")
 
 
 class TestNativeCodeGen(unittest.TestCase):

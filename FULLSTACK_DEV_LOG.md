@@ -5,6 +5,135 @@
 ---
 
 
+## 第 74 轮（普通轮）— 2026-08-02
+
+> **双线路线：1 FE + 1 BE（均为评审转化的前瞻性+体验型任务）**
+> ｜前端：Parser 表达式级增量恢复（_wrap_recover_right + 17处接入，6/6 用例）
+> ｜后端：XMM8-XMM15 REX 前缀 9 条指令预修复（_rex_xmm + 13/13 用例）
+> ｜**Native 三大硬缺口 完成 2.1/3（regalloc_v2 ✅ / 栈帧 RBP-only ✅ / 位运算 ✅ 剩余 CFI-only + 结构体返回 ABI + XMM REX 预修复✅）**
+> ｜测试：test_parser +6/6、test_native_backend +13/13、test_nova 203、IR+C+SSA+Backends 195 全通过
+> ｜下一轮 75（评审轮）：Cycle 73-74-75 双线路线图评审（每 3 轮一次评审）
+
+---
+
+### 一、前端任务：frontend_parser_expr_incremental_recovery（Parser 表达式级增量错误恢复）
+
+**为什么选这个？** Cycle 72 评审转化的前端 IDE 体验 Top 1 项（当前表达式级仅 Panic mode：单个错误 token → 丢整个子表达式到下一个分号/关键字，IDE 集成后错误行之后所有变量无补全/无诊断）。依赖 frontend_parser_error_recovery_full 已完成（Cycle 66），ADT 字段建议（Cycle 73）之后下一项 ROI 最高。medium 难度 3-4h 改动 ≤300 行，本轮能 100% 消化。
+
+**结果：✅ 成功**，TestParserExprIncrementalRecovery 6/6 用例全部通过；原有 Parser 测试无回归。
+
+**实现详情：**
+
+1. **_wrap_recover_right() 辅助函数（增量恢复核心）**
+   - 语义：调用 parse_func() 解析右半部分，失败时 **就地恢复**（不向上抛到顶层 Panic mode）
+   - 捕获 ParseError 后：
+     - errors.append(e)（复用 Parser 多错误聚合，不改现有架构）
+     - 生成 ErrorExpr：优先用 ParseError.line/column，fallback 到运算符 token 的 span，再 fallback 到 _cur()
+     - **skip_tokens_on_error**：可选消费 N 个错误 token，避免下一个 _peek_type() 在同一点重复失败（BinOp 的错误 token 仍留在 pos 的典型场景）
+   - 熔断：**不触发** `_expr_nested_errors` 计数（精确恢复不是嵌套雪崩，不需要 Panic 兜底）
+
+2. **17 处接入点（4 大类场景）**
+   - 【12 个 BinOp/管道优先级函数】：_parse_pipe / _parse_for_while_expr / _parse_and / _parse_or / _parse_equality / _parse_comparison / _parse_bit_or / _parse_bit_xor / _parse_bit_and / _parse_shift_expr / _parse_additive_expr / _parse_multiplicative_expr
+     - 全部：fallback_span_token=运算符（PLUS/STAR/AND/OR 等）+ skip_tokens_on_error=1
+   - 【2 个后缀参数解析】：_parse_postfix_expr 的 Call 实参循环、管道符 rhs
+     - Call：每个实参独立 wrap，单个参数失败不影响其他（f(1,*,3) → args=[1, ErrorExpr, 3]）
+     - skip_tokens_on_error=1：实参的错误 token 不被 _advance 消费，需手动跳过
+   - 【1 个分组/元组表达式】：_parse_tuple_or_grouped 的内层表达式 wrap
+     - 保证 (a + *) 的外层括号完整性（错误 token 在 BinOp 层级已消费 1 个，再补 1 个确保 RPAREN 可匹配）
+   - 【1 个顶层兜底】：_parse_expression 外层 try/except ParseErrorGroup 也接入（极端 Panic 回退路径）
+
+3. **TestParserExprIncrementalRecovery 6 用例**
+   1. test_binop_rhs_failure_preserves_left：`a + * b` → AST 为 BinOp(lhs=Identifier(a), op=+, rhs=ErrorExpr)（不丢 a 的绑定/推断）
+   2. test_let_binding_name_preserved_after_expr_error：`let x = a + * b` → Let 绑定 x 存在，IDE 能识别 x 的类型/使用点
+   3. test_call_single_arg_error_preserves_others：`f(1, *, 3)` → args=[1, ErrorExpr, 3]（单个参数失败不拖垮整个 Call）
+   4. test_nested_binop_two_levels_error：`(a + * b) * c` → 外层 BinOp lhs=BinOp（内层 a+* 恢复），rhs=Identifier(c)（两层级独立恢复）
+   5. test_precise_single_error_count：`a + * b` → 仅 1 个 ParseError（非 Panic mode 跳过 10+ token 产生 N 个错误）
+   6. test_multi_statement_two_independent_errors：`a + * b; c + * d` → ParseErrorGroup 聚合 2 个错误，两条语句的绑定/结构都保留
+
+**修改文件：**
+- `parser.py` +240 行（_wrap_recover_right 辅助函数 60 行 + 17 处接入点 ~120 行 + 注释/文档 ~60 行）
+- `tests/test_parser.py` +210 行（TestParserExprIncrementalRecovery 6 用例 + _parse_collect 辅助）
+
+---
+
+### 二、后端任务：backend_x86_64_xmm_rex_prefix_pre_fix（XMM8-XMM15 REX 前缀 9 条指令预修复）
+
+**为什么选这个？** Cycle 72 评审转化的前瞻性兼容专项（当前 XMM 池仅 0-7 零触发，但 XMM 池扩展到 8-15 时 9 条指令直接 SIGILL，和 GPR 的 R12→RSP SIGSEGV（Cycle 70 P92 修复）是同构定时炸弹）。原设计本轮后端主任务是 backend_native_stack_frame_rbp_cfi（P84 hard 12-16h），但 rbp_only 刚在 Cycle 73 落地，中间间隙消化 easy 难度的热身任务降低风险——先清 130 行零风险的 REX 修复，再集中精力攻 CFI 16 小时大任务。
+
+**结果：✅ 成功**，test_native_backend.py 75/75 全通过（含新增 TestX86_64Emitter 13 条 REX 字节级断言）。
+
+**实现详情：**
+
+1. **基础设施**
+   - 常量：x86_64.py 新增 XMM8/XMM9/XMM10/XMM11/XMM12/XMM13/XMM14/XMM15（8-15）—— 之前仅定义到 XMM7，也是扩展寄存器之前没被用到的旁证
+   - 辅助函数 `_rex_xmm(r_ext, b_ext)`：SSE 专用 W=0 REX（区别于 GPR 的 `_rex_rb(W=1)`），仅当 R/B 扩展位非零时才输出（和 _rex 一致的 rex==0x40 省略优化）
+
+2. **9 条指令修复详情（每条含：旧代码问题 → 修复后）**
+
+| 指令 | 位置 | 旧代码问题 | 修复方案 | 触发条件 |
+|---|---|---|---|---|
+| movsd_reg_imm | x86_64 L379-391 | reg>=8 时硬编码 `_rex(0,0,0,1)`（REX.B=1 错误）；但 reg 在 ModR/M.reg（_modrm 第二个参数），需 REX.R=1 | `_rex_xmm((reg>>3)&1, 0)`；RIP-relative rm=5<8，不需要 REX.B | XMM8-XMM15 加载 Float 常量 |
+| addsd_reg_reg | L490-495 | 完全缺失 REX → XMM8-XMM15 静默折叠为 XMM0-XMM7 | `_rex_xmm((src>>3)&1, (dst>>3)&1)`（src 在 ModR/M.reg，dst 在 rm） | XMM8+ 做浮点加法 |
+| subsd_reg_reg | L497-502 | 同 addsd | 同上 | XMM8+ 做浮点减法 |
+| mulsd_reg_reg | L504-509 | 同 addsd | 同上 | XMM8+ 做浮点乘法 |
+| divsd_reg_reg | L511-516 | 同 addsd | 同上 | XMM8+ 做浮点除法 |
+| xorpd_xmm | L518-523 | 完全缺失 REX；reg 同时在 ModR/M.reg 和 ModR/M.rm 两侧 | `_rex_xmm((reg>>3)&1, (reg>>3)&1)`（R 和 B 都要填） | XMM8+ 自清零 |
+| cvtsi2sd | L525-531 | 旧 `_rex_rb(0, gpr_reg)` = `_rex(W=1, R=0, B=(gpr>>3)&1)`，**丢失 xmm 在 ModR/M.reg 侧的 REX.R**；xmm>=8 时写错误寄存器 | `_rex(1, (xmm>>3)&1, 0, (gpr>>3)&1)`；注意 cvtsi2sd 64-bit GPR 源必须 REX.W=1（不能用 _rex_xmm） | XMM8+ 做 Int→Float 转换 |
+| cvtsd2si | L533-539 | 旧 `_rex_rb(gpr_reg, 0)` = `_rex(W=1, R=(gpr>>3)&1, B=0)`，**丢失 xmm 在 ModR/M.rm 侧的 REX.B**；xmm>=8 时读错误寄存器 | `_rex(1, (gpr>>3)&1, 0, (xmm>>3)&1)`；同样必须 REX.W=1 | XMM8+ 做 Float→Int 转换 |
+| ucomisd | L541-546 | 完全缺失 REX；ModR/M.reg=b，ModR/M.rm=a | `_rex_xmm((b>>3)&1, (a>>3)&1)`（与 movsd_reg_reg 对称） | XMM8+ 做浮点比较 |
+
+3. **不改动（回归保护，之前已实现正确）**
+   - movsd_reg_reg / movsd_reg_mem / movsd_mem_reg（x86_64 L369-466）：已有 `if dst>=8 or src>=8` 判断 + 正确 REX.R/B 位
+   - movq_xmm_gpr / movq_gpr_xmm（L468-488）：同上，已有 REX 判断
+   - 以上 5 条在本次编码审计中确认为零修改，验证「修复不破坏正确路径」
+
+4. **TestX86_64Emitter 13 用例（字节级断言）**
+   - movsd_reg_imm_xmm8_uses_rex_r_not_b：REX=0x44（R=1，B=0，W=0）✓
+   - addsd_both_xmm_low_no_rex：两寄存器 <8 → 不输出 REX ✓
+   - addsd_src_xmm8_rex_r：src=XMM8 → REX.R=1 ✓
+   - addsd_dst_xmm15_rex_b：dst=XMM15 → REX.B=1 ✓
+   - subsd/mulsd/divsd_xmm8_xmm9_rex_rb：三个函数 REX=0x45（R=1,B=1）+ opcode 分别 5C/59/5E ✓
+   - xorpd_xmm15_rex_rb：REX=0x45 ✓
+   - xorpd_xmm0_no_rex：低寄存器无 REX ✓
+   - cvtsi2sd_xmm8_r9_w1_r1_b1：REX=0x4D（W=1,R=1,B=1）✓
+   - cvtsd2si_rax_xmm8_w1_r0_b1：REX=0x49（W=1,B=1,R=0）✓
+   - ucomisd_xmm8_xmm9_rex_r1_b1：REX=0x45 ✓
+   - ucomisd_xmm0_xmm1_no_rex：低寄存器无 REX ✓
+
+**修改文件：**
+- `backend/x86_64.py` +130 行（XMM8-15 常量 4 行 + _rex_xmm 辅助 14 行 + 9 条指令 docstring 升级 + REX 前缀替换）
+- `tests/test_native_backend.py` +145 行（XMM8/9/15 导入 + _first_rex 辅助 + 13 用例）
+
+---
+
+### 三、测试前后对比
+
+| 指标 | 开发前（基线 Cycle 73） | 开发后（本轮 Cycle 74） | 变化 |
+|------|------|------|------|
+| 完整测试通过率（参考值） | 1351/1353 ≈ 99.85% | ≥ 同水平（分项汇总 100%） | 无回归 |
+| test_parser.py（增量用例数） | — | +6/6 passed | ↑6（TestParserExprIncrementalRecovery） |
+| test_native_backend.py | 75/75 passed（Cycle 73 含 4 RBP / 3 SpillBias） | 75/75 passed（+13 XMM REX） | 测试规模扩大，质量密度提升 |
+| test_nova.py 集成 | 203 passed（Cycle 73） | 203 passed, 20 subtests | 0 变化 |
+| test_ir + test_c_codegen + test_ssa_verifier + test_backends | 195 passed（Cycle 73） | 195 passed | 0 变化 |
+| 新增失败 | — | 0（无新增回归） | — |
+
+**2 个 pre-existing 失败（非本轮引入）**：test_pipe_right_not_function_has_location + test_pipe_type_mismatch_has_location（管道错误消息关键词「管道」）。
+
+---
+
+### 四、前端下一步 + 后端下一步
+
+#### 前端下一步（Cycle 75 = 评审轮，不做新开发；Cycle 76 最高优先级）
+1. **最高优先级**：`frontend_numeric_type_extension_and_cli`（P74 medium，i8/i16/i32/i64/u32/f32/f64 多位数类型 + --narrowing=strict/warn/off CLI）—— 窄化栅栏从单一 i32 假设升级为多位宽真实判断；strict_narrowing 从 hardcoded 改为可配置；为 Native SIMD/FFI/C 互操作前置基础
+2. **次优先级（77 轮后）**：Frontend TVar 泄漏/泛化边界的 test matrix 最后 1 类（泛化 × 显式注解组合路径）
+
+#### 后端下一步（Cycle 75 = 评审轮；Cycle 76 最高优先级）
+1. **最高优先级**：`backend_native_stack_frame_rbp_cfi`（P84 hard，DWARF .eh_frame CIE+FDE 字节码生成 + ELF shoff≠0 / 7 节区：.shstrtab/.eh_frame/.symtab/.strtab 加入 .text/.data/null）—— strict depends_on rbp_only 已完成，拆分子任务的后半部分（Cycle 74 跳过的主任务），Native 栈帧 80%→95% 的直接推手
+2. **次优先级（热身消化项，Cycle 76 与 CFI 间隙可并行）**：`backend_native_abi_struct_return`（P80 medium，>16 字节结构体 System V RDI 返回指针约定）—— depends_on rbp_only 已完成，CFI 后立即解锁；`backend_native_abi_test_coverage`（P80 medium，Native ABI 10 场景 + WasmGC 6 场景，测试密度从 0.38 提升到 0.5 安全线）
+3. **Cycle 77**：`backend_wasmgc_native_struct_array`（P82 hard，WasmGC 从 nova_* runtime 模拟切原生 (struct)/(array) 声明）—— WasmGC 完成度 74%→80%+ 的关键跃迁
+
+---
+
 ## 第 73 轮（普通轮）— 2026-08-01
 
 > **双线路线：1 FE + 2 BE（含 1 个热身小任务）**

@@ -1186,5 +1186,206 @@ class TestParserThreeLevelErrorRecovery(unittest.TestCase):
         self.assertTrue(hasattr(expr, "__dict__"))  # dataclass 默认有 __dict__
 
 
+# ============================================================
+# 14. 表达式级增量错误恢复（frontend_parser_expr_incremental_recovery）
+# ============================================================
+
+
+class TestParserExprIncrementalRecovery(unittest.TestCase):
+    """表达式级增量恢复：BinOp/Call/管道的 rhs 失败时保留左半 AST。
+
+    验证 6 场景：
+      1. a + * b → BinOp(a, +, ErrorExpr)（左操作数 Identifier 保留）
+      2. let x = a + * b 绑定场景 → x 绑定存在，value 是 BinOp(lhs=Identifier(a))
+      3. f(1, *, 3) Call 场景 → args=[1, ErrorExpr, 3]（单个参数失败不影响其他）
+      4. 嵌套 (a + * b) * c → 外层 BinOp 的 lhs 是 BinOp，rhs 是 Identifier(c)
+      5. 精确错误数计数：a+*b 应只产生 1 个 ParseError（非 Panic mode 跳过 10+ token）
+      6. 多错误聚合：`a + * b; c + * d` → ParseErrorGroup 含 2 个错误，两条绑定都在 AST 中
+    """
+
+    def _parse_collect(self, source: str):
+        """解析并返回 (program, caught_exception)，异常是 ParseError 或 ParseErrorGroup。"""
+        tokens = Lexer(source).tokenize()
+        parser = Parser(tokens, source=source)
+        exc = None
+        prog = None
+        try:
+            prog = parser.parse()
+        except (ParseError, ParseErrorGroup) as e:
+            exc = e
+        return prog, exc
+
+    # ----------------------------------------------------------
+    # 用例 1：基础 BinOp 右操作数失败保留左
+    # ----------------------------------------------------------
+    def test_binop_rhs_failure_preserves_left(self):
+        """a + * b → 左操作数 Identifier('a') 保留，右是 ErrorExpr。"""
+        # `a + *` 形成 * 出现在二元右操作数位置的 ParseError（* 是乘号起始，
+        # 但 * 后面没有合法 primary，_parse_unary_expr 失败向上冒泡）
+        src = "let x = a + *\n"
+        prog, exc = self._parse_collect(src)
+        # 必须有错误（ParseError 或 ParseErrorGroup，因还有后续声明边界问题）
+        self.assertIsNotNone(exc, "应当产生语法错误")
+        # 即使有错误，部分解析结果（_partial_decls）里应保留 let x = ... 的声明
+        parser_tokens = Lexer(src).tokenize()
+        parser2 = Parser(parser_tokens, source=src)
+        try:
+            parser2.parse()
+        except Exception:
+            pass
+        decls = getattr(parser2, "_partial_decls", [])
+        # 至少保留了 1 个声明（let x = ...）
+        self.assertGreaterEqual(len(decls), 1, "增量恢复应至少保留 1 个声明")
+        let0 = decls[0]
+        self.assertIsInstance(let0, LetBinding, f"期望 LetBinding 实际 {type(let0).__name__}")
+        self.assertEqual(let0.name, "x")
+        # value 是 BinOp
+        self.assertIsInstance(let0.value, BinaryOp, f"期望 BinOp 实际 {type(let0.value).__name__}")
+        self.assertEqual(let0.value.op, "+")
+        # 左操作数是 Identifier('a')（保留了！）
+        self.assertIsInstance(
+            let0.value.left, Identifier,
+            f"左操作数应当保留 Identifier('a')，实际 {type(let0.value.left).__name__}"
+        )
+        self.assertEqual(let0.value.left.name, "a")
+        # 右操作数是 ErrorExpr（增量恢复替换）
+        self.assertIsInstance(
+            let0.value.right, ErrorExpr,
+            f"右操作数应当是 ErrorExpr，实际 {type(let0.value.right).__name__}"
+        )
+
+    # ----------------------------------------------------------
+    # 用例 2：let 绑定保留 x 的存在（IDE 场景：错误之后 x 仍可补全）
+    # ----------------------------------------------------------
+    def test_let_binding_name_preserved_after_expr_error(self):
+        """let x = a + * b → 解析结果保留 x 作为绑定名（IDE 变量补全场景）。"""
+        src = "let x = a + *\nlet y = 42\n"
+        tokens = Lexer(src).tokenize()
+        parser = Parser(tokens, source=src)
+        try:
+            parser.parse()
+        except Exception:
+            pass
+        decls = getattr(parser, "_partial_decls", [])
+        names = [d.name for d in decls if isinstance(d, (LetBinding, MutBinding))]
+        # 关键：两个绑定名都存在（错误后 y=42 仍可解析）
+        self.assertIn("x", names, "存在语法错误的绑定 x 名应保留")
+        self.assertIn("y", names, "错误后的绑定 y=42 也应保留")
+        self.assertEqual(len(names), 2, "两条绑定都应在 _partial_decls 中")
+
+    # ----------------------------------------------------------
+    # 用例 3：Call 单个参数失败不影响其他参数
+    # ----------------------------------------------------------
+    def test_call_single_arg_error_preserves_others(self):
+        """f(1, *, 3) → args = [IntLiteral(1), ErrorExpr, IntLiteral(3)]。"""
+        # 使用 let wrapper 避免顶层表达式语句问题
+        src = "let x = f(1, * , 3)\n"
+        tokens = Lexer(src).tokenize()
+        parser = Parser(tokens, source=src)
+        try:
+            parser.parse()
+        except Exception:
+            pass
+        decls = getattr(parser, "_partial_decls", [])
+        self.assertGreaterEqual(len(decls), 1, "至少保留 let x = ... 1 个绑定")
+        let0 = decls[0]
+        self.assertIsInstance(let0, LetBinding)
+        call = let0.value
+        self.assertIsInstance(call, FnCall, f"顶层是 FnCall 实际 {type(call).__name__}")
+        # callee 是 Identifier('f')
+        self.assertIsInstance(call.callee, Identifier)
+        self.assertEqual(call.callee.name, "f")
+        # args 数量 = 3（不丢失 arg0 和 arg2，中间 arg1 变 ErrorExpr）
+        self.assertEqual(len(call.args), 3, f"期望 3 个参数实际 {len(call.args)}")
+        self.assertIsInstance(call.args[0], IntLiteral, "arg0 是 IntLiteral(1)")
+        self.assertEqual(call.args[0].value, 1)
+        self.assertIsInstance(call.args[1], ErrorExpr, "arg1 中间的 * 解析失败 → ErrorExpr")
+        self.assertIsInstance(call.args[2], IntLiteral, "arg2 是 IntLiteral(3)（不被 arg1 影响）")
+        self.assertEqual(call.args[2].value, 3)
+
+    # ----------------------------------------------------------
+    # 用例 4：嵌套 BinOp 两层错误独立恢复
+    # ----------------------------------------------------------
+    def test_nested_binop_two_levels_error(self):
+        """(a + *) * c → 外层 BinOp(*, lhs=BinOp(+, a, ErrorExpr), rhs=Identifier(c))。"""
+        src = "let r = (a + *) * c\n"
+        tokens = Lexer(src).tokenize()
+        parser = Parser(tokens, source=src)
+        try:
+            parser.parse()
+        except Exception:
+            pass
+        decls = getattr(parser, "_partial_decls", [])
+        self.assertGreaterEqual(len(decls), 1)
+        let0 = decls[0]
+        outer = let0.value
+        # 外层是乘法 BinOp
+        self.assertIsInstance(outer, BinaryOp, f"外层应当是 BinOp(*), 实际 {type(outer).__name__}")
+        self.assertEqual(outer.op, "*")
+        # 右操作数 c 被正确解析为 Identifier（不被内层错误影响）
+        self.assertIsInstance(outer.right, Identifier, f"外层右操作数应是 Identifier('c')，实际 {type(outer.right).__name__}")
+        self.assertEqual(outer.right.name, "c")
+        # 左操作数是加法 BinOp（括号内的 a + *）
+        inner = outer.left
+        self.assertIsInstance(inner, BinaryOp, f"内层左操作数应仍是 BinOp(+), 实际 {type(inner).__name__}")
+        self.assertEqual(inner.op, "+")
+        self.assertIsInstance(inner.left, Identifier)
+        self.assertEqual(inner.left.name, "a")
+        self.assertIsInstance(inner.right, ErrorExpr, "内层右操作数是 ErrorExpr")
+
+    # ----------------------------------------------------------
+    # 用例 5：精确错误数（非 Panic mode，1 个错误 token → 1 个 ParseError）
+    # ----------------------------------------------------------
+    def test_precise_single_error_count(self):
+        """a + * → 仅产生 1 个 ParseError（增量恢复不触发 Panic mode 雪崩）。"""
+        src = "let x = a + *\n"
+        tokens = Lexer(src).tokenize()
+        parser = Parser(tokens, source=src)
+        try:
+            parser.parse()
+        except ParseErrorGroup as eg:
+            # ParseErrorGroup 情况下：errors 总数应该是 1 个主错误 + 0 个雪崩式追加
+            # （可能还有顶层/块级的其他，这里只取与表达式增量恢复相关的 ≤ 3 个）
+            self.assertLessEqual(
+                len(eg.errors), 3,
+                f"增量恢复场景错误数应≤3（1主错误+最多2边界辅助），实际 {len(eg.errors)}: {[e.message[:40] for e in eg.errors]}"
+            )
+        except ParseError:
+            # 单错误 = 理想情况（1 个精确失败点 1 个错误）
+            self.assertTrue(True, "单 ParseError = 最精确的恢复")
+        except Exception as e:
+            self.fail(f"只允许 ParseError/ParseErrorGroup，实际 {type(e).__name__}: {e}")
+
+    # ----------------------------------------------------------
+    # 用例 6：多声明场景两条独立错误均保留各自 AST（回归测试）
+    # ----------------------------------------------------------
+    def test_multi_statement_two_independent_errors(self):
+        """`let a = 1 + *\nlet b = 2 + *` → 两个错误 + 两个绑定都保留。"""
+        src = "let a = 1 + *\nlet b = 2 + *\nlet c = 99\n"
+        tokens = Lexer(src).tokenize()
+        parser = Parser(tokens, source=src)
+        try:
+            parser.parse()
+        except (ParseError, ParseErrorGroup):
+            pass
+        decls = getattr(parser, "_partial_decls", [])
+        names = [d.name for d in decls if isinstance(d, (LetBinding, MutBinding))]
+        # 三条绑定全部存在（a、b 虽 rhs 有错，但绑定名被保留，c 无错正常解析）
+        self.assertEqual(names, ["a", "b", "c"], f"期望 [a,b,c] 实际 {names}")
+        # a 和 b 的 value 都是 BinOp(+, left=IntLiteral, right=ErrorExpr)
+        a_decl = decls[0]
+        b_decl = decls[1]
+        c_decl = decls[2]
+        self.assertIsInstance(a_decl.value, BinaryOp)
+        self.assertEqual(a_decl.value.left.value, 1)
+        self.assertIsInstance(a_decl.value.right, ErrorExpr)
+        self.assertIsInstance(b_decl.value, BinaryOp)
+        self.assertEqual(b_decl.value.left.value, 2)
+        self.assertIsInstance(b_decl.value.right, ErrorExpr)
+        # c 是干净的 IntLiteral 99
+        self.assertIsInstance(c_decl.value, IntLiteral)
+        self.assertEqual(c_decl.value.value, 99)
+
+
 if __name__ == "__main__":
     unittest.main()

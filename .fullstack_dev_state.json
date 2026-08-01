@@ -1,7 +1,7 @@
 {
-  "cycles": 73,
-  "frontend_completed": 49,
-  "backend_completed": 58,
+  "cycles": 74,
+  "frontend_completed": 50,
+  "backend_completed": 59,
   "last_review_cycle": 72,
   "current_review_cycle": 72,
   "completed_tasks": [
@@ -131,7 +131,9 @@
     "review_cycle_72",
     "frontend_adt_field_suggestion_error",
     "backend_native_regalloc_v2_spill_bias_fix",
-    "backend_native_stack_frame_rbp_only"
+    "backend_native_stack_frame_rbp_only",
+    "frontend_parser_expr_incremental_recovery",
+    "backend_x86_64_xmm_rex_prefix_pre_fix"
   ],
   "failed_tasks": [],
   "deprecated_tasks": [
@@ -150,6 +152,40 @@
     "backend_wasmgc_instruction_fill"
   ],
   "task_history": [
+    {
+      "cycle": 74,
+      "task_id": "frontend_parser_expr_incremental_recovery",
+      "name": "Parser 表达式级增量恢复：BinOp/Call/管道的 rhs 失败时就地生成 ErrorExpr，保留左半 AST（非 Panic mode 整段丢弃）",
+      "track": "frontend",
+      "difficulty": "medium",
+      "priority": 76,
+      "status": "success",
+      "result": "success",
+      "duration_min": 180,
+      "details": "Parser 新增 _wrap_recover_right(parse_func, fallback_span_token, skip_tokens_on_error) 辅助：捕获 ParseError 就地 append 错误、生成 ErrorExpr，可选消费 N 个错误 token 避免同点重复失败（不触发 _expr_nested_errors 熔断，精确恢复）。17 处接入：12 个 BinOp/管道优先级函数（_parse_pipe/_parse_for_while/and/or/eq/cmp/bit_or/bit_xor/bit_and/shift/additive/multiplicative）+ 2 个后缀参数解析（Call 实参、管道运算符）+ 2 个括号/元组/分组表达式 + _parse_expression 的顶层兜底。新增 TestParserExprIncrementalRecovery 共 6 用例：a+*b 保留 BinOp(a,+,ErrorExpr) / let x=a+*b 保留 x 绑定 / f(1,*,3) 保留 args=[1,ErrorExpr,3] / 嵌套 (a+*b)*c 两层级独立恢复 / 精确错误计数 1 个（非 Panic 跳过 10+）/ 多语句 `a+*b; c+*d` 聚合两错误双绑定保留。TestParserExprIncrementalRecovery 6/6 全通过，原有 Parser 测试无回归。修改：parser.py +240 行（辅助函数 + 17 处接入 + skip_tokens 参数）、tests/test_parser.py +210 行（6 用例 + 辅助 _parse_collect）。",
+      "files_changed": [
+        "parser.py",
+        "tests/test_parser.py"
+      ],
+      "timestamp": "2026-08-01 16:35:16"
+    },
+    {
+      "cycle": 74,
+      "task_id": "backend_x86_64_xmm_rex_prefix_pre_fix",
+      "name": "XMM8-XMM15 REX 前缀预修复：9 条 SSE 指令的缺失/错位 REX 前缀修复 + XMM8-XMM15 常量 + _rex_xmm 辅助",
+      "track": "backend",
+      "difficulty": "easy",
+      "priority": 78,
+      "status": "success",
+      "result": "success",
+      "duration_min": 90,
+      "details": "（Cycle 72 评审转化的前瞻性修复：当前 XMM 池仅 0-7 未触发，扩展 XMM8-15 时 9 条指令会 SIGILL）。改动分为 4 部分：(1) 常量：x86_64.py 新增 XMM8-XMM15 数值常量 8-15（之前只定义到 XMM7）；(2) 辅助：新增 _rex_xmm(r_ext, b_ext)（W=0 专用 SSE REX，区别于 GPR 的 _rex_rb(W=1)）；(3) 9 条指令修复：movsd_reg_imm（旧 B=1→R=1 错位）、addsd/subsd/mulsd/divsd（无 REX→补 REX.R/B）、xorpd（无 REX→补 REX.R/B 两侧同 reg）、cvtsi2sd（旧丢 REX.R xmm 扩展→_rex(1,R,B) 带 W=1）、cvtsd2si（旧 B=0 丢 xmm 扩展→_rex(1,R,B)）、ucomisd（无 REX→补 REX.R/B）；(4) 回归保护：x86_64.py 原已修复的 movsd_reg_reg/movsd_reg_mem/movsd_mem_reg/movq_xmm_gpr/movq_gpr_xmm 5 条指令保持不变（之前有 REX 逻辑）。新增 TestX86_64Emitter 13 条用例（movsd_reg_imm/4 条 addsd 变体 / subsd_mulsd_divsd RB / xorpd 高低 / cvtsi2sd W1RB / cvtsd2si W1B / ucomisd 高低）。test_native_backend.py 全量 75/75 通过。修改：backend/x86_64.py 约 130 行（常量 + 辅助 + 9 函数修复）+ tests/test_native_backend.py 约 140 行（13 用例 + XMM 导入）。",
+      "files_changed": [
+        "backend/x86_64.py",
+        "tests/test_native_backend.py"
+      ],
+      "timestamp": "2026-08-01 16:35:16"
+    },
     {
       "cycle": 73,
       "task_id": "frontend_adt_field_suggestion_error",
@@ -512,7 +548,7 @@
       "difficulty": "easy",
       "priority": 78,
       "estimated_effort": "1-2小时",
-      "status": "pending",
+      "status": "completed",
       "source": "review_cycle_72 深度审计：5 条 GPR 指令的同类 REX 硬编码 BUG（Cycle 70 P92 修复，R12→RSP SIGSEGV）在 XMM 侧有 12+ 条完全相同结构的定时炸弹，当前 XMM 池仅 0-7 未触发，扩展时必炸",
       "depends_on": [],
       "severity": "P3"
@@ -540,7 +576,7 @@
       "difficulty": "medium",
       "priority": 76,
       "estimated_effort": "3-4小时",
-      "status": "pending",
+      "status": "completed",
       "source": "review_cycle_72 深度审计：前端错误恢复 8.0 分项的最大短板 = 表达式级仅 Panic mode；Parser 8.0→8.5 的直接推手；同时为 IDE/LSP 集成（未来路线图）前置铺路",
       "depends_on": [
         "frontend_parser_error_recovery_full"
@@ -563,6 +599,6 @@
       "severity": "P2"
     }
   ],
-  "last_updated": "2026-08-01 13:50:34",
-  "active_tasks_count": 7
+  "last_updated": "2026-08-01 16:35:16",
+  "active_tasks_count": 5
 }
