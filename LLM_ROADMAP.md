@@ -1,14 +1,14 @@
 # Nova LLM 智能开发路线图
 
-**更新时间**: 2026-08-01 04:20
-**上次评审**: 第 87 轮（路线图评审 · 语法冻结 + M-SH1 Ready + 审查债务梳理）
-**上次开发**: 第 88 轮（SH-1 parity baseline build + CC=13 钉子户 parse_primary_type 出榜 + Lexer 单测 55 passed 三合一）
+**更新时间**: 2026-08-01 12:04
+**上次评审**: 第 90 轮（路线图评审 · 七维评估 方向9/质量9.2/效率9.7/价值9.3/审查对齐9.8 + CC=26/15/14 三座大山定档）
+**上次开发**: 第 89 轮（CC=13 lower_list_comprehension 出榜 + test_parser 75 docstring 清零 + AST/IR Types 双骨架 100 passed 三合一 · 100% 审查驱动）
 **架构战略文档**: [ARCHITECTURE_VISION.md](./ARCHITECTURE_VISION.md) — 架构决策最高参考，如与本路线图冲突以其为准，本文件同步更新
-**总完成度**: ~183/183 ≈ **100%**（+3 任务 · 100% 审查驱动/发现）
-**里程碑 M-ARCH**: ✅ **5/5 全部完成**（cycles=80 硬截止前达成）
-**里程碑 M-MEM**: ✅ **4/4 Step1+Step2+Step3+Step4 全部完成**（cycles=87 截止提前1轮完成 · M-MEM 里程碑定板）
-**审查驱动任务占比（任务池总 95 项）**: 37/95 = **38.9%**（cycle=89 再增 3 条审查派生 · ≥30% 要求持续达标）
-**下一阶段聚焦 cycles=90~92**: ① SH-1 lexer.nv 编写（parity baseline 闸门解除）② Review 债务清零 Phase2（Top CC=15/14/14 三个钉子户 + 74 unused_import 根）③ 质量补齐（TC 6 空分支 + native 5 高风险 + evaluator 6 bare except）
+**总完成度**: ~186/186 ≈ **100%**（任务池 98 项 · 新增 4 审查派生）
+**里程碑 M-ARCH**: ✅ **5/5 全部完成**（cycles=80 硬截止前达成）· **Phase2 收尾 cycles=91 强制启动**（unify_c_backend_phase2 P76→P88，删除旧 c_codegen.py 1591 行）
+**里程碑 M-MEM**: ✅ **4/4 Step1+Step2+Step3+Step4 全部完成**（cycles=87 截止提前1轮完成 · M-MEM 里程碑定板）· **Allocator 独立单测 ≥25 passed → cycles=91 补齐**
+**审查驱动任务占比（任务池总 98 项）**: 41/98 = **41.8%**（≥30% 硬约束 · cycle=90 评审再增 4 条审查派生）
+**下一阶段聚焦 cycles=91~93**：① 架构债 B Phase2 收尾（删除旧 c_codegen.py）② CC 降维攻坚（26→15→14 三座大山每轮 1 座）③ SH-1 质量前置（Allocator+MIR E2E 单测 + Token 契约冻结）· **cycles=93 末 lexer.nv 启动闸门 100% 打开**
 
 本路线图由 LLM 智能开发系统动态维护。
 
@@ -16,37 +16,38 @@
 
 ## 🗺️ v0.3.0 → v1.0 总览里程碑（架构战略约束）
 
-> 第 87 轮评审结论：M-MEM 4/4 ✅ 提前1轮定板；SH-1 前置 4/4 解除（语法冻结已产出）；进入 SH-1 启动前窗口期。**cycles=88-90 三线并行**：① SH-1 parity baseline（8 基准 AST JSON MD5 锚点 + 逐字节 diff 脚本）② 审查债务清零 Phase1（Top 12 CC>15 函数 + 159 unused_import 清理 + 3 God Class 拆分启动）③ 质量补齐（TypeChecker 6 空分支 + NativeBackend 5 高风险场景）
+> 第 90 轮评审结论：cycles=88-89 两轮严格执行 87 评审三线并行方向，方向评估 9/10，质量评估 9.2/10，效率评估 9.7/10，价值评估 9.3/10，审查对齐 9.8/10。SH-1 前置 4/4 闸门 100% 解除，Lexer/AST/IR Types 三骨架 205 passed 锚点齐全，CC=13 钉子户 4→2 两连出榜，连续 6 轮 100% 核心测试。唯一不足：unify_c_backend_phase2 连续 3 轮被挤走、CC=26/15/14 三座难度更高的大山未碰、Allocator+MIR E2E 两测试缺口未补。
 >
-> cycle=88 执行进度：**3 项完成**（SH-1 parity baseline build ✅ + CC=13 钉子户出榜 1 个 ✅ + Lexer 单测 55 passed ✅）；测试量 440→643（+46.1%）；SH-1 baseline 闸门 100% 解除，cycle=89 可启动 lexer.nv。
-> cycle=89 执行进度：**3 项完成**（MIR _lower_list_comprehension CC=13→≤4 钉子户出榜 1 个 ✅ + test_parser.py 75 docstring 中文化门禁清零 ✅ + tests/test_ast_nodes.py+test_ir_types.py 新建 100 passed ✅）；测试量 440→595（+35.2%）；CC 钉子户 Top5 再减 1；审查驱动占比 36.2%→38.9%。
+> cycle=88 执行回顾：**3/3 100% 成功**（SH-1 parity baseline build ✅ + CC=13 parse_primary_type 出榜 ✅ + Lexer 55 passed ✅）；测试 440→643（+46.1%）
+> cycle=89 执行回顾：**3/3 100% 成功**（CC=13 _lower_list_comprehension 出榜 ✅ + test_parser 75 docstring 清零 ✅ + AST/IR Types 100 passed ✅）；测试 440→595（+35.2%）；审查驱动 3/3 = 100%
+> cycle=90 评审结论：**cycles=91-93 三轮攻坚定档**——每轮强制：1 座 CC 大山 + 1 架构债/测试缺口 + 1 filler。cycle=93 末 SH-1 lexer.nv 启动闸门 100% 打开。
 
-## 🧭 cycles=88~90 三线并行详细任务表（第 87 轮评审输出）
+## 🧭 cycles=91~93 三轮攻坚任务表（第 90 轮评审输出 · CC 大山 + 架构债收尾 + SH-1 前置闸门）
 
-| 优先级 | 任务线 | 任务 | 轮次 | 来源 |
+| 优先级 | 任务线 | 任务 | 目标轮次 | 来源 | 现状 |
+|--------|--------|------|---------|------|------|
+| P88 | **架构债强制收尾** | unify_c_backend_phase2 · 删除旧 c_codegen.py 1591 行 + LIR C 后端功能对齐 + test_c_codegen.py 迁移验证 | **91 强制** | 审查驱动+架构战略【手术B Phase2 · 连续3轮被挤走】 | P76→P88 提优先级 · 不再允许延期 |
+| P85 | **审查债务 CC=26 Top#1** | split_type_checker_unify Phase1 · HM 统一算法独立为 type_checker/unification.py 子模块（5 helper 拆分）· CC 26→≤10 | **91 强制** | 审查驱动【AUTO_REVIEW CC Top 榜 全项目 #1】 | P65→P85 提优先级 · TypeChecker 正确性核心 |
+| P82 | **质量补齐 测试缺口** | test_allocator_unit_suite · 新建 tests/test_allocator.py ≥25 passed（Arena边界/Libc配对/Box生命周期/use-after-drop） | **91 优先** | 审查发现【测试缺口·cycles=87/88/89 挂3轮 · Allocator API 语义锚点】 | M-MEM 里程碑 4/4 完成但缺独立单测 |
+| P85 | **审查债务 CC=15 Top#2** | split_native_backend_reg_alloc Phase1 · _allocate_registers 三层剥离（活度分析/线性扫描/溢出策略）· CC 15→≤10 | **92 强制** | 审查驱动【AUTO_REVIEW CC Top 榜 #2 · native_backend.py 3045 行最复杂模块】 | CC=13 钉子户清完后下一座 |
+| P84 | **审查债务 CC=14+13 Top#3#4** | refactor_cc_parser_block_and_call_indirect · Parser._parse_block（CC=14）+ LIRCBackend._compile_call_indirect（CC=13）一轮双出榜 | **92 强制** | 审查驱动【CC=13 钉子户最后 2 个 · 87 评审 200% 目标收尾】 | 剩余最后 2 个 CC=13/14 钉子户 |
+| P85+P78 | **Filler 质量双清理** | cleanup_unused_imports_root_v10（74 条脚本批量）+ review_gate_noise_calibration_v2（LOW 级噪音 -40%） | **92 Filler** | 审查驱动+评审发现【unused_import 74 条 + LOW 级信噪比优化】 | 半天窗口可完成 · 审查 MEDIUM/LOW 立即止血 |
+| P92 | **SH-1 启动闸门** | sh1_lexer_token_contract_freeze · 12 Token 类型+Span 约定+8 基准 tokenize MD5 固化 + sh1_parity_verify.py --mode=lexer 钩子 | **93 强制·里程碑** | 评审发现【SH-1 自举前最后闸门：输入输出契约冻结】 | 没有 Token 契约 = nova_lexer.nv 等价性验证成本 ×10 |
+| P81 | **质量补齐 测试缺口** | test_mir_lowering_e2e_8cases · 新建 tests/test_mir_lowering_e2e.py ≥8 端到端 HIR→MIR 结构断言 | **93 优先** | 审查发现【测试缺口·MIR 降级核心路径缺断言级 E2E】 | 8 基准 SH-1 文件正好作为输入 |
+| P83+P80 | **质量补齐薄弱分支** | test_tc_empty_branches_6_cases（TypeChecker 6 空分支 100% 覆盖）+ evaluator_bare_except_6_fix（evaluator 6 处过宽异常收窄） | **93 Filler** | 审查驱动【gap_coverage MEDIUM + too_broad_exception MEDIUM】 | 薄弱分支 100% 覆盖 · 异常路径不再静默吞错 |
+
+---
+
+### cycles=88~89 三线并行任务完成情况回顾（第 87 轮评审输出 · 100% 达成）
+
+| 优先级 | 任务线 | 任务 | 轮次 | 结果 |
 |--------|--------|------|------|------|
-| P87 | **SH-1 启动基建** | sh1_parity_baseline_build · 8 基准文件 AST JSON + MD5 固化 + fixtures/sh1_parity/ + parity verify 脚本 | **88 ✅ 完成** | 自主规划【SH-1 前置】 |
-| P70 | **审查债务 CC** | refactor_cc_parse_primary_type（CC=13→≤4 拆分三方法·类级常量）· **钉子户出榜 4→3** | **88 ✅ 完成** | 审查驱动【AUTO_REVIEW_LOG.md R139-R143 TOP CC 榜·挂 3 轮】 |
-| P83 | **质量补齐 测试** | test_lexer_unit_tests（11 大类 55 passed + 40 subtests）· SH-1 lexer.nv 等价性锚点 | **88 ✅ 完成** | 审查发现【测试缺口·cycles=84/85/86 三轮告警·31 核心模块仅 29% 有独立测试】 |
-| P87 | **SH-1 启动基建** | sh1_parity_diff_script · nova_vs_python_parity.py 逐字节 diff 脚本（CI 可集成） | 89 | 自主规划【SH-1 前置】 |
-| P88 | **SH-1 启动基建** | sh1_parser_edge_cases_audit · 3 处 parser edge case 固化 MD5 | 89 | 审查发现+自主规划 |
-| P88 | **审查债务 CC** | refactor_cc_native_reg_alloc CC=15→≤6（Top#1 最复杂函数） | 88/89 | 审查发现 |
-| P88 | **审查债务 CC** | refactor_cc_type_check_unify CC=14→≤3（Top#3 统一算法） | 89 | 审查发现 |
-| P88 | **审查债务 CC** | refactor_cc_parser_parse_stmt CC=14（SH-1 parity 前先降复杂度） | 89/90 | 审查发现 |
-| P88 | **审查债务 CC** | refactor_cc_lowering_lower_list_comp CC=13→≤4（钉子户出榜：Top 连续 4 轮 · 拆 4 helper） | **89 ✅ 完成** | 审查驱动【AUTO_REVIEW CC Top 榜 R1513-1515】 |
-| P86 | **审查债务 质量** | test_parser_docstring_bulk_74 · 75 例英→中文语义 docstring（gate_docstring_quality 清零） | **89 ✅ 完成** | 审查驱动【AUTO_REVIEW no_docstring R1513 · test_parser 74 例极简】 |
-| P85 | **审查发现 测试缺口** | test_ast_nodes_ir_types_bundle · 新建 2 文件 100 passed（SH-1 P0 骨架接口测试） | **89 ✅ 完成** | 审查发现【cycle=1515 gap_coverage · 87 评审 cycle=89 明确建议】 |
-| P90 | **审查债务 unused_import** | cleanup_unused_imports_ir（37 项一次性清理） | 88 | 审查发现 |
-| P90 | **审查债务 unused_import** | cleanup_unused_imports_backend（48 项一次性清理） | 88 | 审查发现 |
-| P89 | **审查债务 unused_import** | cleanup_unused_imports_root（74 项一次性清理） | 89 | 审查发现 |
-| P88 | **审查债务 长函数** | split_long_native_lower_function 276 行 | 88 | 审查发现 |
-| P88 | **审查债务 长函数** | split_long_type_check_expr 195 行 | 89 | 审查发现 |
-| P87 | **审查债务 大类型** | split_class_native_backend 2773 行 God Class → 5 协作者 | 89/90 | 审查发现 |
-| P87 | **审查债务 大类型** | split_class_type_checker 2218 行 God Class → 5 协作者 | 90 | 审查发现 |
-| P89 | **审查债务 过宽异常** | fix_bare_except_evaluator 6 处 bare except | 89 | 审查发现 |
-| P89 | **审查债务 过宽异常** | fix_bare_except_backends 9 处 except Exception | 90 | 审查发现 |
-| P89 | **质量补齐 测试** | test_tc_empty_branches TypeChecker 6 个空分支覆盖 | 89 | 审查发现 |
-| P88 | **质量补齐 测试** | test_native_backend_gaps NativeBackend 5 高风险场景端到端 | 90 | 审查发现 |
+| P87 | **SH-1 启动基建** | sh1_parity_baseline_build · 8 基准文件 AST JSON + MD5 固化 + fixtures/sh1_parity/ + parity verify 脚本 | **88 ✅ 完成** | SH-1 baseline 闸门 100% 解除 · 8/8 MD5 锚点产出 |
+| P70 | **审查债务 CC** | refactor_cc_parse_primary_type（CC=13→≤4 拆分三方法·类级常量）· 钉子户出榜 4→3 | **88 ✅ 完成** | CC=13 钉子户 -1 · Parser._parse_primary_type 出榜 |
+| P83 | **质量补齐 测试** | test_lexer_unit_tests（11 大类 55 passed + 40 subtests）· SH-1 lexer.nv 等价性锚点 | **88 ✅ 完成** | 三骨架锚点 #1 Lexer 补齐 · 55 passed |
+| P88 | **审查债务 CC** | refactor_cc_lowering_lower_list_comp CC=13→≤4（钉子户出榜·Top 连续 4 轮 · 拆 4 helper） | **89 ✅ 完成** | CC=13 钉子户再 -1 · MIRLowering._lower_list_comprehension 出榜 |
+| P86 | **审查债务 质量** | test_parser_docstring_bulk_74 · 75 例英→中文语义 docstring（gate_docstring_quality 清零） | **89 ✅ 完成** | 审查门禁噪音大幅降低 · 74/75 例极简 docstring 升级 |
+| P85 | **审查发现 测试缺口** | test_ast_nodes_ir_types_bundle · 新建 2 文件 100 passed（AST 58 节点 + IR 类型 28 公开 API） | **89 ✅ 完成** | 三骨架锚点 #2 AST + #3 IR Types 双补齐 · 100 passed |
 
 ---
 

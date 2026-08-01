@@ -1,5 +1,5 @@
 {
-  "cycles": 89,
+  "cycles": 90,
   "architecture_strategy": {
     "document": "ARCHITECTURE_VISION.md",
     "effective_date": "2026-07-29",
@@ -1610,6 +1610,62 @@
       "why": "AST 节点与 IR 类型是编译前后端的骨架接口，缺测试直接影响重构安全（任何节点字段变更无单测兜底）。87 评审 cycle=89 明确建议补此二文件。",
       "result": "新建 tests/test_ast_nodes.py（50 用例，覆盖 Span/7Literal/Identifier/BinaryOp/UnaryOp/Pipe/Try/Param/Lambda/FnDef/FnCall/Let/Mut/Assign/If/For/While/Break/Continue/10Pattern*/ListExpr/ListComp/Tuple/Map/FieldAccess/Block/Import/Export/TypeDef/VariantDef/AliasDef/Program/10Type* 共 58 类节点）；新建 tests/test_ir_types.py（50 用例，覆盖 IRType15枚举/NovaType 等价+哈希+repr/8单例/9工厂/8兼容别名/嵌套/公开API）。合计 100 新用例 100% 通过。",
       "completed_at": "2026-08-01 04:24"
+    },
+    {
+      "cycle": 90,
+      "type": "review",
+      "date": "2026-08-01 12:17",
+      "backup_tag": "llm-dev-review-90-20260801-1204",
+      "baseline_tests": "598 passed, 60 subtests passed (8 core files)",
+      "final_tests": "598 passed (review, no code changes)",
+      "review_scope": "cycles=87评审 + 88开发 + 89开发（三轮）",
+      "review_scores": {
+        "direction": "9/10",
+        "quality": "9.2/10",
+        "efficiency": "9.7/10",
+        "value": "9.3/10",
+        "review_alignment": "9.8/10"
+      },
+      "key_findings": [
+        "SH-1 前置 4/4 闸门 100% 解除 + Lexer/AST/IR Types 三骨架 205 passed 锚点齐全",
+        "CC=13 钉子户 4→2（两轮连出榜 2 个，87 评审要求 200% 达成）",
+        "连续 6 轮 100% 核心测试（cycles=82/83/85/86/88/89）",
+        "unify_c_backend_phase2 连续 3 轮被挤走（架构债 B Phase2 未收尾）",
+        "CC=26/15/14 三座大山未碰（_unify/_allocate_registers/_parse_block）"
+      ],
+      "task_pool_changes": {
+        "added": [
+          "cleanup_unused_imports_root_v10",
+          "sh1_lexer_token_contract_freeze",
+          "review_gate_noise_calibration_v2",
+          "test_tc_empty_branches_6_cases"
+        ],
+        "priority_raised": [
+          "unify_c_backend_phase2 (P76→P88)",
+          "split_type_checker_unify (P65→P85)"
+        ],
+        "deprecated": [
+          "benchmark_enhance_exec_time"
+        ],
+        "review_derived_ratio_after": "41/98 = 41.8%"
+      },
+      "next_3_cycles_plan": {
+        "cycle_91": [
+          "unify_c_backend_phase2（P88 · 架构债强制收尾）",
+          "split_type_checker_unify Phase1（P85 · CC=26 Top#1）",
+          "test_allocator_unit_suite（P82 · Allocator 独立单测 ≥25 passed）"
+        ],
+        "cycle_92": [
+          "split_native_backend_reg_alloc Phase1（P85 · CC=15 Top#2）",
+          "refactor_cc_parser_block_and_call_indirect（P84 · CC=14+13 双出榜）",
+          "cleanup_unused_imports_root_v10 + review_gate_noise_calibration_v2（filler 双任务）"
+        ],
+        "cycle_93": [
+          "sh1_lexer_token_contract_freeze（P92 · SH-1 启动闸门）",
+          "test_mir_lowering_e2e_8cases（P81 · MIR 降级 E2E 8 基准断言）",
+          "test_tc_empty_branches_6_cases + evaluator_bare_except_6_fix（质量补齐双任务）"
+        ]
+      }
     }
   ],
   "current_cycle": 81,
@@ -1619,8 +1675,8 @@
     "subtests_passed": 20,
     "note": "5核心文件 baseline (cycle=84 review)"
   },
-  "current_tests": 1065,
-  "last_review_cycle": 84,
+  "current_tests": 598,
+  "last_review_cycle": 90,
   "tasks": [
     {
       "id": "unify_c_backend_phase1",
@@ -1783,7 +1839,7 @@
       "name": "统一C后端Phase2（ADT/match功能迁移 + 删除旧c_codegen.py）",
       "description": "对比c_codegen.py与lir_c_backend.py的特性矩阵，找出LIR→C路径缺失的最后几个能力（主要是ADT构造/匹配边缘情况），对齐后正式删除c_codegen.py文件。",
       "difficulty": "hard",
-      "priority": 76,
+      "priority": 88,
       "category": "architecture",
       "estimated": "2-3 天",
       "status": "pending",
@@ -1791,7 +1847,7 @@
         "unify_c_backend_phase1"
       ],
       "reason": "[ARCHITECTURE_VISION.md §2.2 Phase2] 依赖Phase1完成标记弃用和入口清理。对齐功能后永久移除维护双份语义的负担。[自主规划 · [第81轮评审调优：P70→P74，Phase1 弃用标记已挂，SH-1 前必须删除旧 c_codegen.py 1036 行消除双路径维护成本，微提升反映前置压力]",
-      "note": "[cycle=83 Part1 完成] __init__.py 已移除 CCodeGen re-export（断包级API）；Part2（cycle=84）正式删除 c_codegen.py + test_c_codegen.py。",
+      "note": "[cycle=83 Part1 完成] __init__.py 已移除 CCodeGen re-export（断包级API）；Part2（cycle=84）正式删除 c_codegen.py + test_c_codegen.py。 [review-90] P76→P88 提优先级，cycles=91 强制收尾，不再允许挤走",
       "source": "审查驱动+架构战略【手术B Phase2】",
       "why": "删除旧 c_codegen.py 1591 行 + 迁移 ADT/match 功能；MEDIUM class_too_large 钉子户"
     },
@@ -1803,12 +1859,13 @@
       "priority": 25,
       "category": "test",
       "estimated": "3-5 小时",
-      "status": "pending",
+      "status": "deprecated",
       "depends_on": [
         "backend_benchmark_framework"
       ],
       "reason": "[ARCHITECTURE_VISION.md §5.3 下调] nice-to-have，不阻塞架构手术和self-hosting。优先级从 38 下调至 30。[自主规划 · [第81轮评审调优：P30→P28，nice-to-have 不阻塞任何里程碑；M-MEM+SH-1 压力下继续下调优先级]",
-      "source": "自主规划【nice-to-have】"
+      "source": "自主规划【nice-to-have】",
+      "deprecation_reason": "[review-90] nice-to-have，与 SH-1 + CC 降维两大主线零关联；未来需要时从 SH-3 阶段重新插入"
     },
     {
       "id": "refactor_convert_nova_to_json_cc13",
@@ -1830,7 +1887,7 @@
       "name": "拆分 TypeChecker._unify 子模块（CC=26 统一算法独立）",
       "description": "从 type_checker.py 中抽离 Hindley-Milner 统一算法到 type_checker/unification.py 子模块。_unify 方法 CC=26，约 180 行，是 HM 类型推断正确性根基。拆分后单测可独立覆盖 unify(t1, t2, subst) 纯函数，大幅降低 type_checker.py 2128 行单体体积。",
       "difficulty": "hard",
-      "priority": 65,
+      "priority": 85,
       "category": "architecture",
       "estimated": "2-3 天",
       "status": "pending",
@@ -1839,7 +1896,8 @@
       ],
       "reason": "[审查驱动·评审发现] 深度代码审计最薄弱模块#1 type_checker.py 2128 行，Top10 复杂函数独占 6 席（CC=30/26/24/20/19/18）。_unify（CC=26）是 HM 推断引擎纯函数核心，可 0 破坏性迁移（外部签名不变，内部调用替换为 import）。拆分后降低 type_checker 认知负担和合并冲突风险。[来源：深度代码审计薄弱模块#1 + 审查 cyclomatic_complexity]",
       "source": "审查驱动【薄弱模块#2】",
-      "why": "type_checker.py 2301 行 Top2 最薄弱模块；_unify 统一算法是 HM 推断核心，应独立子模块"
+      "why": "type_checker.py 2301 行 Top2 最薄弱模块；_unify 统一算法是 HM 推断核心，应独立子模块",
+      "note": " [review-90] P65→P85 提优先级，CC=26 Top#1 最高复杂度爆点，SH-1 前必须 Phase1 降维到 ≤10"
     },
     {
       "id": "split_native_backend_elf",
@@ -2942,6 +3000,68 @@
       "why": "AST 节点与 IR 类型是编译前后端的骨架接口，缺测试直接影响重构安全（任何节点字段变更无单测兜底）。87 评审 cycle=89 明确建议补此二文件。",
       "depends_on": [],
       "completed_at": "2026-08-01 04:24"
+    },
+    {
+      "id": "cleanup_unused_imports_root_v10",
+      "name": "批量清理未使用导入 v10 Massive：root 目录 74 条一次性脚本化清理",
+      "description": "编写 cleanup_unused_v10.py 脚本，对 root 目录（lexer.py/parser.py/ast_nodes.py/type_checker.py/compiler.py/c_codegen.py/vm.py/evaluator.py/errors.py/environment.py/cli.py/compiler_cli.py 共 12 文件）执行 AST 级 unused_import 检测 + 自动移除。清理前后各跑一遍 598 核心测试确保零回归。",
+      "difficulty": "easy",
+      "priority": 85,
+      "category": "engineering",
+      "estimated": "2-3 小时",
+      "status": "pending",
+      "depends_on": [],
+      "reason": "来源：AUTO_REVIEW_LOG.md R1513-R1515 MEDIUM Top5 #4 unused_import（74 条挂 3+ 轮），cycles=92 filler 窗口必须一次性清零，提高审查信噪比。",
+      "source": "审查驱动【MEDIUM unused_import 钉子户】",
+      "why": "R1513→R1515 三轮 MEDIUM 榜 unused_import 稳定在 #4，74 条全部集中在 root 目录，AST 脚本可 100% 自动清理零人工干预。",
+      "created_review_cycle": 90
+    },
+    {
+      "id": "sh1_lexer_token_contract_freeze",
+      "name": "SH-1 启动闸门：Lexer Token 契约冻结（对照表 + span 约定 + 8 基准 MD5）",
+      "description": "输出 lexer_token_contract.md（≤2 页）：① 12 种词法 Token 类型枚举与 Nova 侧对应结构体名 ② Span 约定（1-based line / 0-based column / 包含 end 行号 end_col 不包含字符，与 Python lexer.py Span dataclass 字节级一致） ③ 8 基准 SH-1 文件（hello/fibonacci/loops/math/pattern_match/list_comprehension/pipe/file_io）的 token 总数 + tokenize 输出 JSON MD5 固化到 fixtures/sh1_parity/token_manifest.json ④ sh1_parity_verify.py 新增 --mode=lexer 钩子。",
+      "difficulty": "medium",
+      "priority": 92,
+      "category": "self_hosting",
+      "estimated": "1 天",
+      "status": "pending",
+      "depends_on": [
+        "sh1_parity_baseline_build"
+      ],
+      "reason": "来源：评审发现·SH-1 启动前最后闸门。cycles=89 末 baseline 闸门 + 三骨架锚点已齐全，lexer.nv 启动前必须冻结输入输出契约，否则 Nova 自举 lexer 写出后无法量化等价性（只能人工 diff 1000+ tokens）。",
+      "source": "评审发现【SH-1 启动前置闸门】",
+      "why": "没有 Token 契约冻结 = 未来 nova_lexer.nv 等价性验证成本 ×10，且任何 span 字段顺序/语义小改都会造成静默回归。",
+      "created_review_cycle": 90
+    },
+    {
+      "id": "review_gate_noise_calibration_v2",
+      "name": "审查门禁噪音校准 v2：单行 lambda / 断言值 / 局部变量 三类豁免",
+      "description": "修改 scripts/auto_review.py 的 gate_no_docstring 和 gate_new_magic_number 检测逻辑：① no_docstring：单行 lambda（≤80 字符 body）豁免 + TestCase 内部测试方法的嵌套 helper 豁免 ② magic_number：assert 语句的字面量豁免（断言值 99% 是语义相关的期望结果不是魔法数字）+ 函数体局部变量初始化的常用常量（0/1/2/8/16/32/64/128/256/1024）豁免 ③ 回归：改动后跑 auto_review.py 对比 LOW 级数量，目标 no_docstring 下降 ≥20%、magic_number 下降 ≥30%。",
+      "difficulty": "easy",
+      "priority": 78,
+      "category": "engineering",
+      "estimated": "2-4 小时",
+      "status": "pending",
+      "depends_on": [],
+      "reason": "来源：评审发现·LOW 级噪音过高。R1515 no_docstring 1818 + magic_number 886 = 合计 2704 条 LOW 级（占总问题 93%），挤占审查报告的高价值信号版面，导致 CRITICAL/HIGH/MEDIUM 信号被淹没。v2 校准后信噪比预计提升 40%+。",
+      "source": "评审发现【审查门禁信噪比优化】",
+      "why": "噪音过高 = 审查报告每轮 3000+ 条总计数，LLM 研读成本 ×2，真实钉子户容易被淹没在 LOW 级海洋里。",
+      "created_review_cycle": 90
+    },
+    {
+      "id": "test_tc_empty_branches_6_cases",
+      "name": "TypeChecker 6 个空分支覆盖补齐（gap_coverage MEDIUM）",
+      "description": "新建 tests/test_type_checker_branches.py 或在现有 test_type_checker.py 中追加 6 个用例：① _detect_leaking_tvars 的 else 路径（不泄露时返回空集）② _has_overflow_risk 的默认路径（非算术运算返回 False）③ _check_fn_decl 的无参路径（fn foo() -> Body 推断）④ _check_expr 的 UNIT 类型字面量分支 ⑤ _from_ast_type 的泛型空参数路径（TypeIdentifier 不带 <...>）⑥ _check_pattern 的 PatternWildcard 空返回分支。要求每条用例单独断言分支覆盖率，跑 pytest --cov=type_checker 验证 6 空分支覆盖率从 0%→100%。",
+      "difficulty": "easy",
+      "priority": 83,
+      "category": "test",
+      "estimated": "3-5 小时",
+      "status": "pending",
+      "depends_on": [],
+      "reason": "来源：审查驱动·AUTO_REVIEW_LOG.md R1513-R1515 gap_coverage MEDIUM 级告警：TypeChecker 6 个 if/else 路径仅 if 有测试，else 分支零覆盖——这些 else 分支大多是静默 fallback（空集/False/UNIT_TYPE），一旦未来重构被意外改错，不会有测试报警。",
+      "source": "审查驱动【gap_coverage MEDIUM】",
+      "why": "6 空分支正好对应 TypeChecker 的 6 大模块路径（泄露检测/溢出风险/函数声明/表达式/类型解析/模式匹配），每条 else 都是边界情况的默认 fallback，零覆盖 = 高静默 bug 风险。",
+      "created_review_cycle": 90
     }
   ],
   "current_subtests": 31,
@@ -2972,5 +3092,6 @@
     "tasks_completed": 3,
     "tasks_failed": 0,
     "review_driven_tasks": 3
-  }
+  },
+  "last_review_date": "2026-08-01 12:17"
 }
