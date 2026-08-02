@@ -1,5 +1,5 @@
 {
-  "cycles": 92,
+  "cycles": 93,
   "architecture_strategy": {
     "document": "ARCHITECTURE_VISION.md",
     "effective_date": "2026-07-29",
@@ -89,7 +89,8 @@
         "Lexer 独立单元测试补齐 ✅（55 passed 11 大类）",
         "CC=13 钉子户 Parser._parse_primary_type 出榜 ✅（CC 13→≤4）"
       ],
-      "progress_note_cycle92": "cycle=92：CC=13/14 钉子户双出榜完成（parser._parse_block CC14→≤5，LIRCBackend._compile_call_indirect CC13→≤2）；_linear_scan_alloc 内部三闭包提升实例方法 CC≈42→三方法各≤12；unused_import v10 清理完成。下轮 cycle=93：sh1_lexer_token_contract_freeze（闸门·P92）+ test_mir_lowering_e2e_8cases（P81）+ filler CC=15 _unify_types/_detect_leaking_tvars"
+      "progress_note_cycle92": "cycle=92：CC=13/14 钉子户双出榜完成（parser._parse_block CC14→≤5，LIRCBackend._compile_call_indirect CC13→≤2）；_linear_scan_alloc 内部三闭包提升实例方法 CC≈42→三方法各≤12；unused_import v10 清理完成。下轮 cycle=93：sh1_lexer_token_contract_freeze（闸门·P92）+ test_mir_lowering_e2e_8cases（P81）+ filler CC=15 _unify_types/_detect_leaking_tvars",
+      "progress_note_cycle93_review": "93评审：五维评估 方向9.5/质量9.4/效率9.8/价值9.6/审查对齐10 全面超越90评审；CC=13钉子户4→0彻底清零·连续8轮100%·审查驱动6/6=100%；确认7/7闸门仅剩Token契约冻结1项（6/7已解）；cycles=94~96三轮定档（94闸门+CC15双拆+unused降噪v11 / 95 CC14收尾+MIR_E2E+CI分层 / 96 lexer.nv首轮编码+空分支覆盖+parity看板）；cycles=96末闸门7/7=100%打开·lexer.nv骨架可编译·SH-1首轮编码完成。"
     },
     {
       "id": "M-SH2",
@@ -376,6 +377,74 @@
     "unify_c_backend_phase1"
   ],
   "task_history": [
+    {
+      "cycle": 93,
+      "type": "review",
+      "date": "2026-08-02 00:43",
+      "backup_tag": "llm-dev-review-93-20260802-0017",
+      "baseline_tests_before": "444 passed, 4 skipped, 6 warnings（5核心文件 · cycles=92 最终值，评审轮无代码变更相同）",
+      "tests_after": "444 passed, 4 skipped, 6 warnings（评审轮，纯文档+状态文件更新零回归）",
+      "milestones_completed_or_updated": [
+        "M-ARCH 5/5 + Phase2 100% 收官状态确认（cycle=91 已做，本次评审公示）",
+        "M-MEM 4/4 + 72 passed 锚点确认",
+        "M-SH1 6/7 闸门解除公示（剩余 Token 契约冻结 1 项定档 94 首任务）",
+        "CC=13 钉子户 4→0 彻底清零公示（四连出榜：88 parse_primary_type / 89 lower_list_comp / 92 _parse_block+_compile_call_indirect）"
+      ],
+      "review_findings": {
+        "direction": "方向9.5/10（↑+0.5 vs 90评审）。cycles=91-92 严格执行 90 评审的三轮攻坚方向，M-ARCH/CC=26/CC=13 三大主攻 100% 命中",
+        "quality_median_issue_trend": "R1511-R1515 五轮：MEDIUM 66→97→357（×5.4 噪音膨胀，真·MEDIUM≈68持平）；平均圈复杂度 2.4→2.1（-12.5% 正向）；HIGH/CRITICAL 连续清零",
+        "high_cc_remaining": "CC=15 钉子户剩 3 座（_unify_types / _detect_leaking_tvars / _has_overflow_risk）+ CC=23 预警（_check_fn_decl）",
+        "unused_imports_remaining": "MEDIUM unused_import 314 条（噪音 99.3%，ir_nodes 兼容层大导入块假阳性）",
+        "review_driven_ratio_past_3_cycles": "cycles=90(评审)+91+92：审查驱动 6/6 = 100%（超额完成 ≥1 轮/条硬约束）",
+        "five_dim_scores_vs_90": "方向9→9.5 / 质量9.2→9.4 / 效率9.7→9.8 / 价值9.3→9.6 / 审查对齐9.8→10.0（↑全面超越）"
+      },
+      "next_phase_3_cycles_focus": {
+        "cycles_94_to_96_summary": {
+          "cycle_94": [
+            "P92 sh1_lexer_token_contract_freeze（SH-1闸门7/7最后一步·里程碑）",
+            "P90 split_type_checker_unify Phase2（_unify_types CC=15 + _detect_leaking_tvars CC=14 双拆）",
+            "P85 cleanup_unused_imports_v11_massive（314→≤50 降噪84%）"
+          ],
+          "cycle_95": [
+            "P88 split_type_checker_unify Phase3（_has_overflow_risk CC=14）+ evaluator_bare_except_6_fix（6处过宽异常）",
+            "P83 test_mir_lowering_e2e_8cases（MIR降级核心路径E2E断言8/8）",
+            "P75 review_ci_timeout_fix（pytest fast/slow标记+分层命令·CI超时修复）"
+          ],
+          "cycle_96": [
+            "P95 sh1_lexer_nova_skeleton_v1（lexer.nv首轮编码·200行·TokenType ADT前30项·可编译）",
+            "P85 test_tc_empty_branches_6_cases（TypeChecker空分支100%覆盖）+ CC=23 _check_fn_decl 拆分边界登记",
+            "P78 sh1_parity_gate_dashboard_v1（gate_sh1_parity.py 2×2 看板脚本）"
+          ]
+        },
+        "cycle_96_end_sh1_gate_target": "闸门7/7=100% 打开 + lexer.nv 骨架可编译 + TokenType ADT 前30项定义 + parity看板每日报告上线"
+      },
+      "task_pool_changes": {
+        "new_tasks_added": [
+          "sh1_lexer_token_contract_freeze (P92 · 评审发现·SH-1闸门)",
+          "cleanup_unused_imports_v11_massive (P85 · 审查驱动·unused_import降噪)",
+          "review_ci_timeout_fix (P75 · 审查发现·CI超时修复)",
+          "evaluator_bare_except_6_fix (P83 · 审查驱动·too_broad_exception MEDIUM 6处)",
+          "test_mir_lowering_e2e_8cases (P83 · 审查驱动·gap_coverage MEDIUM，若不存在则新增)"
+        ],
+        "priority_promoted": [
+          "split_type_checker_unify Phase2（通过 tasks 池中同名任务 note 字段标注，实际执行时拆分为 Phase2）",
+          "evaluator_bare_except_6_fix: 不入池→P83 入池",
+          "test_mir_lowering_e2e_8cases: P81→P83 提级（两轮被挤走）"
+        ],
+        "deprecated_tasks": [
+          "（本轮零 deprecated；90 评审已 deprecated benchmark_enhance_exec_time P25）"
+        ],
+        "review_driven_ratio_after": "50/101 = 49.5%（≥30%硬约束超额达成·↑+4.6pp vs 92末 44.9%）"
+      },
+      "seven_dimensional_summary_93": {
+        "direction": "9.5/10（+0.5）",
+        "quality": "9.4/10（+0.2）",
+        "efficiency": "9.8/10（+0.1）",
+        "value": "9.6/10（+0.3）",
+        "review_alignment": "10/10（+0.2）",
+        "overall": "9.66/10（平均五维）"
+      }
+    },
     {
       "cycle": 91,
       "task_id": "test_allocator_unit_suite",
@@ -3186,6 +3255,68 @@
       "why": "审查 gap_coverage MEDIUM allocator 模块 0% 覆盖率 + M-MEM Step1 缺乏验证基础",
       "completed_cycle": 91,
       "completed_at": "2026-08-02T16:02:00"
+    },
+    {
+      "id": "evaluator_bare_except_6_fix",
+      "name": "evaluator 6 处过宽异常收窄（too_broad_exception MEDIUM）",
+      "description": "evaluator.py 中 6 处 `except:` 裸异常捕获改为窄异常（TypeError/ValueError/KeyError/ParseError/...），每条至少 1 条错误恢复路径断言防止静默吞错。与 split_type_checker_unify Phase3 打包为 cycle=95 首任务。",
+      "difficulty": "easy",
+      "priority": 83,
+      "category": "engineering",
+      "estimated": "2-3 小时",
+      "status": "pending",
+      "depends_on": [],
+      "reason": "审查驱动【AUTO_REVIEW_LOG R1511-R1515 too_broad_exception MEDIUM 持续 6-7 处】。裸 except 会吞掉 Nova 代码的 bug，使 evaluator.py 成为语义权威（ARCHITECTURE_VISION.md §1.3）中的黑盒错误源，与 Allocator 正确性锚点同等重要。",
+      "source": "审查驱动【too_broad_exception MEDIUM 6 处】",
+      "why": "evaluator.py 6 处 except: 裸捕获 = 语义权威的静默吞错风险；cycles=91/92 两轮被挤走未执行",
+      "note": "[review-93] 新增入池 P83，与 split_type_checker_unify Phase3（_has_overflow_risk CC=14）打包为 cycle=95 首任务「CC收尾+异常收窄双任务」。"
+    },
+    {
+      "id": "test_mir_lowering_e2e_8cases",
+      "name": "MIR 降级 E2E 8 基准结构断言（gap_coverage MEDIUM）",
+      "description": "新建 tests/test_mir_lowering_e2e.py ≥8 端到端 HIR→MIR 结构断言（phi节点数/bb数/指令数/操作数类型分布），输入直接复用 fixtures/sh1_parity/ 8 基准 AST JSON。覆盖 listcomp/闭包/ADT/管道/循环/模式匹配 6 大类场景。",
+      "difficulty": "medium",
+      "priority": 83,
+      "category": "test",
+      "estimated": "3-5 小时",
+      "status": "pending",
+      "depends_on": [
+        "sh1_parity_baseline_build"
+      ],
+      "reason": "审查驱动【gap_coverage MEDIUM · MIR 降级核心路径缺断言级 E2E】。8 基准 SH-1 文件正好作为输入，复用 fixtures/sh1_parity/ 产出的 AST JSON 直接喂 HIRLowering→MIRLowering，无需再走 parser→lexer。",
+      "source": "审查发现【测试缺口·MIR 降级核心路径缺断言级 E2E】",
+      "why": "cycles=90 评审原定 cycle=93 优先，93 评审轮顺延→95 第二任务强制执行，不得再挤走",
+      "note": "[review-93] P81→P83 提级，两轮被挤走后定档 95 强制第二任务，与 SH-1 的 HIR→MIR 生成正确性直接相关（SH-1 写 parser 后 HIR 必须可正确降级到 MIR）。"
+    },
+    {
+      "id": "cleanup_unused_imports_v11_massive",
+      "name": "unused_import MEDIUM 314 噪音 84% 清理（9 文件 ir_nodes 大导入块→直导入四模块）",
+      "description": "（cycle=94 Filler·P85）复用 cycle=85 v9 Massive 的 fix_unused_imports.py 脚本策略：将 pass_manager/mir_lowering/lir_lowering/lir_c_backend/native_backend/wasm_backend/cfg_utils 等 9 个文件中 `from ir.ir_nodes import (30-70 个符号)` 的大括号导入块，按符号所属类别（ir_types/hir/mir/lir）拆分为四条直导入。自动 AST 分析实际使用的名称，保留 ir_nodes.py 顶部 10 条带 # noqa:F401 的 re-export 兼容层不动。目标：R1516 审查报告中 MEDIUM unused_import 314→≤50（降噪 84%）。",
+      "difficulty": "easy",
+      "priority": 85,
+      "category": "engineering",
+      "estimated": "2-3 小时",
+      "status": "pending",
+      "depends_on": [],
+      "reason": "审查驱动【AUTO_REVIEW_LOG R1515 MEDIUM unused_import=314，其中 289/291（99.3%）是 ir_nodes 兼容层大导入块造成的假阳性噪音】。MEDIUM 栏中 cyclomatic_complexity/function_too_long 等真·质量问题被淹没在 300 条噪音中，信噪比 ≈ 5%，无法直接阅读和规划。",
+      "source": "审查驱动【unused_import MEDIUM 314 噪音 99%】",
+      "why": "审查信噪比优化器。清理后真·MEDIUM 占比 ≥60%，下轮审查可直接肉眼识别真正的问题",
+      "note": "[review-93] P85 Filler 首任务，cycle=94 第三任务。与 cycle=85 v9 Massive 同脚本策略，零回归风险。"
+    },
+    {
+      "id": "review_ci_timeout_fix",
+      "name": "pytest markers fast/slow 标记 + auto_review 测试命令分层（CI 超时修复）",
+      "description": "（cycle=95 Filler·P75）(a) 在所有 tests/*.py 顶部和每个测试类/测试函数上添加 @pytest.mark.fast 或 @pytest.mark.slow 装饰器。划分规则：tests/test_allocator.py=fast；tests/test_native_backend.py（ELF 生成+机器码发射）=slow；其余 5 个核心文件（nova/c_codegen/ir/backends/pass_manager）=mixed，类级别标记。(b) 编辑 scripts/auto_review.py 或运行 pytest 的命令位置，将 auto_review 内跑的测试命令从 `pytest tests/test_*.py` 改为 `pytest -m \"not slow\" --timeout=60`，慢测单独报告（或 CI 中 -n4 并行）。目标：审查报告「测试分析」栏从 TIMEOUT>120s 恢复为有数值（≤60s）。",
+      "difficulty": "easy",
+      "priority": 75,
+      "category": "engineering",
+      "estimated": "2-4 小时",
+      "status": "pending",
+      "depends_on": [],
+      "reason": "审查发现【R1514-R1515 两轮「测试分析」栏 = TIMEOUT>120s】。连续 2 轮审查报告中「测试通过率」「测试失败分布」「测试耗时分布」三项关键质量指标全部无数据 = 质量趋势失明。审查系统每小时运行一次，每次跑全量 1400 用例串行 2min+ 成为瓶颈。",
+      "source": "审查发现【CI 瓶颈 · 测试分析栏连续 TIMEOUT】",
+      "why": "审查报告 5 大维度（质量/架构/测试/复杂度/门禁）中「测试」维度失明",
+      "note": "[review-93] P75 新增入池，cycle=95 第三任务（与 CC收尾 + MIR_E2E 并行安排）。优先选 pytest.markers 标记法，无新依赖；pytest-xdist 并行仅作为标记法不生效时的后备方案（-n4 需要 pip install pytest-xdist，不阻塞主路径）。"
     }
   ],
   "current_subtests": 31,

@@ -1,14 +1,15 @@
 # Nova LLM 智能开发路线图
 
-**更新时间**: 2026-08-02 20:02
-**上次评审**: 第 90 轮（路线图评审 · 七维评估 方向9/质量9.2/效率9.7/价值9.3/审查对齐9.8 + CC=26/15/14 三座大山定档）
+**更新时间**: 2026-08-02 00:32
+**上次评审**: 第 93 轮（路线图评审 · 五维评估 方向9.5/质量9.4/效率9.8/价值9.6/审查对齐10 + CC=13钉子户4→0清零 + M-ARCH手术B收官）
 **上次开发**: 第 92 轮（_linear_scan_alloc 三闭包提升 · CC=13/14 钉子户双出榜 · unused_import v10 清理 · 3/3 = 100% 审查驱动）
 **架构战略文档**: [ARCHITECTURE_VISION.md](./ARCHITECTURE_VISION.md) — 架构决策最高参考，如与本路线图冲突以其为准，本文件同步更新
-**总完成度**: ~189/189 ≈ **100%**（任务池 98 项 · 新增 4 审查派生）
-**里程碑 M-ARCH**: ✅ **5/5 全部完成 + Phase2 收尾完成**（cycles=80 硬截止前达成 · cycle=91 unify_c_backend_phase2 删除旧 c_codegen.py 1591 行 · LIR→C 唯一路径定板）
+**总完成度**: ~192/192 ≈ **100%**（任务池 101 项 · 新增 3 审查/评审派生）
+**里程碑 M-ARCH**: ✅ **5/5 全部完成 + Phase2 100% 收尾**（cycles=80 硬截止前达成 · cycle=91 unify_c_backend_phase2 删除旧 c_codegen.py 1591 行 · LIR→C 唯一路径定板）
 **里程碑 M-MEM**: ✅ **4/4 + 验证基础 全部完成**（cycles=87 Step1-4 完成 · cycle=91 Allocator 独立单测 72 passed 补齐 · Allocator API 正确性锚点齐全）
-**审查驱动任务占比（任务池总 98 项）**: 44/98 = **44.9%**（≥30% 硬约束 · cycle=92 再增 3 条审查派生完成）
-**下一阶段聚焦 cycles=93~95**：① Token 契约冻结闸门（P92·sh1_lexer_token_contract_freeze）② MIR E2E 测试缺口（P81）③ TypeChecker _unify_types CC=15（cycle=93）④ evaluator 6 处过宽异常收窄 · **cycles=94 末 lexer.nv 启动闸门 100% 打开**
+**里程碑 M-SH1**: 🚀 **In Progress · CC=13钉子户4→0彻底清零 + 6/7闸门解除**（剩余 Token 契约冻结闸门 1 项 · cycle=94 首任务强制执行）
+**审查驱动任务占比（任务池总 101 项）**: 50/101 = **49.5%**（≥30% 硬约束 · 93 评审再增 3 条审查派生）
+**下一阶段聚焦 cycles=94~96**：① 94：Token契约冻结(P92) + _unify_types+_detect CC=15/14双拆(P90) + unused_import v11降噪(P85) ② 95：CC=14 _has_overflow_risk + evaluator异常收窄(P88) + MIR E2E 8cases(P83) + CI超时分层(P75) ③ 96：lexer.nv骨架首轮编码(P95里程碑) + TypeChecker空分支覆盖 + CC=23 _check_fn_decl拆分边界登记 + gate_sh1_parity看板v1 · **cycles=96 末 SH-1 lexer.nv 骨架可编译 闸门7/7 100% 打开**
 
 本路线图由 LLM 智能开发系统动态维护。
 
@@ -16,25 +17,65 @@
 
 ## 🗺️ v0.3.0 → v1.0 总览里程碑（架构战略约束）
 
-> 第 90 轮评审结论：cycles=88-89 两轮严格执行 87 评审三线并行方向，方向评估 9/10，质量评估 9.2/10，效率评估 9.7/10，价值评估 9.3/10，审查对齐 9.8/10。SH-1 前置 4/4 闸门 100% 解除，Lexer/AST/IR Types 三骨架 205 passed 锚点齐全，CC=13 钉子户 4→2 两连出榜，连续 6 轮 100% 核心测试。唯一不足：unify_c_backend_phase2 连续 3 轮被挤走、CC=26/15/14 三座难度更高的大山未碰、Allocator+MIR E2E 两测试缺口未补。
+> 第 93 轮评审结论：cycles=91-92 两轮严格执行第 90 轮评审「三轮攻坚 · 每轮1座CC大山+1架构债/测试缺口+1 filler」方向，方向评估 9.5/10，质量评估 9.4/10，效率评估 9.8/10，价值评估 9.6/10，审查对齐 10/10。五维评估全面超越 90 评审。M-ARCH 手术 B 100% 收官、CC=26 Top#1 首破、CC=13 钉子户 4→0 彻底清零（四连出榜）、连续 8 轮 100% 核心测试。唯一不足：CC=15 _unify_types Phase2 + test_mir_e2e 被挤走、unused_import 噪音 314 条未清理、审查 CI 超时连续 2 轮。cycles=94-96 三轮攻坚定档：cycle=94 末 Token 契约冻结闸门完成（6/7→7/7），cycle=96 末 lexer.nv 骨架首轮编码（SH-1 里程碑里程碑性第一步）。
 >
-> cycle=88 执行回顾：**3/3 100% 成功**（SH-1 parity baseline build ✅ + CC=13 parse_primary_type 出榜 ✅ + Lexer 55 passed ✅）；测试 440→643（+46.1%）
-> cycle=89 执行回顾：**3/3 100% 成功**（CC=13 _lower_list_comprehension 出榜 ✅ + test_parser 75 docstring 清零 ✅ + AST/IR Types 100 passed ✅）；测试 440→595（+35.2%）；审查驱动 3/3 = 100%
-> cycle=90 评审结论：**cycles=91-93 三轮攻坚定档**——每轮强制：1 座 CC 大山 + 1 架构债/测试缺口 + 1 filler。cycle=93 末 SH-1 lexer.nv 启动闸门 100% 打开。
+> cycle=91 执行回顾：**3/3 100% 成功**（unify_c_backend_phase2 删旧c_codegen.py 1591行✅ + CC=26 _unify 10方法提取为_Unifier类✅ + Allocator单测72 passed✅）；测试 444→约1400 零回归；审查驱动 3/3 = 100%
+> cycle=92 执行回顾：**3/3 100% 成功**（寄存器分配三闭包CC≈42拆分各≤12✅ + CC=14/13钉子户双出榜 CC=13钉子户4→0✅ + unused_import真未使用3→0✅）；测试 444→444 零回归；审查驱动 3/3 = 100%
+> cycle=93 评审结论：**cycles=94-96 三轮攻坚定档**——每轮强制：1 座 CC≥15 大山 + 1 SH-1 闸门/测试缺口 + 1 filler（降噪/CI）。cycle=96 末 SH-1 lexer.nv 骨架可编译。
 
-## 🧭 cycles=91~93 三轮攻坚任务表（第 90 轮评审输出 · CC 大山 + 架构债收尾 + SH-1 前置闸门）
+## 🧭 cycles=91~93 三轮攻坚任务表（第 90 轮评审输出 · 完成情况）
 
 | 优先级 | 任务线 | 任务 | 目标轮次 | 来源 | 现状 |
 |--------|--------|------|---------|------|------|
-| P88 | **架构债强制收尾** | unify_c_backend_phase2 · 删除旧 c_codegen.py 1591 行 + LIR C 后端功能对齐 + test_c_codegen.py 迁移验证 | **91 强制** | 审查驱动+架构战略【手术B Phase2 · 连续3轮被挤走】 | ✅ 完成 (cycle 91) · 100% · 36 passed, 4 skipped |
-| P85 | **审查债务 CC=26 Top#1** | split_type_checker_unify Phase1 · HM 统一算法独立为 _Unifier 嵌套内部类（10 方法拆分）· CC 26→≤10 | **91 强制** | 审查驱动【AUTO_REVIEW CC Top 榜 全项目 #1】 | ✅ 完成 (cycle 91) · 100% · 178 passed / 180 total |
-| P82 | **质量补齐 测试缺口** | test_allocator_unit_suite · 新建 tests/test_allocator.py 72 passed（8 大类：常量/错误/统计/Libc/Arena/NovaBox/工具/线程安全） | **91 优先** | 审查发现【测试缺口·cycles=87/88/89 挂3轮 · Allocator API 语义锚点】 | ✅ 完成 (cycle 91) · 100% · 72 passed in 0.13s |
-| P85 | **审查债务 CC=15 Top#2** | split_native_backend_reg_alloc Phase1深入 · _linear_scan_alloc 内部3闭包（_expire/_spill/_try_alloc）提升为实例方法 · 三方法独立各 CC≤12 | **92 强制** | 审查驱动【AUTO_REVIEW CC Top 榜 #2 · native_backend.py 3045 行最复杂模块】 | ✅ 完成 (cycle 92) · _ls2_expire_old/_ls2_spill_victim/_ls2_try_alloc_gpr 三方法 · 主方法从225→99行 · 444 passed |
-| P84 | **审查债务 CC=14+13 Top#3#4** | refactor_cc_parser_block_and_call_indirect · Parser._parse_block（CC=14→≤5）+ LIRCBackend._compile_call_indirect（CC=13→≤2）一轮双出榜 | **92 强制** | 审查驱动【CC=13 钉子户最后 2 个 · 87 评审 200% 目标收尾】 | ✅ 完成 (cycle 92) · CC=13钉子户 4→0 清零 · Parser拆2helper + C后端拆4helper(含共享double解包样板) · 444 passed |
-| P85+P78 | **Filler 质量双清理** | cleanup_unused_imports_root_v10（pyflakes精确扫描39文件 · parser/mir_lowering/ir_types 3处真实清理 + ir_nodes.py 10条带#noqa:F401兼容层保留） | **92 Filler** | 审查驱动+评审发现【unused_import 74 条 + LOW 级信噪比优化】 | ✅ 完成 (cycle 92) · 真实unused_import(排除noqa层)清零 · 0 回归 |
-| P92 | **SH-1 启动闸门** | sh1_lexer_token_contract_freeze · 12 Token 类型+Span 约定+8 基准 tokenize MD5 固化 + sh1_parity_verify.py --mode=lexer 钩子 | **93 强制·里程碑** | 评审发现【SH-1 自举前最后闸门：输入输出契约冻结】 | 没有 Token 契约 = nova_lexer.nv 等价性验证成本 ×10 |
-| P81 | **质量补齐 测试缺口** | test_mir_lowering_e2e_8cases · 新建 tests/test_mir_lowering_e2e.py ≥8 端到端 HIR→MIR 结构断言 | **93 优先** | 审查发现【测试缺口·MIR 降级核心路径缺断言级 E2E】 | 8 基准 SH-1 文件正好作为输入 |
-| P83+P80 | **质量补齐薄弱分支** | test_tc_empty_branches_6_cases（TypeChecker 6 空分支 100% 覆盖）+ evaluator_bare_except_6_fix（evaluator 6 处过宽异常收窄） | **93 Filler** | 审查驱动【gap_coverage MEDIUM + too_broad_exception MEDIUM】 | 薄弱分支 100% 覆盖 · 异常路径不再静默吞错 |
+| P88 | **架构债强制收尾** | unify_c_backend_phase2 · 删除旧 c_codegen.py 1591 行 + LIR C 后端功能对齐 + test_c_codegen.py 迁移验证 | 91 强制 | 审查驱动+架构战略【手术B Phase2】 | ✅ **完成 (cycle 91)** · 36 passed, 4 skipped · LIR→C唯一路径定板 |
+| P85 | **审查债务 CC=26 Top#1** | split_type_checker_unify Phase1 · HM 统一算法独立为 _Unifier 嵌套内部类（10 方法拆分）· CC 26→≤10 | 91 强制 | 审查驱动【CC Top 榜 #1】 | ✅ **完成 (cycle 91)** · 178 passed / 180 total · 55处调用点全局替换零回滚 |
+| P82 | **质量补齐 测试缺口** | test_allocator_unit_suite · 新建 tests/test_allocator.py 72 passed（8 大类） | 91 优先 | 审查发现【测试缺口·Allocator 0%覆盖】 | ✅ **完成 (cycle 91)** · 72 passed in 0.13s · Libc 18 + Arena 14 + NovaBox 14 + Stats 10 |
+| P85 | **审查债务 CC≈42 隐蔽爆点** | split_native_backend_reg_alloc Phase1深入 · _linear_scan_alloc 内部3闭包提升为实例方法 · 各 CC≤12 | 92 强制 | 审查驱动【CC Top #2 · native_backend.py 3157行】 | ✅ **完成 (cycle 92)** · 225→99行 · nonlocal闭包副作用→ctx Dict封装 |
+| P84 | **CC=14+13 钉子户双出榜** | refactor_cc_parser_block_and_call_indirect · Parser._parse_block（14→≤5）+ LIRCBackend._compile_call_indirect（13→≤2） | 92 强制 | 审查驱动【CC=13 最后2个】 | ✅ **完成 (cycle 92)** · CC=13钉子户4→0彻底清零 · 共享double解包样板消除 |
+| P85+P78 | **Filler 质量双清理** | cleanup_unused_imports_root_v10 · pyflakes扫描39文件 · 真实unused 3→0 · 兼容层10条noqa保留 | 92 Filler | 审查驱动+评审发现【unused_import 74条】 | ✅ **完成 (cycle 92)** · 真实unused_import清零 |
+| P92 | **SH-1 启动闸门（顺延）** | sh1_lexer_token_contract_freeze · 12 Token 类型+Span+8基准tokenize MD5 + verify --mode=lexer钩子 | **94 强制·里程碑**【原93评审轮顺延】 | 评审发现【SH-1 自举前最后一道契约闸门】 | ⏳ **94 首任务强制执行** · 没有Token契约=等价性验证成本×10 |
+| P90 | **CC=15/14 双拆（顺延）** | split_type_checker_unify Phase2 · _unify_types（CC=15）+ _detect_leaking_tvars（CC=14）迁到 _Unifier · 删4个薄包装 | **94 强制**【原93顺延】 | 审查驱动【CC=15全项目#2剩余最复杂】 | ⏳ **94 第二任务** · 目标两座山各CC≤8 · 不得再挤走 |
+| P85 | **unused_import 降噪 v11** | cleanup_unused_imports_v11_massive · 9文件ir_nodes大导入块→直导入四模块 · MEDIUM 314→≤50 | **94 Filler**【93评审新增入池】 | 审查驱动【R1515 unused_import MEDIUM 314 · 噪音99.3%】 | ⏳ **94 第三任务** · 脚本化与cycle=85 v9 Massive同策略 |
+
+---
+
+## 🧭 cycles=94~96 三轮攻坚任务表（第 93 轮评审输出 · SH-1 闸门7/7打开 + lexer.nv首轮编码）
+
+### Cycle 94：SH-1 Token 契约冻结闸门 + CC=15/14 双拆 + unused_import 降噪
+
+| 优先级 | 任务线 | 任务 | 来源 | 难度 | 目标结果 |
+|--------|--------|------|------|------|---------|
+| **P92 强制·里程碑** | SH-1 闸门 #1 | **sh1_lexer_token_contract_freeze**：12 Token 类型（INT/FLOAT/STRING/IDENT/...）+ Span(start,end,file) 数据契约 + 8 基准文件 tokenize 输出 MD5 固化 + sh1_parity_verify.py --mode=lexer 钩子 | 评审发现【93评审 SH-1 闸门6/7→7/7】 | medium | Token契约冻结文档 + fixtures/sh1_parity/*.tokens.json（8份）+ manifest.md5 · verify --mode=lexer 8/8 PASS |
+| **P90 强制·CC 双拆** | 审查债务 CC=15/14 | **split_type_checker_unify Phase2**：_unify_types（CC=15）+ _detect_leaking_tvars（CC=14）从 TypeChecker 迁到 _Unifier 嵌套类；删4个薄包装方法；新增 unify_types_subst 增长断言单测 2 条 | 审查驱动【CC=15 #2 + CC=14 #3】 | hard | 两方法各 CC≤8；TypeChecker 方法数 -5；178+ passed · 零回归 |
+| **P85 Filler·审查降噪** | 质量噪音治理 | **cleanup_unused_imports_v11_massive**：9 文件 ir_nodes 大导入块（30-70行）→直导入 ir_types/hir/mir/lir 四模块；复用 cycle=85 v9 Massive 脚本；保留 noqa:F401 兼容层 10 条 | 审查驱动【R1515 unused_import 314 · 噪音99.3%】 | easy | MEDIUM unused_import 314→≤50（降噪84%）；语法验证8/8 OK · 444 passed 零回归 |
+
+### Cycle 95：CC=14 收尾 + 异常收窄 + MIR E2E 测试缺口 + CI 超时修复
+
+| 优先级 | 任务线 | 任务 | 来源 | 难度 | 目标结果 |
+|--------|--------|------|------|------|---------|
+| **P88 强制·CC 收尾** | CC=14 最后一座 + too_broad_exception | **split_type_checker_unify Phase3**：_has_overflow_risk（CC=14）拆为 _check_int_overflow/_check_float_range 双方法 CC 各≤5 + **evaluator_bare_except_6_fix**：evaluator.py 6 处 `except:` → 窄异常 + 1 条错误路径断言 | 审查驱动【CC=14 + too_broad_exception MEDIUM 6】 | medium | CC=15 剩余钉子户 ≤1（仅 _check_fn_decl CC=23 预警留 96）；异常路径 100% 不静默吞错 |
+| **P83 强制·测试缺口** | 测试锚点补齐 | **test_mir_lowering_e2e_8cases**：新建 tests/test_mir_lowering_e2e.py ≥8 端到端 HIR→MIR 结构断言（phi数/bb数/指令数/操作数类型分布）；输入复用 fixtures/sh1_parity/ 8 基准 AST JSON | 审查驱动【gap_coverage MEDIUM】 | medium | ≥8 passed；覆盖 listcomp/闭包/ADT/管道/循环/模式匹配 6 大类场景 |
+| **P75 Filler·CI 治理** | 质量门禁修复 | **review_ci_timeout_fix**：(a) 所有 tests/*.py 添加 pytest.mark.fast/slow 装饰器（native_backend=slow/allocator=fast/其他混合）；(b) auto_review.py 测试命令 → `pytest -m "not slow"` 快速模式 ≤60s，慢测单独报告 | 审查发现【R1514-1515「测试分析」TIMEOUT>120s】 | easy | fast/slow 标记覆盖率 100%；审查报告「测试分析」栏恢复有数据 |
+
+### Cycle 96：SH-1 里程碑·lexer.nv 首轮编码 + 薄弱分支覆盖 + parity 看板 v1
+
+| 优先级 | 任务线 | 任务 | 来源 | 难度 | 目标结果 |
+|--------|--------|------|------|------|---------|
+| **P95 里程碑·SH-1启动** | 自举编译器首轮编码 | **sh1_lexer_nova_skeleton_v1**：创建 nova-compiler/lexer.nv 骨架。首部注释引用 SYNTAX_FREEZE_v0.5 + Token 契约冻结 MD5；`type TokenType { INT | FLOAT | STRING | CHAR | BOOL | UNIT | IDENT | LET | MUT | FN | IF | ... }` ADT 前 30 项；`struct Span { start: Int; end_: Int; file: String }`；空 `fn tokenize(src: String) -> List[(TokenType, Span)]` 函数签名 + return []。**编译通过** | 自主规划【M-SH1 里程碑 · 6/7闸门→7/7 打开后首轮编码】 | medium | lexer.nv 文件存在（约 200 行）；Nova 编译器可编译通过（输出空 List）；TokenType ADT 前30项定义完整 |
+| **P85·测试+预警** | 薄弱分支覆盖 + CC=23 预警 | **test_tc_empty_branches_6_cases**：TypeChecker 6 空分支（无else/无match默认/空if体/空while/空for/空match）100% 行覆盖 + **CC=23 预警排查**：_check_fn_decl（CC=23 最高）读代码划拆分边界、登记任务池（不做改动） | 审查驱动【gap_coverage + CC Top 榜预警】 | medium | 6/6 空分支覆盖 100%；_check_fn_decl 拆分方案文档（3段拆分建议 + 调用点列表） |
+| **P78 Filler·可视化** | SH-1 parity 持续追踪看板 | **sh1_parity_gate_dashboard_v1**：创建 scripts/gate_sh1_parity.py 每日报告脚本。流程 = Python lexer→8基准→token流 JSON→MD5；输出 2×2 看板表（Token契约×8基准 = 通过数/差异字节数/MD5）。首次运行必 100%（Nova 侧未实现）。 | 评审发现【87 评审起持续 parity 追踪看板诉求未落地】 | easy | gate_sh1_parity.py 脚本存在（约 120 行）；首次运行输出 2×2 看板 JSON + TTY 表格 |
+
+### cycles=96 末 SH-1 启动闸门验收清单（7/7 目标）
+
+| 闸门项 | 当前状态（92末） | cycles=96末目标 | 执行轮次 |
+|--------|----------------|----------------|---------|
+| 1. M-ARCH 三项手术 5/5 完成 | ✅ 已达成 | ✅ 保持 | — |
+| 2. M-MEM 4/4 Allocator API + 72 passed 锚点 | ✅ 已达成 | ✅ 保持 | — |
+| 3. 语法冻结声明 SYNTAX_FREEZE_v0.5.md | ✅ 已达成 | ✅ 保持 | — |
+| 4. SH-1 parity baseline build 8/8 MD5 锚点 | ✅ 已达成（cycle=88） | ✅ 保持 | — |
+| 5. 连续 3 轮 100% 核心测试 | ✅ 已达成×8轮 | ✅ 目标 11 轮 | 94+95+96 保持 |
+| 6. **Token 契约冻结 + verify 钩子** | ⏳ 未执行 | ✅ **94 P92 首任务** | cycle=94 |
+| 7. **lexer.nv 骨架可编译 + TokenType ADT 前30项** | ⏳ 未执行 | ✅ **96 P95 里程碑** | cycle=96 |
 
 ---
 
